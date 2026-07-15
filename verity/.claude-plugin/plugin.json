@@ -1,0 +1,21 @@
+{
+  "name": "verity",
+  "description": "Fetches current official Claude Code documentation on demand, giving Claude truth-grounding from primary sources instead of training memory.",
+  "license": "MIT",
+  "author": {
+    "name": "Victor Villegas",
+    "email": "victor.villegas@tuta.com"
+  },
+  "homepage": "https://github.com/V-Songbird/slag/tree/main/verity",
+  "repository": "https://github.com/V-Songbird/slag",
+  "keywords": [
+    "documentation",
+    "grounding",
+    "truth",
+    "fetch",
+    "Claude Code docs",
+    "MCP tools",
+    "reference",
+    "live fetch"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "jetbrains-router",
+  "description": "Routes Claude's reads, searches, and edits through your running JetBrains IDE for live error detection, unsaved-change visibility, and index-aware search.",
+  "license": "MIT",
+  "author": {
+    "name": "Victor Villegas",
+    "email": "victor.villegas@tuta.com"
+  },
+  "homepage": "https://github.com/V-Songbird/slag/tree/main/jetbrains-router",
+  "repository": "https://github.com/V-Songbird/slag",
+  "keywords": ["JetBrains", "WebStorm", "Rider", "IntelliJ", "PyCharm", "IDE", "MCP", "routing", "diagnostics", "hooks"]
+}

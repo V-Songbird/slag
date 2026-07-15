@@ -1,0 +1,24 @@
+# Benchmark harness (local-only, never published)
+.benchmarks/
+
+# Python cache directories
+__pycache__/
+.pytest_cache/
+
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+node_modules/
+
+# Private notes, and the reference-name blocklist scripts/git-hooks reads
+docs/
+
+# Claude — the dev agents, skills and hooks under .claude/ ARE tracked here
+/.claude/settings.local.json
+
+# Roadmap and foreman config are local-only, not published
+ROADMAP.jsonl
+.foreman/

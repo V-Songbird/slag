@@ -1,0 +1,13 @@
+{
+  "name": "forge",
+  "description": "Investigates your codebase before you build, using parallel domain experts and an adversarial critic to stress-test the plan before anything gets implemented.",
+  "license": "MIT",
+  "author": {
+    "name": "Victor Villegas",
+    "email": "victor.villegas@tuta.com"
+  },
+  "homepage": "https://github.com/V-Songbird/slag/tree/main/forge",
+  "repository": "https://github.com/V-Songbird/slag",
+  "keywords": ["investigation", "pre-code", "planning", "architecture", "adversarial", "expert-analysis"],
+  "hooks": "./hooks/forge-hooks.json"
+}

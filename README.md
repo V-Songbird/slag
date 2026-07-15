@@ -1,0 +1,114 @@
+<div align="center">
+  <h1>slag</h1>
+  <p><strong>Experimental Claude Code plugins by Victor Villegas</strong> — the stuff that didn't make it out of the workshop, kept where it can't hurt anyone.</p>
+</div>
+
+---
+
+> [!WARNING]
+> Nothing here is a product. These plugins are experiments: half-finished ideas, things being tried out, things kept around to see if they earn their keep. They get rewritten, renamed, and deleted without notice or a migration path. There is no support, no stability promise, and no release schedule.
+>
+> You are welcome to install any of them. If one breaks your session, that's the deal you took.
+
+## What this is
+
+Slag is the byproduct that comes off the good metal. This repo is where plugin ideas live before they're worth anyone's trust — and where they stay if they never get there.
+
+Every plugin here works on its own, does one job, and stays out of the others' way. Some are genuinely useful. Some are load-bearing on assumptions that will turn out to be wrong. Nothing tells you which is which except reading the code, which is the honest answer for an experiment.
+
+## Install
+
+Inside Claude Code, run:
+
+```
+/plugin marketplace add V-Songbird/slag
+/plugin install <plugin-name>
+```
+
+The first command registers this collection (once); the second installs whichever plugin you want. Uninstalling is just as easy: `/plugin uninstall <plugin-name>`.
+
+---
+
+## The plugins
+
+### [forge](./forge) — Review the plan before writing the code
+
+Big features fail for the same reason: a problem nobody spotted until the code was already written. Forge investigates first. Describe what you want to build, and a team of parallel AI experts examines your actual codebase, drafts a plan, and an adversarial critic tries to poke holes in that plan — all **before** a single line is written. Nothing gets implemented without your explicit sign-off.
+
+```
+/plugin install forge
+```
+
+### [verity](./verity) — Real documentation instead of guesses
+
+When you ask Claude how Claude Code itself works, it may answer from training memory — which ages badly. Verity makes Claude fetch the current official documentation live and answer from the source, citing the exact page it read. Install and forget; it kicks in whenever a Claude Code question comes up.
+
+```
+/plugin install verity
+```
+
+### [jetbrains-router](./jetbrains-router) — Claude works through your JetBrains IDE
+
+If you code in WebStorm, IntelliJ IDEA, Rider, PyCharm, or another JetBrains IDE, your editor already knows things Claude's native tools don't: which files have errors right now (no build needed), what you've typed but not saved, and which paths are worth searching. jetbrains-router redirects Claude's file reads, searches, and edits through the IDE's MCP server whenever the IDE is running — and steps aside completely when it isn't.
+
+```
+/plugin install jetbrains-router
+```
+
+### [plumb](./plumb) — Make it prove the code runs
+
+"This should work now." The load-bearing word in modern software. Plumb watches for a turn that edited code, claimed success, and never actually ran anything — then asks it to prove the claim before finishing. It ships off by default and only writes down what it *would* have said; turn it on when you want it to actually speak up.
+
+```
+/plugin install plumb
+```
+
+### Which one first?
+
+| You want to… | Install |
+| --- | --- |
+| Plan big features safely | **forge** |
+| Get trustworthy answers about Claude Code | **verity** |
+| Use your JetBrains IDE's brains | **jetbrains-router** |
+| Stop taking "should work" on faith | **plumb** |
+
+---
+
+## Repository layout
+
+```
+slag/
+├── forge/
+├── jetbrains-router/
+├── plumb/
+└── verity/
+```
+
+Plugins live in-tree — plain directories, one history, no submodules. Each ships its metadata in `.claude-plugin/plugin.json` and carries its own `README.md`, `CHANGELOG.md`, and `LICENSE`. The marketplace index is [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) — it is also the single owner of every plugin's version number (plugin.json files carry no version field). The conventions a plugin here follows are in [`.claude/rules/plugin-layout.md`](.claude/rules/plugin-layout.md).
+
+---
+
+## Development
+
+Run this once after cloning, to enable the commit gates:
+
+```
+git config core.hooksPath scripts/git-hooks
+```
+
+`.claude/settings.json` (committed) registers two repo-wide dev hooks, both dev-only — neither fires for anyone who has merely *installed* a plugin from this repo, only for edits made inside the source tree itself:
+
+- `.claude/hooks/run-tests-on-edit.js` reruns whichever plugin's own test suite after an `Edit`/`Write` lands in that plugin's `scripts/` or `hooks/` dir — detected by walking up to the nearest `.claude-plugin/plugin.json` marker, so it works for any plugin in this repo, not just one. Silent when green; surfaces a failure via `additionalContext` when red.
+- `.claude/hooks/nudge-manifest-curator.js` nudges a follow-up `manifest-curator` audit after an `Edit`/`Write` lands in `.claude-plugin/marketplace.json` or any plugin's `.claude-plugin/plugin.json` — manifest edits are easy to get subtly wrong (stale author info, version drift, schema violations), so a check only helps if something actually reminds you to run it.
+
+Tests, for a plugin that has them:
+
+```
+node --test <plugin>/tests/*.test.js
+```
+
+---
+
+## License
+
+MIT — see [LICENSE](./LICENSE).

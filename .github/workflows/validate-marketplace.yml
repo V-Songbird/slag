@@ -1,0 +1,39 @@
+name: Validate marketplace
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: marketplace.json must be valid JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('.claude-plugin/marketplace.json', 'utf-8'))"
+
+      - name: every plugin source must resolve to a real plugin on disk
+        run: node scripts/check-plugin-sources.js
+
+      - name: run the repo's own tooling tests
+        run: node --test scripts/*.test.js .claude/hooks/*.test.js
+
+      - name: run each plugin's test suite
+        run: |
+          status=0
+          for dir in */; do
+            plugin="${dir%/}"
+            [ -f "$plugin/.claude-plugin/plugin.json" ] || continue
+            [ -d "$plugin/tests" ] || { echo "$plugin: no tests/ directory, nothing to run"; continue; }
+            echo "::group::$plugin"
+            node --test "$plugin"/tests/*.test.js || status=1
+            echo "::endgroup::"
+          done
+          exit $status

@@ -1,0 +1,151 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "slag",
+  "description": "Experimental agentic plugins and tools that are not meant for public consumption.",
+  "owner": {
+    "name": "Victor Villegas",
+    "email": "victor.villegas@tuta.com"
+  },
+  "plugins": [
+    {
+      "name": "forge",
+      "source": "./forge",
+      "description": "Investigates your codebase before you build, using parallel domain experts and an adversarial critic to stress-test the plan before anything gets implemented.",
+      "version": "1.4.3-alpha",
+      "license": "MIT",
+      "author": {
+        "name": "Victor Villegas",
+        "email": "victor.villegas@tuta.com"
+      },
+      "homepage": "https://github.com/V-Songbird/slag/tree/main/forge",
+      "repository": "https://github.com/V-Songbird/slag",
+      "category": "planning",
+      "keywords": [
+        "investigation",
+        "pre-code",
+        "planning",
+        "architecture",
+        "adversarial",
+        "expert-analysis"
+      ],
+      "tags": [
+        "investigation",
+        "pre-code",
+        "planning",
+        "architecture",
+        "adversarial",
+        "expert-analysis"
+      ],
+      "strict": true
+    },
+    {
+      "name": "verity",
+      "source": "./verity",
+      "description": "Fetches current official Claude Code documentation on demand, giving Claude truth-grounding from primary sources instead of training memory.",
+      "version": "0.1.3-alpha",
+      "license": "MIT",
+      "author": {
+        "name": "Victor Villegas",
+        "email": "victor.villegas@tuta.com"
+      },
+      "homepage": "https://github.com/V-Songbird/slag/tree/main/verity",
+      "repository": "https://github.com/V-Songbird/slag",
+      "category": "reference",
+      "keywords": [
+        "documentation",
+        "grounding",
+        "truth",
+        "fetch",
+        "Claude Code docs",
+        "MCP tools",
+        "reference",
+        "live fetch"
+      ],
+      "tags": [
+        "documentation",
+        "grounding",
+        "truth",
+        "fetch",
+        "Claude Code docs",
+        "MCP tools",
+        "reference",
+        "live fetch"
+      ],
+      "strict": true
+    },
+    {
+      "name": "jetbrains-router",
+      "source": "./jetbrains-router",
+      "description": "Routes Claude's reads, searches, and edits through your running JetBrains IDE for live error detection, unsaved-change visibility, and index-aware search.",
+      "version": "2.0.3-alpha",
+      "license": "MIT",
+      "author": {
+        "name": "Victor Villegas",
+        "email": "victor.villegas@tuta.com"
+      },
+      "homepage": "https://github.com/V-Songbird/slag/tree/main/jetbrains-router",
+      "repository": "https://github.com/V-Songbird/slag",
+      "category": "integration",
+      "keywords": [
+        "JetBrains",
+        "WebStorm",
+        "Rider",
+        "IntelliJ",
+        "PyCharm",
+        "IDE",
+        "MCP",
+        "routing",
+        "diagnostics",
+        "hooks"
+      ],
+      "tags": [
+        "JetBrains",
+        "WebStorm",
+        "Rider",
+        "IntelliJ",
+        "PyCharm",
+        "IDE",
+        "MCP",
+        "routing",
+        "diagnostics",
+        "hooks"
+      ],
+      "strict": true
+    },
+    {
+      "name": "plumb",
+      "source": "./plumb",
+      "description": "Evidence-gated completion at the harness level — when a turn edits code and claims it works but never ran a check, plumb asks it to prove it before finishing.",
+      "version": "0.1.0-alpha",
+      "license": "MIT",
+      "author": {
+        "name": "Victor Villegas",
+        "email": "victor.villegas@tuta.com"
+      },
+      "homepage": "https://github.com/V-Songbird/slag/tree/main/plumb",
+      "repository": "https://github.com/V-Songbird/slag",
+      "category": "quality",
+      "keywords": [
+        "verification",
+        "evidence",
+        "completion",
+        "testing",
+        "hooks",
+        "correctness",
+        "stop-gate",
+        "quality"
+      ],
+      "tags": [
+        "verification",
+        "evidence",
+        "completion",
+        "testing",
+        "hooks",
+        "correctness",
+        "stop-gate",
+        "quality"
+      ],
+      "strict": true
+    }
+  ]
+}
