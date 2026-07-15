@@ -1,7 +1,6 @@
 'use strict';
 
-// Spec P6 (docs/research/razor-plumb-competitor-intel-2026-07-14.md, Part 6):
-// a validation harness can itself be inert. Roadmap 018 audit: stop_gate.test.js
+// A validation harness can itself be inert. Coverage audit: stop_gate.test.js
 // (base class), phantom_claim.test.js (phantom-claim class), and
 // check_outcome.test.js + dispositions.test.js (claimed-over-failure + the
 // base class's dormant/armed dispositions) already spawn the REAL stop-gate.js

@@ -398,12 +398,11 @@ function runGate(data, key, entries, calls, ctx) {
   writeState(ctx.stateId, { turnKey: key, fired: true, armedBlocks });
 }
 
-// ---- SubagentStop (Spec P2) ----
+// ---- SubagentStop ----
 //
-// Probed live 2026-07-14 (roadmap 014): a scratch SubagentStop hook dumping
-// stdin + returning {decision:"block"} on its first firing, driven by
-// `claude -p --model haiku` spawning one Task-tool subagent (cost $0.088).
-// Findings, folded into this gate:
+// Probed live 2026-07-14: a scratch SubagentStop hook dumping stdin +
+// returning {decision:"block"} on its first firing, driven by a headless
+// run spawning one Task-tool subagent. Findings, folded into this gate:
 //   - decision:"block" IS honored on SubagentStop, exactly like Stop: the
 //     blocked agent produced a second SubagentStop firing with
 //     stop_hook_active:true, having visibly reacted to the block reason. So

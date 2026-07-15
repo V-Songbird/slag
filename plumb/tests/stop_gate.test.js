@@ -57,7 +57,7 @@ describe('unit: ranCheck (signal 3)', () => {
   // bypassPermissions/HUSH_WRAP=1 to smuggle the real exit code past a
   // PostToolUseFailure event. Literal fixtures of that wrap shape (not a
   // live hush call — plumb never depends on a sibling plugin), confirmed
-  // 2026-07-14: PreToolUse hooks don't chain (razor/plumb roadmap 011), so
+  // 2026-07-14: PreToolUse hooks don't chain, so
   // stop-gate never actually sees a wrapped command in the transcript — this
   // locks CHECK_RE's substring match as a defense-in-depth regardless.
   test('still matches hush-wrapped Bash commands', () => {

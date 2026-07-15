@@ -1,8 +1,7 @@
 'use strict';
 
-// Spec P2 (roadmap 014): SubagentStop gate, probe-first. The live probe
-// (docs/research/razor-plumb-competitor-intel-2026-07-14.md Part 6 Spec P2;
-// findings restated in stop-gate.js's SubagentStop comment block) confirmed
+// SubagentStop gate, probe-first. A live probe (findings restated in
+// stop-gate.js's SubagentStop comment block) confirmed
 // decision:"block" IS honored on SubagentStop and every subagent-transcript
 // entry carries isSidechain:true. These tests exercise the real hook as a
 // subprocess (Spec P6 liveness discipline), an agent-scoped state file per

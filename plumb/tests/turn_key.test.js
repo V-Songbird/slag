@@ -1,8 +1,8 @@
 'use strict';
 
 // turnKey(data): the harness carries prompt_id on the happy path, so the key
-// should come from there rather than a transcript parse — see roadmap 017 /
-// razor's turnKey(data) for the reference pattern.
+// should come from there rather than a transcript parse — razor's
+// turnKey(data) is the reference pattern.
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert');
