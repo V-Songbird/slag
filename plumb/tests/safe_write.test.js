@@ -63,7 +63,10 @@ describe('safeWriteFileSync: symlink refusal', () => {
   test('refuses a symlinked parent dir that resolves outside tmpdir/home (win32 branch)', () => {
     const dir = tmpDir();
     const target = path.join(dir, 'a.json');
-    const outside = path.join('C:\\', 'nonexistent-outside-root', 'evil');
+    // Must be absolute on the HOST platform, or path.resolve() re-anchors it
+    // under cwd and the "outside trusted roots" branch never fires: a literal
+    // C:\ path is a relative segment on posix, and cwd is under homedir there.
+    const outside = path.resolve(path.sep, 'nonexistent-outside-root', 'evil');
     const origLstat = fs.lstatSync;
     const origRealpath = fs.realpathSync;
     const origStat = fs.statSync;
