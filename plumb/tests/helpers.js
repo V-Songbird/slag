@@ -43,13 +43,13 @@ function freshSession() {
  *             { command, result, is_error }. `name` defaults to 'Bash'; pass
  *             { command, name: 'PowerShell', result } for a PowerShell check.
  *   finalText: the turn's closing assistant message
+ *   isSidechain: stamp every entry, marking the file as a subagent's own
+ *             transcript rather than a main-thread one — see writeSubagentTurn.
  */
-function writeTurn({ uuid = 'turn-1', calls = [], commands = [], finalText = '' } = {}) {
+function writeTurn({ uuid = 'turn-1', calls = [], commands = [], finalText = '', isSidechain = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plumb-t-'));
   const file = path.join(dir, 't.jsonl');
-  const lines = [
-    JSON.stringify({ type: 'user', uuid, message: { role: 'user', content: 'please implement the thing' } }),
-  ];
+  const entries = [{ type: 'user', uuid, message: { role: 'user', content: 'please implement the thing' } }];
   const content = [];
   const results = [];
   for (const c of calls) content.push({ type: 'tool_use', name: c.name, input: c.input || {}, id: `tu${content.length}` });
@@ -64,13 +64,25 @@ function writeTurn({ uuid = 'turn-1', calls = [], commands = [], finalText = '' 
       results.push(block);
     }
   }
-  if (content.length) lines.push(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content } }));
-  if (results.length) lines.push(JSON.stringify({ type: 'user', message: { role: 'user', content: results } }));
+  if (content.length) entries.push({ type: 'assistant', message: { role: 'assistant', content } });
+  if (results.length) entries.push({ type: 'user', message: { role: 'user', content: results } });
   if (finalText) {
-    lines.push(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: finalText }] } }));
+    entries.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: finalText }] } });
   }
+  const lines = entries.map((e) => JSON.stringify(isSidechain ? { ...e, isSidechain: true } : e));
   fs.writeFileSync(file, lines.map((l) => l + '\n').join(''));
   return file;
+}
+
+/**
+ * A subagent's OWN transcript (what agent_transcript_path points at). Same
+ * shape as writeTurn, except every entry carries isSidechain:true — relative
+ * to the root session a subagent's whole run is a sidechain, so there is no
+ * isRealUserPrompt boundary in the file and the gate treats the whole thing as
+ * one turn. Returns the .jsonl path.
+ */
+function writeSubagentTurn(opts = {}) {
+  return writeTurn({ ...opts, isSidechain: true });
 }
 
 /** A fresh temp file path (not yet created) for an isolated observation log. */
@@ -78,4 +90,17 @@ function freshLog() {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'plumb-log-')), 'obs.jsonl');
 }
 
-module.exports = { runHook, hookOutput, freshSession, writeTurn, freshLog, HOOKS_DIR };
+/**
+ * Whether a usable git binary exists. Tests that need a real temp repo skip
+ * rather than fake-pass when it doesn't. Probed once per process.
+ */
+let gitAvailable;
+function hasGit() {
+  if (gitAvailable === undefined) {
+    const r = spawnSync('git', ['--version'], { encoding: 'utf-8' });
+    gitAvailable = !r.error && r.status === 0;
+  }
+  return gitAvailable;
+}
+
+module.exports = { runHook, hookOutput, freshSession, writeTurn, writeSubagentTurn, freshLog, hasGit, HOOKS_DIR };
