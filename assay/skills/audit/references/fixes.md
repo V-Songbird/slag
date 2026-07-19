@@ -66,14 +66,16 @@ only manual step. For each candidate the user checked:
    invoke its skill with the rule text, the target primitive, and the signal
    evidence as the argument, and let it do the building. One invocation per
    candidate.
-2. If the companion is missing, install it yourself with Bash:
-   `claude plugin install <companion>@claude-plugins-official`. A fresh
-   install is invisible to the running session, so build that candidate in a
-   child session instead, from the project root:
+2. If the companion is missing, install it yourself with Bash at project
+   scope, so it never touches the user's global config:
+   `claude plugin install <companion>@claude-plugins-official --scope project`.
+   A fresh install is invisible to the running session, so build that candidate
+   in a child session instead, from the project root:
    `claude -p "<promotion prompt>" --permission-mode acceptEdits`. The prompt
    must be self-contained: name the companion skill to invoke, the target
-   primitive, and the exact rule text. The child loads the new plugin and
-   builds the artifact.
+   primitive, and the exact rule text. Because it starts in the same project
+   after the install, the child loads the project-scoped plugin and builds the
+   artifact.
 3. Build hooks one at a time — parallel hook builds can collide on the same
    settings file. Skills and subagents may build in parallel.
 4. Verify each artifact landed (hook wired, skill directory or agent file
@@ -82,9 +84,9 @@ only manual step. For each candidate the user checked:
 5. Anything that failed — install refused, child errored or stalled — gets
    parked (below) with its install command, not retried.
 
-Close by telling the user which companions were newly installed: their skills
-join the user's own session after `/reload-plugins`, but the promotions
-themselves are already done.
+Close by telling the user which companions were newly installed at project
+scope: their skills join this project's sessions after `/reload-plugins`, but
+the promotions themselves are already done.
 
 After all candidates are handled, remove each promoted rule's bullet from its
 source file with `Edit` — the built artifact replaces the prose.

@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Changed
+
+- Companions promoted on the spot now install at project scope, leaving the user's global plugin config untouched
+
 ## [0.2.0-alpha] — 2026-07-18
 
 ### Added
