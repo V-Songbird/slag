@@ -10,11 +10,18 @@
   "repository": "https://github.com/V-Songbird/slag",
   "keywords": ["verification", "evidence", "completion", "testing", "hooks", "correctness", "stop-gate", "quality"],
   "userConfig": {
-    "armed": {
+    "arm": {
       "type": "boolean",
       "title": "Arm the completion gate",
       "description": "When on, plumb blocks a turn that edited code and claimed success without running any test, build, or run command. Off (default) is observe-only: it records what it would have blocked to a log, without ever interrupting a turn.",
       "default": false
+    },
+    "session_cap": {
+      "type": "number",
+      "title": "Armed blocks per session",
+      "description": "How many turns an armed gate may block in one session before it goes quiet. Ignored while observe-only.",
+      "default": 3,
+      "min": 0
     }
   }
 }

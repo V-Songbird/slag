@@ -51,11 +51,12 @@ It's one check at the end of a turn plus a bit of cleanup — all there to read 
 
 ## Settings
 
-Most people only ever touch the first one. plumb asks about arming when you enable it (changeable anytime in the plugin's configuration) — the environment variables below do the same and take precedence when set:
+Most people only ever touch the first one. plumb asks about arming and the block cap when you enable it (changeable anytime in the plugin's configuration) — the environment variables below do the same and take precedence when set:
 
 | Variable | What it does |
 | --- | --- |
 | `PLUMB_ARM=1` | Arms the gate — it holds back an unproven "done" instead of only observing |
+| `PLUMB_SESSION_CAP=<n>` | How many turns an armed gate may block per session (default 3) |
 | `PLUMB_DISABLE=1` | Turns everything off |
 | `PLUMB_LOG=<path>` | Where the observe-only log is written |
 
