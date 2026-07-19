@@ -22,6 +22,12 @@
       "description": "How many turns an armed gate may block in one session before it goes quiet. Ignored while observe-only.",
       "default": 3,
       "min": 0
+    },
+    "extra_checks": {
+      "type": "string",
+      "title": "Extra check commands",
+      "description": "Comma-separated command fragments that count as running a check, for test or build runners plumb doesn't recognize on its own — e.g. './scripts/verify.sh, invoke ci'. Matched anywhere in a command line, case-insensitive.",
+      "default": ""
     }
   }
 }

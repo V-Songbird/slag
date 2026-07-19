@@ -51,14 +51,21 @@ It's one check at the end of a turn plus a bit of cleanup — all there to read 
 
 ## Settings
 
-Most people only ever touch the first one. plumb asks about arming and the block cap when you enable it (changeable anytime in the plugin's configuration) — the environment variables below do the same and take precedence when set:
+Most people only ever touch the first one. plumb asks about arming and the session cap when you enable it (changeable anytime in the plugin's configuration) — the environment variables below do the same and take precedence when set:
 
 | Variable | What it does |
 | --- | --- |
 | `PLUMB_ARM=1` | Arms the gate — it holds back an unproven "done" instead of only observing |
 | `PLUMB_SESSION_CAP=<n>` | How many turns an armed gate may block per session (default 3) |
+| `PLUMB_EXTRA_CHECKS=<list>` | Comma-separated command fragments that count as running a check |
 | `PLUMB_DISABLE=1` | Turns everything off |
 | `PLUMB_LOG=<path>` | Where the observe-only log is written |
+
+## Good to know
+
+- plumb recognizes a check by its command line — the common test and build runners, wrapper scripts like `./gradlew`, and scripts run through a shell or PowerShell. A check it doesn't recognize looks like no check at all, and an armed gate would then hold back turns that were verified fine.
+- A runner it doesn't know can be named once in **Extra check commands**. An armed plumb also learns on its own: a block that gets waved off teaches it the project's scripts, and after a couple of those the runner counts. Learning only ever makes plumb block less.
+- Before arming, you can let a few sessions of normal work accumulate, then read the tally: `node path/to/slag/plumb/scripts/observe-report.js`. If turns you know were verified show up as candidates, list what you run in **Extra check commands** first.
 
 ## License
 

@@ -80,6 +80,40 @@ describe('unit: checkOutcome — tool_use/tool_result pairing', () => {
   });
 });
 
+// Only each distinct command's LAST result counts — fail, fix, re-run green
+// is the normal loop, and the early red must not outvote the re-run.
+describe('unit: checkOutcome — final-run-per-command semantics', () => {
+  test('the same command failing then passing classifies passed', () => {
+    const entries = [
+      toolUseEntry('tu0', 'npm test'),
+      toolResultEntry('tu0', '2 failed, 8 passed, 10 total'),
+      toolUseEntry('tu1', 'npm test'),
+      toolResultEntry('tu1', 'PASS\n10 passed, 10 total'),
+    ];
+    assert.strictEqual(checkOutcome(entries, CHECK_RE, FAIL_RE), 'passed');
+  });
+
+  test('the same command passing then failing classifies failed', () => {
+    const entries = [
+      toolUseEntry('tu0', 'npm test'),
+      toolResultEntry('tu0', 'PASS\n10 passed, 10 total'),
+      toolUseEntry('tu1', 'npm test'),
+      toolResultEntry('tu1', '1 failed, 9 passed, 10 total'),
+    ];
+    assert.strictEqual(checkOutcome(entries, CHECK_RE, FAIL_RE), 'failed');
+  });
+
+  test('a DIFFERENT command whose final run failed still fails the turn', () => {
+    const entries = [
+      toolUseEntry('tu0', 'npm run lint'),
+      toolResultEntry('tu0', '3 errors'),
+      toolUseEntry('tu1', 'npm test'),
+      toolResultEntry('tu1', 'PASS\n10 passed'),
+    ];
+    assert.strictEqual(checkOutcome(entries, CHECK_RE, FAIL_RE), 'failed');
+  });
+});
+
 describe('unit: checkOutcome — is_error classification', () => {
   test('is_error:true on the result block classifies failed even with neutral-looking text', () => {
     const entries = [toolUseEntry('tu0', 'pytest -q'), toolResultEntry('tu0', 'command exited with a non-zero status', true)];
@@ -246,6 +280,51 @@ describe('integration: claimed-over-failure outranks the silent check-ran exit',
     const lines = readLog(log);
     assert.strictEqual(lines.length, 1);
     assert.strictEqual(lines[0].kind, 'check-ran');
+  });
+});
+
+describe('integration: iterate-until-green stays silent', () => {
+  test('a failing run superseded by a green re-run of the same command is check-ran, not a candidate', () => {
+    const log = freshLog();
+    const input = {
+      session_id: freshSession(),
+      transcript_path: writeTurn({
+        calls: [{ name: 'Edit', input: { file_path: 'src/app.js' } }],
+        commands: [
+          { command: 'npm test', result: '2 failed, 8 passed, 10 total' },
+          { command: 'npm test', result: 'PASS\n10 passed, 10 total' },
+        ],
+        finalText: 'Done — all tests pass now.',
+      }),
+      hook_event_name: 'Stop',
+    };
+    assert.strictEqual(hookOutput(runHook('stop-gate.js', input, { PLUMB_LOG: log, PLUMB_ARM: '1' })), null);
+    const lines = readLog(log);
+    assert.strictEqual(lines.length, 1);
+    assert.strictEqual(lines[0].kind, 'check-ran');
+  });
+});
+
+describe('integration: honest failure reports stay silent', () => {
+  test('a closing message that names its own blocker is not a candidate despite a failing check', () => {
+    const log = freshLog();
+    const input = failingCheckTurn({ finalText: 'Done — 420 landed as a documented blocker, not a fix.' });
+    assert.strictEqual(hookOutput(runHook('stop-gate.js', input, { PLUMB_LOG: log, PLUMB_ARM: '1' })), null);
+    const lines = readLog(log);
+    assert.strictEqual(lines.length, 1);
+    assert.strictEqual(lines[0].kind, 'check-ran');
+  });
+
+  test('claimsSuccess is suppressed by plain failure statements', () => {
+    const { claimsSuccess } = require('../hooks/stop-gate');
+    for (const t of [
+      'Status: done — defect B was not reproduced.',
+      'Done — both failures were expectations, not bugs.',
+      'The task is done but the build is still failing.',
+    ]) {
+      assert.strictEqual(claimsSuccess(t), false, t);
+    }
+    assert.strictEqual(claimsSuccess('Done — all tests pass now.'), true);
   });
 });
 

@@ -43,8 +43,40 @@ describe('unit: ranCheck (signal 3)', () => {
     }
   });
 
+  // Wrapper-script and per-ecosystem runners, added after the first
+  // observation review showed real Gradle verification logging as would-blocks.
+  test('true for wrapper scripts, interpreter-run scripts, and ecosystem runners', () => {
+    const cmds = [
+      './gradlew build',
+      './gradlew test --tests RAThenaColorProviderTest',
+      'gradlew.bat test',
+      '.\\gradlew.bat build',
+      './mvnw verify',
+      'mvnw.cmd package',
+      'bash scripts/test.sh',
+      'sh ./run.sh',
+      'pwsh -File build.ps1',
+      'powershell -NoProfile -File .\\build.ps1',
+      './scripts/check.sh',
+      '.\\build.ps1',
+      'deno test',
+      'mix test',
+      'swift test',
+      'flutter test',
+      'composer test',
+      'sbt test',
+      'just test',
+      'uv run pytest',
+      'uv run check.py',
+      'msbuild App.sln',
+    ];
+    for (const cmd of cmds) {
+      assert.strictEqual(ranCheck([{ name: 'Bash', input: { command: cmd } }]), true, cmd);
+    }
+  });
+
   test('false for non-check shell commands', () => {
-    for (const cmd of ['git status', 'ls -la', 'cat package.json', 'grep foo src', 'mkdir build']) {
+    for (const cmd of ['git status', 'ls -la', 'cat package.json', 'grep foo src', 'mkdir build', 'swift package describe', 'echo done']) {
       assert.strictEqual(ranCheck([{ name: 'Bash', input: { command: cmd } }]), false, cmd);
     }
   });
@@ -135,6 +167,21 @@ describe('integration: armed', () => {
         calls: [{ name: 'Edit', input: { file_path: 'src/app.js' } }],
         commands: ['npm test'],
         finalText: 'Done — tests pass.',
+      }),
+      hook_event_name: 'Stop',
+    };
+    assert.strictEqual(hookOutput(runHook('stop-gate.js', input, { PLUMB_ARM: '1' })), null);
+  });
+
+  // Regression for the observation-review finding: a Gradle turn whose only
+  // check is the wrapper script must classify check-ran, not candidate.
+  test('silent when the only check is ./gradlew', () => {
+    const input = {
+      session_id: freshSession(),
+      transcript_path: writeTurn({
+        calls: [{ name: 'Edit', input: { file_path: 'src/Main.kt' } }],
+        commands: ['./gradlew test'],
+        finalText: 'Done — the build succeeded and all tests pass.',
       }),
       hook_event_name: 'Stop',
     };

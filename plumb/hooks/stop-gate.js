@@ -24,6 +24,9 @@ const {
   isActive,
   isArmed,
   settingNumber,
+  settingString,
+  learnedFragments,
+  recordWaveoff,
   readState,
   writeState,
   logObservation,
@@ -73,19 +76,66 @@ const CHECK_RE = new RegExp(
     '\\bgo\\s+(test|run|build|vet)\\b',
     '\\bcargo\\s+(test|check|build|run|clippy)\\b',
     '\\bdotnet\\s+(test|build|run)\\b',
-    '\\b(mvn|gradle|make|cmake|ninja|bazel|ctest|phpunit)\\b',
+    '\\b(mvn|gradle|make|cmake|ninja|bazel|ctest|phpunit|msbuild)\\b',
+    '\\b(gradlew|mvnw)(\\.bat|\\.cmd)?\\b',
     '\\b(tsc|eslint|ruff|mypy|pyright|rubocop|clippy|prettier)\\b',
     '\\b(node|python3?|ruby|deno|bun|php)\\s+[^\\s|;&]+\\.(js|mjs|cjs|ts|py|rb|php)\\b',
+    // Wrapper/script gaps surfaced by the first observation review: a shell or
+    // PowerShell interpreter running a script file, or a relative-path script
+    // invoked directly — CODE_EXT_RE already counts these files as code, so
+    // running one must count as a check.
+    '\\b(sh|bash|zsh|pwsh|powershell)(\\.exe)?\\s+(-\\w+\\s+)*[^\\s|;&]+\\.(sh|bash|zsh|ps1)\\b',
+    '(^|[\\s;&|(])\\.{1,2}[\\\\/][^\\s|;&]*\\.(sh|ps1|bat|cmd)\\b',
+    '\\b(deno|mix|swift|flutter|dart|composer|sbt|just)\\s+(test|build|run|check|task|verify|compile)\\b',
+    '\\buv\\s+run\\b',
   ].join('|'),
   'i'
 );
 
-function ranCheck(calls) {
+function ranCheck(calls, matcher = CHECK_RE) {
   return calls.some((c) => {
     if (c.name !== 'Bash' && c.name !== 'PowerShell') return false;
     const cmd = c.input && c.input.command;
-    return typeof cmd === 'string' && CHECK_RE.test(cmd);
+    return typeof cmd === 'string' && matcher.test(cmd);
   });
+}
+
+// ---- extra checks: the escape hatch for runners CHECK_RE doesn't know ----
+//
+// Two sources, both matched as case-insensitive substrings of the command
+// line: the extra_checks setting (comma-separated, set once at enable time)
+// and the per-project tokens the wave-off learner has promoted (plumb-lib).
+// Returns a CHECK_RE-compatible { test } object so ranCheck and checkOutcome
+// take it unchanged.
+function checkMatcherFor(cwd) {
+  const configured = settingString('EXTRA_CHECKS', '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const fragments = [...configured, ...learnedFragments(cwd)];
+  if (!fragments.length) return CHECK_RE;
+  return {
+    test: (cmd) => CHECK_RE.test(cmd) || fragments.some((f) => cmd.toLowerCase().includes(f)),
+  };
+}
+
+// What the wave-off learner may learn from a turn: the first token of each
+// unrecognized Bash/PowerShell command, only when it LOOKS like a project
+// script — a relative-path invocation or a script-extension file. Never bare
+// words ("git", "ls"): learning one of those would match every turn and
+// silently kill the gate.
+const LEARNABLE_TOKEN_RE = /^(\.{1,2}[\\/][^\s|;&]*|[^\s|;&]+\.(sh|bash|zsh|ps1|bat|cmd))$/i;
+
+function learnableTokens(calls, matcher) {
+  const tokens = new Set();
+  for (const c of calls) {
+    if (c.name !== 'Bash' && c.name !== 'PowerShell') continue;
+    const cmd = c.input && c.input.command;
+    if (typeof cmd !== 'string' || matcher.test(cmd)) continue;
+    const first = cmd.trim().split(/\s+/)[0] || '';
+    if (LEARNABLE_TOKEN_RE.test(first)) tokens.add(first.toLowerCase());
+  }
+  return [...tokens];
 }
 
 // ---- signal 3b: a check ran AND it failed (Spec P3, ran ≠ passed) ----
@@ -124,8 +174,30 @@ const CLAIM_PATTERNS = [
 
 const CLAIM_RE = new RegExp(CLAIM_PATTERNS.join('|'), 'i');
 
+// A closing message that names its own failures or blockers plainly is honest
+// reporting, not an unproven claim — blocking it would punish exactly the
+// candor plumb exists to protect. A suppressor, never a trigger, same
+// directionality as COMMIT_VERBS_RE. First observation review: the honest
+// reports all matched CLAIM_RE through broad phrases like "done" while
+// stating a failure in the same breath.
+const FAILURE_STATEMENT_RE = new RegExp(
+  [
+    '\\bfail(s|ed|ing|ure|ures)?\\b',
+    '\\bnot (a )?fix(ed)?\\b',
+    "\\b(couldn't|could not|cannot|can't) (be )?(reproduce|fix)",
+    '\\bnot reproduced?\\b',
+    '\\bblocked\\b',
+    '\\bblocker\\b',
+    '\\bbroken\\b',
+    '\\bregress(ion|ed)\\b',
+    "\\b(doesn't|does not|isn't|is not) work",
+    '\\bstill (failing|broken|red)\\b',
+  ].join('|'),
+  'i'
+);
+
 function claimsSuccess(text) {
-  return typeof text === 'string' && CLAIM_RE.test(text);
+  return typeof text === 'string' && CLAIM_RE.test(text) && !FAILURE_STATEMENT_RE.test(text);
 }
 
 // ---- signal 4 (phantom-claim class): a claim of DONE work with no edit tool ----
@@ -319,14 +391,16 @@ function runGate(data, key, entries, calls, ctx) {
     return;
   }
 
-  if (ranCheck(calls)) {
+  const matcher = checkMatcherFor(data.cwd);
+
+  if (ranCheck(calls, matcher)) {
     // signal 3b (Spec P3): a check ran, but ran ≠ passed. A failing check
     // whose closing message still claims success outranks the silent
     // check-ran exit below — it's the worst case (claim + machine-readable
     // failure evidence) and the lowest-false-positive candidate class plumb
     // has. Passed / unknown outcomes, or a failed check nobody claimed
     // success over, keep today's silent check-ran behavior.
-    const outcome = checkOutcome(entries, CHECK_RE, FAIL_RE, { allowSidechain: ctx.allowSidechain });
+    const outcome = checkOutcome(entries, matcher, FAIL_RE, { allowSidechain: ctx.allowSidechain });
     if (outcome === 'failed') {
       const claimText = resolveClaimText(data, entries, ctx.allowSidechain);
       if (claimText.trim() && claimsSuccess(claimText)) {
@@ -341,7 +415,7 @@ function runGate(data, key, entries, calls, ctx) {
             return;
           }
           record(data, key, armed, 'claimed-over-failure', candidateExtra);
-          writeState(ctx.stateId, { turnKey: key, fired: true, armedBlocks: armedBlocks + 1 });
+          writeState(ctx.stateId, { turnKey: key, fired: true, armedBlocks: armedBlocks + 1, lastBlockKey: key });
           process.stdout.write(JSON.stringify({ decision: 'block', reason: checkFailedBlockReason(claimText) }));
           return;
         }
@@ -389,7 +463,7 @@ function runGate(data, key, entries, calls, ctx) {
       return;
     }
     record(data, key, armed, 'candidate-armed-blocked', candidateExtra);
-    writeState(ctx.stateId, { turnKey: key, fired: true, armedBlocks: armedBlocks + 1 });
+    writeState(ctx.stateId, { turnKey: key, fired: true, armedBlocks: armedBlocks + 1, lastBlockKey: key });
     process.stdout.write(JSON.stringify({ decision: 'block', reason: blockReason(files) }));
     return;
   }
@@ -461,6 +535,34 @@ function handleSubagentStop(data) {
   runGate(data, key, entries, calls, { stateId: gateStateId(data), allowSidechain: true });
 }
 
+// ---- wave-off learner (main-thread Stop only) ----
+//
+// The Stop that carries stop_hook_active:true is the post-block continuation
+// ending — the one place we can see whether the block worked (a check ran) or
+// was waved off in a line. On a wave-off plumb was wrong about that turn:
+// record its unrecognized script-like commands, so a runner seen across
+// enough waved-off turns becomes a recognized check (checkMatcherFor above).
+// Learning only ever reduces blocking — the permitted auto-demote direction.
+// razor: main-thread only; handleSubagentStop returns before this, so
+// subagent wave-offs go unlearned — extend there if the log shows the gap.
+function maybeLearnFromWaveoff(data) {
+  if (!isArmed() || !data.cwd) return;
+
+  const state = readState(data.session_id);
+  if (!state.lastBlockKey || state.lastBlockKey === state.learnedKey) return;
+
+  const { turnKey: transcriptTurnKey, entries } = currentTurn(data.transcript_path);
+  if (transcriptTurnKey === 'no-transcript') return;
+  if (turnKey(data, transcriptTurnKey) !== state.lastBlockKey) return; // a later turn — that block is history
+
+  const matcher = checkMatcherFor(data.cwd);
+  const calls = turnToolCalls(entries);
+  if (ranCheck(calls, matcher)) return; // the block worked — nothing to learn
+
+  recordWaveoff(data.cwd, state.lastBlockKey, learnableTokens(calls, matcher));
+  writeState(data.session_id, { ...state, learnedKey: state.lastBlockKey });
+}
+
 function main() {
   const data = readInput();
   if (!isActive()) return;
@@ -470,7 +572,8 @@ function main() {
   if (event && event !== 'Stop') return;
   // The host sets this when the turn is already continuing because of a Stop
   // hook; never re-block into a loop. Belt to the per-turn state's suspenders.
-  if (data.stop_hook_active) return;
+  // It IS the wave-off learner's one observation window, though.
+  if (data.stop_hook_active) return maybeLearnFromWaveoff(data);
 
   const { turnKey: transcriptTurnKey, entries } = currentTurn(data.transcript_path);
   if (transcriptTurnKey === 'no-transcript') return; // can't scope the turn → stay silent
@@ -488,10 +591,13 @@ module.exports = {
   CLAIM_PATTERNS,
   CHECK_RE,
   FAIL_RE,
+  FAILURE_STATEMENT_RE,
   DEFAULT_SESSION_CAP,
   editTargets,
   editedCode,
   ranCheck,
+  checkMatcherFor,
+  learnableTokens,
   claimsSuccess,
   blockReason,
   snippet,

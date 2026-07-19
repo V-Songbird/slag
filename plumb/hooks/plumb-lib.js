@@ -41,6 +41,14 @@ function settingNumber(name, fallback) {
   return fallback;
 }
 
+// Same resolution order again, for free-text settings (PLUMB_EXTRA_CHECKS).
+function settingString(name, fallback) {
+  for (const raw of [process.env[`PLUMB_${name}`], process.env[`CLAUDE_PLUGIN_OPTION_${name}`]]) {
+    if (raw !== undefined && raw !== '') return raw;
+  }
+  return fallback;
+}
+
 // Dormant by default: the gate observes and logs what it WOULD block, but never
 // interrupts a turn until it's explicitly armed. Arming is the deliberate step
 // taken only after the observation log shows the heuristic's false-positive rate
@@ -174,12 +182,64 @@ function gcStateFiles() {
   const cutoff = Date.now() - GC_AGE_MS;
   for (const name of names) {
     if (!/^plumb-.*\.json$/.test(name)) continue;
+    if (name === path.basename(learnedChecksPath())) continue; // learned knowledge outlives sessions
     const file = path.join(dir, name);
     try {
       if (fs.statSync(file).mtimeMs < cutoff) fs.unlinkSync(file);
     } catch {
       /* best effort */
     }
+  }
+}
+
+// ---- learned checks (wave-off learner storage) ----
+//
+// Per-project memory of check commands plumb taught itself: when an armed
+// block gets waved off, the turn's unrecognized script-like commands are
+// recorded; a token seen across LEARN_THRESHOLD distinct waved-off turns is
+// learned and counts as a check from then on. Learning only ever REDUCES
+// blocking — the doctrine-permitted auto-demote direction. Shape:
+//   { "<cwd>": { "<token>": ["turnKey", ...] } }
+const LEARN_THRESHOLD = 2;
+const LEARN_MAX_TOKENS = 30; // per project
+const LEARN_MAX_TURNS = 5; // per token
+
+function learnedChecksPath() {
+  return path.join(stateDir(), 'plumb-learned-checks.json');
+}
+
+function readLearnedChecks() {
+  try {
+    const data = JSON.parse(fs.readFileSync(learnedChecksPath(), 'utf-8'));
+    return data && typeof data === 'object' ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+// Tokens for this project that have crossed the threshold.
+function learnedFragments(cwd) {
+  if (!cwd) return [];
+  const project = readLearnedChecks()[cwd];
+  if (!project || typeof project !== 'object') return [];
+  return Object.keys(project).filter((t) => Array.isArray(project[t]) && project[t].length >= LEARN_THRESHOLD);
+}
+
+function recordWaveoff(cwd, key, tokens) {
+  if (!cwd || !key || !tokens.length) return;
+  const all = readLearnedChecks();
+  const project = all[cwd] && typeof all[cwd] === 'object' ? all[cwd] : {};
+  for (const token of tokens) {
+    const turns = Array.isArray(project[token]) ? project[token] : [];
+    if (!(token in project) && Object.keys(project).length >= LEARN_MAX_TOKENS) continue;
+    if (turns.includes(key) || turns.length >= LEARN_MAX_TURNS) continue;
+    project[token] = [...turns, key];
+  }
+  all[cwd] = project;
+  try {
+    safeWriteFileSync(learnedChecksPath(), JSON.stringify(all));
+  } catch {
+    /* best effort — a lost wave-off means one more block before learning */
   }
 }
 
@@ -378,14 +438,16 @@ function findToolResult(entries, toolUseId, opts) {
   return null;
 }
 
-// Returns 'passed' | 'failed' | 'unknown'. Any failed check wins outright. A
+// Returns 'passed' | 'failed' | 'unknown'. Only each distinct check command's
+// LAST result counts — fail, fix, re-run the same command green is the normal
+// loop, and an early red must not outvote the re-run that superseded it. A
+// distinct command whose final run failed still fails the turn outright. A
 // check with no findable result counts toward 'unknown', never 'failed' — an
 // unseen result is not evidence of failure (fail toward silence). No matching
 // check calls at all is also 'unknown' (no evidence either way).
 function checkOutcome(entries, checkRe, failRe, opts) {
   const allowSidechain = !!(opts && opts.allowSidechain);
-  let sawCheck = false;
-  let sawUnknown = false;
+  const byCommand = new Map(); // trimmed command -> outcome of its last run
 
   for (const e of entries) {
     if (e.type !== 'assistant' || (e.isSidechain && !allowSidechain)) continue;
@@ -396,25 +458,32 @@ function checkOutcome(entries, checkRe, failRe, opts) {
       if (c.name !== 'Bash' && c.name !== 'PowerShell') continue;
       const cmd = c.input && c.input.command;
       if (typeof cmd !== 'string' || !checkRe.test(cmd)) continue;
-      sawCheck = true;
 
       const result = findToolResult(entries, c.id, opts);
-      if (!result) {
-        sawUnknown = true;
-        continue;
-      }
-      if (result.is_error === true || failRe.test(toolResultText(result))) return 'failed';
+      const outcome = !result
+        ? 'unknown'
+        : result.is_error === true || failRe.test(toolResultText(result))
+          ? 'failed'
+          : 'passed';
+      byCommand.set(cmd.trim(), outcome);
     }
   }
 
-  if (!sawCheck) return 'unknown';
-  return sawUnknown ? 'unknown' : 'passed';
+  if (!byCommand.size) return 'unknown';
+  const outcomes = [...byCommand.values()];
+  if (outcomes.includes('failed')) return 'failed';
+  return outcomes.includes('unknown') ? 'unknown' : 'passed';
 }
 
 module.exports = {
   readInput,
   settingBool,
   settingNumber,
+  settingString,
+  LEARN_THRESHOLD,
+  learnedChecksPath,
+  learnedFragments,
+  recordWaveoff,
   isArmed,
   isActive,
   stateDir,
