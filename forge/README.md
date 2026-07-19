@@ -35,7 +35,7 @@ Inside Claude Code, run:
 
 ```
 /plugin marketplace add V-Songbird/slag
-/plugin install forge
+/plugin install forge@slag
 ```
 
 It's active from your next session — nothing to configure. To use it, type `/forge`, describe the feature in plain words, and answer the approval question at the end. forge handles the rest.

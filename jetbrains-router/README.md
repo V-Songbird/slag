@@ -33,7 +33,7 @@ Inside Claude Code, run:
 
 ```
 /plugin marketplace add V-Songbird/slag
-/plugin install jetbrains-router
+/plugin install jetbrains-router@slag
 ```
 
 One requirement it can't handle for you: a JetBrains IDE — WebStorm, IntelliJ IDEA, Rider, PyCharm, and the rest all work — running version 2025.2 or newer, with its MCP Server switched on (Settings → Tools → MCP Server) and connected to Claude Code. With that in place, it starts working the moment the IDE is open.

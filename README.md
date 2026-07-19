@@ -30,10 +30,10 @@ Inside Claude Code, run:
 
 ```
 /plugin marketplace add V-Songbird/slag
-/plugin install <plugin-name>
+/plugin install <plugin-name>@slag
 ```
 
-The first command registers this collection (once); the second installs whichever plugin you want. Uninstalling is just as easy: `/plugin uninstall <plugin-name>`.
+The first command registers this collection (once); the second installs whichever plugin you want. Uninstalling is just as easy: `/plugin uninstall <plugin-name>@slag`.
 
 ---
 
@@ -44,7 +44,7 @@ The first command registers this collection (once); the second installs whicheve
 Big features fail for the same reason: a problem nobody spotted until the code was already written. Forge investigates first. Describe what you want to build, and a team of parallel AI experts examines your actual codebase, drafts a plan, and an adversarial critic tries to poke holes in that plan — all **before** a single line is written. Nothing gets implemented without your explicit sign-off.
 
 ```
-/plugin install forge
+/plugin install forge@slag
 ```
 
 ### [verity](./verity) — Real documentation instead of guesses
@@ -52,7 +52,7 @@ Big features fail for the same reason: a problem nobody spotted until the code w
 When you ask Claude how Claude Code itself works, it may answer from training memory — which ages badly. Verity makes Claude fetch the current official documentation live and answer from the source, citing the exact page it read. Install and forget; it kicks in whenever a Claude Code question comes up.
 
 ```
-/plugin install verity
+/plugin install verity@slag
 ```
 
 ### [jetbrains-router](./jetbrains-router) — Claude works through your JetBrains IDE
@@ -60,7 +60,7 @@ When you ask Claude how Claude Code itself works, it may answer from training me
 If you code in WebStorm, IntelliJ IDEA, Rider, PyCharm, or another JetBrains IDE, your editor already knows things Claude's native tools don't: which files have errors right now (no build needed), what you've typed but not saved, and which paths are worth searching. jetbrains-router redirects Claude's file reads, searches, and edits through the IDE's MCP server whenever the IDE is running — and steps aside completely when it isn't.
 
 ```
-/plugin install jetbrains-router
+/plugin install jetbrains-router@slag
 ```
 
 ### [assay](./assay) — Find out which of your rules Claude can actually follow
@@ -68,7 +68,7 @@ If you code in WebStorm, IntelliJ IDEA, Rider, PyCharm, or another JetBrains IDE
 You wrote rules for Claude; it keeps ignoring some. assay grades every rule in your `CLAUDE.md` and `.claude/rules/` on whether Claude can tell when it fires and what to do, offers to rewrite the weak ones, and flags the rules that were never meant to be prose — the ones a hook, skill, or subagent would enforce better. Almost all of the grading is a deterministic script, so a re-run gives the same numbers.
 
 ```
-/plugin install assay
+/plugin install assay@slag
 ```
 
 ### Which one first?

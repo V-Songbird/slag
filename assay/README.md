@@ -47,7 +47,7 @@ Inside Claude Code, run:
 
 ```
 /plugin marketplace add V-Songbird/slag
-/plugin install assay
+/plugin install assay@slag
 ```
 
 Nothing to configure. Works at the next session.

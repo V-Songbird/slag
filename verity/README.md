@@ -35,7 +35,7 @@ Inside Claude Code, run:
 
 ```
 /plugin marketplace add V-Songbird/slag
-/plugin install verity
+/plugin install verity@slag
 ```
 
 That's it — nothing to configure.
