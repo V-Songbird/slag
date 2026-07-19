@@ -113,37 +113,37 @@
       "strict": true
     },
     {
-      "name": "plumb",
-      "source": "./plumb",
-      "description": "Evidence-gated completion at the harness level — when a turn edits code and claims it works but never ran a check, plumb asks it to prove it before finishing.",
-      "version": "0.1.0-alpha",
+      "name": "assay",
+      "source": "./assay",
+      "description": "Grades every rule in CLAUDE.md and .claude/rules/ for structural clarity — can Claude tell when it fires and what to do? — then offers rewrites for the weak ones and flags rules that should be hooks, skills, or subagents instead of prose.",
+      "version": "0.2.0-alpha",
       "license": "MIT",
       "author": {
         "name": "Victor Villegas",
         "email": "victor.villegas@tuta.com"
       },
-      "homepage": "https://github.com/V-Songbird/slag/tree/main/plumb",
+      "homepage": "https://github.com/V-Songbird/slag/tree/main/assay",
       "repository": "https://github.com/V-Songbird/slag",
       "category": "quality",
       "keywords": [
-        "verification",
-        "evidence",
-        "completion",
-        "testing",
+        "rules",
+        "CLAUDE.md",
+        "audit",
+        "quality",
+        "instructions",
+        "scoring",
         "hooks",
-        "correctness",
-        "stop-gate",
-        "quality"
+        "placement"
       ],
       "tags": [
-        "verification",
-        "evidence",
-        "completion",
-        "testing",
+        "rules",
+        "CLAUDE.md",
+        "audit",
+        "quality",
+        "instructions",
+        "scoring",
         "hooks",
-        "correctness",
-        "stop-gate",
-        "quality"
+        "placement"
       ],
       "strict": true
     }

@@ -1,0 +1,1111 @@
+#!/usr/bin/env node
+"use strict";
+
+// assay engine — deterministic scoring of Claude Code rule files.
+//
+// Commands (run from the project root being audited):
+//   node assay.js scan [--root <path>]   discover + extract + mechanical scores;
+//                                        writes .assay-tmp/scan.json, prints a
+//                                        JSON summary with the judgment worklist
+//   node assay.js report [--verbose] [--json] [--root <path>]
+//                                        merges .assay-tmp/judgments.json, computes
+//                                        composite scores + placement candidates,
+//                                        prints the finished markdown report
+//   node assay.js clean [--root <path>]  removes .assay-tmp/
+//
+// Everything mechanical happens here; the only model-judged inputs are F3
+// (trigger-action distance) and F8 (enforceability), supplied via judgments.json.
+
+const fs = require("fs");
+const path = require("path");
+
+const TMP_DIR = ".assay-tmp";
+
+// ---------------------------------------------------------------------------
+// Data tables
+// ---------------------------------------------------------------------------
+
+const VERB_TIERS_RAW = [
+  { score: 1.0, label: "unconditional_mandate", verbs: ["must", "required"] },
+  { score: 0.95, label: "strong_prohibition", verbs: ["never", "do not", "don't", "forbidden", "cannot", "must not"] },
+  {
+    score: 0.85, label: "bare_imperative", verbs: [
+      "use", "run", "ensure", "place", "return", "validate", "add", "create", "implement", "include",
+      "set", "write", "check", "apply", "import", "export", "call", "pass", "configure", "define",
+      "make", "keep", "follow", "put", "handle", "wrap", "throw", "catch", "extend", "override",
+      "test", "verify", "assert", "name", "format", "structure", "organize", "separate", "split",
+      "merge", "combine", "convert", "transform", "parse", "serialize", "render", "display", "log",
+      "track", "store", "save", "load", "read", "delete", "remove", "update", "replace", "insert",
+      "append", "prepend", "edit", "modify", "regenerate", "rebuild", "restart", "install", "deploy",
+      "commit", "push", "pull", "fetch", "rebase", "tag", "release", "document", "annotate",
+      "refactor", "migrate", "initialize", "register", "enable", "disable", "allow", "block",
+      "reject", "accept", "emit", "publish", "subscribe", "listen", "watch", "mount", "unmount",
+      "report", "record", "reset", "revert", "avoid", "enforce", "restrict", "limit", "generate",
+      "execute", "maintain", "expose", "guard", "preserve", "notify", "specify", "invoke", "compose",
+      "bind", "defer", "inline", "encrypt", "decrypt", "sanitize", "normalize", "optimize", "lint",
+      "retry", "abort", "cache", "pin", "scope", "flush", "throttle", "debounce", "suppress",
+      "freeze", "truncate", "rotate", "scaffold", "bootstrap", "populate", "drain", "terminate",
+      "preload", "paginate", "escalate", "centralize", "standardize", "prioritize", "coordinate",
+      "minimize", "authenticate", "authorize", "archive", "batch", "aggregate", "benchmark",
+      "profile", "isolate", "provision", "orchestrate", "coerce"
+    ]
+  },
+  { score: 0.7, label: "advisory", verbs: ["should", "always"] },
+  { score: 0.5, label: "preference", verbs: ["prefer", "default to", "favor"] },
+  { score: 0.3, label: "suggestion", verbs: ["consider", "aim to", "where practical"] },
+  { score: 0.2, label: "hedged", verbs: ["try to", "try to prefer", "where possible", "when you can"] },
+  { score: 0.1, label: "weak_suggestion", verbs: ["you might want to", "it's worth", "keep in mind"] },
+];
+const IMPLICIT_VERB_DEFAULT = 0.7;
+
+// Flattened, pattern-precompiled, longest-first.
+const VERB_TIERS = [];
+for (const tier of VERB_TIERS_RAW) {
+  for (const verb of tier.verbs) {
+    VERB_TIERS.push({
+      verb,
+      score: tier.score,
+      label: tier.label,
+      pattern: new RegExp("(?:^|[\\s,;(])(" + escapeRe(verb) + ")(?:[\\s,;.)!?]|$)"),
+    });
+  }
+}
+VERB_TIERS.sort((a, b) => b.verb.length - a.verb.length);
+
+const ALL_VERBS = new Set(VERB_TIERS.map((t) => t.verb));
+
+const PROHIBITION_MARKERS = ["never ", "do not ", "don't ", "avoid ", "must not "];
+const HEDGED_MARKERS = ["prefer ", "default to ", "when possible"];
+const ALTERNATIVE_MARKERS = ["instead", " rather than "];
+
+const CONCRETE_REGEX = [
+  /`[^`]+`/g,
+  /\b[A-Z][a-zA-Z]+(?:Manager|Service|Controller|Factory|Builder|Handler|Provider|Repository|Validator|Schema|Config|Context|Store|Router|Middleware|Plugin|Hook|Component|Module|Interface|Type|Enum|Error|Exception)\b/g,
+  /\b\w+\.(?:ts|tsx|js|jsx|py|rs|go|java|rb|md|json|yaml|yml|toml|css|scss|html|sql|sh|bash)\b/g,
+  /(?:src|lib|test|tests|spec|specs|components|pages|api|utils|hooks|services|models|types|config|scripts)\/[\w/.-]+/g,
+  /\b(?:React|Vue|Angular|Express|Django|Flask|FastAPI|Spring|Rails|Next|Nuxt|Svelte|Tailwind|TypeScript|Zod|Prisma|Jest|Vitest|pytest|JUnit|ESLint|Prettier|Webpack|Vite|Docker|Kubernetes|GraphQL|REST|gRPC|Redis|PostgreSQL|MongoDB|MySQL|SQLite)\b/g,
+];
+
+// Bright-line numeric thresholds count as concrete markers — they turn an
+// adjective ("short", "soon") into something mechanically checkable.
+const NUMERIC_THRESHOLD_REGEX = [
+  /\b(?:fewer|less|more|greater|under|over|above|below|at\s+most|at\s+least|no\s+more\s+than|no\s+less\s+than|no\s+fewer\s+than|up\s+to)\s+(?:than\s+)?\d+(?:\.\d+)?\s*(?:%|(?:ms|milliseconds?|sec(?:ond)?s?|min(?:ute)?s?|hours?|days?|weeks?|months?|years?|kb|mb|gb|bytes?|chars?|characters?|words?|lines?|items?|entries|rows?|examples?|pages?|files?)\b)?/gi,
+  /\b\d+(?:\.\d+)?\s*(?:%|(?:ms|milliseconds?|sec(?:ond)?s?|min(?:ute)?s?|hours?|days?|weeks?|months?|years?|kb|mb|gb|bytes?|chars?|characters?|words?|lines?|items?|entries|rows?)\b)/gi,
+  /\bbetween\s+\d+(?:\.\d+)?\s+and\s+\d+(?:\.\d+)?\b/gi,
+];
+
+const ABSTRACT_MARKERS = [
+  "good", "appropriate", "reasonable", "clean", "thoughtful", "proper", "correct", "careful",
+  "best practice", "when possible", "where practical", "as needed", "properly", "correctly",
+  "carefully", "error handling", "naming", "code quality", "best practices", "maintainable",
+  "readable", "scalable", "efficient", "expensive", "simple", "clear", "obvious", "intuitive",
+];
+
+const CONCRETE_TERMS = [
+  "functional components", "class components", "named exports", "default exports", "barrel exports",
+  "type aliases", "interfaces", "enums", "generics", "strict mode", "strict null checks",
+  "type guards", "type assertions", "arrow functions", "async functions", "generator functions",
+  "unit tests", "integration tests", "end-to-end tests", "snapshot tests", "pre-commit hook",
+  "pre-push hook", "commit message", "pull request", "middleware", "error boundary",
+  "higher-order component", "custom hook", "dependency injection", "API endpoint", "REST API",
+  "GraphQL query", "GraphQL mutation", "database migration", "schema migration", "seed data",
+  "environment variable", "config file", "secrets manager", "CI pipeline", "CD pipeline",
+  "build step", "deploy step", "code review", "merge request", "branch protection", "linter rule",
+  "formatter config", "tsconfig", "eslint config", "request body", "response body",
+  "query parameter", "path parameter", "handler boundary", "controller layer", "service layer",
+  "repository layer", "connection pool", "input validation", "type guard", "type assertion",
+  "type narrowing",
+];
+
+// Composite weights and floors — the quality-heuristic contract.
+const WEIGHTS = { F1: 1.5, F2: 1.0, F3: 1.3, F4: 1.0, F5: 1.5, F7: 2.0 };
+const WEIGHTS_TOTAL = 8.3;
+const SOFT_FLOOR_THRESHOLD = 0.2; // applied to F4 and F7
+const STALENESS_MULTIPLIER = 0.05;
+// A bare prohibition can stall a headless run outright when the task needs the
+// banned action — capped to grade F regardless of the other factors.
+const STALL_RISK_CAP = 0.3;
+// Position only starts to bite in files long enough to bury their bottom rules.
+const LONG_FILE_LINES = 50;
+const BURIED_F5_THRESHOLD = 0.6;
+const F8_HOOK_THRESHOLD = 0.4;
+const F4_NO_OVERLAP_SCORE = 0.85;
+const F4_AMBIGUOUS_SCORE = 0.65;
+const CATEGORY_FLOORS = { mandate: 0.5, override: 0.25, preference: 0.25 };
+const LETTER_GRADES = [[0.8, "A"], [0.65, "B"], [0.5, "C"], [0.35, "D"]];
+
+const FRIENDLY_FIXES = {
+  F1: "Start with a clear action verb: Use, Always, Never, Run",
+  F2: "Name the alternative: 'Never X — do Y instead' (a bare prohibition can stall the task)",
+  F3: "Add a trigger: 'When editing X...' or 'Before committing...'",
+  F4: "Move to a scoped rule file with paths: frontmatter, or broaden the language",
+  F5: "Move the rule into the top quarter of the file, or split the file",
+  F7: "Add a file path, code example, or before/after comparison",
+};
+
+// Placement detection signals (hook / skill / subagent / compound).
+const PLACEMENT_CANDIDATE_THRESHOLD = 0.6;
+const PLACEMENT_COMPOUND_THRESHOLD = 0.35;
+
+const PLACEMENT_SIGNALS = {
+  hook: [
+    { name: "f8-low", weight: 0.4, f8Below: F8_HOOK_THRESHOLD },
+    { name: "tool-invocation-match", weight: 0.3, pattern: /\b(git\s+(commit|push|tag|reset|rebase|checkout|merge|force-push)|npm\s+(publish|version|install)|yarn\s+(publish|version)|pnpm\s+(publish|version)|pip\s+install|docker\s+push)\b/i },
+    { name: "mechanical-verb", weight: 0.2, pattern: /^\s*(never|always|do not|don't)\s+\w+/i },
+    { name: "lifecycle-trigger-keyword", weight: 0.25, pattern: /\b(before\s+(committing|pushing|merging|releasing|publishing)|after\s+(tests?\s+pass|the?\s*build|each\s+(edit|write|save))|on\s+save|pre[-\s]commit|post[-\s]commit|session\s+start)\b/i },
+    // keep-file-X-in-sync duties: prose compliance is fragile, a PostToolUse
+    // hook fires on every edit deterministically
+    { name: "distant-file-duty", weight: 0.5, pattern: /\b(?:update|add|append|record|note|log|sync|list|mirror|document)\b[^.;]*\b(?:in|into|to)\s+`?(?:[\w-]+\/)*[\w.-]+\.(?:md|txt|json|ya?ml)\b/i },
+  ],
+  skill: [
+    { name: "reference-pointer-phrase", weight: 0.4, pattern: /\b(follow\s+the\s+(style\s+guide|conventions?|patterns?|spec)|conventions?\s+(are|live)\s+in|see\s+[`"[].*?\bfor\b|refer\s+to\s+(the\s+)?[`"[]|check\s+(against|in)\s+(the\s+)?[`"[]|consult\s+[`"[]|documented\s+in\s+[`"[])/i },
+    { name: "external-reference-to-md", weight: 0.25, pattern: /\b[`"[][\w./-]+\.md[`"\]](?!\s*$)/ },
+    { name: "workflow-step-chain", weight: 0.35, anyPattern: [/\bfirst\b.*?\bthen\b.*?\b(then|finally|and\s+then)\b/i, /\bstep\s*1\b.*?\bstep\s*2\b/i, /,\s*then\b.*?,\s*then\b/i, /\bafter\s+[^,]+,\s*(do|run|execute)\b.*?,\s*(then|finally)\b/i] },
+    { name: "named-procedure-trigger", weight: 0.3, pattern: /^\s*when\s+(deploying|releasing|publishing|shipping|cutting\s+a\s+release|preparing\s+a\s+release|creating\s+a\s+(new\s+)?(component|page|module|service)|scaffolding|bootstrapping)\b/i },
+    { name: "pointer-shape", weight: 0.25, pointerShape: true },
+  ],
+  subagent: [
+    { name: "read-large-tree", weight: 0.4, pattern: /\b(read\s+the\s+(full|entire|whole)\s+[\w\s]+|read\s+the\s+source\s+(at|in)|check\s+every\s+[\w\s]+|scan\s+(all|every)\s+[\w\s]+|inspect\s+(all|every)\s+[\w\s]+|traverse\s+(all|every|the\s+entire))\b/i },
+    { name: "audit-verb", weight: 0.4, pattern: /\b(audit|review|verify|check)\s+(the\s+)?(diff|code|changes?|coverage|implementation|module|component|feature|test\s+suite|pr|branch|commit)\b/i },
+    { name: "judgment-verification-phrase", weight: 0.4, pattern: /\b(make\s+sure\s+(the\s+)?[\w\s]+?\s+(covers?|is\s+(tested|verified|asserted)|meets?)|ensure\s+(the\s+)?[\w\s]+?\s+(complies|satisfies|matches)|verify\s+(the\s+)?[\w\s]+?\s+(covers?|is\s+exercised))\b/i },
+    { name: "bias-independence-language", weight: 0.2, pattern: /\b(fresh\s+context|second\s+opinion|independent\s+review|without\s+(knowing|seeing)\s+what\s+was\s+written|unbiased\s+review|from\s+scratch\b|blind\s+review)\b/i },
+    { name: "delimited-summary-output", weight: 0.2, pattern: /\b(return\s+(a\s+)?(summary|verdict|list|inventory|report|contract|approved|ok)|report\s+back\s+with|produce\s+(a\s+)?(contract|inventory|summary|report|list\s+of))\b/i },
+    { name: "context-heavy-reference", weight: 0.25, pattern: /\b(the\s+(full|entire|whole)\s+(repository|repo|codebase|source\s+tree)|sibling\s+(repo|codebase|project)|external\s+(repository|project|codebase))\b|[A-Za-z]:[\\/][\w\\/.\- ]+|(?<![\w/])\/[\w./-]+\/[\w./-]+/i },
+    { name: "agent-invocation-phrase", weight: 0.65, pattern: /\b(run|invoke|delegate\s+to|call|use|spawn|launch)\s+(the\s+)?`?[\w][\w.-]*`?\s+(agent|subagent)\b/i },
+  ],
+};
+const COMPOUND_CONJUNCTION = /(,\s+and\s+|\s+—\s+|\s+--\s+|;\s+|\s+while\s+also\s+|\s+plus\s+)/;
+
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function round3(x) {
+  return Math.round(x * 1000) / 1000;
+}
+
+function grade(score) {
+  for (const [threshold, letter] of LETTER_GRADES) {
+    if (score >= threshold) return letter;
+  }
+  return "F";
+}
+
+// ---------------------------------------------------------------------------
+// Discovery
+// ---------------------------------------------------------------------------
+
+function parseFrontmatter(content) {
+  const fm = {};
+  const lines = content.split("\n");
+  if (!lines.length || lines[0].trim() !== "---") return fm;
+  let end = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === "---") { end = i; break; }
+  }
+  if (end === -1) return fm;
+  let i = 1;
+  while (i < end) {
+    const line = lines[i].trim();
+    if (!line || line.startsWith("#") || !line.includes(":")) { i++; continue; }
+    const sep = line.indexOf(":");
+    const key = line.slice(0, sep).trim();
+    let value = line.slice(sep + 1).trim().replace(/^["']|["']$/g, "");
+    if (!value && i + 1 < end && lines[i + 1].trim().startsWith("- ")) {
+      const items = [];
+      i++;
+      while (i < end && lines[i].trim().startsWith("- ")) {
+        const item = lines[i].trim().slice(2).trim().replace(/^["']|["']$/g, "");
+        if (item) items.push(item);
+        i++;
+      }
+      fm[key] = items;
+      continue;
+    }
+    fm[key] = value;
+    i++;
+  }
+  return fm;
+}
+
+function countGlobMatches(globs, root) {
+  // razor: fs.globSync needs Node 22+; on older Node the count is unknown
+  // and dead-glob detection is skipped rather than reimplementing a matcher.
+  if (typeof fs.globSync !== "function") return null;
+  let count = 0;
+  for (const pattern of globs) {
+    try {
+      count += fs.globSync(pattern, { cwd: root }).length;
+    } catch {
+      // malformed pattern counts as zero matches
+    }
+  }
+  return count;
+}
+
+function findInstructionFiles(root) {
+  const files = [];
+  const rootClaude = path.join(root, "CLAUDE.md");
+  const altClaude = path.join(root, ".claude", "CLAUDE.md");
+  if (fs.existsSync(rootClaude)) {
+    files.push({ path: "CLAUDE.md", absPath: rootClaude, alwaysLoaded: true });
+  } else if (fs.existsSync(altClaude)) {
+    files.push({ path: ".claude/CLAUDE.md", absPath: altClaude, alwaysLoaded: true });
+  }
+  const rulesDir = path.join(root, ".claude", "rules");
+  if (fs.existsSync(rulesDir) && fs.statSync(rulesDir).isDirectory()) {
+    for (const name of fs.readdirSync(rulesDir).sort()) {
+      if (!name.endsWith(".md")) continue;
+      files.push({ path: ".claude/rules/" + name, absPath: path.join(rulesDir, name), alwaysLoaded: false });
+    }
+  }
+  for (const f of files) {
+    const content = fs.readFileSync(f.absPath, "utf-8");
+    const fm = parseFrontmatter(content);
+    let globs = fm.paths || [];
+    if (typeof globs === "string") globs = globs ? [globs] : [];
+    f.content = content;
+    f.globs = globs;
+    f.globMatchCount = globs.length ? countGlobMatches(globs, root) : null;
+    f.defaultCategory = fm["default-category"] || "mandate";
+    f.lineCount = content.split("\n").length;
+    // an unscoped .claude/rules file loads every session, same as CLAUDE.md
+    if (!f.alwaysLoaded && globs.length === 0) f.alwaysLoaded = true;
+  }
+  return files;
+}
+
+// ---------------------------------------------------------------------------
+// Extraction
+// ---------------------------------------------------------------------------
+
+const BARE_LINK = /^\s*[-*]?\s*\[.*?\]\(.*?\)\s*$/;
+const PROSE_STARTERS = /^(?:this means|this is because|the reason|note that|background:|overview:|for context|these rules|this rule|this file|these files|this section|the following|detailed conventions|scoped rules)/i;
+const MECHANISM = /^(?:the\s+\w+\s+(?:pipeline|agent|system|layer|service)\s+(?:runs|handles|manages|processes))/i;
+const REFERENCE = /^see\s+[`"[].*?\b(?:for|about)\b/i;
+const DESCRIPTION_BULLET = /^\*\*[^*]+\*\*\s*(?:—|--|:)\s/;
+const NAVIGATION_POINTER = /^`[^`]+\.md`\s*(?:—|--|:|→)\s|^\*\*[^*]+\*\*\s*(?:→|—|--)\s*\[?`?[\w./-]*\.md|^\[[^\]]+\]\([^)]*\.md\)\s*(?:—|--|:|→)\s/;
+const CLARIFICATION_STARTERS = /^(?:this means|for example|i\.e\.|e\.g\.|in other words|specifically|that is)/i;
+const CONSTRAINT_KEYWORDS = [/\bonly\b/, /\brequired\b/, /\bforbidden\b/, /\bmandatory\b/];
+
+function hasImperativeVerb(text) {
+  const lower = text.toLowerCase();
+  for (const t of VERB_TIERS) {
+    if (t.pattern.test(lower)) return true;
+  }
+  return false;
+}
+
+function hasConstraintKeyword(text) {
+  const lower = text.toLowerCase();
+  return CONSTRAINT_KEYWORDS.some((p) => p.test(lower));
+}
+
+function stripMetadata(content) {
+  const lines = content.split("\n");
+  const result = [];
+  const annotations = {}; // lineNum -> category
+  const ignored = new Set(); // lineNums following an assay-ignore comment
+
+  let frontmatterEnd = 0;
+  if (lines.length && lines[0].trim() === "---") {
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i].trim() === "---") { frontmatterEnd = i + 1; break; }
+    }
+  }
+
+  const fenceRegions = new Set();
+  let inFence = false;
+  for (let i = frontmatterEnd; i < lines.length; i++) {
+    if (lines[i].trim().startsWith("```")) {
+      inFence = !inFence;
+      fenceRegions.add(i);
+    } else if (inFence) {
+      fenceRegions.add(i);
+    }
+  }
+
+  const tableRegions = new Set();
+  for (let i = frontmatterEnd; i < lines.length; i++) {
+    if (tableRegions.has(i) || fenceRegions.has(i)) continue;
+    if (lines[i].trim().startsWith("|") && i + 1 < lines.length && /^\|[\s:]*-/.test(lines[i + 1].trim())) {
+      let j = i;
+      while (j < lines.length && lines[j].trim().startsWith("|")) {
+        tableRegions.add(j);
+        j++;
+      }
+    }
+  }
+
+  for (let i = frontmatterEnd; i < lines.length; i++) {
+    const lineNum = i + 1;
+    if (fenceRegions.has(i) || tableRegions.has(i)) continue;
+    const raw = lines[i];
+    const stripped = raw.trim();
+
+    const catMatch = stripped.match(/^<!--\s*category:\s*(\w+)\s*-->$/);
+    if (catMatch) { annotations[lineNum] = catMatch[1]; continue; }
+    if (/^<!--\s*assay-ignore\s*-->$/.test(stripped)) { ignored.add(lineNum); continue; }
+
+    if (/^#{1,6}\s/.test(stripped)) {
+      result.push({ lineNum, text: "", isContent: false, isBlank: false, isHeading: true, raw: stripped });
+      continue;
+    }
+    if (/^(?:---+|___+|\*\*\*+)\s*$/.test(stripped)) continue;
+    if (!stripped) {
+      result.push({ lineNum, text: "", isContent: false, isBlank: true, isHeading: false, raw: "" });
+      continue;
+    }
+    if (BARE_LINK.test(stripped)) continue;
+    result.push({ lineNum, text: stripped, isContent: true, isBlank: false, isHeading: false, raw });
+  }
+
+  return { lines: result, annotations, ignored };
+}
+
+function identifyChunks(lines) {
+  const chunks = [];
+  let current = null;
+  let heading = null;
+  let headingLine = null;
+
+  for (const line of lines) {
+    if (!line.isContent) {
+      if (line.isHeading) {
+        const text = line.raw.replace(/^#{1,6}\s+/, "").trim();
+        if (text) { heading = text; headingLine = line.lineNum; }
+      }
+      if (line.isBlank && current) { chunks.push(current); current = null; }
+      continue;
+    }
+    const isBullet = /^(?:[-*]|\d+\.)\s/.test(line.text);
+    const isContinuation = /^(?:\s{2,}|\t)/.test(line.raw) && !isBullet;
+    if (isBullet) {
+      if (current) chunks.push(current);
+      current = {
+        lineStart: line.lineNum, lineEnd: line.lineNum,
+        text: line.text.replace(/^(?:[-*]|\d+\.)\s+/, ""),
+        isBullet: true, heading, headingLine,
+      };
+    } else if (isContinuation && current) {
+      current.lineEnd = line.lineNum;
+      current.text += " " + line.text;
+    } else if (!current) {
+      current = { lineStart: line.lineNum, lineEnd: line.lineNum, text: line.text, isBullet: false, heading, headingLine };
+    } else {
+      current.lineEnd = line.lineNum;
+      current.text += " " + line.text;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+function classifyChunk(chunk) {
+  const text = chunk.text;
+  const plain = text.replace(/\*\*([^*]+)\*\*/g, "$1");
+  if (PROSE_STARTERS.test(text) || MECHANISM.test(text) || REFERENCE.test(text)) return "prose";
+  if (chunk.isBullet && NAVIGATION_POINTER.test(text)) return "prose";
+  if (hasImperativeVerb(plain) || hasConstraintKeyword(text)) return "rule";
+  if (chunk.isBullet) {
+    if (DESCRIPTION_BULLET.test(text)) return "prose";
+    return "rule";
+  }
+  return "prose";
+}
+
+function isVerblessBullet(chunk) {
+  return chunk.isBullet && !hasImperativeVerb(chunk.text) && !hasConstraintKeyword(chunk.text);
+}
+
+function mergeTwo(rule, extra) {
+  return {
+    lineStart: rule.lineStart, lineEnd: extra.lineEnd,
+    text: rule.text + " " + extra.text,
+    isBullet: rule.isBullet, heading: rule.heading,
+  };
+}
+
+function mergeClarifications(chunks) {
+  const classified = chunks.map((c) => [c, classifyChunk(c)]);
+  const merged = [];
+  let i = 0;
+  while (i < classified.length) {
+    let [chunk, cls] = classified[i];
+    if (cls !== "rule") { merged.push([chunk, cls]); i++; continue; }
+
+    // Verbless bullets under a heading merge into a synthetic "Heading: ..."
+    // parent so conditional blocks keep their directive context.
+    if (isVerblessBullet(chunk) && chunk.heading) {
+      const heading = chunk.heading;
+      let combined = mergeTwo(
+        { lineStart: chunk.headingLine ?? chunk.lineStart, lineEnd: chunk.lineStart, text: heading + ":", isBullet: false, heading },
+        chunk
+      );
+      let j = i + 1;
+      while (j < classified.length) {
+        const [next, nextCls] = classified[j];
+        if (nextCls === "rule" && isVerblessBullet(next) && next.heading === heading) {
+          combined = mergeTwo(combined, next);
+          j++;
+        } else break;
+      }
+      merged.push([combined, "rule"]);
+      i = j;
+      continue;
+    }
+
+    let j = i + 1;
+    while (j < classified.length) {
+      const [next, nextCls] = classified[j];
+      const isClarification = nextCls === "prose" && (CLARIFICATION_STARTERS.test(next.text) || next.text.startsWith("```"));
+      const isDependentBullet = nextCls === "rule" && next.isBullet && !chunk.isBullet && isVerblessBullet(next);
+      if (isClarification || isDependentBullet) {
+        chunk = mergeTwo(chunk, next);
+        j++;
+      } else break;
+    }
+    merged.push([chunk, "rule"]);
+    i = j;
+  }
+  return merged;
+}
+
+const SINGLE_PROCESS_PATTERNS = [
+  /\b(?:edit|modify|change).*\band\b.*\b(?:regenerate|rebuild|recompile|restart)/,
+  /\b(?:save|write).*\band\b.*\b(?:commit|push)/,
+  /\b(?:create|add).*\band\b.*\b(?:register|configure|setup)/,
+];
+
+function splitCompound(chunk) {
+  const text = chunk.text;
+  const sub = (t) => ({ lineStart: chunk.lineStart, lineEnd: chunk.lineEnd, text: t, isBullet: chunk.isBullet, heading: chunk.heading });
+
+  if (text.includes(";")) {
+    const parts = text.split(";").map((p) => p.trim()).filter(Boolean);
+    if (parts.length >= 2 && parts.every(hasImperativeVerb)) return parts.map(sub);
+  }
+  const andParts = text.split(/,\s+and\s+|\s+and\s+/).map((p) => p.trim());
+  if (andParts.length >= 2 && andParts.every(hasImperativeVerb)) {
+    const lower = text.toLowerCase();
+    if (!SINGLE_PROCESS_PATTERNS.some((p) => p.test(lower))) return andParts.map(sub);
+  }
+  return [chunk];
+}
+
+// ---------------------------------------------------------------------------
+// Staleness
+// ---------------------------------------------------------------------------
+
+function checkStaleness(text, root) {
+  const missing = [];
+  for (const m of text.matchAll(/`([^`]+)`/g)) {
+    const name = m[1];
+    // only project-relative concrete paths are checkable
+    if (!name.includes("/")) continue;
+    if (/[<>{}*$]|:\/\//.test(name)) continue;
+    if (name.startsWith("/") || name.startsWith("~") || /^[A-Za-z]:/.test(name)) continue;
+    if (!fs.existsSync(path.join(root, name.replace(/\/+$/, "")))) missing.push(name);
+  }
+  return { gated: missing.length > 0, missing };
+}
+
+// ---------------------------------------------------------------------------
+// Mechanical scoring — F1, F2, F4, F7
+// ---------------------------------------------------------------------------
+
+const NOUN_VERB_AMBIGUOUS = new Set([
+  "document", "format", "log", "name", "set", "watch", "report", "display", "record", "test",
+  "check", "cache", "scope", "limit", "batch", "profile", "audit", "benchmark", "aggregate",
+  "archive", "guard", "pin", "drain",
+]);
+const NOUN_FOLLOWERS = new Set([
+  "headers", "files", "strings", "entries", "requests", "messages", "logs", "values", "types",
+  "fields", "options", "conventions", "names", "rules", "paths", "settings", "keys", "items",
+  "objects", "results", "records", "operations", "endpoints", "variables", "pages", "data",
+  "clauses", "layers", "levels", "lines", "traits", "pipes", "pools", "connections", "events",
+  "configs",
+]);
+
+function looksLikeStatement(lower) {
+  const starts = [
+    /^(?:all|each|every|the|a|an|this|that|these|those)\s/,
+    /^(?:files?|code|modules?|components?|functions?|classes|methods)\s/,
+    /^tests?\s+(?!the\s|a\s|an\s)/,
+  ];
+  if (starts.some((p) => p.test(lower))) return true;
+  const words = lower.split(/\s+/);
+  return words.length >= 2 && NOUN_VERB_AMBIGUOUS.has(words[0]) && NOUN_FOLLOWERS.has(words[1]);
+}
+
+function scoreF1(text) {
+  const lower = text.toLowerCase();
+  const matches = [];
+  for (const t of VERB_TIERS) {
+    const m = t.pattern.exec(lower);
+    if (m) matches.push({ verb: t.verb, score: t.score, label: t.label, pos: m.index });
+  }
+  if (!matches.length) {
+    if (looksLikeStatement(lower)) return { value: IMPLICIT_VERB_DEFAULT, method: "implicit_imperative_default", matchedVerb: null };
+    return { value: null, method: "extraction_failed", matchedVerb: null };
+  }
+  const bestScore = Math.max(...matches.map((m) => m.score));
+  if (looksLikeStatement(lower) && bestScore <= 0.85) {
+    return { value: IMPLICIT_VERB_DEFAULT, method: "implicit_imperative_default", matchedVerb: null };
+  }
+  const hedgingLabels = new Set(["hedged", "suggestion", "weak_suggestion", "preference"]);
+  const hedges = matches.filter((m) => hedgingLabels.has(m.label));
+  let best;
+  if (hedges.length >= 2) {
+    best = hedges.reduce((a, b) => (a.score <= b.score ? a : b));
+  } else {
+    best = matches.reduce((a, b) => (a.score >= b.score ? a : b));
+  }
+  if (matches.some((m) => m.verb === "always")) {
+    const imperative = matches.find((m) => m.verb !== "always" && m.label === "bare_imperative");
+    if (imperative) return { value: 1.0, method: "lookup", matchedVerb: "always + " + imperative.verb };
+  }
+  return { value: best.score, method: "lookup", matchedVerb: best.verb };
+}
+
+function hasPositiveImperative(text) {
+  const lower = text.toLowerCase().trim();
+  if (PROHIBITION_MARKERS.some((p) => lower.startsWith(p.trim()))) return false;
+  for (const t of VERB_TIERS) {
+    if ((t.label === "bare_imperative" || t.label === "unconditional_mandate") && t.pattern.test(lower)) return true;
+  }
+  return false;
+}
+
+function hasContrastNot(text) {
+  if (/`[^`]+`\s*[,;:]?\s+not\s+`[^`]+`/.test(text)) return true;
+  const negations = [
+    /\b(?:is|are|was|were|be|been|being)\s+not\b/i,
+    /,\s+not\s+\w+(?:ing|ed|ly)\b/i,
+    /,\s+not\s+\w+\s+(?:on|to|in|with|from|by|at|of|as|for|after|before)\b/i,
+  ];
+  if (negations.some((p) => p.test(text))) return false;
+  return /,\s+not\s+\w+/i.test(text);
+}
+
+function scoreF2(text) {
+  const lower = text.toLowerCase();
+  const isProhibition = PROHIBITION_MARKERS.some((p) => lower.includes(p));
+  const isHedged = HEDGED_MARKERS.some((p) => lower.includes(p));
+  const hasAlternative = ALTERNATIVE_MARKERS.some((p) => lower.includes(p)) || hasContrastNot(text);
+
+  if (isProhibition) {
+    // Prohibition + named alternative is the strongest framing; a prohibition
+    // without one converts blocked tasks into stalls, not compliance.
+    const sentences = text.split(/(?<=[.!?])\s+(?=[A-Z])|[;—–]\s*/);
+    if (hasAlternative || (sentences.length >= 2 && sentences.some(hasPositiveImperative))) {
+      return { value: 0.95, category: "prohibition_with_alternative" };
+    }
+    return { value: 0.2, category: "bare_prohibition", stallRisk: true };
+  }
+  if (isHedged) return { value: 0.35, category: "hedged_preference" };
+  if (hasAlternative) return { value: 0.95, category: "positive_with_alternative" };
+  return { value: 0.85, category: "positive_imperative" };
+}
+
+const TRIGGER_SCOPE_PATTERNS = [
+  /\bwhen\s+(?:editing|working\s+(?:on|with)|modifying|creating)\s+(\w+)\s+files?\b/gi,
+  /\bfor\s+(\w+)\s+files?\b/gi,
+  /\bin\s+(?:the\s+)?(\w+)\s+(?:directory|folder|module)\b/gi,
+  /\bduring\s+(\w+)\b/gi,
+];
+
+function extractTriggerScope(lower) {
+  const triggers = new Set();
+  for (const p of TRIGGER_SCOPE_PATTERNS) {
+    for (const m of lower.matchAll(p)) triggers.add(m[1].toLowerCase());
+  }
+  return triggers;
+}
+
+function extractGlobKeywords(globs) {
+  const keywords = new Set();
+  for (const g of globs) {
+    for (const part of g.split(/[/\\*?.[\]{}]+/)) {
+      const p = part.toLowerCase().trim();
+      if (p && p.length > 1 && !["src", "lib", "test", "tests"].includes(p)) keywords.add(p);
+    }
+  }
+  return keywords;
+}
+
+const RULE_KEYWORD_STOPWORDS = new Set([
+  "the", "and", "for", "all", "new", "with", "not", "use", "when", "this", "that", "from",
+  "into", "over", "than", "must", "should", "always", "never", "before", "after", "each",
+  "every", "where", "only", "also", "just", "about", "more", "most", "some", "any",
+]);
+
+function scoreF4(rule, file) {
+  const lower = rule.text.toLowerCase();
+  if (rule.staleness && rule.staleness.gated) return { value: 0.05, method: "stale" };
+  const globs = file.globs || [];
+  if (globs.length && file.globMatchCount === 0) return { value: 0.05, method: "dead_glob" };
+
+  if (file.alwaysLoaded && !globs.length) {
+    if (extractTriggerScope(lower).size) return { value: 0.4, method: "misaligned" };
+    return { value: 0.95, method: "always_universal" };
+  }
+  if (globs.length) {
+    const triggers = extractTriggerScope(lower);
+    const globKeywords = extractGlobKeywords(globs);
+    if (triggers.size) {
+      const overlap = [...triggers].some((t) => globKeywords.has(t));
+      return overlap ? { value: 0.95, method: "glob_match" } : { value: 0.25, method: "wrong_scope" };
+    }
+    const words = (lower.match(/\b[a-z]{3,}\b/g) || []).filter((w) => !RULE_KEYWORD_STOPWORDS.has(w));
+    if (words.some((w) => globKeywords.has(w))) return { value: 0.9, method: "keyword_overlap" };
+    // No trigger text and no overlap: the paths: frontmatter is doing the
+    // alignment work — a correctly lean rule, not a misaligned one.
+    return { value: F4_NO_OVERLAP_SCORE, method: "implicit_scope_trust" };
+  }
+  return { value: F4_AMBIGUOUS_SCORE, method: "no_signal" };
+}
+
+function scoreF5(lineStart, file) {
+  if (file.lineCount <= LONG_FILE_LINES) return { value: 0.95, method: "short_file" };
+  const frac = lineStart / file.lineCount;
+  if (frac <= 0.25) return { value: 0.95, method: "top" };
+  if (frac <= 0.5) return { value: 0.8, method: "upper_middle" };
+  if (frac <= 0.75) return { value: 0.6, method: "lower_middle" };
+  return { value: 0.4, method: "bottom" };
+}
+
+function scoreF7(text) {
+  const markers = [];
+  for (const m of text.matchAll(/`([^`]+)`/g)) markers.push(m[1]);
+  const stripped = text.replace(/`[^`]+`/g, "");
+  for (const pattern of CONCRETE_REGEX.slice(1)) {
+    for (const m of stripped.matchAll(pattern)) {
+      if (!markers.includes(m[0])) markers.push(m[0]);
+    }
+  }
+  for (const pattern of NUMERIC_THRESHOLD_REGEX) {
+    for (const m of stripped.matchAll(pattern)) {
+      const phrase = m[0].trim();
+      if (!markers.some((x) => x.includes(phrase) || phrase.includes(x))) markers.push(phrase);
+    }
+  }
+  const lower = text.toLowerCase();
+  const markersLower = markers.map((m) => m.toLowerCase());
+  for (const term of CONCRETE_TERMS) {
+    const termLower = term.toLowerCase();
+    if (lower.includes(termLower) && !markersLower.some((m) => m.includes(termLower) || termLower.includes(m))) {
+      markers.push(term);
+      markersLower.push(termLower);
+    }
+  }
+  const abstract = ABSTRACT_MARKERS.filter((a) => lower.includes(a));
+
+  const c = markers.length, a = abstract.length;
+  let value;
+  if (c === 0 && a === 0) value = 0.05;
+  else if (c === 0) value = 0.1;
+  else if (a === 0) value = c >= 4 ? 0.95 : c >= 2 ? 0.85 : 0.8;
+  else {
+    const ratio = c / (c + a);
+    if (ratio >= 0.8) value = 0.75 + 0.1 * Math.min(c / 4, 1);
+    else if (ratio >= 0.5) value = 0.45 + 0.2 * ratio;
+    else if (ratio >= 0.25) value = 0.25 + 0.15 * ratio;
+    else value = 0.1 + 0.1 * ratio;
+  }
+  return { value: Math.round(value * 100) / 100, concrete: markers, abstract };
+}
+
+// ---------------------------------------------------------------------------
+// Composition
+// ---------------------------------------------------------------------------
+
+function softFloor(x) {
+  return Math.min(1, x / SOFT_FLOOR_THRESHOLD);
+}
+
+function composeScore(factors, stale) {
+  // factors: { F1..F7 } as plain numbers in [0,1]; F1 null falls back to 0.5
+  const values = { ...factors };
+  if (values.F1 == null) values.F1 = 0.5;
+  if (values.F5 == null) values.F5 = 0.95;
+  let linear = 0;
+  for (const [name, weight] of Object.entries(WEIGHTS)) linear += weight * values[name];
+  linear /= WEIGHTS_TOTAL;
+  const floor = Math.min(softFloor(values.F7), softFloor(values.F4), stale ? STALENESS_MULTIPLIER : 1);
+  const score = linear * floor;
+
+  let dominant = null, dominantGap = -1;
+  for (const [name, weight] of Object.entries(WEIGHTS)) {
+    const gap = weight * (1 - values[name]);
+    if (gap > dominantGap) { dominantGap = gap; dominant = name; }
+  }
+  return { score: round3(score), preFloor: round3(linear), floor: round3(floor), dominantWeakness: dominant };
+}
+
+// ---------------------------------------------------------------------------
+// Placement detection
+// ---------------------------------------------------------------------------
+
+function countActionVerbs(text) {
+  const lower = text.toLowerCase();
+  let count = 0;
+  for (const t of VERB_TIERS) {
+    if (t.label === "bare_imperative" || t.label === "unconditional_mandate") {
+      const matches = lower.match(new RegExp(t.pattern.source, "g"));
+      if (matches) count += matches.length;
+    }
+  }
+  return count;
+}
+
+function detectPlacement(ruleText, f8) {
+  const detections = {};
+  for (const [primitive, signals] of Object.entries(PLACEMENT_SIGNALS)) {
+    let confidence = 0;
+    const evidence = [];
+    for (const s of signals) {
+      let hit = false;
+      if (s.f8Below !== undefined) hit = f8 != null && f8 < s.f8Below;
+      else if (s.anyPattern) hit = s.anyPattern.some((p) => p.test(ruleText));
+      else if (s.pointerShape) hit = countActionVerbs(ruleText) <= 1 && (/\.md\b/.test(ruleText) || /`[^`]*\/[^`]*`/.test(ruleText));
+      else hit = s.pattern.test(ruleText);
+      if (hit) { confidence += s.weight; evidence.push(s.name); }
+    }
+    confidence = Math.min(1, round3(confidence));
+    if (evidence.length) detections[primitive] = { confidence, evidence };
+  }
+
+  const candidates = Object.entries(detections).filter(([, d]) => d.confidence >= PLACEMENT_CANDIDATE_THRESHOLD);
+  const firing = Object.entries(detections).filter(([, d]) => d.confidence >= PLACEMENT_COMPOUND_THRESHOLD);
+  const compound = firing.length >= 2 && COMPOUND_CONJUNCTION.test(ruleText);
+
+  if (!candidates.length && !compound) return null;
+  let bestFit = compound ? "compound" : null;
+  if (!bestFit) bestFit = candidates.reduce((a, b) => (a[1].confidence >= b[1].confidence ? a : b))[0];
+  return { bestFit, detections, compound };
+}
+
+// ---------------------------------------------------------------------------
+// scan
+// ---------------------------------------------------------------------------
+
+function scan(root) {
+  const files = findInstructionFiles(root);
+  const rules = [];
+  let counter = 0;
+
+  files.forEach((file, fileIndex) => {
+    const { lines, annotations, ignored } = stripMetadata(file.content);
+    const chunks = identifyChunks(lines);
+    const merged = mergeClarifications(chunks);
+
+    for (const [chunk, cls] of merged) {
+      if (cls !== "rule") continue;
+      for (const part of splitCompound(chunk)) {
+        // an <!-- assay-ignore --> comment on either of the two lines above skips the rule
+        if (ignored.has(part.lineStart - 1) || ignored.has(part.lineStart - 2)) continue;
+        counter++;
+        let category = file.defaultCategory;
+        for (let ln = part.lineStart - 2; ln < part.lineStart; ln++) {
+          if (annotations[ln]) category = annotations[ln];
+        }
+        const staleness = checkStaleness(part.text, root);
+        const f1 = scoreF1(part.text);
+        const rule = {
+          id: "R" + String(counter).padStart(3, "0"),
+          fileIndex,
+          file: file.path,
+          text: part.text,
+          lineStart: part.lineStart,
+          lineEnd: part.lineEnd,
+          category,
+          staleness,
+          factors: {
+            F1: f1,
+            F2: scoreF2(part.text),
+            F4: scoreF4({ text: part.text, staleness }, file),
+            F5: scoreF5(part.lineStart, file),
+            F7: scoreF7(part.text),
+          },
+        };
+        rules.push(rule);
+      }
+    }
+  });
+
+  return {
+    root: path.resolve(root),
+    files: files.map(({ content, absPath, ...rest }) => rest),
+    rules,
+  };
+}
+
+function cmdScan(root) {
+  const result = scan(root);
+  const tmpDir = path.join(root, TMP_DIR);
+  fs.mkdirSync(tmpDir, { recursive: true });
+  fs.writeFileSync(path.join(tmpDir, "scan.json"), JSON.stringify(result, null, 2));
+
+  const summary = {
+    ruleCount: result.rules.length,
+    fileCount: result.files.length,
+    files: result.files.map((f) => f.path),
+    scanFile: TMP_DIR + "/scan.json",
+    judgmentsFile: TMP_DIR + "/judgments.json",
+    judge: result.rules.map((r) => ({
+      id: r.id,
+      text: r.text,
+      needsF1: r.factors.F1.method === "extraction_failed",
+    })),
+  };
+  process.stdout.write(JSON.stringify(summary, null, 2) + "\n");
+}
+
+// ---------------------------------------------------------------------------
+// report
+// ---------------------------------------------------------------------------
+
+function loadJudgments(root, rules) {
+  const file = path.join(root, TMP_DIR, "judgments.json");
+  if (!fs.existsSync(file)) {
+    return { error: "Missing " + TMP_DIR + "/judgments.json — write it before running report." };
+  }
+  let judgments;
+  try {
+    judgments = JSON.parse(fs.readFileSync(file, "utf-8"));
+  } catch (err) {
+    return { error: TMP_DIR + "/judgments.json is not valid JSON: " + err.message };
+  }
+  const problems = [];
+  for (const rule of rules) {
+    const j = judgments[rule.id];
+    if (!j || typeof j.F3 !== "number" || typeof j.F8 !== "number") {
+      problems.push(rule.id);
+      continue;
+    }
+    for (const k of ["F3", "F8", "F1"]) {
+      if (j[k] !== undefined && (typeof j[k] !== "number" || j[k] < 0 || j[k] > 1)) problems.push(rule.id + "." + k);
+    }
+  }
+  if (problems.length) {
+    return { error: "Judgments missing or out of range [0,1] for: " + problems.join(", ") };
+  }
+  return { judgments };
+}
+
+function composeAudit(scanData, judgments) {
+  const rules = scanData.rules.map((r) => {
+    const j = judgments[r.id];
+    const factors = {
+      F1: j.F1 !== undefined ? j.F1 : r.factors.F1.value,
+      F2: r.factors.F2.value,
+      F3: j.F3,
+      F4: r.factors.F4.value,
+      F5: r.factors.F5 ? r.factors.F5.value : 0.95,
+      F7: r.factors.F7.value,
+    };
+    const composed = composeScore(factors, r.staleness.gated);
+    const stallRisk = r.factors.F2.stallRisk === true;
+    const score = stallRisk ? Math.min(composed.score, STALL_RISK_CAP) : composed.score;
+    const placement = detectPlacement(r.text, j.F8);
+    return {
+      ...r,
+      factorValues: factors,
+      f8: j.F8,
+      ...composed,
+      score,
+      grade: grade(score),
+      stallRisk,
+      hookOpportunity: j.F8 < F8_HOOK_THRESHOLD,
+      placement,
+      weak: score < (CATEGORY_FLOORS[r.category] ?? CATEGORY_FLOORS.mandate),
+    };
+  });
+
+  const files = scanData.files.map((f, i) => {
+    const own = rules.filter((r) => r.fileIndex === i);
+    const mean = own.length ? own.reduce((s, r) => s + r.score, 0) / own.length : null;
+    return { ...f, ruleCount: own.length, score: mean === null ? null : round3(mean), grade: mean === null ? null : grade(mean) };
+  });
+
+  const mandates = rules.filter((r) => r.category === "mandate");
+  const corpus = mandates.length ? round3(mandates.reduce((s, r) => s + r.score, 0) / mandates.length) : null;
+
+  return { root: scanData.root, files, rules, corpusScore: corpus, corpusGrade: corpus === null ? null : grade(corpus) };
+}
+
+function fmt(x) {
+  return x.toFixed(2);
+}
+
+function renderReport(audit, opts = {}) {
+  const out = [];
+  const { rules, files } = audit;
+  out.push("# Rule audit — " + path.basename(audit.root));
+  out.push("");
+  if (!rules.length) {
+    out.push("No rules found in CLAUDE.md or .claude/rules/.");
+    return out.join("\n");
+  }
+  out.push(`**${rules.length} rules across ${files.filter((f) => f.ruleCount > 0).length} file(s)** — corpus grade **${audit.corpusGrade} (${fmt(audit.corpusScore)})**, mandate rules only.`);
+  out.push("");
+  out.push("Grades assume the rules must survive the least forgiving reader — small models, subagents, headless runs. If only large models in interactive sessions read this corpus, treat severity one notch softer.");
+  out.push("");
+
+  out.push("## Files");
+  out.push("");
+  out.push("| File | Rules | Grade | Loading |");
+  out.push("|---|---|---|---|");
+  for (const f of files) {
+    const loading = f.globs && f.globs.length ? "scoped: " + f.globs.join(", ") : "always loaded";
+    const g = f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`;
+    out.push(`| ${f.path} | ${f.ruleCount} | ${g} | ${loading} |`);
+  }
+  out.push("");
+
+  const weak = rules.filter((r) => r.weak).sort((a, b) => a.score - b.score);
+  if (weak.length) {
+    out.push(`## Weak rules (${weak.length} below their category floor)`);
+    out.push("");
+    out.push("| Rule | Where | Score | Weakest factor | Suggested fix |");
+    out.push("|---|---|---|---|---|");
+    for (const r of weak) {
+      out.push(`| ${r.id} "${truncate(r.text, 60)}" | ${r.file}:${r.lineStart} | ${r.grade} (${fmt(r.score)}) | ${r.dominantWeakness} | ${FRIENDLY_FIXES[r.dominantWeakness]} |`);
+    }
+    out.push("");
+  }
+
+  const stalls = rules.filter((r) => r.stallRisk);
+  if (stalls.length) {
+    out.push("## Stall risks (bare prohibitions)");
+    out.push("");
+    out.push('A prohibition with no named alternative can stall a run outright when the task needs the banned thing. Pair it with the replacement — "Never X — do Y instead" — or with the escape hatch ("stop and ask").');
+    out.push("");
+    for (const r of stalls) {
+      out.push(`- ${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}"`);
+    }
+    out.push("");
+  }
+
+  const buried = rules.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD);
+  if (buried.length) {
+    out.push("## Buried rules");
+    out.push("");
+    out.push("These sit in the bottom half of a long file, where rules lose force. Move load-bearing rules into the top quarter, or split the file into scoped rule files.");
+    out.push("");
+    for (const r of buried) {
+      const total = files[r.fileIndex] ? files[r.fileIndex].lineCount : "?";
+      out.push(`- ${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}" — line ${r.lineStart} of ${total}`);
+    }
+    out.push("");
+  }
+
+  const stale = rules.filter((r) => r.staleness.gated);
+  if (stale.length) {
+    out.push("## Stale references");
+    out.push("");
+    for (const r of stale) {
+      out.push(`- ${r.id} (${r.file}:${r.lineStart}) cites missing path(s): ${r.staleness.missing.map((m) => "`" + m + "`").join(", ")}`);
+    }
+    out.push("");
+  }
+
+  const hooks = rules.filter((r) => r.hookOpportunity);
+  if (hooks.length) {
+    out.push(`## Hook opportunities (F8 < ${F8_HOOK_THRESHOLD})`);
+    out.push("");
+    out.push("These rules could be enforced mechanically instead of read as text:");
+    out.push("");
+    for (const r of hooks) {
+      out.push(`- ${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}" — F8 ${fmt(r.f8)}`);
+    }
+    out.push("");
+  }
+
+  const placed = rules.filter((r) => r.placement);
+  if (placed.length) {
+    out.push("## Placement candidates");
+    out.push("");
+    out.push("Rules whose job fits a Claude Code primitive better than rule prose:");
+    out.push("");
+    for (const r of placed) {
+      const det = Object.entries(r.placement.detections)
+        .map(([prim, d]) => `${prim} ${fmt(d.confidence)} [${d.evidence.join(", ")}]`)
+        .join("; ");
+      out.push(`- ${r.id} (${r.file}:${r.lineStart}) → **${r.placement.bestFit}** — "${truncate(r.text, 70)}"`);
+      out.push(`  - signals: ${det}`);
+    }
+    out.push("");
+  }
+
+  if (opts.verbose) {
+    out.push("## All rules");
+    out.push("");
+    out.push("| Rule | Where | Cat | F1 | F2 | F3 | F4 | F5 | F7 | F8 | Score | Grade |");
+    out.push("|---|---|---|---|---|---|---|---|---|---|---|---|");
+    for (const r of rules) {
+      const v = r.factorValues;
+      out.push(`| ${r.id} "${truncate(r.text, 40)}" | ${r.file}:${r.lineStart} | ${r.category} | ${fmt(v.F1)} | ${fmt(v.F2)} | ${fmt(v.F3)} | ${fmt(v.F4)} | ${fmt(v.F5)} | ${fmt(v.F7)} | ${fmt(r.f8)} | ${fmt(r.score)} | ${r.grade} |`);
+    }
+    out.push("");
+  }
+
+  return out.join("\n");
+}
+
+function truncate(text, n) {
+  const clean = text.replace(/\|/g, "\\|").replace(/\s+/g, " ");
+  return clean.length > n ? clean.slice(0, n - 1) + "…" : clean;
+}
+
+function cmdReport(root, opts) {
+  const scanFile = path.join(root, TMP_DIR, "scan.json");
+  if (!fs.existsSync(scanFile)) {
+    process.stderr.write("No " + TMP_DIR + "/scan.json — run scan first.\n");
+    process.exit(1);
+  }
+  const scanData = JSON.parse(fs.readFileSync(scanFile, "utf-8"));
+  const { judgments, error } = loadJudgments(root, scanData.rules);
+  if (error) {
+    process.stderr.write(error + "\n");
+    process.exit(1);
+  }
+  const audit = composeAudit(scanData, judgments);
+  fs.writeFileSync(path.join(root, TMP_DIR, "audit.json"), JSON.stringify(audit, null, 2));
+  if (opts.json) process.stdout.write(JSON.stringify(audit, null, 2) + "\n");
+  else process.stdout.write(renderReport(audit, opts) + "\n");
+}
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
+
+function main() {
+  const args = process.argv.slice(2);
+  const command = args[0];
+  const rootIdx = args.indexOf("--root");
+  const root = rootIdx !== -1 ? args[rootIdx + 1] : process.cwd();
+  const opts = { verbose: args.includes("--verbose"), json: args.includes("--json") };
+
+  if (command === "scan") cmdScan(root);
+  else if (command === "report") cmdReport(root, opts);
+  else if (command === "clean") fs.rmSync(path.join(root, TMP_DIR), { recursive: true, force: true });
+  else {
+    process.stderr.write("Usage: assay.js <scan|report|clean> [--root <path>] [--verbose] [--json]\n");
+    process.exit(2);
+  }
+}
+
+module.exports = {
+  parseFrontmatter, findInstructionFiles, stripMetadata, identifyChunks, classifyChunk,
+  mergeClarifications, splitCompound, checkStaleness, scoreF1, scoreF2, scoreF4, scoreF5, scoreF7,
+  composeScore, grade, detectPlacement, scan, composeAudit, renderReport, loadJudgments,
+  looksLikeStatement, hasImperativeVerb,
+};
+
+if (require.main === module) main();

@@ -4,13 +4,17 @@
     <img src="assets/logo.svg" alt="forge" width="240" />
   </picture>
   <h1>forge</h1>
-  <p><em>Stop discovering architectural problems in code review.<br>Surface them before implementation starts.</em></p>
+  <p><strong>Stop discovering architectural problems in code review. Surface them before implementation starts.</strong></p>
 </div>
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
+
+> **TL;DR** — Big changes fail on the thing nobody checked first. forge studies your actual project, drafts a plan that cites real files and lines, then tries hard to break its own plan — all before a single line of code is written.
 
 ---
 
-> [!WARNING]
-> Experimental, and staying that way. This plugin lives in a sandbox marketplace: no support, no stability promise, and it can change shape or disappear without a migration path. Try it if you like; you're on your own if it misbehaves.
+> [!NOTE]
+> Experimental, and staying that way. No support, no stability promise; it can change shape or disappear without a migration path. If it breaks your session, that's the deal you took.
 
 ## What is this?
 
@@ -48,7 +52,7 @@ It's active from your next session — nothing to configure. To use it, type `/f
 
 ## Under the hood
 
-If you're curious, forge works by sending a small team of specialists at your plan from different angles, then letting a critic try to break it before you ever see it. It's all there to read in the plugin's files.
+forge sends a small team of specialists at your plan from different angles, then lets a critic try to break it before you ever see it — all there to read in the plugin's files.
 
 ## License
 

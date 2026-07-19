@@ -1,0 +1,12 @@
+{
+  "name": "gauge",
+  "description": "Measures your project's real Claude Code context bill and keeps it lean — a transcript-grounded token audit, a silent session sentinel that only speaks when a budget is blown, and a guard that blocks the frontmatter bugs that silently kill skill triggering.",
+  "license": "MIT",
+  "author": {
+    "name": "Victor Villegas",
+    "email": "victor.villegas@tuta.com"
+  },
+  "homepage": "https://github.com/V-Songbird/slag/tree/main/gauge",
+  "repository": "https://github.com/V-Songbird/slag",
+  "keywords": ["tokens", "context-window", "audit", "token-optimization", "claude-md", "skills", "hooks", "cost"]
+}

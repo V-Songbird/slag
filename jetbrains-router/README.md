@@ -7,10 +7,14 @@
   <p><strong>Makes Claude work through your JetBrains IDE — live error detection, reads that see unsaved changes, searches that skip the junk.</strong></p>
 </div>
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
+
+> **TL;DR** — Your JetBrains IDE already knows where the errors are and what you haven't saved. jetbrains-router routes Claude's reads, searches, and edits through the IDE while it's running — and steps aside completely when it isn't.
+
 ---
 
-> [!WARNING]
-> Experimental, and staying that way. This plugin lives in a sandbox marketplace: no support, no stability promise, and it can change shape or disappear without a migration path. Try it if you like; you're on your own if it misbehaves.
+> [!NOTE]
+> Experimental, and staying that way. No support, no stability promise; it can change shape or disappear without a migration path. If it breaks your session, that's the deal you took.
 
 ## What is this?
 
@@ -23,10 +27,6 @@ Your JetBrains IDE already knows more about your project than Claude does — th
 - **Cleaner searches.** Searches skip `node_modules`, build output, and ignored files — less noise, lower cost.
 - **Nothing to set up.** It figures out which IDE you're running and just uses it. When no IDE is open, everything works exactly as before.
 
-## Requirements
-
-You need a JetBrains IDE — WebStorm, IntelliJ IDEA, Rider, PyCharm, and the rest all work — running version 2025.2 or newer, with its MCP Server switched on (Settings → Tools → MCP Server) and connected to Claude Code. That's the one thing this plugin can't do for you.
-
 ## Install
 
 Inside Claude Code, run:
@@ -36,14 +36,18 @@ Inside Claude Code, run:
 /plugin install jetbrains-router
 ```
 
-That's it — it starts working the moment a JetBrains IDE is open.
+One requirement it can't handle for you: a JetBrains IDE — WebStorm, IntelliJ IDEA, Rider, PyCharm, and the rest all work — running version 2025.2 or newer, with its MCP Server switched on (Settings → Tools → MCP Server) and connected to Claude Code. With that in place, it starts working the moment the IDE is open.
 
 ## What you can do
 
-| Command | What it does |
-|---------|--------------|
-| `/jetbrains-router:status` | Tells you whether it's active and which IDE it's talking to |
-| `/jetbrains-router:router` | The behind-the-scenes reference Claude uses to route to your IDE |
+| You want to… | Command |
+| --- | --- |
+| See whether it's active and which IDE it's talking to | `/jetbrains-router:status` |
+| Read the behind-the-scenes routing reference Claude follows | `/jetbrains-router:router` |
+
+## Under the hood
+
+A routing reference Claude follows and a quiet check that finds your running IDE — all there to read in the plugin's files.
 
 ## Good to know
 

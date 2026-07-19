@@ -1,13 +1,20 @@
 <div align="center">
-  <img src="assets/logo.svg" alt="plumb" width="220" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg" />
+    <img src="assets/logo.svg" alt="plumb" width="240" />
+  </picture>
   <h1>plumb</h1>
   <p><strong>Won't let Claude call it done until it's actually run the code.</strong></p>
 </div>
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
+
+> **TL;DR** — "This should work now." plumb watches the end of each turn: when Claude edited code, claimed it works, and never ran anything, it asks for proof before "done" is allowed. Ships observe-only until you arm it.
+
 ---
 
-> [!WARNING]
-> Experimental, and staying that way. This plugin lives in a sandbox marketplace: no support, no stability promise, and it can change shape or disappear without a migration path. Try it if you like; you're on your own if it misbehaves.
+> [!NOTE]
+> Experimental, and staying that way — and not even published to the marketplace. No support, no stability promise; it can change shape or disappear without a migration path. If it breaks your session, that's the deal you took.
 
 ## What is this?
 
@@ -16,9 +23,6 @@ AI assistants are quick to sign off. Ask for a fix and you'll often get "Done �
 plumb watches the end of each turn. When Claude has edited code and signed off as if it works — but never ran a test, a build, or the program itself — plumb asks it to prove it first: run the change, confirm it works, then finish. It fires once, and if verification honestly doesn't apply, Claude says why in a line and stops. A checkpoint for "did you actually check?", never a wall.
 
 It's built for real engineering sessions, where a confidently-wrong "it's fixed" costs far more than the second it takes to run the thing.
-
-> [!NOTE]
-> plumb ships **observe-only**. Until you arm it, it quietly records what it would have flagged — and never interrupts a turn — so you can see how it behaves in your own work before it holds the line.
 
 ## Why you'd want it
 
@@ -29,14 +33,17 @@ It's built for real engineering sessions, where a confidently-wrong "it's fixed"
 
 ## Install
 
-Inside Claude Code, run:
+plumb isn't in the marketplace — it loads from a local clone of this repo, for the current session:
 
 ```
-/plugin marketplace add V-Songbird/slag
-/plugin install plumb
+git clone https://github.com/V-Songbird/slag
+claude --plugin-dir path/to/slag/plumb
 ```
 
-It observes from your next session. To have it actually hold the line, turn on **Arm the completion gate** in the plugin's configuration (or set `PLUMB_ARM=1`).
+It observes from the moment it loads. To have it actually hold the line, turn on **Arm the completion gate** in the plugin's configuration (or set `PLUMB_ARM=1`).
+
+> [!NOTE]
+> plumb ships **observe-only**. Until you arm it, it quietly records what it would have flagged — and never interrupts a turn — so you can see how it behaves in your own work before it holds the line.
 
 ## Under the hood
 

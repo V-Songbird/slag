@@ -1,0 +1,12 @@
+{
+  "name": "assay",
+  "description": "Grades every rule in CLAUDE.md and .claude/rules/ for structural clarity — can Claude tell when it fires and what to do? — then offers rewrites for the weak ones and flags rules that should be hooks, skills, or subagents instead of prose.",
+  "license": "MIT",
+  "author": {
+    "name": "Victor Villegas",
+    "email": "victor.villegas@tuta.com"
+  },
+  "homepage": "https://github.com/V-Songbird/slag/tree/main/assay",
+  "repository": "https://github.com/V-Songbird/slag",
+  "keywords": ["rules", "CLAUDE.md", "audit", "quality", "instructions", "scoring", "hooks", "placement"]
+}

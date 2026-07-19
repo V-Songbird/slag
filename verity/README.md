@@ -7,10 +7,14 @@
   <p><strong>Stops Claude from guessing about Claude Code. Makes it look up the real documentation instead.</strong></p>
 </div>
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
+
+> **TL;DR** — Ask Claude how Claude Code works and it may answer from memory that's months out of date. verity makes it fetch the current official docs and answer from what they say today — with a link to the exact page it read.
+
 ---
 
-> [!WARNING]
-> Experimental, and staying that way. This plugin lives in a sandbox marketplace: no support, no stability promise, and it can change shape or disappear without a migration path. Try it if you like; you're on your own if it misbehaves.
+> [!NOTE]
+> Experimental, and staying that way. No support, no stability promise; it can change shape or disappear without a migration path. If it breaks your session, that's the deal you took.
 
 ## What is this?
 
@@ -22,7 +26,7 @@ verity fixes that. When a question about Claude Code comes up, Claude fetches th
 
 - **Answers you can trust.** Every answer ends with a link to the page it came from.
 - **Always current.** The docs are fetched live, the moment you ask — never a stale copy.
-- **Covers the hidden stuff too.** Some tools inside Claude Code sessions aren't in the public docs at all (things like `spawn_task` or `show_widget`). verity bundles a reference for those, so even the undocumented corners get real answers.
+- **Covers the hidden stuff too.** Some of what runs inside a Claude Code session isn't in the public docs at all. verity bundles its own reference for those corners, so even the undocumented parts get real answers.
 - **Zero setup.** No configuration, no accounts, nothing to maintain.
 
 ## Install
@@ -36,15 +40,17 @@ Inside Claude Code, run:
 
 That's it — nothing to configure.
 
-## How to use it
+## What you can do
 
-Mostly, you don't — Claude reaches for the docs on its own. Ask anything about how Claude Code works and it'll look things up before answering:
+Mostly, you don't do anything — Claude reaches for the docs on its own whenever a Claude Code question comes up, from "what are the valid hook events?" to "does Claude Code support scheduled tasks?".
 
-> "What are the valid hook events?"
-> "Does Claude Code support scheduled tasks?"
-> "What does the `spawn_task` tool do?"
+| You want to… | Command |
+| --- | --- |
+| Force a doc-grounded answer right now | `/verity:ground-truth` |
 
-You can also ask for it explicitly with `/verity:ground-truth`.
+## Under the hood
+
+One skill that fetches the live docs, plus the bundled reference for the undocumented corners — all there to read in the plugin's files.
 
 ## Good to know
 

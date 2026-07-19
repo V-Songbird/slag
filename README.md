@@ -1,11 +1,19 @@
 <div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg" />
+    <img src="assets/logo.svg" alt="slag" width="240" />
+  </picture>
   <h1>slag</h1>
   <p><strong>Experimental Claude Code plugins by Victor Villegas</strong> — the stuff that didn't make it out of the workshop, kept where it can't hurt anyone.</p>
 </div>
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
+
+> **TL;DR** — A sandbox marketplace of plugin experiments. Four are installable from here; two more live in the tree, local-only, until they earn their keep. Nothing has a support promise, and nothing is guaranteed to still exist tomorrow.
+
 ---
 
-> [!WARNING]
+> [!IMPORTANT]
 > Nothing here is a product. These plugins are experiments: half-finished ideas, things being tried out, things kept around to see if they earn their keep. They get rewritten, renamed, and deleted without notice or a migration path. There is no support, no stability promise, and no release schedule.
 >
 > You are welcome to install any of them. If one breaks your session, that's the deal you took.
@@ -55,12 +63,12 @@ If you code in WebStorm, IntelliJ IDEA, Rider, PyCharm, or another JetBrains IDE
 /plugin install jetbrains-router
 ```
 
-### [plumb](./plumb) — Make it prove the code runs
+### [assay](./assay) — Find out which of your rules Claude can actually follow
 
-"This should work now." The load-bearing word in modern software. Plumb watches for a turn that edited code, claimed success, and never actually ran anything — then asks it to prove the claim before finishing. It ships off by default and only writes down what it *would* have said; turn it on when you want it to actually speak up.
+You wrote rules for Claude; it keeps ignoring some. assay grades every rule in your `CLAUDE.md` and `.claude/rules/` on whether Claude can tell when it fires and what to do, offers to rewrite the weak ones, and flags the rules that were never meant to be prose — the ones a hook, skill, or subagent would enforce better. Almost all of the grading is a deterministic script, so a re-run gives the same numbers.
 
 ```
-/plugin install plumb
+/plugin install assay
 ```
 
 ### Which one first?
@@ -70,7 +78,14 @@ If you code in WebStorm, IntelliJ IDEA, Rider, PyCharm, or another JetBrains IDE
 | Plan big features safely | **forge** |
 | Get trustworthy answers about Claude Code | **verity** |
 | Use your JetBrains IDE's brains | **jetbrains-router** |
-| Stop taking "should work" on faith | **plumb** |
+| Know which of your rules actually work | **assay** |
+
+### Also in the tree, not in the marketplace
+
+Two experiments live here without a marketplace entry — even more experimental than the rest. Each loads from a local clone (`claude --plugin-dir path/to/slag/<name>`); their READMEs have the details.
+
+- [plumb](./plumb) — won't let Claude call it done until it's actually run the code.
+- [gauge](./gauge) — measures what your project really costs Claude Code every session, then hands you the fix list.
 
 ---
 
@@ -78,7 +93,9 @@ If you code in WebStorm, IntelliJ IDEA, Rider, PyCharm, or another JetBrains IDE
 
 ```
 slag/
+├── assay/
 ├── forge/
+├── gauge/
 ├── jetbrains-router/
 ├── plumb/
 └── verity/

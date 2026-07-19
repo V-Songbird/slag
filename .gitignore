@@ -16,6 +16,9 @@ node_modules/
 # Private notes, and the reference-name blocklist scripts/git-hooks reads
 docs/
 
+# Local research skill (drives the private rule-lab harness under docs/)
+/.claude/skills/rule-lab/
+
 # Claude — the dev agents, skills and hooks under .claude/ ARE tracked here
 /.claude/settings.local.json
 
