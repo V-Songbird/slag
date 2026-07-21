@@ -38,58 +38,48 @@ Per-factor moves:
 Keep each rewrite to a single bullet under ~30 words. Never merge two rules,
 never invent policy the original didn't state.
 
-## Companion plugins
+## Official docs
 
-Building a hook, skill, or subagent is never assay's own job — each primitive
-has an official companion plugin that owns creation:
+Hook, skill, and agent formats drift between Claude Code releases, so every
+build starts from the current official page — fetched live, never recalled
+from memory:
 
-| Primitive | Companion | Install |
-| --- | --- | --- |
-| hook | hookify | `/plugin install hookify@claude-plugins-official` |
-| skill | skill-creator | `/plugin install skill-creator@claude-plugins-official` |
-| subagent | plugin-dev | `/plugin install plugin-dev@claude-plugins-official` |
-| broader Claude Code config | claude-code-setup | `/plugin install claude-code-setup@claude-plugins-official` |
+| Primitive | Fetch |
+| --- | --- |
+| hook | `https://code.claude.com/docs/en/hooks.md` (reference) and `https://code.claude.com/docs/en/hooks-guide.md` |
+| skill | `https://code.claude.com/docs/en/skills.md` |
+| subagent | `https://code.claude.com/docs/en/sub-agents.md` |
 
-Info pages live at `https://claude.com/plugins/<companion>`.
-
-These are plugins, so a companion counts as installed when a skill prefixed
-with its plugin name appears in the session's available-skills list. Never
-guess a skill name that is not listed, and never hand-write hook config,
-SKILL.md scaffolding, or agent definitions yourself.
+If a fetch fails, park that candidate instead of building from memory.
 
 ## Promoting candidates now
 
 Promotion is automated end to end — checking the menu option is the user's
 only manual step. For each candidate the user checked:
 
-1. If the primitive's companion is in the session's available-skills list,
-   invoke its skill with the rule text, the target primitive, and the signal
-   evidence as the argument, and let it do the building. One invocation per
-   candidate.
-2. If the companion is missing, install it yourself with Bash at project
-   scope, so it never touches the user's global config:
-   `claude plugin install <companion>@claude-plugins-official --scope project`.
-   A fresh install is invisible to the running session, so build that candidate
-   in a child session instead, from the project root:
-   `claude -p "<promotion prompt>" --permission-mode acceptEdits`. The prompt
-   must be self-contained: name the companion skill to invoke, the target
-   primitive, and the exact rule text. Because it starts in the same project
-   after the install, the child loads the project-scoped plugin and builds the
-   artifact.
+1. Fetch the primitive's doc pages from the table above with `WebFetch` —
+   once per primitive per run, not once per candidate.
+2. Build the artifact at project scope, exactly as the fetched page
+   specifies — never from a remembered format:
+   - **hook** — wire the event in `.claude/settings.json`; any check script
+     goes under `.claude/hooks/`.
+   - **skill** — create `.claude/skills/<name>/SKILL.md`; the rule text
+     becomes the body's first section. Write the frontmatter description per
+     `${CLAUDE_PLUGIN_ROOT}/skills/craft/references/recipe.md` — concrete base
+     sentence, quoted trigger phrases, exclusion clause — a plain description
+     routes too weakly to replace a rule.
+   - **subagent** — create `.claude/agents/<name>.md`; the rule text becomes
+     its prompt.
 3. Build hooks one at a time — parallel hook builds can collide on the same
    settings file. Skills and subagents may build in parallel.
 4. Verify each artifact landed (hook wired, skill directory or agent file
    present), then remove the promoted rule's bullet from its source file with
    `Edit`.
-5. Anything that failed — install refused, child errored or stalled — gets
-   parked (below) with its install command, not retried.
+5. Anything that failed — fetch refused, artifact invalid — gets parked
+   (below), not retried.
 
-Close by telling the user which companions were newly installed at project
-scope: their skills join this project's sessions after `/reload-plugins`, but
-the promotions themselves are already done.
-
-After all candidates are handled, remove each promoted rule's bullet from its
-source file with `Edit` — the built artifact replaces the prose.
+Close by telling the user the built artifacts load from the next session on,
+but the promotions themselves are already done.
 
 ## Parking placement candidates
 
@@ -104,7 +94,7 @@ For each candidate the user checked:
    > <exact rule text>
 
    Signals: <evidence names from the report>
-   Promote with: <companion plugin> — <install command>
+   Promote with: <the primitive's doc URL(s) from the table above>
    To promote: <one concrete sentence — see below>
    ```
 
@@ -115,13 +105,14 @@ For each candidate the user checked:
 - **hook** — which event fits (a command gate before the matched tool runs, a
   check after edits, or a PostToolUse reminder for keep-file-in-sync duties
   like changelog or doc updates), and what the check script must verify. The
-  build itself belongs to hookify, not to hand-written config.
+  build follows the live hooks docs, never a remembered config format.
 - **skill** — the trigger phrase the skill should own and what its SKILL.md
   covers; the rule text usually becomes the skill body's first section, built
-  via skill-creator.
+  per the live skills docs with a description following the craft skill's
+  trigger recipe (or via `/assay:craft` directly).
 - **subagent** — what the subagent audits and what it must return; note that
   the value is the fresh context, so the rule text becomes its prompt, built
-  via plugin-dev.
+  per the live subagents docs.
 - **compound** — split the sentence at the conjunction and park each half under
   its own primitive with its own "to promote" line.
 

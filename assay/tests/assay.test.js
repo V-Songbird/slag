@@ -264,6 +264,107 @@ test("a mechanical half conjoined with a judgment half is compound", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Skill descriptions
+// ---------------------------------------------------------------------------
+
+const GOOD_DESC = 'Generates a Markdown summary report from a `.csv` file. Use when the user asks to "summarize the data", "make a report from the csv". Do NOT use when the user asks a single specific question — only for full reports.';
+
+test("checkSkillDescription passes a recipe-shaped description", () => {
+  assert.deepEqual(engine.checkSkillDescription(GOOD_DESC).missing, []);
+});
+
+test("checkSkillDescription flags each missing recipe part", () => {
+  const noTrigger = engine.checkSkillDescription('Generates a report from a `.csv` file. Do NOT use for single questions... never use it otherwise.');
+  assert.ok(noTrigger.missing.includes("trigger"));
+  const oneQuote = engine.checkSkillDescription('Generates a report from a `.csv` file. Use when the user asks to "summarize". Do NOT use for single questions.');
+  assert.ok(oneQuote.missing.includes("trigger"));
+  const noConcrete = engine.checkSkillDescription('Processes tabular data. Use when the user asks to "summarize data.csv", "make a report". Do NOT use for single questions.');
+  assert.ok(noConcrete.missing.includes("concrete"));
+  const noExclusion = engine.checkSkillDescription('Generates a report from a `.csv` file. Use when the user asks to "summarize the data", "make a report".');
+  assert.deepEqual(noExclusion.missing, ["exclusion"]);
+  assert.deepEqual(engine.checkSkillDescription("").missing, ["trigger", "concrete", "exclusion"]);
+});
+
+test("quoted trigger phrases do not count toward concreteness", () => {
+  const r = engine.checkSkillDescription('Processes tabular data. Use when the user asks to "summarize data.csv", "report on the `.csv`". Do NOT use for single questions.');
+  assert.ok(r.missing.includes("concrete"));
+});
+
+test("findSkillFiles reads folded descriptions and grades them", () => {
+  const root = tmpProject({
+    ".claude/skills/summarize/SKILL.md": [
+      "---",
+      "name: summarize",
+      "description: >-",
+      "  " + GOOD_DESC,
+      "---",
+      "",
+      "# summarize",
+    ].join("\n"),
+    ".claude/skills/vague/SKILL.md": [
+      "---",
+      "name: vague",
+      "description: Helps with the codebase.",
+      "---",
+    ].join("\n"),
+  });
+  const skills = engine.findSkillFiles(root);
+  assert.equal(skills.length, 2);
+  assert.deepEqual(skills[0].checks.missing, []);
+  assert.equal(skills[0].description, GOOD_DESC);
+  assert.deepEqual(skills[1].checks.missing, ["trigger", "concrete", "exclusion"]);
+});
+
+test("weak skill descriptions land in the report with /assay:craft as the fix", () => {
+  const root = tmpProject({
+    ...FIXTURE,
+    ".claude/skills/vague/SKILL.md": "---\nname: vague\ndescription: Helps with the codebase.\n---\n",
+  });
+  const scanData = engine.scan(root);
+  assert.equal(scanData.skills.length, 1);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /## Weak skill descriptions/);
+  assert.match(report, /\/assay:craft/);
+  assert.match(report, /vague/);
+});
+
+test("a project with no rules still reports weak skill descriptions", () => {
+  const root = tmpProject({
+    ".claude/skills/vague/SKILL.md": "---\nname: vague\ndescription: Helps with the codebase.\n---\n",
+  });
+  const scanData = engine.scan(root);
+  assert.equal(scanData.rules.length, 0);
+  const report = engine.renderReport(engine.composeAudit(scanData, {}));
+  assert.match(report, /No rules found/);
+  assert.match(report, /## Weak skill descriptions/);
+});
+
+test("assay's own skill descriptions pass the trigger-recipe checks", () => {
+  const skillsRoot = path.join(__dirname, "..", "skills");
+  for (const name of fs.readdirSync(skillsRoot)) {
+    const skillMd = path.join(skillsRoot, name, "SKILL.md");
+    if (!fs.existsSync(skillMd)) continue;
+    const fm = engine.parseFrontmatter(fs.readFileSync(skillMd, "utf-8"));
+    const desc = [fm.description, fm.when_to_use].filter(Boolean).join(" ");
+    assert.deepEqual(engine.checkSkillDescription(desc).missing, [], name);
+  }
+});
+
+test("a recipe-shaped skill stays out of the report", () => {
+  const root = tmpProject({
+    ...FIXTURE,
+    ".claude/skills/summarize/SKILL.md": "---\nname: summarize\ndescription: " + JSON.stringify(GOOD_DESC) + "\n---\n",
+  });
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.doesNotMatch(report, /## Weak skill descriptions/);
+});
+
+// ---------------------------------------------------------------------------
 // Staleness
 // ---------------------------------------------------------------------------
 

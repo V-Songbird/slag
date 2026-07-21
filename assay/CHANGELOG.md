@@ -6,9 +6,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- The audit now grades project skill descriptions: every `.claude/skills/*/SKILL.md` description is checked against the trigger recipe, and the ones missing a trigger clause, a concrete artifact, or an exclusion land in a new "Weak skill descriptions" section with `/assay:craft` as the fix
+- `/assay:craft` skill: builds a new skill with a description Claude reliably triggers on, or refits one that never fires; skills that must always run get a companion rule, with a hook offered as the only true guarantee
+- `/assay:craft-rules` skill: interviews you about the behavior you want enforced, writes one recipe-shaped rule into `CLAUDE.md` or a scoped `.claude/rules/` file, verifies it with the audit engine before handing it back, and redirects asks that are really hooks or skills instead of writing them as prose
+
 ### Changed
 
-- Companions promoted on the spot now install at project scope, leaving the user's global plugin config untouched
+- assay's own skill descriptions now follow the trigger recipe they preach, so its skills route more reliably themselves
+- Promotion no longer installs companion plugins: promoted rules are now built directly from the live official docs, at project scope, so nothing new lands in your plugin config and formats are always current
+- Skill promotions from the audit now write trigger-recipe descriptions instead of plain one-liners
 
 ## [0.2.0-alpha] — 2026-07-18
 
@@ -17,7 +25,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - Position grading: a rule in the bottom half of a long file now grades down, and the report lists it under "Buried rules" with the fix (move it up or split the file)
 - Stall-risk detection: a prohibition that names no alternative is now capped at grade F and listed under "Stall risks", with the paired-alternative rewrite as the fix
 - Keep-file-in-sync duties (changelog entries, doc sync) are now flagged as hook candidates
-- Placement candidates can be promoted on the spot through the official companion plugins — hookify for hooks, skill-creator for skills, plugin-dev for subagents; a missing companion is installed automatically
+- Placement candidates can be promoted on the spot through the official companion plugins for hooks, skills, and subagents; a missing companion is installed automatically
 - The report states its severity calibration: grades assume small-model, subagent, and headless readers, and read one notch softer for large-model-only interactive use
 
 ### Changed

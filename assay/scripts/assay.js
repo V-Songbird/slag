@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 "use strict";
 
-// assay engine — deterministic scoring of Claude Code rule files.
+// assay engine — deterministic scoring of Claude Code rule files and
+// .claude/skills/*/SKILL.md frontmatter descriptions.
 //
 // Commands (run from the project root being audited):
 //   node assay.js scan [--root <path>]   discover + extract + mechanical scores;
@@ -215,6 +216,16 @@ function parseFrontmatter(content) {
     const sep = line.indexOf(":");
     const key = line.slice(0, sep).trim();
     let value = line.slice(sep + 1).trim().replace(/^["']|["']$/g, "");
+    if (/^[>|][+-]?$/.test(value)) {
+      const parts = [];
+      i++;
+      while (i < end && (!lines[i].trim() || /^\s/.test(lines[i]))) {
+        parts.push(lines[i].trim());
+        i++;
+      }
+      fm[key] = parts.filter(Boolean).join(" ");
+      continue;
+    }
     if (!value && i + 1 < end && lines[i + 1].trim().startsWith("- ")) {
       const items = [];
       i++;
@@ -277,6 +288,58 @@ function findInstructionFiles(root) {
     if (!f.alwaysLoaded && globs.length === 0) f.alwaysLoaded = true;
   }
   return files;
+}
+
+// ---------------------------------------------------------------------------
+// Skill descriptions — graded against the craft trigger recipe
+// ---------------------------------------------------------------------------
+
+const SKILL_TRIGGER_CLAUSE = /\b(?:use|trigger|invoke)\s+(?:this\s+skill\s+)?when\b/i;
+const SKILL_QUOTED_PHRASE = /"[^"]+"|“[^”]+”/g;
+const SKILL_EXCLUSION_CLAUSE = /\b(?:do\s+not|don'?t|never)\s+(?:use|trigger|invoke)\b/i;
+const SKILL_FILE_TYPE_NOUN = /(?:^|[\s(`"'])\.[a-z][a-z0-9]{0,5}\b|\b(?:markdown|csv|json|ya?ml|html?|pdf|svg|xlsx|docx|pptx)\b/i;
+
+const SKILL_CHECK_LABELS = {
+  trigger: 'no "Use when" clause with 2+ quoted phrasings',
+  concrete: "no concrete artifact or file type named",
+  exclusion: 'no "Do NOT use" exclusion clause',
+};
+
+function checkSkillDescription(description) {
+  const text = (description || "").trim();
+  const quotes = text.match(SKILL_QUOTED_PHRASE) || [];
+  // the base sentence must name the artifact itself — quoted trigger phrases
+  // don't count toward concreteness
+  const base = text.replace(SKILL_QUOTED_PHRASE, " ");
+  const missing = [];
+  if (!SKILL_TRIGGER_CLAUSE.test(text) || quotes.length < 2) missing.push("trigger");
+  if (!CONCRETE_REGEX.some((p) => (base.match(p) || []).length > 0) && !SKILL_FILE_TYPE_NOUN.test(base)) {
+    missing.push("concrete");
+  }
+  if (!SKILL_EXCLUSION_CLAUSE.test(text)) missing.push("exclusion");
+  return { quotedPhrases: quotes.length, missing };
+}
+
+function findSkillFiles(root) {
+  const skillsDir = path.join(root, ".claude", "skills");
+  const skills = [];
+  if (!fs.existsSync(skillsDir) || !fs.statSync(skillsDir).isDirectory()) return skills;
+  for (const name of fs.readdirSync(skillsDir).sort()) {
+    const skillMd = path.join(skillsDir, name, "SKILL.md");
+    if (!fs.existsSync(skillMd)) continue;
+    const fm = parseFrontmatter(fs.readFileSync(skillMd, "utf-8"));
+    // when_to_use carries trigger text in some skills; the router reads both
+    const description = [fm.description, fm.when_to_use]
+      .filter((v) => typeof v === "string" && v)
+      .join(" ");
+    skills.push({
+      path: ".claude/skills/" + name + "/SKILL.md",
+      name: typeof fm.name === "string" && fm.name ? fm.name : name,
+      description,
+      checks: checkSkillDescription(description),
+    });
+  }
+  return skills;
 }
 
 // ---------------------------------------------------------------------------
@@ -842,6 +905,7 @@ function scan(root) {
     root: path.resolve(root),
     files: files.map(({ content, absPath, ...rest }) => rest),
     rules,
+    skills: findSkillFiles(root),
   };
 }
 
@@ -853,6 +917,7 @@ function cmdScan(root) {
 
   const summary = {
     ruleCount: result.rules.length,
+    skillCount: result.skills.length,
     fileCount: result.files.length,
     files: result.files.map((f) => f.path),
     scanFile: TMP_DIR + "/scan.json",
@@ -936,20 +1001,41 @@ function composeAudit(scanData, judgments) {
   const mandates = rules.filter((r) => r.category === "mandate");
   const corpus = mandates.length ? round3(mandates.reduce((s, r) => s + r.score, 0) / mandates.length) : null;
 
-  return { root: scanData.root, files, rules, corpusScore: corpus, corpusGrade: corpus === null ? null : grade(corpus) };
+  return {
+    root: scanData.root, files, rules, skills: scanData.skills || [],
+    corpusScore: corpus, corpusGrade: corpus === null ? null : grade(corpus),
+  };
 }
 
 function fmt(x) {
   return x.toFixed(2);
 }
 
+function pushWeakSkillSection(out, weakSkills) {
+  out.push(`## Weak skill descriptions (${weakSkills.length} missing recipe parts)`);
+  out.push("");
+  out.push("A skill's frontmatter description is how Claude decides to invoke it. These are missing parts of the trigger recipe — run `/assay:craft <skill>` to refit each one.");
+  out.push("");
+  out.push("| Skill | Where | Missing |");
+  out.push("|---|---|---|");
+  for (const s of weakSkills) {
+    out.push(`| ${s.name} | ${s.path} | ${s.checks.missing.map((k) => SKILL_CHECK_LABELS[k]).join(", ")} |`);
+  }
+  out.push("");
+}
+
 function renderReport(audit, opts = {}) {
   const out = [];
   const { rules, files } = audit;
+  const weakSkills = (audit.skills || []).filter((s) => s.checks.missing.length);
   out.push("# Rule audit — " + path.basename(audit.root));
   out.push("");
   if (!rules.length) {
     out.push("No rules found in CLAUDE.md or .claude/rules/.");
+    if (weakSkills.length) {
+      out.push("");
+      pushWeakSkillSection(out, weakSkills);
+    }
     return out.join("\n");
   }
   out.push(`**${rules.length} rules across ${files.filter((f) => f.ruleCount > 0).length} file(s)** — corpus grade **${audit.corpusGrade} (${fmt(audit.corpusScore)})**, mandate rules only.`);
@@ -1043,6 +1129,8 @@ function renderReport(audit, opts = {}) {
     out.push("");
   }
 
+  if (weakSkills.length) pushWeakSkillSection(out, weakSkills);
+
   if (opts.verbose) {
     out.push("## All rules");
     out.push("");
@@ -1105,7 +1193,7 @@ module.exports = {
   parseFrontmatter, findInstructionFiles, stripMetadata, identifyChunks, classifyChunk,
   mergeClarifications, splitCompound, checkStaleness, scoreF1, scoreF2, scoreF4, scoreF5, scoreF7,
   composeScore, grade, detectPlacement, scan, composeAudit, renderReport, loadJudgments,
-  looksLikeStatement, hasImperativeVerb,
+  looksLikeStatement, hasImperativeVerb, checkSkillDescription, findSkillFiles,
 };
 
 if (require.main === module) main();
