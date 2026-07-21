@@ -25,3 +25,7 @@ docs/
 # Roadmap and foreman config are local-only, not published
 ROADMAP.jsonl
 .foreman/
+
+# This repo's dev config ported to other agent CLIs — local-only, not published
+.agents/
+.codex/
