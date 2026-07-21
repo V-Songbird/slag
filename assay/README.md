@@ -72,7 +72,7 @@ Nothing to configure. Works at the next session.
 ## Good to know
 
 - The grade measures **structural clarity** — whether a rule is parseable, triggerable, specific, and placed where it will be seen. It does not predict compliance; a perfectly clear rule can still lose to the model's habits. Clarity is the part you control.
-- Scoring is English-only. Rules in other languages will grade wrong.
+- Scoring is English-only. Rules in other languages will grade wrong; the report counts the ones in a non-Latin script so their numbers aren't mistaken for real grades.
 - Promoted rules are built at project scope, straight from the current official docs — fetched at promotion time, so the formats are never stale. Nothing else gets installed.
 - Skip a rule you like as-is by putting `<!-- assay-ignore -->` on the line above it.
 - Dead-glob detection (a scoped rules file whose file patterns match nothing) needs Node 22+; everything else runs on older Node.

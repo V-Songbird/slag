@@ -476,3 +476,27 @@ test("assay-ignore comment and category annotation are honored", () => {
   assert.equal(result.rules.length, 1);
   assert.equal(result.rules[0].category, "preference");
 });
+
+test("a non-Latin-script rule is flagged and the report says the grade is unreliable", () => {
+  const cyrillic = "Перед commit запустите тесты.";
+  const root = tmpProject({
+    "CLAUDE.md": ["- " + cyrillic, "", "- Never use `var` — use `const` instead.", ""].join("\n"),
+  });
+  const scanData = engine.scan(root);
+  assert.equal(scanData.rules.length, 2);
+  assert.equal(scanData.rules[0].nonLatin, true);
+  assert.equal(scanData.rules[1].nonLatin, false);
+
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.7, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /1 rule\(s\) contain non-Latin script/);
+});
+
+test("an all-English corpus carries no non-Latin notice", () => {
+  const root = tmpProject({ "CLAUDE.md": "- Never use `var` — use `const` instead.\n" });
+  const scanData = engine.scan(root);
+  assert.equal(scanData.rules[0].nonLatin, false);
+  const report = engine.renderReport(engine.composeAudit(scanData, { R001: { F3: 0.7, F8: 0.9 } }));
+  assert.doesNotMatch(report, /non-Latin script/);
+});

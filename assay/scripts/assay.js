@@ -95,6 +95,17 @@ const NUMERIC_THRESHOLD_REGEX = [
   /\bbetween\s+\d+(?:\.\d+)?\s+and\s+\d+(?:\.\d+)?\b/gi,
 ];
 
+// A rule written in a non-Latin script can still match an English verb on a
+// borrowed token — a Cyrillic sentence containing "commit" scores F1 0.85 by
+// lookup — so the grade reads confident while English-only scoring never
+// applied. Flagging the script lets the report say so.
+// razor: ceiling is script detection, not language detection — Latin-script
+// non-English (Spanish, French, German) is not covered and is not meant to be.
+const NON_LATIN_SCRIPT = new RegExp(
+  "[\\u0370-\\u03FF\\u0400-\\u04FF\\u0530-\\u058F\\u0590-\\u05FF\\u0600-\\u06FF" +
+  "\\u0900-\\u097F\\u0E00-\\u0E7F\\u3040-\\u30FF\\u3400-\\u4DBF\\u4E00-\\u9FFF\\uAC00-\\uD7AF]"
+);
+
 const ABSTRACT_MARKERS = [
   "good", "appropriate", "reasonable", "clean", "thoughtful", "proper", "correct", "careful",
   "best practice", "when possible", "where practical", "as needed", "properly", "correctly",
@@ -888,6 +899,7 @@ function scan(root) {
           lineEnd: part.lineEnd,
           category,
           staleness,
+          nonLatin: NON_LATIN_SCRIPT.test(part.text),
           factors: {
             F1: f1,
             F2: scoreF2(part.text),
@@ -1042,6 +1054,11 @@ function renderReport(audit, opts = {}) {
   out.push("");
   out.push("Grades assume the rules must survive the least forgiving reader — small models, subagents, headless runs. If only large models in interactive sessions read this corpus, treat severity one notch softer.");
   out.push("");
+  const nonLatin = rules.filter((r) => r.nonLatin);
+  if (nonLatin.length) {
+    out.push(`**${nonLatin.length} rule(s) contain non-Latin script.** assay grades English only, so treat their scores as unreliable rather than low.`);
+    out.push("");
+  }
 
   out.push("## Files");
   out.push("");

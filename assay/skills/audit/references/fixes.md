@@ -62,7 +62,9 @@ only manual step. For each candidate the user checked:
 2. Build the artifact at project scope, exactly as the fetched page
    specifies — never from a remembered format:
    - **hook** — wire the event in `.claude/settings.json`; any check script
-     goes under `.claude/hooks/`.
+     goes under `.claude/hooks/`. If that file already wires a hook for the
+     same event and matcher, skip this candidate: say the duty is already
+     enforced and leave the rule where it is.
    - **skill** — create `.claude/skills/<name>/SKILL.md`; the rule text
      becomes the body's first section. Write the frontmatter description per
      `${CLAUDE_PLUGIN_ROOT}/skills/craft/references/recipe.md` — concrete base
