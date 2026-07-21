@@ -39,6 +39,14 @@ The first command registers this collection (once); the second installs whicheve
 
 ## The plugins
 
+### [assay](./assay) — Find out which of your rules Claude can actually follow
+
+You wrote rules for Claude; it keeps ignoring some. assay grades every rule in your `CLAUDE.md` and `.claude/rules/` on whether Claude can tell when it fires and what to do, offers to rewrite the weak ones, and flags the rules that were never meant to be prose — the ones a hook, skill, or subagent would enforce better. Almost all of the grading is a deterministic script, so a re-run gives the same numbers.
+
+```
+/plugin install assay@slag
+```
+
 ### [verity](./verity) — Real documentation instead of guesses
 
 When you ask Claude how Claude Code itself works, it may answer from training memory — which ages badly. Verity makes Claude fetch the current official documentation live and answer from the source, citing the exact page it read. Install and forget; it kicks in whenever a Claude Code question comes up.
@@ -55,21 +63,13 @@ If you code in WebStorm, IntelliJ IDEA, Rider, PyCharm, or another JetBrains IDE
 /plugin install jetbrains-router@slag
 ```
 
-### [assay](./assay) — Find out which of your rules Claude can actually follow
-
-You wrote rules for Claude; it keeps ignoring some. assay grades every rule in your `CLAUDE.md` and `.claude/rules/` on whether Claude can tell when it fires and what to do, offers to rewrite the weak ones, and flags the rules that were never meant to be prose — the ones a hook, skill, or subagent would enforce better. Almost all of the grading is a deterministic script, so a re-run gives the same numbers.
-
-```
-/plugin install assay@slag
-```
-
 ### Which one first?
 
 | You want to… | Install |
 | --- | --- |
+| Know which of your rules actually work | **assay** |
 | Get trustworthy answers about Claude Code | **verity** |
 | Use your JetBrains IDE's brains | **jetbrains-router** |
-| Know which of your rules actually work | **assay** |
 
 ### Also in the tree, not in the marketplace
 
