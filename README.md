@@ -9,7 +9,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
 
-> **TL;DR** — A sandbox marketplace of plugin experiments. Four are installable from here; two more live in the tree, local-only, until they earn their keep. Nothing has a support promise, and nothing is guaranteed to still exist tomorrow.
+> **TL;DR** — A sandbox marketplace of plugin experiments. Three are installable from here; two more live in the tree, local-only, until they earn their keep. Nothing has a support promise, and nothing is guaranteed to still exist tomorrow.
 
 ---
 
@@ -39,14 +39,6 @@ The first command registers this collection (once); the second installs whicheve
 
 ## The plugins
 
-### [forge](./forge) — Review the plan before writing the code
-
-Big features fail for the same reason: a problem nobody spotted until the code was already written. Forge investigates first. Describe what you want to build, and a team of parallel AI experts examines your actual codebase, drafts a plan, and an adversarial critic tries to poke holes in that plan — all **before** a single line is written. Nothing gets implemented without your explicit sign-off.
-
-```
-/plugin install forge@slag
-```
-
 ### [verity](./verity) — Real documentation instead of guesses
 
 When you ask Claude how Claude Code itself works, it may answer from training memory — which ages badly. Verity makes Claude fetch the current official documentation live and answer from the source, citing the exact page it read. Install and forget; it kicks in whenever a Claude Code question comes up.
@@ -75,7 +67,6 @@ You wrote rules for Claude; it keeps ignoring some. assay grades every rule in y
 
 | You want to… | Install |
 | --- | --- |
-| Plan big features safely | **forge** |
 | Get trustworthy answers about Claude Code | **verity** |
 | Use your JetBrains IDE's brains | **jetbrains-router** |
 | Know which of your rules actually work | **assay** |
@@ -94,7 +85,6 @@ Two experiments live here without a marketplace entry — even more experimental
 ```
 slag/
 ├── assay/
-├── forge/
 ├── gauge/
 ├── jetbrains-router/
 ├── plumb/

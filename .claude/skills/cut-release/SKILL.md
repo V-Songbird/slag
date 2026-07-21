@@ -28,8 +28,8 @@ entry and installers would never see the bump). See
 
 ## Step 0 — figure out which plugin, and confirm the code is ready
 
-Ask which plugin to release if not stated: `forge`, `verity`, `jetbrains-router`,
-or `plumb`.
+Ask which plugin to release if not stated: `verity`, `jetbrains-router`, `assay`,
+`plumb`, or `gauge`.
 
 ```bash
 git status --short -- "<plugin>"

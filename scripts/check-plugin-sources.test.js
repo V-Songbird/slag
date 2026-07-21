@@ -21,44 +21,44 @@ function repoWith(pluginName, manifest) {
 }
 
 test("passes when the source resolves and names agree", () => {
-  const root = repoWith("forge", { name: "forge" });
-  const problems = verify(root, { plugins: [{ name: "forge", source: "./forge" }] });
+  const root = repoWith("widget", { name: "widget" });
+  const problems = verify(root, { plugins: [{ name: "widget", source: "./widget" }] });
   assert.deepStrictEqual(problems, []);
 });
 
 test("flags a source directory that does not exist", () => {
-  const root = repoWith("forge", { name: "forge" });
+  const root = repoWith("widget", { name: "widget" });
   const problems = verify(root, { plugins: [{ name: "verity", source: "./verity" }] });
   assert.strictEqual(problems.length, 1);
   assert.match(problems[0], /no \.claude-plugin\/plugin\.json/);
 });
 
 test("flags a plugin.json whose name disagrees with the entry", () => {
-  const root = repoWith("forge", { name: "forgery" });
-  const problems = verify(root, { plugins: [{ name: "forge", source: "./forge" }] });
+  const root = repoWith("widget", { name: "widgets" });
+  const problems = verify(root, { plugins: [{ name: "widget", source: "./widget" }] });
   assert.strictEqual(problems.length, 1);
-  assert.match(problems[0], /declares name "forgery"/);
+  assert.match(problems[0], /declares name "widgets"/);
 });
 
 test("flags a version in plugin.json, which would mask marketplace.json's", () => {
-  const root = repoWith("forge", { name: "forge", version: "1.0.0" });
-  const problems = verify(root, { plugins: [{ name: "forge", source: "./forge" }] });
+  const root = repoWith("widget", { name: "widget", version: "1.0.0" });
+  const problems = verify(root, { plugins: [{ name: "widget", source: "./widget" }] });
   assert.strictEqual(problems.length, 1);
   assert.match(problems[0], /marketplace\.json owns versions/);
 });
 
 test("flags a non-relative source", () => {
-  const root = repoWith("forge", { name: "forge" });
+  const root = repoWith("widget", { name: "widget" });
   const problems = verify(root, {
-    plugins: [{ name: "forge", source: { source: "url", url: "https://example.invalid/forge.git" } }],
+    plugins: [{ name: "widget", source: { source: "url", url: "https://example.invalid/widget.git" } }],
   });
   assert.strictEqual(problems.length, 1);
   assert.match(problems[0], /must be a relative/);
 });
 
 test("flags a source that escapes the repo root", () => {
-  const root = repoWith("forge", { name: "forge" });
-  const problems = verify(root, { plugins: [{ name: "forge", source: "./../forge" }] });
+  const root = repoWith("widget", { name: "widget" });
+  const problems = verify(root, { plugins: [{ name: "widget", source: "./../widget" }] });
   assert.strictEqual(problems.length, 1);
   assert.match(problems[0], /must not escape the repo root/);
 });

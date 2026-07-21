@@ -8,37 +8,6 @@
   },
   "plugins": [
     {
-      "name": "forge",
-      "source": "./forge",
-      "description": "Investigates your codebase before you build, using parallel domain experts and an adversarial critic to stress-test the plan before anything gets implemented.",
-      "version": "1.4.3-alpha",
-      "license": "MIT",
-      "author": {
-        "name": "Victor Villegas",
-        "email": "victor.villegas@tuta.com"
-      },
-      "homepage": "https://github.com/V-Songbird/slag/tree/main/forge",
-      "repository": "https://github.com/V-Songbird/slag",
-      "category": "planning",
-      "keywords": [
-        "investigation",
-        "pre-code",
-        "planning",
-        "architecture",
-        "adversarial",
-        "expert-analysis"
-      ],
-      "tags": [
-        "investigation",
-        "pre-code",
-        "planning",
-        "architecture",
-        "adversarial",
-        "expert-analysis"
-      ],
-      "strict": true
-    },
-    {
       "name": "verity",
       "source": "./verity",
       "description": "Fetches current official Claude Code documentation on demand, giving Claude truth-grounding from primary sources instead of training memory.",
@@ -147,5 +116,8 @@
       ],
       "strict": true
     }
-  ]
+  ],
+  "renames": {
+    "forge": null
+  }
 }
