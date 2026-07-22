@@ -26,7 +26,13 @@ function writeInto(dir, rel, content) {
 
 /**
  * @param {object} spec        the A/B spec (fixture tree + claudeMd template)
- * @param {string|object|null} armConfig  config text for this arm; null = none
+ * @param {string|object|null} armConfig  config for this arm:
+ *   - null              => no config (baseline): template with an empty slot
+ *   - string            => rule text injected into the CLAUDE.md `{{CONFIG}}` slot
+ *   - object {rel:body} => per-arm file overrides written over the fixture tree
+ *     (a "CLAUDE.md" key replaces the template outright). This is the skill-firing
+ *     case, where the A/B varies a `.claude/skills/<name>/SKILL.md` — and, for a
+ *     companion-rule arm, both that file and CLAUDE.md.
  * @returns {string} absolute path to the materialized checkout dir
  */
 function materialize(spec, armConfig) {
@@ -34,14 +40,19 @@ function materialize(spec, armConfig) {
   for (const [rel, content] of Object.entries(spec.fixture || {})) {
     writeInto(dir, rel, content);
   }
+  const isObj = armConfig != null && typeof armConfig === "object";
   const template = spec.claudeMd || "# Project notes\n\n{{CONFIG}}\n";
-  const configText = armConfig == null ? "" : String(armConfig);
+  const configText = isObj || armConfig == null ? "" : String(armConfig);
   // Function replacement so `$`-sequences in the config text are literal, not
   // treated as replacement patterns.
   const claudeMd = template
     .replace(/^.*\{\{CONFIG\}\}.*$/m, () => configText)
     .replace(/\n{3,}/g, "\n\n");
   fs.writeFileSync(path.join(dir, "CLAUDE.md"), claudeMd);
+  // Object arms write their files last so a "CLAUDE.md" key overrides the template.
+  if (isObj) {
+    for (const [rel, content] of Object.entries(armConfig)) writeInto(dir, rel, content);
+  }
   return dir;
 }
 

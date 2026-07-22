@@ -39,6 +39,27 @@ test("config text with $-sequences is injected literally", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("object arm writes per-arm file overrides (skill-firing case)", () => {
+  const dir = materialize(SPEC, {
+    ".claude/skills/csv-report/SKILL.md": "---\nname: csv-report\ndescription: trigger-list desc\n---\nbody\n",
+  });
+  const skill = fs.readFileSync(path.join(dir, ".claude/skills/csv-report/SKILL.md"), "utf-8");
+  assert.match(skill, /trigger-list desc/);
+  // No config leaked into the template CLAUDE.md, and the shared fixture still lands.
+  assert.doesNotMatch(fs.readFileSync(path.join(dir, "CLAUDE.md"), "utf-8"), /\{\{CONFIG\}\}/);
+  assert.ok(fs.existsSync(path.join(dir, "src/num.js")));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("object arm with a CLAUDE.md key overrides the template (companion-rule case)", () => {
+  const dir = materialize(SPEC, {
+    "CLAUDE.md": "When the user asks X, ALWAYS use the skill.\n",
+    ".claude/skills/x/SKILL.md": "---\nname: x\n---\nbody\n",
+  });
+  assert.match(fs.readFileSync(path.join(dir, "CLAUDE.md"), "utf-8"), /ALWAYS use the skill/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("baseline and treatment differ only by the injected config", () => {
   const base = materialize(SPEC, null);
   const treat = materialize(SPEC, "- a rule.");
