@@ -1,0 +1,1 @@
+{"type":"result","subtype":"success","is_error":true,"api_error_status":404,"num_turns":0,"result":"","session_id":"err-fake","total_cost_usd":0,"permission_denials":[],"terminal_reason":"api_error","errors":["model not found"]}

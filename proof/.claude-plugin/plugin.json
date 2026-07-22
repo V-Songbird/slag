@@ -1,0 +1,12 @@
+{
+  "name": "proof",
+  "description": "Paired A/B harness that measures whether an agent-config change actually changes agent behavior — headless runs on isolated checkouts, lift with a bootstrap CI, and a four-way verdict.",
+  "license": "MIT",
+  "author": {
+    "name": "Victor Villegas",
+    "email": "victor.villegas@tuta.com"
+  },
+  "homepage": "https://github.com/V-Songbird/slag/tree/main/proof",
+  "repository": "https://github.com/V-Songbird/slag",
+  "keywords": ["measurement", "ab-testing", "experiment", "evaluation", "statistics", "headless", "config", "behavior"]
+}

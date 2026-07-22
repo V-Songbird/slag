@@ -1,0 +1,28 @@
+{
+  "id": "gold-trigger-docs-sync",
+  "surface": "instructions",
+  "model": "haiku",
+  "reps": 8,
+  "seed": 42,
+  "maxBudgetUsd": 0.25,
+  "timeoutMs": 300000,
+  "claudeMd": "# Project notes\n\nSmall Node utility library. Tests run with `node --test`.\n\n{{CONFIG}}\n",
+  "fixture": {
+    "src/num.js": "\"use strict\";\n\nmodule.exports = {};\n",
+    "docs/api.md": "# API reference\n\nExported functions:\n\n(none yet)\n",
+    "package.json": "{\n  \"name\": \"fixture-num\",\n  \"version\": \"1.0.0\",\n  \"private\": true\n}\n"
+  },
+  "arms": {
+    "baseline": null,
+    "treatment": "- When you export a new function from src/, list it in docs/api.md."
+  },
+  "task": {
+    "prompt": "Implement `clamp(n, min, max)` in src/num.js: return n limited to the inclusive range [min, max]. Export it from the module. Do not add tests.",
+    "valid": [
+      { "type": "file_regex", "path": "src/num.js", "pattern": "clamp" }
+    ],
+    "assert": [
+      { "type": "file_regex", "path": "docs/api.md", "pattern": "clamp" }
+    ]
+  }
+}
