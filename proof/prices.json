@@ -1,0 +1,12 @@
+{
+  "currency": "USD",
+  "source": "proof M0 spike (06-m0-spike-notes.md) + gate-2 realized total_cost_usd; no live $/Mtok feed exists (M0 item 16), so these are measured per-run costs, not vendor list prices.",
+  "note": "perRun is the realized cost of ONE headless paired-run arm on an identical prompt-cached fixture. low/mid/high carry the run-to-run cost spread M0 item 17 measured (up to ~6.6x on an identical prompt), so the estimator shows a band, never a point.",
+  "perRun": {
+    "haiku": { "low": 0.008, "mid": 0.021, "high": 0.05 },
+    "sonnet": { "low": 0.04, "mid": 0.081, "high": 0.16 }
+  },
+  "rubricPerCall": {
+    "haiku": { "low": 0.002, "mid": 0.005, "high": 0.012 }
+  }
+}

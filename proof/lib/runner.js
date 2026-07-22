@@ -12,9 +12,14 @@ const path = require("path");
 const { materialize } = require("./fixture");
 const { runAgent, DEFAULTS: ADAPTER_DEFAULTS } = require("./claude");
 const { grade } = require("./grade");
+const { rubricGrade } = require("./rubric");
 const { lcg, mean, bootstrapLiftCI, verdictFor } = require("./stats");
 
 const DEFAULTS = { reps: 8, seed: 42, concurrency: 2 };
+
+// A spec carries either one `task` (M1/M2 single-task specs) or a `tasks` array
+// (an M3 task set). Normalize to an array; compliance is pooled across the set.
+function tasksOf(spec) { return spec.tasks || (spec.task ? [spec.task] : []); }
 
 function shuffle(arr, rand) {
   const a = arr.slice();
@@ -25,37 +30,55 @@ function shuffle(arr, rand) {
   return a;
 }
 
-// One cell per (arm, repeat); order shuffled deterministically from the seed so
-// arms interleave and slow platform drift hits both equally.
+// One cell per (arm, task, repeat); order shuffled deterministically from the
+// seed so arms interleave and slow platform drift hits both equally. Single-task
+// specs keep the legacy `${arm}__r${rep}` id for on-disk resume compatibility.
 function buildCells(spec, opts = {}) {
   const reps = opts.reps || spec.reps || DEFAULTS.reps;
   const seed = opts.seed || spec.seed || DEFAULTS.seed;
+  const tasks = tasksOf(spec);
+  const multi = tasks.length > 1;
   const cells = [];
   for (const arm of Object.keys(spec.arms)) {
-    for (let rep = 1; rep <= reps; rep++) {
-      cells.push({ id: `${arm}__r${rep}`, arm, rep });
+    for (let ti = 0; ti < tasks.length; ti++) {
+      for (let rep = 1; rep <= reps; rep++) {
+        cells.push({
+          id: multi ? `${arm}__t${ti}_r${rep}` : `${arm}__r${rep}`,
+          arm, task: ti, taskId: tasks[ti].id || `t${ti}`, rep,
+        });
+      }
     }
   }
   return shuffle(cells, lcg(seed));
 }
 
 async function runCell(spec, cell, opts = {}) {
+  const task = tasksOf(spec)[cell.task || 0];
   const dir = materialize(spec, spec.arms[cell.arm]);
   const record = { ...cell, id: cell.id, startedAt: new Date().toISOString() };
   try {
-    const r = await runAgent(spec.task.prompt, dir, {
+    const r = await runAgent(task.prompt, dir, {
       model: opts.model || spec.model || ADAPTER_DEFAULTS.model,
       maxBudgetUsd: opts.maxBudgetUsd || spec.maxBudgetUsd || ADAPTER_DEFAULTS.maxBudgetUsd,
       timeoutMs: spec.timeoutMs || ADAPTER_DEFAULTS.timeoutMs,
       allowedTools: spec.allowedTools,
     });
-    const ctx = { dir, response: r.response };
-    const validity = grade(spec.task.valid || [{ type: "file_exists", path: "CLAUDE.md" }], ctx);
-    const compliance = grade(spec.task.assert || [], ctx);
+    const ctx = { dir, response: r.response, editedFiles: r.editedFiles };
+    const validity = grade(task.valid || [{ type: "file_exists", path: "CLAUDE.md" }], ctx);
+    let compliance;
+    if ((task.assert || []).length) {
+      compliance = grade(task.assert, ctx).score;
+    } else if (opts.rubric && task.rubric) {
+      const rg = await rubricGrade(task.rubric, ctx, { model: opts.model || spec.model });
+      compliance = rg.ok ? rg.score : null;
+      record.rubricReason = rg.reasonCode;
+    } else {
+      compliance = 0;
+    }
     Object.assign(record, {
       ok: r.ok,
       valid: validity.score === 1,
-      compliance: compliance.score,
+      compliance,
       turns: r.turns,
       costUsd: r.cost,
       editedFiles: r.editedFiles,
@@ -146,4 +169,4 @@ function analyze(spec, cellDir, opts = {}) {
   };
 }
 
-module.exports = { buildCells, runCell, run, analyze, readRecords, shuffle, DEFAULTS };
+module.exports = { buildCells, runCell, run, analyze, readRecords, shuffle, tasksOf, DEFAULTS };
