@@ -117,6 +117,74 @@
         "hooks"
       ],
       "strict": true
+    },
+    {
+      "name": "proof",
+      "source": "./proof",
+      "description": "Paired A/B harness that measures whether an agent-config change actually changes agent behavior — headless runs on isolated checkouts, lift with a bootstrap CI, and a four-way verdict.",
+      "version": "0.1.0-alpha",
+      "license": "MIT",
+      "author": {
+        "name": "Victor Villegas",
+        "email": "victor.villegas@tuta.com"
+      },
+      "homepage": "https://github.com/V-Songbird/slag/tree/main/proof",
+      "repository": "https://github.com/V-Songbird/slag",
+      "category": "measurement",
+      "keywords": [
+        "measurement",
+        "ab-testing",
+        "experiment",
+        "evaluation",
+        "statistics",
+        "headless",
+        "config",
+        "behavior"
+      ],
+      "tags": [
+        "measurement",
+        "ab-testing",
+        "experiment",
+        "evaluation",
+        "statistics",
+        "headless",
+        "config",
+        "behavior"
+      ],
+      "strict": true
+    },
+    {
+      "name": "brink",
+      "source": "./brink",
+      "description": "Watches how full the context window is getting and, once you near the edge, surfaces a one-time nudge to run /compact with a ready-made instruction — so the summary keeps the task, decisions, and errors instead of an automatic guess.",
+      "version": "0.1.0-alpha",
+      "license": "MIT",
+      "author": {
+        "name": "Victor Villegas",
+        "email": "victor.villegas@tuta.com"
+      },
+      "homepage": "https://github.com/V-Songbird/slag/tree/main/brink",
+      "repository": "https://github.com/V-Songbird/slag",
+      "category": "workflow",
+      "keywords": [
+        "context-window",
+        "compact",
+        "compaction",
+        "tokens",
+        "session",
+        "hooks",
+        "nudge"
+      ],
+      "tags": [
+        "context-window",
+        "compact",
+        "compaction",
+        "tokens",
+        "session",
+        "hooks",
+        "nudge"
+      ],
+      "strict": true
     }
   ],
   "renames": {

@@ -9,7 +9,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
 
-> **TL;DR** — A sandbox marketplace of plugin experiments. Three are installable from here; two more live in the tree, local-only, until they earn their keep. Nothing has a support promise, and nothing is guaranteed to still exist tomorrow.
+> **TL;DR** — A sandbox marketplace of plugin experiments. Four are installable from here; two more live in the tree, local-only, until they earn their keep. Nothing has a support promise, and nothing is guaranteed to still exist tomorrow.
 
 ---
 
@@ -63,6 +63,14 @@ If you code in WebStorm, IntelliJ IDEA, Rider, PyCharm, or another JetBrains IDE
 /plugin install jetbrains-router@slag
 ```
 
+### [proof](./proof) — Find out if your config change actually did anything
+
+You tweaked a rule, a skill, a whole `CLAUDE.md`, and it *feels* better — but the model is different every run, so "seems better" is a vibe, not evidence. proof runs your tasks with and without the change, many times over, and hands you a verdict: it helped, it hurt, it did nothing, or there isn't enough signal yet — with the cost shown before anything runs.
+
+```
+/plugin install proof@slag
+```
+
 ### Which one first?
 
 | You want to… | Install |
@@ -70,6 +78,7 @@ If you code in WebStorm, IntelliJ IDEA, Rider, PyCharm, or another JetBrains IDE
 | Know which of your rules actually work | **assay** |
 | Get trustworthy answers about Claude Code | **verity** |
 | Use your JetBrains IDE's brains | **jetbrains-router** |
+| Measure whether a config change moved anything | **proof** |
 
 ### Also in the tree, not in the marketplace
 
@@ -88,6 +97,7 @@ slag/
 ├── gauge/
 ├── jetbrains-router/
 ├── plumb/
+├── proof/
 └── verity/
 ```
 
