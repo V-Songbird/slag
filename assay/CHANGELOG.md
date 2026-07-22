@@ -8,13 +8,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
+- Stale-reference detection now reads markdown-link targets and root-relative paths, not just backticked paths, so a link like `[example](/example.md)` is checked too; when a cited file has only moved, the report names its new location so the fix is a one-line edit
 - Rules written in a non-Latin script are now flagged at the top of the report, so their scores aren't mistaken for real grades
-- The audit now grades project skill descriptions: every `.claude/skills/*/SKILL.md` description is checked against the trigger recipe, and the ones missing a trigger clause, a concrete artifact, or an exclusion land in a new "Weak skill descriptions" section with `/assay:craft` as the fix
-- `/assay:craft` skill: builds a new skill with a description Claude reliably triggers on, or refits one that never fires; skills that must always run get a companion rule, with a hook offered as the only true guarantee
+- The audit now grades project skill descriptions: every `.claude/skills/*/SKILL.md` description is checked against the trigger recipe, and the ones missing a trigger clause, a concrete artifact, or an exclusion land in a new "Weak skill descriptions" section and can be rewritten in place from the same fix menu as the rules
+- `/assay:craft-skill` skill: builds a new skill with a description Claude reliably triggers on, or refits one that never fires; skills that must always run get a companion rule, with a hook offered as the only true guarantee
 - `/assay:craft-rules` skill: interviews you about the behavior you want enforced, writes one recipe-shaped rule into `CLAUDE.md` or a scoped `.claude/rules/` file, verifies it with the audit engine before handing it back, and redirects asks that are really hooks or skills instead of writing them as prose
 
 ### Changed
 
+- The report now names each rule's weakness in plain English — "no clear trigger", "too vague", "buried in the file" — instead of internal factor codes, so it reads without knowing how the scorer works
+- Command listings and glossary bullets (a build command with its description, a labelled reference entry) are no longer mistaken for rules, so the report stops filling up with false weak-rule findings
 - assay's own skill descriptions now follow the trigger recipe they preach, so its skills route more reliably themselves
 - Promotion no longer installs companion plugins: promoted rules are now built directly from the live official docs, at project scope, so nothing new lands in your plugin config and formats are always current
 - Skill promotions from the audit now write trigger-recipe descriptions instead of plain one-liners

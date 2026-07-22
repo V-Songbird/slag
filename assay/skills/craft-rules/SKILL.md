@@ -6,7 +6,7 @@ description: >-
   directive verb, named alternative, concrete specifics — and verifies the
   result with the same engine /assay:audit grades with. Do NOT use to grade
   or rewrite existing rules — that is /assay:audit — and not for skill
-  descriptions — that is /assay:craft.
+  descriptions — that is /assay:craft-skill.
 when_to_use: >-
   Trigger when the user wants a rule written or made to stick: "add a rule",
   "write a CLAUDE.md rule for X", "make Claude always do X", "Claude keeps
@@ -49,7 +49,7 @@ Check the ask against the recipe's "not a rule" table before writing:
 - Mechanically checkable → say a hook enforces it better, and offer to build
   it from the live docs (`https://code.claude.com/docs/en/hooks.md`). Build
   only if accepted; otherwise write the rule as a stopgap and say so.
-- A procedure or follow-the-doc duty → suggest `/assay:craft` instead.
+- A procedure or follow-the-doc duty → suggest `/assay:craft-skill` instead.
 - Must-never-be-violated → say plainly that only a hook guarantees; a rule is
   probabilistic on every model size.
 

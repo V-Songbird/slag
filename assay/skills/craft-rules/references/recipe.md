@@ -52,6 +52,6 @@ grades it down, and buried rules lose force.
 | The ask | The right primitive |
 | --- | --- |
 | A command could verify it with an exit code, or a file matcher could block it | Hook — prose is a stopgap that has to be remembered |
-| A multi-step procedure, or "follow the conventions in <doc>" | Skill — build it with `/assay:craft` |
+| A multi-step procedure, or "follow the conventions in <doc>" | Skill — build it with `/assay:craft-skill` |
 | An audit or review duty that needs fresh context | Subagent |
 | "Claude must NEVER, not even once" | Hook — only a hook guarantees; a rule is probabilistic |

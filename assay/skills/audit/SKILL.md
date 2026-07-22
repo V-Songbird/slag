@@ -83,16 +83,18 @@ judgments, fix `.assay-tmp/judgments.json` and rerun.
 
 ## 4. Offer fixes
 
-Skip this step entirely (go to 5) when the report has no weak rules and no
-placement candidates. If `--fix` was passed, skip the question and apply
-rewrites only. Weak skill descriptions are never menu items — the report
-already names `/assay:craft <skill>` as their fix.
+Skip this step entirely (go to 5) when the report has no weak rules, no weak
+skill descriptions, and no placement candidates. If `--fix` was passed, skip the
+question and apply every rewrite — weak rules and weak skill descriptions — only.
 
 Otherwise ask ONE question with `AskUserQuestion` (`multiSelect: true`,
 header `"Fix menu"`), including only options that have evidence:
 
 - `Rewrite [N] weak rules` — only if weak rules exist. Description: "Rewrite the
   rules below their quality floor in place; you review via git diff."
+- `Rewrite [N] weak skill descriptions` — only if the report has a "Weak skill
+  descriptions" section. Description: "Rewrite each skill's frontmatter
+  description to the trigger recipe in place; you review via git diff."
 - `Promote [N] candidates now` — only if placement candidates exist. Description:
   "Build each hook, skill, or subagent at project scope, straight from the
   live official docs."

@@ -155,6 +155,22 @@ const FRIENDLY_FIXES = {
   F7: "Add a file path, code example, or before/after comparison",
 };
 
+// Plain-English names for the scoring factors, for the user-facing report. The
+// factor codes (F1, F3, F8…) stay internal — a reader shouldn't need the rubric.
+const FACTOR_LABELS = {
+  F1: "weak verb",
+  F2: "framing",
+  F3: "no clear trigger",
+  F4: "scope mismatch",
+  F5: "buried in the file",
+  F7: "too vague",
+};
+// Verbose per-rule table: friendly column headers in factor order.
+const FACTOR_COLUMNS = [
+  ["F1", "Verb"], ["F2", "Framing"], ["F3", "Trigger"], ["F4", "Scope"],
+  ["F5", "Position"], ["F7", "Concrete"], ["F8", "Judgment"],
+];
+
 // Placement detection signals (hook / skill / subagent / compound).
 const PLACEMENT_CANDIDATE_THRESHOLD = 0.6;
 const PLACEMENT_COMPOUND_THRESHOLD = 0.35;
@@ -363,6 +379,12 @@ const MECHANISM = /^(?:the\s+\w+\s+(?:pipeline|agent|system|layer|service)\s+(?:
 const REFERENCE = /^see\s+[`"[].*?\b(?:for|about)\b/i;
 const DESCRIPTION_BULLET = /^\*\*[^*]+\*\*\s*(?:—|--|:)\s/;
 const NAVIGATION_POINTER = /^`[^`]+\.md`\s*(?:—|--|:|→)\s|^\*\*[^*]+\*\*\s*(?:→|—|--)\s*\[?`?[\w./-]*\.md|^\[[^\]]+\]\([^)]*\.md\)\s*(?:—|--|:|→)\s/;
+// Definition/reference bullets, not directives: a command or term followed by a
+// dash-led gloss (`` `./gradlew build` — full compile ``) or a colon-labelled
+// entry (`**Grammar Kit:** write .bnf rules`). Command listings and glossaries
+// live under Commands/Reference/Competencies headings and are documentation, not
+// rules — matching one turns a bare "run the build" into a fake weak rule.
+const REFERENCE_BULLET = /^(?:`[^`]+`\s*(?:—|–|--)|\*\*[^*]+:\*\*(?:\s|$))/;
 const CLARIFICATION_STARTERS = /^(?:this means|for example|i\.e\.|e\.g\.|in other words|specifically|that is)/i;
 const CONSTRAINT_KEYWORDS = [/\bonly\b/, /\brequired\b/, /\bforbidden\b/, /\bmandatory\b/];
 
@@ -483,7 +505,7 @@ function classifyChunk(chunk) {
   const text = chunk.text;
   const plain = text.replace(/\*\*([^*]+)\*\*/g, "$1");
   if (PROSE_STARTERS.test(text) || MECHANISM.test(text) || REFERENCE.test(text)) return "prose";
-  if (chunk.isBullet && NAVIGATION_POINTER.test(text)) return "prose";
+  if (chunk.isBullet && (NAVIGATION_POINTER.test(text) || REFERENCE_BULLET.test(text))) return "prose";
   if (hasImperativeVerb(plain) || hasConstraintKeyword(text)) return "rule";
   if (chunk.isBullet) {
     if (DESCRIPTION_BULLET.test(text)) return "prose";
@@ -575,15 +597,89 @@ function splitCompound(chunk) {
 // Staleness
 // ---------------------------------------------------------------------------
 
-function checkStaleness(text, root) {
-  const missing = [];
+// Directories never worth walking when hunting for a file that moved.
+const WALK_IGNORE = new Set([
+  ".git", ".svn", ".hg", "node_modules", ".assay-tmp", "dist", "build",
+  "coverage", ".next", ".nuxt", ".cache", ".venv", "__pycache__", "vendor", "target",
+]);
+
+// One full walk of the project indexed by basename, built lazily on the first
+// missing reference so a corpus with no stale paths never pays for it.
+function buildBasenameIndex(root) {
+  const index = new Map();
+  const stack = ["."];
+  while (stack.length) {
+    const rel = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(path.join(root, rel), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        if (!WALK_IGNORE.has(e.name)) stack.push(path.join(rel, e.name));
+      } else if (e.isFile()) {
+        const p = path.join(rel, e.name).split(path.sep).join("/").replace(/^\.\//, "");
+        const list = index.get(e.name);
+        if (list) list.push(p);
+        else index.set(e.name, [p]);
+      }
+    }
+  }
+  return index;
+}
+
+function makeBasenameResolver(root) {
+  let index = null;
+  return (basename) => {
+    if (index === null) index = buildBasenameIndex(root);
+    return index.get(basename) || [];
+  };
+}
+
+// A backtick token is checkable only as a project-relative concrete path.
+function backtickToPath(name) {
+  if (!name.includes("/")) return null;
+  if (/[<>{}*$]|:\/\//.test(name)) return null;
+  if (name.startsWith("/") || name.startsWith("~") || /^[A-Za-z]:/.test(name)) return null;
+  return name;
+}
+
+// A markdown link target, normalized to a project-relative path or null. A
+// leading "/" is repo-root-relative, the way docs conventionally link.
+function linkTargetToPath(target) {
+  let t = target.trim().replace(/^<(.*)>$/, "$1").split(/\s+/)[0];
+  t = t.split("#")[0].split("?")[0];
+  if (!t) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(t)) return null; // scheme: http, mailto, C:, data…
+  if (/[<>{}*$]/.test(t) || t.startsWith("~")) return null;
+  if (t.startsWith("/")) t = t.slice(1);
+  if (!t) return null;
+  if (!t.includes("/") && !/\.[a-zA-Z0-9]+$/.test(t)) return null; // bare word, not a path
+  return t;
+}
+
+function checkStaleness(text, root, findMoved) {
+  const resolve = findMoved || makeBasenameResolver(root);
+  const refs = [];
   for (const m of text.matchAll(/`([^`]+)`/g)) {
-    const name = m[1];
-    // only project-relative concrete paths are checkable
-    if (!name.includes("/")) continue;
-    if (/[<>{}*$]|:\/\//.test(name)) continue;
-    if (name.startsWith("/") || name.startsWith("~") || /^[A-Za-z]:/.test(name)) continue;
-    if (!fs.existsSync(path.join(root, name.replace(/\/+$/, "")))) missing.push(name);
+    const p = backtickToPath(m[1]);
+    if (p) refs.push(p);
+  }
+  for (const m of text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+    const p = linkTargetToPath(m[1]);
+    if (p) refs.push(p);
+  }
+  const missing = [];
+  const seen = new Set();
+  for (const ref of refs) {
+    const clean = ref.replace(/\/+$/, "");
+    if (seen.has(clean)) continue;
+    seen.add(clean);
+    if (fs.existsSync(path.join(root, clean))) continue;
+    const moved = resolve(path.basename(clean)).filter((c) => c !== clean);
+    missing.push({ ref: clean, moved });
   }
   return { gated: missing.length > 0, missing };
 }
@@ -872,6 +968,7 @@ function scan(root) {
   const files = findInstructionFiles(root);
   const rules = [];
   let counter = 0;
+  const findMoved = makeBasenameResolver(root);
 
   files.forEach((file, fileIndex) => {
     const { lines, annotations, ignored } = stripMetadata(file.content);
@@ -888,7 +985,7 @@ function scan(root) {
         for (let ln = part.lineStart - 2; ln < part.lineStart; ln++) {
           if (annotations[ln]) category = annotations[ln];
         }
-        const staleness = checkStaleness(part.text, root);
+        const staleness = checkStaleness(part.text, root, findMoved);
         const f1 = scoreF1(part.text);
         const rule = {
           id: "R" + String(counter).padStart(3, "0"),
@@ -979,7 +1076,9 @@ function composeAudit(scanData, judgments) {
   const rules = scanData.rules.map((r) => {
     const j = judgments[r.id];
     const factors = {
-      F1: j.F1 !== undefined ? j.F1 : r.factors.F1.value,
+      // F1 extraction can fail (value null); fall back to the same 0.5 the
+      // composer uses, so the stored value is never null for the report to render
+      F1: j.F1 !== undefined ? j.F1 : (r.factors.F1.value != null ? r.factors.F1.value : 0.5),
       F2: r.factors.F2.value,
       F3: j.F3,
       F4: r.factors.F4.value,
@@ -1026,7 +1125,7 @@ function fmt(x) {
 function pushWeakSkillSection(out, weakSkills) {
   out.push(`## Weak skill descriptions (${weakSkills.length} missing recipe parts)`);
   out.push("");
-  out.push("A skill's frontmatter description is how Claude decides to invoke it. These are missing parts of the trigger recipe — run `/assay:craft <skill>` to refit each one.");
+  out.push("A skill's frontmatter description is how Claude decides to invoke it. These are missing parts of the trigger recipe, so the skill may never fire when you expect it to. assay can rewrite each one for you from the fix menu.");
   out.push("");
   out.push("| Skill | Where | Missing |");
   out.push("|---|---|---|");
@@ -1075,10 +1174,11 @@ function renderReport(audit, opts = {}) {
   if (weak.length) {
     out.push(`## Weak rules (${weak.length} below their category floor)`);
     out.push("");
-    out.push("| Rule | Where | Score | Weakest factor | Suggested fix |");
+    out.push("| Rule | Where | Score | Main issue | Suggested fix |");
     out.push("|---|---|---|---|---|");
     for (const r of weak) {
-      out.push(`| ${r.id} "${truncate(r.text, 60)}" | ${r.file}:${r.lineStart} | ${r.grade} (${fmt(r.score)}) | ${r.dominantWeakness} | ${FRIENDLY_FIXES[r.dominantWeakness]} |`);
+      const issue = FACTOR_LABELS[r.dominantWeakness] || r.dominantWeakness;
+      out.push(`| ${r.id} "${truncate(r.text, 60)}" | ${r.file}:${r.lineStart} | ${r.grade} (${fmt(r.score)}) | ${issue} | ${FRIENDLY_FIXES[r.dominantWeakness]} |`);
     }
     out.push("");
   }
@@ -1112,20 +1212,29 @@ function renderReport(audit, opts = {}) {
   if (stale.length) {
     out.push("## Stale references");
     out.push("");
+    out.push("A rule pointing at a path that no longer resolves makes Claude re-discover it or give up. Fix the path or drop the reference.");
+    out.push("");
     for (const r of stale) {
-      out.push(`- ${r.id} (${r.file}:${r.lineStart}) cites missing path(s): ${r.staleness.missing.map((m) => "`" + m + "`").join(", ")}`);
+      for (const m of r.staleness.missing) {
+        const moved = m.moved || [];
+        let hint;
+        if (moved.length === 1) hint = " → likely moved to `" + moved[0] + "`";
+        else if (moved.length > 1) hint = " → same name lives at: " + moved.slice(0, 4).map((c) => "`" + c + "`").join(", ");
+        else hint = " → no file by that name in the repo";
+        out.push(`- ${r.id} (${r.file}:${r.lineStart}) cites \`${m.ref}\`${hint}`);
+      }
     }
     out.push("");
   }
 
   const hooks = rules.filter((r) => r.hookOpportunity);
   if (hooks.length) {
-    out.push(`## Hook opportunities (F8 < ${F8_HOOK_THRESHOLD})`);
+    out.push("## Better enforced by a hook");
     out.push("");
-    out.push("These rules could be enforced mechanically instead of read as text:");
+    out.push("A hook or script could enforce these mechanically, on every run, instead of relying on Claude to read and remember them:");
     out.push("");
     for (const r of hooks) {
-      out.push(`- ${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}" — F8 ${fmt(r.f8)}`);
+      out.push(`- ${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}"`);
     }
     out.push("");
   }
@@ -1151,11 +1260,14 @@ function renderReport(audit, opts = {}) {
   if (opts.verbose) {
     out.push("## All rules");
     out.push("");
-    out.push("| Rule | Where | Cat | F1 | F2 | F3 | F4 | F5 | F7 | F8 | Score | Grade |");
-    out.push("|---|---|---|---|---|---|---|---|---|---|---|---|");
+    out.push("Each column scores one thing about the rule, 0 (worst) to 1 (best): whether it has a firm verb, names an alternative, has a clear trigger, is scoped right, sits high in the file, is concrete, and how much it needs Claude's judgment rather than a hook.");
+    out.push("");
+    out.push("| Rule | Where | Cat | " + FACTOR_COLUMNS.map(([, h]) => h).join(" | ") + " | Score | Grade |");
+    out.push("|---|---|---|" + FACTOR_COLUMNS.map(() => "---").join("|") + "|---|---|");
     for (const r of rules) {
       const v = r.factorValues;
-      out.push(`| ${r.id} "${truncate(r.text, 40)}" | ${r.file}:${r.lineStart} | ${r.category} | ${fmt(v.F1)} | ${fmt(v.F2)} | ${fmt(v.F3)} | ${fmt(v.F4)} | ${fmt(v.F5)} | ${fmt(v.F7)} | ${fmt(r.f8)} | ${fmt(r.score)} | ${r.grade} |`);
+      const cells = FACTOR_COLUMNS.map(([f]) => fmt(f === "F8" ? r.f8 : v[f])).join(" | ");
+      out.push(`| ${r.id} "${truncate(r.text, 40)}" | ${r.file}:${r.lineStart} | ${r.category} | ${cells} | ${fmt(r.score)} | ${r.grade} |`);
     }
     out.push("");
   }

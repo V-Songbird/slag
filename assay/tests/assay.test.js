@@ -55,6 +55,18 @@ test("classifyChunk filters prose, navigation pointers, and description bullets"
   assert.equal(engine.classifyChunk(rule), "rule");
 });
 
+test("classifyChunk treats command listings and colon-labelled bullets as reference prose", () => {
+  const cmd = { text: "`./gradlew build` — full compile + checks.", isBullet: true };
+  const label = { text: "**Grammar Kit:** write `.bnf` grammar and generate the parser.", isBullet: true };
+  const conditional = { text: "After editing `.bnf`/`.flex`: run `./gradlew generateLexer`.", isBullet: true };
+  const directive = { text: "Run `npm test` before pushing.", isBullet: true };
+  assert.equal(engine.classifyChunk(cmd), "prose");
+  assert.equal(engine.classifyChunk(label), "prose");
+  // a real conditional rule leads with its trigger, not a code span — still a rule
+  assert.equal(engine.classifyChunk(conditional), "rule");
+  assert.equal(engine.classifyChunk(directive), "rule");
+});
+
 test("splitCompound splits semicolon-joined directives, keeps single processes", () => {
   const compound = { text: "Use Vitest for tests; place test files next to the source.", lineStart: 1, lineEnd: 1 };
   assert.equal(engine.splitCompound(compound).length, 2);
@@ -315,7 +327,7 @@ test("findSkillFiles reads folded descriptions and grades them", () => {
   assert.deepEqual(skills[1].checks.missing, ["trigger", "concrete", "exclusion"]);
 });
 
-test("weak skill descriptions land in the report with /assay:craft as the fix", () => {
+test("weak skill descriptions land in the report as a rewritable fix", () => {
   const root = tmpProject({
     ...FIXTURE,
     ".claude/skills/vague/SKILL.md": "---\nname: vague\ndescription: Helps with the codebase.\n---\n",
@@ -326,7 +338,7 @@ test("weak skill descriptions land in the report with /assay:craft as the fix", 
   for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.match(report, /## Weak skill descriptions/);
-  assert.match(report, /\/assay:craft/);
+  assert.match(report, /rewrite each one/);
   assert.match(report, /vague/);
 });
 
@@ -372,9 +384,42 @@ test("checkStaleness flags missing project-relative paths, ignores globs and URL
   const root = tmpProject({ "src/real.ts": "export {};" });
   const bad = engine.checkStaleness("See `src/missing.ts` for details.", root);
   assert.equal(bad.gated, true);
-  assert.deepEqual(bad.missing, ["src/missing.ts"]);
+  assert.deepEqual(bad.missing, [{ ref: "src/missing.ts", moved: [] }]);
   const ok = engine.checkStaleness("See `src/real.ts` and `src/**/*.ts` and `https://x.dev/a`.", root);
   assert.equal(ok.gated, false);
+});
+
+test("checkStaleness catches a markdown link with a root-relative target", () => {
+  const root = tmpProject({ "CLAUDE.md": "x" });
+  const r = engine.checkStaleness("Check [example](/example.md) to see how examples are crafted.", root);
+  assert.equal(r.gated, true);
+  assert.equal(r.missing[0].ref, "example.md");
+});
+
+test("checkStaleness passes a markdown link whose target exists", () => {
+  const root = tmpProject({ "docs/example.md": "x" });
+  const r = engine.checkStaleness("Follow [the example](docs/example.md) exactly.", root);
+  assert.equal(r.gated, false);
+});
+
+test("checkStaleness names where a referenced file moved to", () => {
+  const root = tmpProject({ "docs/guide/example.md": "x" });
+  const r = engine.checkStaleness("See [the example](/example.md) for the format.", root);
+  assert.equal(r.gated, true);
+  assert.deepEqual(r.missing[0].moved, ["docs/guide/example.md"]);
+});
+
+test("the report shows where a stale reference likely moved", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "- Check [the example](/example.md) before writing new ones.\n",
+    "docs/example.md": "x",
+  });
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /## Stale references/);
+  assert.match(report, /likely moved to `docs\/example\.md`/);
 });
 
 // ---------------------------------------------------------------------------
@@ -433,10 +478,27 @@ test("composeAudit + renderReport produce a graded markdown report", () => {
   assert.match(report, /# Rule audit/);
   assert.match(report, /corpus grade/);
   assert.match(report, /Stall risks/);
-  assert.match(report, /Hook opportunities/);
+  assert.match(report, /Better enforced by a hook/);
   assert.match(report, /prettier/);
   const verbose = engine.renderReport(audit, { verbose: true });
   assert.match(verbose, /## All rules/);
+});
+
+test("the report names factors in plain English, never as F-codes", () => {
+  const root = tmpProject(FIXTURE);
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  // no raw factor code (F1, F3, F8…) reaches the reader
+  assert.doesNotMatch(report, /\bF[1-9]\b/);
+  // the weakest "Write clean, maintainable code" surfaces as a plain-English issue
+  assert.match(report, /too vague/);
+  assert.match(report, /Main issue/);
+  // even the verbose per-rule table uses friendly headers
+  const verbose = engine.renderReport(engine.composeAudit(scanData, judgments), { verbose: true });
+  assert.doesNotMatch(verbose, /\bF[1-9]\b/);
+  assert.match(verbose, /Trigger \| Scope \| Position/);
 });
 
 test("a rule at the bottom of a long file is reported as buried", () => {

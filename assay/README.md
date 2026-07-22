@@ -22,7 +22,7 @@ You wrote rules for Claude. Claude keeps ignoring some of them. Before you concl
 
 It also spots the rules that were never meant to be prose at all — "run prettier before committing" is a hook pretending to be a sentence — and offers to park them for promotion into the mechanism that would actually enforce them.
 
-And when the problem is a skill instead of a rule, `/assay:craft` builds one whose description Claude actually notices, or refits a skill Claude keeps ignoring. A skill that must always run gets a rule backing it up — and, when even that isn't promise enough, a hook.
+And when the problem is a skill instead of a rule, `/assay:craft-skill` builds one whose description Claude actually notices, or refits a skill Claude keeps ignoring. A skill that must always run gets a rule backing it up — and, when even that isn't promise enough, a hook.
 
 Rules get the same treatment: `/assay:craft-rules` grills you — when should it fire, what replaces the thing you're banning, what does a violation actually look like — then writes one bullet that would survive its own audit, placed where Claude will actually read it. If what you asked for was never a rule at all, it says so instead of writing you a wish.
 
@@ -32,9 +32,9 @@ Rules get the same treatment: `/assay:craft-rules` grills you — when should it
 - **Prohibitions that dead-end get flagged.** "Never X" with no alternative can stall a session mid-task, so it grades F until it names the replacement.
 - **The weak ones get rewritten, not lectured about.** One menu, your approval, then in-place edits you review with `git diff`.
 - **Wishes get unmasked as hooks.** Rules a script could enforce with an exit code are flagged, with the evidence, instead of burning goodwill as text.
-- **Stale references get caught.** A rule citing a file that no longer exists is worse than no rule — assay notices before Claude does.
+- **Stale references get caught — and traced.** A rule citing a file that no longer exists is worse than no rule. assay reads the paths in backticks *and* in markdown links, and when the file has merely moved it names where it went, so the fix is one edit instead of a hunt.
 - **Skills that actually fire.** A skill's description is how Claude decides to use it; most are written as documentation instead. Crafted ones are written as triggers.
-- **Skills you already have get graded too.** The audit checks every project skill's description against the same trigger recipe and points the ones missing parts at `/assay:craft`.
+- **Skills you already have get graded too.** The audit checks every project skill's description against the same trigger recipe and offers to rewrite the ones missing parts, in the same fix menu as the rules.
 
 ## How it works
 
@@ -65,8 +65,8 @@ Nothing to configure. Works at the next session.
 | Grade your rules and get the fix list | `/assay:audit` |
 | Same, but apply rewrites without the menu | `/assay:audit --fix` |
 | See every factor score per rule | `/assay:audit --verbose` |
-| Build a skill that reliably triggers | `/assay:craft` |
-| Fix a skill Claude keeps ignoring | `/assay:craft <skill name>` |
+| Build a skill that reliably triggers | `/assay:craft-skill` |
+| Fix a skill Claude keeps ignoring | `/assay:craft-skill <skill name>` |
 | Write a new rule that sticks | `/assay:craft-rules` |
 
 ## Good to know
@@ -76,11 +76,11 @@ Nothing to configure. Works at the next session.
 - Promoted rules are built at project scope, straight from the current official docs — fetched at promotion time, so the formats are never stale. Nothing else gets installed.
 - Skip a rule you like as-is by putting `<!-- assay-ignore -->` on the line above it.
 - Dead-glob detection (a scoped rules file whose file patterns match nothing) needs Node 22+; everything else runs on older Node.
-- Even a crafted description is a strong hint, not a promise — on any model size. That's why craft backs must-run skills with a rule, and names a hook as the only true guarantee.
+- Even a crafted description is a strong hint, not a promise — on any model size. That's why `craft-skill` backs must-run skills with a rule, and names a hook as the only true guarantee.
 
 ## Under the hood
 
-One scoring script and three skills — the audit with its two rubrics, craft with its trigger recipe, craft-rules with its rule recipe — all there to read in the plugin's files.
+One scoring script and three skills — the audit with its two rubrics, craft-skill with its trigger recipe, craft-rules with its rule recipe — all there to read in the plugin's files.
 
 ## License
 

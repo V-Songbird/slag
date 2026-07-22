@@ -1,5 +1,5 @@
 ---
-name: craft
+name: craft-skill
 description: >-
   Builds a new Claude Code skill — SKILL.md format fetched live from the
   official docs, description written to the measured trigger recipe: concrete
@@ -11,12 +11,12 @@ when_to_use: >-
   Trigger when the user wants a skill created or made to trigger reliably:
   "make me a skill", "create a skill for X", "my skill never fires", "Claude
   keeps ignoring my skill", "fix this skill description", "craft a skill", or
-  invokes /assay:craft.
+  invokes /assay:craft-skill.
 argument-hint: "[skill name or what it should do]"
 allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, WebFetch
 ---
 
-# assay:craft
+# assay:craft-skill
 
 You build one skill per run — new, or a refit of an existing one. The
 description is the product: follow
