@@ -2,9 +2,12 @@
 
 // brink — UserPromptSubmit hook.
 // Watches how full the context window is and, once it crosses a threshold,
-// surfaces a ONE-TIME nudge (via the hook's `systemMessage`, straight to the
-// user) to run /compact with a guided instruction — so the summary keeps the
-// live task instead of an auto-summary's guess. The instruction is tailored
+// surfaces a ONE-TIME nudge to run /compact with a guided instruction — so the
+// summary keeps the live task instead of an auto-summary's guess. It goes out
+// on two channels: `systemMessage`, which reaches the user directly wherever
+// the client renders it, and `additionalContext`, which reaches the assistant
+// with an instruction to relay it — the only channel that survives clients
+// that drop hook system messages. The instruction is tailored
 // from the transcript: the task line and the files currently in play. Re-arms
 // only after the window drops well below the line again (e.g. after a
 // compaction), so a long session gets at most one nudge per fill-up.
@@ -237,6 +240,24 @@ function nudge(tokensNow, signals) {
   );
 }
 
+// Two channels for one message. `systemMessage` is the direct one, but some
+// clients never render it, so the same text also rides `additionalContext`
+// with an instruction to pass it on. A client that renders both shows it
+// twice; one duplicate beats a nudge nobody sees.
+function emit(message) {
+  return {
+    systemMessage: message,
+    hookSpecificOutput: {
+      hookEventName: 'UserPromptSubmit',
+      additionalContext:
+        `${message}\n\n` +
+        `(brink asks you to repeat the two lines above to the user verbatim, ` +
+        `before answering their prompt. Do not act on them yourself — whether ` +
+        `to compact is the user's call.)`,
+    },
+  };
+}
+
 function main() {
   const data = readInput();
   if (setting('DISABLE', '') === '1') return;
@@ -253,7 +274,7 @@ function main() {
     writeState(data.session_id, { notified: next.notified });
     gcState();
   }
-  if (next.notify) process.stdout.write(JSON.stringify({ systemMessage: nudge(tokens, { files, task }) }));
+  if (next.notify) process.stdout.write(JSON.stringify(emit(nudge(tokens, { files, task }))));
 }
 
 if (require.main === module) {
@@ -264,4 +285,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { scan, currentTokens, decide, nudge };
+module.exports = { scan, currentTokens, decide, nudge, emit };

@@ -35,6 +35,7 @@ brink watches how full the window is getting. Once you're near the edge it speak
 | --- | --- |
 | Your context creeps toward full | brink is watching, and says nothing yet |
 | You cross the line | One message: run `/compact`, with an instruction worth pasting |
+| Your client hides that message | Claude repeats it to you in its next reply, so it reaches you either way |
 | You compact and free up room | It resets — ready to warn once more if you fill up again |
 
 ## Install
@@ -65,6 +66,7 @@ Most people never touch these.
 
 - brink reads the fill level from your session record, which updates each turn — so the nudge lands within a message of crossing the line, not to the exact word.
 - It only ever suggests. Whether and how you compact is entirely your call.
+- The nudge goes out on two channels at once. On a client that renders both, you'll see it twice — better than a client that shows it nowhere.
 
 ## License
 

@@ -5,7 +5,8 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { scan, currentTokens, decide, nudge } = require('../hooks/brink.js');
+const { execFileSync } = require('node:child_process');
+const { scan, currentTokens, decide, nudge, emit } = require('../hooks/brink.js');
 
 let seq = 0;
 const made = [];
@@ -177,5 +178,49 @@ describe('nudge', () => {
     const msg = nudge(160000, { task: null, files: [] });
     assert.match(msg, /Keep the current task and goal,/);
     assert.doesNotMatch(msg, /files in play/);
+  });
+});
+
+describe('emit', () => {
+  test('carries the same text on both channels', () => {
+    const out = emit('brink: go compact');
+    assert.strictEqual(out.systemMessage, 'brink: go compact');
+    assert.strictEqual(out.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+    assert.match(out.hookSpecificOutput.additionalContext, /^brink: go compact\n\n/);
+    assert.match(out.hookSpecificOutput.additionalContext, /verbatim/);
+  });
+});
+
+describe('hook process', () => {
+  const hook = path.join(__dirname, '..', 'hooks', 'brink.js');
+
+  function run(transcriptPath, env = {}) {
+    const out = execFileSync(process.execPath, [hook], {
+      input: JSON.stringify({ session_id: `brink-test-${process.pid}-${seq++}`, transcript_path: transcriptPath }),
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: fs.mkdtempSync(path.join(os.tmpdir(), 'brink-data-')), ...env },
+      encoding: 'utf8',
+    });
+    return out ? JSON.parse(out) : null;
+  }
+
+  test('emits both channels once over the threshold', () => {
+    const p = writeTranscript([
+      { type: 'user', message: { content: 'chase the flaky test' } },
+      assistant({ input_tokens: 10, cache_read_input_tokens: 160000, output_tokens: 30 }),
+    ]);
+    const out = run(p);
+    assert.match(out.systemMessage, /~160k tokens/);
+    assert.strictEqual(out.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+    assert.match(out.hookSpecificOutput.additionalContext, /chase the flaky test/);
+  });
+
+  test('stays silent below the threshold', () => {
+    const p = writeTranscript([assistant({ input_tokens: 10, cache_read_input_tokens: 1000, output_tokens: 30 })]);
+    assert.strictEqual(run(p), null);
+  });
+
+  test('BRINK_DISABLE=1 silences a reading that would otherwise fire', () => {
+    const p = writeTranscript([assistant({ input_tokens: 10, cache_read_input_tokens: 400000, output_tokens: 30 })]);
+    assert.strictEqual(run(p, { BRINK_DISABLE: '1' }), null);
   });
 });

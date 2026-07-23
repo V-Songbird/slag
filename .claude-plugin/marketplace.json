@@ -157,7 +157,7 @@
       "name": "brink",
       "source": "./brink",
       "description": "Watches how full the context window is getting and, once you near the edge, surfaces a one-time nudge to run /compact with a ready-made instruction — so the summary keeps the task, decisions, and errors instead of an automatic guess.",
-      "version": "0.1.0-alpha",
+      "version": "0.2.0-alpha",
       "license": "MIT",
       "author": {
         "name": "Victor Villegas",
