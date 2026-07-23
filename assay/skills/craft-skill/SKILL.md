@@ -5,13 +5,11 @@ description: >-
   official docs, description written to the measured trigger recipe: concrete
   base sentence, quoted trigger phrases, an exclusion clause — and, for
   must-run skills, a companion rule or hook on top. Also refits existing skill
-  descriptions that never seem to fire. Do NOT use for auditing CLAUDE.md
-  rules — that is /assay:audit.
-when_to_use: >-
-  Trigger when the user wants a skill created or made to trigger reliably:
-  "make me a skill", "create a skill for X", "my skill never fires", "Claude
-  keeps ignoring my skill", "fix this skill description", "craft a skill", or
-  invokes /assay:craft-skill.
+  descriptions that never seem to fire. Use when the user wants a skill created
+  or made to trigger reliably — e.g. "make me a skill", "create a skill for X",
+  "my skill never fires", "Claude keeps ignoring my skill", "fix this skill
+  description", "craft a skill" — or invokes /assay:craft-skill. Do NOT use for
+  auditing CLAUDE.md rules — that is /assay:audit.
 argument-hint: "[skill name or what it should do]"
 allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, WebFetch
 ---

@@ -4,14 +4,12 @@ description: >-
   Interviews you about the behavior you want enforced, then writes one rule
   into CLAUDE.md or a scoped .claude/rules/<topic>.md — firing trigger,
   directive verb, named alternative, concrete specifics — and verifies the
-  result with the same engine /assay:audit grades with. Do NOT use to grade
+  result with the same engine /assay:audit grades with. Use when the user wants
+  a rule written or made to stick — e.g. "add a rule", "write a CLAUDE.md rule
+  for X", "make Claude always do X", "Claude keeps ignoring my instructions",
+  "help me write a rule" — or invokes /assay:craft-rules. Do NOT use to grade
   or rewrite existing rules — that is /assay:audit — and not for skill
   descriptions — that is /assay:craft-skill.
-when_to_use: >-
-  Trigger when the user wants a rule written or made to stick: "add a rule",
-  "write a CLAUDE.md rule for X", "make Claude always do X", "Claude keeps
-  ignoring my instructions", "help me write a rule", or invokes
-  /assay:craft-rules.
 argument-hint: "[what the rule should enforce]"
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch
 ---

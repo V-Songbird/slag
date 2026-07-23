@@ -8,13 +8,11 @@ description: >-
   in .claude/skills/ against the trigger recipe. Most of the scoring is a
   deterministic Node script; the model judges only two factors.
   Offers to rewrite weak rules and to park placement candidates for promotion.
-  English-only scoring. Do NOT use to review code, PRs, or non-Claude config
-  like eslint.
-when_to_use: >-
-  Trigger when the user wants feedback on existing rule files: "are my rules any
-  good", "check my CLAUDE.md", "grade my instruction files", "which rules are
-  weak or vague", "audit my rules", "which rules should be hooks", or invokes
-  /assay:audit with any flags.
+  English-only scoring. Use when the user wants feedback on existing rule files
+  — e.g. "are my rules any good", "check my CLAUDE.md", "grade my instruction
+  files", "which rules are weak or vague", "audit my rules", "which rules should
+  be hooks" — or invokes /assay:audit with any flags. Do NOT use to review code,
+  PRs, or non-Claude config like eslint.
 argument-hint: "[--fix] [--verbose] [--json]"
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch
 ---
@@ -73,7 +71,15 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" report
 Add `--verbose` or `--json` if the user asked. The command prints the finished
 markdown report — corpus grade, per-file grades, weak rules with suggested
 fixes, stall risks, buried rules, stale references, hook opportunities,
-placement candidates, weak skill descriptions. Print its markdown **verbatim** —
+placement candidates, weak skill descriptions.
+
+The report is this skill's deliverable, so it goes in your **final message** —
+the one after step 5, not a preamble before the fix menu. Text written before a
+tool call is discarded under silent output styles, and the user then sees an
+audit that reported nothing. Length limits from an output style do not apply to
+it: reproduce every table in full.
+
+Print its markdown **verbatim** —
 each rule cell is a clickable `[rule](file:line)` link, so do not rebuild the
 tables as an artifact, reword the cells, or replace a link with a bare line
 number. Present it as-is, with one exception: the hook section ends with the hooks already wired for this
@@ -121,4 +127,6 @@ can run `/assay:audit` again.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" clean
 ```
 
-Always run this last, whether or not fixes were applied.
+Always run this last, whether or not fixes were applied. Then write the final
+message: the step 3 report verbatim, your three sentences, and what step 4
+changed.
