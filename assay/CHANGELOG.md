@@ -4,6 +4,14 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.3.1-alpha] — 2026-07-23
+
+### Fixed
+
+- Backticked commands with arguments (like a build invocation) are no longer read as missing file paths, so command listings stop landing in "Stale references" with crushed scores
+- A reference whose file merely moved elsewhere in the repo no longer crushes the rule's score — the report still lists it with the new location so the fix stays a one-line edit
+- Worked examples wrapped in `<example>`-style tag blocks are no longer scored as rules
+
 ## [0.3.0-alpha] — 2026-07-23
 
 ### Added

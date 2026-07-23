@@ -37,6 +37,23 @@ test("stripMetadata removes frontmatter, fences, tables, and bare links", () => 
   assert.deepEqual(contentLines, ["- Use Vitest for tests.", "- Never commit secrets."]);
 });
 
+test("stripMetadata skips <example>-style tag blocks", () => {
+  const content = [
+    "- Never commit secrets.",
+    "",
+    "<example>",
+    "**Steps**:",
+    "1. Place caret on MyHelper",
+    "2. Shift+F6 → rename it.",
+    "</example>",
+    "",
+    "- Use Vitest for tests.",
+  ].join("\n");
+  const { lines } = engine.stripMetadata(content);
+  const texts = lines.filter((l) => l.isContent).map((l) => l.text);
+  assert.deepEqual(texts, ["- Never commit secrets.", "- Use Vitest for tests."]);
+});
+
 test("identifyChunks joins continuation lines into one chunk", () => {
   const { lines } = engine.stripMetadata("- Use Vitest for all tests\n  placed next to the source file.\n");
   const chunks = engine.identifyChunks(lines);
@@ -402,11 +419,19 @@ test("checkStaleness passes a markdown link whose target exists", () => {
   assert.equal(r.gated, false);
 });
 
-test("checkStaleness names where a referenced file moved to", () => {
+test("checkStaleness names where a referenced file moved to, without gating", () => {
   const root = tmpProject({ "docs/guide/example.md": "x" });
   const r = engine.checkStaleness("See [the example](/example.md) for the format.", root);
-  assert.equal(r.gated, true);
+  // a moved file is a one-line fix, not a dead reference — no score crush
+  assert.equal(r.gated, false);
   assert.deepEqual(r.missing[0].moved, ["docs/guide/example.md"]);
+});
+
+test("checkStaleness ignores backtick commands with arguments", () => {
+  const root = tmpProject({ "gradlew": "#!/bin/sh" });
+  const r = engine.checkStaleness("After editing `.bnf`: run `./gradlew generateLexer generateParser`.", root);
+  assert.equal(r.gated, false);
+  assert.equal(r.missing.length, 0);
 });
 
 test("the report shows where a stale reference likely moved", () => {

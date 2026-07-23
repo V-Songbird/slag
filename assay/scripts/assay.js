@@ -425,9 +425,26 @@ function stripMetadata(content) {
     }
   }
 
+  // <example>…</example>-style tag blocks hold worked-example content, not
+  // rules — treat them like code fences. Only a tag alone on its line opens a
+  // region, and an unclosed tag strips nothing.
+  const tagRegions = new Set();
+  let openTag = null, tagStart = 0;
+  for (let i = frontmatterEnd; i < lines.length; i++) {
+    if (fenceRegions.has(i)) continue;
+    const t = lines[i].trim();
+    if (!openTag) {
+      const m = t.match(/^<([a-z][\w-]*)>$/i);
+      if (m) { openTag = m[1]; tagStart = i; }
+    } else if (t === "</" + openTag + ">") {
+      for (let j = tagStart; j <= i; j++) tagRegions.add(j);
+      openTag = null;
+    }
+  }
+
   const tableRegions = new Set();
   for (let i = frontmatterEnd; i < lines.length; i++) {
-    if (tableRegions.has(i) || fenceRegions.has(i)) continue;
+    if (tableRegions.has(i) || fenceRegions.has(i) || tagRegions.has(i)) continue;
     if (lines[i].trim().startsWith("|") && i + 1 < lines.length && /^\|[\s:]*-/.test(lines[i + 1].trim())) {
       let j = i;
       while (j < lines.length && lines[j].trim().startsWith("|")) {
@@ -439,7 +456,7 @@ function stripMetadata(content) {
 
   for (let i = frontmatterEnd; i < lines.length; i++) {
     const lineNum = i + 1;
-    if (fenceRegions.has(i) || tableRegions.has(i)) continue;
+    if (fenceRegions.has(i) || tableRegions.has(i) || tagRegions.has(i)) continue;
     const raw = lines[i];
     const stripped = raw.trim();
 
@@ -639,9 +656,10 @@ function makeBasenameResolver(root) {
 }
 
 // A backtick token is checkable only as a project-relative concrete path.
+// Whitespace means a command with arguments (`./gradlew generateLexer`), not a path.
 function backtickToPath(name) {
   if (!name.includes("/")) return null;
-  if (/[<>{}*$]|:\/\//.test(name)) return null;
+  if (/[<>{}*$\s]|:\/\//.test(name)) return null;
   if (name.startsWith("/") || name.startsWith("~") || /^[A-Za-z]:/.test(name)) return null;
   return name;
 }
@@ -681,7 +699,9 @@ function checkStaleness(text, root, findMoved) {
     const moved = resolve(path.basename(clean)).filter((c) => c !== clean);
     missing.push({ ref: clean, moved });
   }
-  return { gated: missing.length > 0, missing };
+  // A ref whose file merely moved still points at something real — report it
+  // as fixable, but only a truly dead ref crushes the score.
+  return { gated: missing.some((m) => m.moved.length === 0), missing };
 }
 
 // ---------------------------------------------------------------------------
@@ -1208,7 +1228,7 @@ function renderReport(audit, opts = {}) {
     out.push("");
   }
 
-  const stale = rules.filter((r) => r.staleness.gated);
+  const stale = rules.filter((r) => r.staleness.missing.length);
   if (stale.length) {
     out.push("## Stale references");
     out.push("");
