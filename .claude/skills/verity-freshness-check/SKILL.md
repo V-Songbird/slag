@@ -8,7 +8,9 @@ description: >-
   snapshot. Trigger when working on the verity plugin and you want to know if
   the index has drifted ("are the verity docs stale?", "check verity
   freshness", "update verity snapshot", "refresh the doc index"), before
-  cutting a new verity release, or after a Claude Code update.
+  cutting a new verity release, or after a Claude Code update. Do NOT use to
+  edit verity's docs or code — only to check and refresh the bundled doc index
+  (lastmod-snapshot.json).
 allowed-tools: Bash, Read, Write
 ---
 
