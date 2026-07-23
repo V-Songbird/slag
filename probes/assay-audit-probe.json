@@ -1,0 +1,32 @@
+{
+  "id": "assay-audit-probe",
+  "surface": "skill",
+  "model": "haiku",
+  "reps": 16,
+  "seed": 42,
+  "maxBudgetUsd": 0.30,
+  "timeoutMs": 180000,
+  "claudeMd": "# Team project\n\nBe careful.\nTry to write good code.\nAlways handle errors properly and make sure things work.\nUse the right tool for the job.\n",
+  "fixture": {},
+  "arms": {
+    "probe": {
+      ".claude/skills/audit/SKILL.md": "---\nname: audit\ndescription: >-\n  Grades every rule in the project's CLAUDE.md and .claude/rules/ for structural\n  clarity — verb strength, framing, trigger distance, loading scope, position in\n  the file, concreteness — and detects rules that would work better as hooks,\n  skills, or subagents. Also grades each project skill's frontmatter description\n  against the trigger recipe. Do NOT use to review code, PRs, or non-Claude config\n  like eslint.\nwhen_to_use: >-\n  Trigger when the user wants feedback on existing rule files: \"are my rules any\n  good\", \"check my CLAUDE.md\", \"grade my instruction files\", \"which rules are\n  weak or vague\", \"audit my rules\", or \"which rules should be hooks\".\n---\n\n# audit\n\nWhen this skill is invoked, do these steps in order:\n\n1. Read the project's `CLAUDE.md`.\n2. Write `audit-report.md` grading each rule you find. Write one line per rule in the form `<short rule label>: grade <A-F>`, then a final line `corpus grade: <A-F>`.\n3. Tell the user the grades are in `audit-report.md`.\n"
+    }
+  },
+  "task": {
+    "prompt": "Are the rules in my CLAUDE.md any good? Grade my instruction file and tell me which ones are weak.",
+    "valid": [
+      {
+        "type": "composite",
+        "op": "or",
+        "children": [
+          { "type": "response_regex", "pattern": "(grade|rule|audit|weak)", "flags": "i" },
+          { "type": "file_exists", "path": "audit-report.md" }
+        ]
+      }
+    ],
+    "assert": [
+      { "type": "file_regex", "path": "audit-report.md", "pattern": "grade\\s+[A-F]", "flags": "i" }
+    ]
+  }
+}

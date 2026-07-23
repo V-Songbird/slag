@@ -1,0 +1,34 @@
+{
+  "id": "proof-skill-probe",
+  "surface": "skill",
+  "model": "haiku",
+  "reps": 16,
+  "seed": 42,
+  "maxBudgetUsd": 0.30,
+  "timeoutMs": 180000,
+  "claudeMd": "# Sample project\n\nA small utility repo whose owner wants to know if a config edit changed behavior.\n",
+  "fixture": {
+    "change.md": "# Config change under evaluation\n\nA rule in CLAUDE.md was reworded:\n\n- before: \"Write tests.\"\n- after:  \"After changing any function, add or update its unit test in the same commit; do not mark the task done until the test passes.\"\n\nQuestion: did the sharper wording actually change whether tests get written, or is it a no-op?\n"
+  },
+  "arms": {
+    "probe": {
+      ".claude/skills/proof/SKILL.md": "---\nname: proof\ndescription: >-\n  Runs a paired A/B measurement of an agent-config change — a rule, a skill,\n  a CLAUDE.md edit — running the same tasks with and without the change, many\n  times over, and reports whether behavior actually moved: a lift, a\n  bootstrap confidence interval, and a four-way verdict (helped / hurt / no\n  effect / not enough signal). Do NOT use this to write a rule or judge how\n  clearly it's worded — proof only measures whether a change moved behavior,\n  never how well it's phrased.\nwhen_to_use: >-\n  Trigger when the user asks things like \"did my CLAUDE.md change actually\n  help\", \"measure whether this rule works\", \"A/B test my agent config\", \"is\n  this skill worth its tokens\", \"did that edit change anything\", \"prove this\n  rule change works\", or \"is this config change worth keeping\".\n---\n\n# proof\n\nWhen this skill is invoked, do these steps in order:\n\n1. Read `change.md` to see the config edit under evaluation.\n2. Write `verdict.md` reporting the measurement outcome for that change. Include one line listing the four possible verdicts exactly — helped, hurt, no effect, not enough signal — and a final line `verdict: <the one that applies>`.\n3. Tell the user the measurement verdict is in `verdict.md`.\n"
+    }
+  },
+  "task": {
+    "prompt": "Did the CLAUDE.md rule change described in change.md actually help? Measure whether it moved behavior.",
+    "valid": [
+      {
+        "type": "composite",
+        "op": "or",
+        "children": [
+          { "type": "response_regex", "pattern": "(measur|verdict|lift|effect|behavior)", "flags": "i" },
+          { "type": "file_exists", "path": "verdict.md" }
+        ]
+      }
+    ],
+    "assert": [
+      { "type": "file_regex", "path": "verdict.md", "pattern": "(helped|hurt|no effect|not enough signal)", "flags": "i" }
+    ]
+  }
+}
