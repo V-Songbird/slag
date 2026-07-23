@@ -122,7 +122,7 @@
       "name": "proof",
       "source": "./proof",
       "description": "Paired A/B harness that measures whether an agent-config change actually changes agent behavior — headless runs on isolated checkouts, lift with a bootstrap CI, and a four-way verdict.",
-      "version": "0.1.0-alpha",
+      "version": "0.2.0-alpha",
       "license": "MIT",
       "author": {
         "name": "Victor Villegas",

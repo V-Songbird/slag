@@ -4,6 +4,12 @@ All notable changes to proof are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.2.0-alpha] — 2026-07-22
+
+### Added
+
+- A skill, so a session recognizes proof and drives `harvest` → `lint` → `run` correctly instead of the plugin sitting installed and unused
+
 ## [0.1.0-alpha] — 2026-07-22
 
 ### Added

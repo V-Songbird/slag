@@ -46,19 +46,21 @@ Inside Claude Code, run:
 /plugin install proof@slag
 ```
 
+That's it — no separate CLI to learn. Installing gives Claude the skill, so you just ask in plain words, in any session.
+
 Running [assay](../assay) too? Good instinct — assay grades whether a rule is *written* clearly; proof measures whether it actually *changed* anything.
 
 ## What you can do
 
-The whole loop, from a repo to a verdict:
+The whole loop, from a repo to a verdict — just ask:
 
-| You want to… | Command |
+| You want to… | Just ask |
 | --- | --- |
-| Mine tasks from your repo's own fix history | `proof harvest --repo . --out my-change.json` |
-| Check whether a task set is worth measuring | `proof lint --spec my-change.json` |
-| Run both arms and get a verdict | `proof run --spec my-change.json` |
+| Mine tasks from your repo's own fix history | "pull some real test cases from this repo's fix history" |
+| Check whether a task set is worth measuring | "is this task set solid enough to measure" |
+| Run both arms and get a verdict | "did this change actually help" |
 
-Fill in your two arms (the config present vs. absent) and real assertions in the spec, then `run`. It prints the cost estimate, waits for `y`, runs, and reports.
+Claude fills in the two arms (the config present vs. absent) and real assertions, then runs it. It prints the cost estimate, waits for your yes, runs, and reports.
 
 Each arm comes back as one of four calls: **CONFIRMED+** (behavior moved up; the interval clears zero), **CONFIRMED−** (behavior moved down), **NULL** (a tight interval around zero — a real "no effect," not a shrug), or **INCONCLUSIVE** (the interval's too wide to call — underpowered, not a null; add runs before you conclude anything).
 
