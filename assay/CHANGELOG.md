@@ -4,6 +4,14 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.5.0-alpha] — 2026-07-23
+
+### Changed
+
+- A skill description is no longer marked down for having fewer than two quoted example phrasings. The "Use when…" trigger clause is still required; the number of quotes is not, so one quoted phrasing — or none — now passes
+- Skill-description guidance now tells you to keep the base sentence terse and to stop enumerating a domain's whole surface, which costs a skill more firing than anything else in the description
+- Skill-description guidance now warns that quoted phrasings which don't match what the skill is really asked for are worse than none at all, and should be rewritten or deleted rather than padded to a count
+
 ## [0.4.2-alpha] — 2026-07-23
 
 ### Changed

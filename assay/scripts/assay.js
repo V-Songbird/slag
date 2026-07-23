@@ -349,12 +349,13 @@ const SKILL_FILE_TYPE_NOUN = /(?:^|[\s(`"'])\.[a-z][a-z0-9]{0,5}\b|\b(?:markdown
 const DESCRIPTION_CAP = 1536;
 
 const SKILL_CHECK_LABELS = {
-  trigger: 'no "Use when" clause with 2+ quoted phrasings',
+  trigger: 'no "Use when" trigger clause',
   concrete: "no concrete artifact or file type named",
   exclusion: 'no "Do NOT use" exclusion clause',
   redundant: "a clause is duplicated — merge the pair, keep every distinct phrasing",
   overCap: "over the 1,536-char listing cap — the tail is truncated",
   overSpecified: "model-disabled — drop when_to_use and trigger phrasings, keep a short user-facing summary",
+  whenToUse: "model-invocable — drop when_to_use, fold any trigger phrases into description",
   empty: "no description",
   dead: "no model or user invocation — recommend removing the skill",
 };
@@ -366,7 +367,12 @@ function checkSkillDescription(description) {
   // don't count toward concreteness
   const base = text.replace(SKILL_QUOTED_PHRASE, " ");
   const missing = [];
-  if (!SKILL_TRIGGER_CLAUSE.test(text) || quotes.length < 2) missing.push("trigger");
+  // The trigger clause is the requirement; the quote COUNT is not. A proof A/B
+  // (docs/research/proof/skill-trim/) measured 0, 1, 2 and 4 quoted phrasings on
+  // two fixtures: more quotes never improved firing, and quotes that did not
+  // cover the real ask collapsed it. A floor of 2 pushed authors to invent
+  // off-target quotes, so there is no floor — quotedPhrases is still reported.
+  if (!SKILL_TRIGGER_CLAUSE.test(text)) missing.push("trigger");
   if (!CONCRETE_REGEX.some((p) => (base.match(p) || []).length > 0) && !SKILL_FILE_TYPE_NOUN.test(base)) {
     missing.push("concrete");
   }
@@ -391,9 +397,14 @@ function checkSkillDescription(description) {
 // governs auto-routing (disable-model-invocation unset). A user-only slash
 // command wants a short plain summary, not trigger machinery; a skill neither
 // side can invoke is dead. Defaults are on/on, so an unflagged skill is graded
-// on the recipe exactly as before.
+// on the recipe exactly as before. A model-invocable skill is graded on the
+// combined text but flagged if when_to_use still exists as its own field: a
+// proof A/B (docs/research/proof/skill-trim/) found no firing penalty from
+// dropping it and a measurable recall lift on sonnet over keeping it.
 function gradeSkill(router, whenToUse, modelInvocable, userInvocable) {
-  if (modelInvocable) return { mode: "model", ...checkSkillDescription(router) };
+  if (modelInvocable) {
+    return { mode: "model", ...checkSkillDescription(router), hasWhenToUse: Boolean(whenToUse.trim()) };
+  }
   const length = router.trim().length;
   if (!userInvocable) {
     return { mode: "dead", missing: [], redundant: false, overCap: length > DESCRIPTION_CAP, length };
@@ -1273,7 +1284,7 @@ function fmt(x) {
 function pushWeakSkillSection(out, weakSkills) {
   out.push(`## Weak skill descriptions (${weakSkills.length} to fix)`);
   out.push("");
-  out.push("A skill's frontmatter description is how Claude decides to invoke it, and its `description` plus `when_to_use` share one listing entry capped at 1,536 characters — past that the tail is silently truncated. Model-invocable skills are graded on the trigger recipe; a `disable-model-invocation` skill is graded as a plain user-facing summary instead, and a skill neither side can invoke is flagged for removal. assay can rewrite each one for you from the fix menu (dead skills are flagged, not rewritten).");
+  out.push("A skill's frontmatter description is how Claude decides to invoke it, and its `description` plus `when_to_use` share one listing entry capped at 1,536 characters — past that the tail is silently truncated. Model-invocable skills are graded on the trigger recipe folded into `description` alone; a lingering `when_to_use` field is flagged to fold in and delete, not a place to stash overflow. A `disable-model-invocation` skill is graded as a plain user-facing summary instead, and a skill neither side can invoke is flagged for removal. assay can rewrite each one for you from the fix menu (dead skills are flagged, not rewritten).");
   out.push("");
   out.push("| Skill | Where | Chars | Issue |");
   out.push("|---|---|---|---|");
@@ -1291,6 +1302,7 @@ function pushWeakSkillSection(out, weakSkills) {
       issues = c.missing.map((k) => SKILL_CHECK_LABELS[k]);
       if (c.redundant) issues.push(SKILL_CHECK_LABELS.redundant);
       if (c.overCap) issues.push(SKILL_CHECK_LABELS.overCap);
+      if (c.hasWhenToUse) issues.push(SKILL_CHECK_LABELS.whenToUse);
     }
     out.push(`| ${s.name} | [${s.path}](${s.path}) | ${c.length}/${DESCRIPTION_CAP} | ${issues.join(", ")} |`);
   }
@@ -1311,7 +1323,7 @@ function renderReport(audit, opts = {}) {
     const c = s.checks;
     if (c.mode === "dead") return true;
     if (c.mode === "user-only") return c.overSpecified || c.overCap || c.empty;
-    return c.missing.length || c.overCap || c.redundant;
+    return c.missing.length || c.overCap || c.redundant || c.hasWhenToUse;
   });
   out.push("# Rule audit — " + path.basename(audit.root));
   out.push("");

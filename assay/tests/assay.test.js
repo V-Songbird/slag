@@ -323,13 +323,21 @@ test("checkSkillDescription passes a recipe-shaped description", () => {
 test("checkSkillDescription flags each missing recipe part", () => {
   const noTrigger = engine.checkSkillDescription('Generates a report from a `.csv` file. Do NOT use for single questions... never use it otherwise.');
   assert.ok(noTrigger.missing.includes("trigger"));
+  // a single quoted phrasing is NOT a defect — there is no quote-count floor
   const oneQuote = engine.checkSkillDescription('Generates a report from a `.csv` file. Use when the user asks to "summarize". Do NOT use for single questions.');
-  assert.ok(oneQuote.missing.includes("trigger"));
+  assert.deepEqual(oneQuote.missing, []);
+  assert.equal(oneQuote.quotedPhrases, 1);
   const noConcrete = engine.checkSkillDescription('Processes tabular data. Use when the user asks to "summarize data.csv", "make a report". Do NOT use for single questions.');
   assert.ok(noConcrete.missing.includes("concrete"));
   const noExclusion = engine.checkSkillDescription('Generates a report from a `.csv` file. Use when the user asks to "summarize the data", "make a report".');
   assert.deepEqual(noExclusion.missing, ["exclusion"]);
   assert.deepEqual(engine.checkSkillDescription("").missing, ["trigger", "concrete", "exclusion"]);
+});
+
+test("a trigger clause with no quoted phrasings is not a defect", () => {
+  const noQuotes = engine.checkSkillDescription("Generates a report from a `.csv` file. Use when the user asks for a full summary. Do NOT use for single questions.");
+  assert.deepEqual(noQuotes.missing, []);
+  assert.equal(noQuotes.quotedPhrases, 0);
 });
 
 test("quoted trigger phrases do not count toward concreteness", () => {
@@ -433,6 +441,10 @@ test("assay's own skill descriptions pass the trigger-recipe checks", () => {
     assert.deepEqual(checks.missing, [], name);
     assert.equal(checks.overCap, false, name + " is over the 1,536-char cap");
     assert.equal(checks.redundant, false, name + " carries a duplicated clause");
+    const disabled = fm["disable-model-invocation"] === true || fm["disable-model-invocation"] === "true";
+    if (!disabled) {
+      assert.equal(fm.when_to_use, undefined, name + " is model-invocable but still carries when_to_use");
+    }
   }
 });
 
@@ -494,7 +506,43 @@ test("an unflagged skill grades on the recipe (model mode), flags default on", (
   assert.equal(s.modelInvocable, true);
   assert.equal(s.userInvocable, true);
   assert.equal(s.checks.mode, "model");
+  assert.equal(s.checks.hasWhenToUse, false);
   assert.deepEqual(s.checks.missing, engine.checkSkillDescription(GOOD_DESC).missing);
+});
+
+test("a model-invocable skill with a lingering when_to_use field is flagged", () => {
+  const root = tmpProject({
+    ".claude/skills/split/SKILL.md": [
+      "---",
+      "name: split",
+      "description: " + JSON.stringify(GOOD_DESC),
+      "when_to_use: Use when the user asks to split things.",
+      "---",
+    ].join("\n"),
+  });
+  const s = engine.findSkillFiles(root)[0];
+  assert.equal(s.checks.mode, "model");
+  assert.equal(s.checks.hasWhenToUse, true);
+});
+
+test("report: a model-invocable skill still carrying when_to_use gets the fold-and-drop advice", () => {
+  const root = tmpProject({
+    ...FIXTURE,
+    ".claude/skills/split/SKILL.md": [
+      "---",
+      "name: split",
+      "description: " + JSON.stringify(GOOD_DESC),
+      "when_to_use: Use when the user asks to split things.",
+      "---",
+    ].join("\n"),
+  });
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /## Weak skill descriptions/);
+  assert.match(report, /split/);
+  assert.match(report, /drop when_to_use/);
 });
 
 test("a model-disabled skill is graded as a plain summary, not the recipe", () => {

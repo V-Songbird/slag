@@ -41,14 +41,18 @@ never invent policy the original didn't state.
 ## Rewriting weak skill descriptions
 
 The "Weak skill descriptions" section lists each `.claude/skills/<name>/SKILL.md`
-whose `description` (plus `when_to_use`) is missing part of the trigger recipe,
-carries a duplicated clause, or runs over the 1,536-character listing cap. Read
+whose `description` (plus `when_to_use`, if present) is missing part of the
+trigger recipe, carries a duplicated clause, still keeps a separate `when_to_use`
+field, or runs over the 1,536-character listing cap. Read
 `${CLAUDE_PLUGIN_ROOT}/skills/craft-skill/references/recipe.md` first, then fix
 each listed skill by editing only its frontmatter — never the skill body.
 
 The Issue column says which case each skill is, and the fix differs by case:
 
-- **Model-invocable** (the default) — rewrite to the recipe, as below.
+- **Model-invocable** (the default) — rewrite to the recipe, as below, folding
+  any `when_to_use` content into `description` and deleting the field. A proof
+  A/B (`docs/research/proof/skill-trim/`, confirmed on sonnet) found no firing
+  penalty from dropping it and a measurable recall lift over keeping it.
 - **`disable-model-invocation`, still user-invocable** — the description is a
   slash-command summary, not a router. The fix inverts: trim it to one short
   plain-English sentence and delete `when_to_use` and any quoted trigger
@@ -64,22 +68,37 @@ parts in, turning an existing prose trigger into the quoted "Use when…" form
 rather than adding a second clause beside it.
 
 1. Read the skill's current `description` and `when_to_use` with `Read`, and note
-   the report's Chars figure — that combined length is your budget.
-2. Rewrite to the recipe's three parts: a concrete base sentence naming real
-   artifacts, key use case first; a "Use when…" clause with two to four quoted
-   phrasings in the user's words; and a "Do NOT use when…" exclusion. Keep what
-   already works and keep the author's intent — cut only duplication and padding.
-   Split the load the way the docs do: `description` carries what the skill does
-   plus the primary trigger, `when_to_use` (if present) holds a short extra line
-   of trigger phrases — never repeat a phrasing across both fields.
-3. The combined `description` + `when_to_use` must end **under 1,536 characters**.
-   If it was already over, the rewrite has to remove more than it adds — past the
-   cap the tail truncates in the listing and the "Do NOT use" clause is the first
-   thing lost. Apply with `Edit`, matching the exact current text, then re-check
-   against the recipe's refit checklist.
+   the report's Chars figure — that combined length is your budget, and it all
+   lands in one field.
+2. Rewrite to the recipe's three parts, all inside `description`: a concrete
+   base sentence naming real artifacts, key use case first; a "Use when…" clause;
+   and a "Do NOT use when…" exclusion. Keep what already works and keep the
+   author's intent — cut only duplication and padding. If `when_to_use` exists,
+   fold its content in and remove the field from the frontmatter entirely — a
+   model-invocable skill never keeps both.
 
-Fix only the description and `when_to_use`. A skill that needs a whole new body,
-or a brand-new skill, is `/assay:craft-skill`, not this pass.
+   Two things the measurement changed about how to write part 1 and part 2:
+
+   - **Keep the base sentence terse.** If it enumerates the domain's whole
+     surface ("the full command set and constant registry, scoping, event
+     labels, …"), cut it to a `<domain> — <key commands/nouns>` opener. The
+     enumeration measurably lowers firing, most sharply on niche domains. This
+     is the highest-value edit on the description.
+   - **Quoted phrasings are optional, and must fit.** There is no minimum count
+     — one is fine, none is fine, and adding more never improved firing. What
+     does hurt is quotes that miss what the skill is actually asked for: they
+     narrow the router's scope and can collapse firing. Rewrite off-target
+     quotes to match the real ask, or delete them. Never invent quotes just to
+     reach a count.
+3. `description` alone must end **under 1,536 characters**. If it was already
+   over, the rewrite has to remove more than it adds — past the cap the tail
+   truncates in the listing and the "Do NOT use" clause is the first thing lost.
+   Apply with `Edit`, matching the exact current text, then re-check against the
+   recipe's refit checklist.
+
+Fix only `description`, deleting `when_to_use` for a model-invocable skill when
+it exists. A skill that needs a whole new body, or a brand-new skill, is
+`/assay:craft-skill`, not this pass.
 
 ## Fixing stale references
 
