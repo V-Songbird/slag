@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { currentTokens, decide, nudge } = require('../hooks/brink.js');
+const { scan, currentTokens, decide, nudge } = require('../hooks/brink.js');
 
 let seq = 0;
 const made = [];
@@ -63,6 +63,67 @@ describe('currentTokens', () => {
   });
 });
 
+describe('scan signals', () => {
+  test('pulls tokens, recent file basenames (distinct, newest-first, capped), and the task line', () => {
+    const p = writeTranscript([
+      { type: 'user', message: { content: 'Fix the failing pricing test\nsecond line ignored' } },
+      { type: 'assistant', message: { content: [
+        { type: 'tool_use', name: 'Read', input: { file_path: '/repo/src/pricing.js' } },
+        { type: 'tool_use', name: 'Edit', input: { file_path: 'D:\\repo\\src\\pricing.js' } }, // same basename → de-duped
+      ] } },
+      assistant({ input_tokens: 10, cache_read_input_tokens: 160000, output_tokens: 30 }),
+      { type: 'assistant', message: { content: [
+        { type: 'tool_use', name: 'Write', input: { file_path: '/repo/tests/pricing.test.js' } },
+      ] } },
+    ]);
+    const s = scan(p);
+    assert.strictEqual(s.tokens, 160040);
+    assert.deepStrictEqual(s.files, ['pricing.test.js', 'pricing.js']);
+    assert.strictEqual(s.task, 'Fix the failing pricing test');
+  });
+
+  test('caps the file list at three, newest first', () => {
+    const p = writeTranscript([
+      { type: 'assistant', message: { content: [
+        { type: 'tool_use', name: 'Edit', input: { file_path: 'a.js' } },
+        { type: 'tool_use', name: 'Edit', input: { file_path: 'b.js' } },
+        { type: 'tool_use', name: 'Edit', input: { file_path: 'c.js' } },
+        { type: 'tool_use', name: 'Edit', input: { file_path: 'd.js' } },
+      ] } },
+      assistant({ input_tokens: 1, cache_read_input_tokens: 5, output_tokens: 1 }),
+    ]);
+    assert.deepStrictEqual(scan(p).files, ['a.js', 'b.js', 'c.js']);
+  });
+
+  test('ignores sidechain file ops and truncates a long task line', () => {
+    const long = 'A'.repeat(200);
+    const p = writeTranscript([
+      { type: 'user', message: { content: long } },
+      { type: 'assistant', isSidechain: true, message: { content: [
+        { type: 'tool_use', name: 'Edit', input: { file_path: '/sub/agent.js' } },
+      ] } },
+      assistant({ input_tokens: 1, cache_read_input_tokens: 5, output_tokens: 1 }),
+    ]);
+    const s = scan(p);
+    assert.deepStrictEqual(s.files, []);
+    assert.ok(s.task.length <= 80 && s.task.endsWith('…'));
+  });
+
+  test('ignores harness-injected (non-human) user turns when choosing the task', () => {
+    const p = writeTranscript([
+      { type: 'user', message: { content: 'the real task' } },
+      { type: 'user', isMeta: true, message: { content: 'scheduled wakeup' } },
+      { type: 'user', origin: { kind: 'task' }, message: { content: 'task notification' } },
+      assistant({ input_tokens: 1, cache_read_input_tokens: 5, output_tokens: 1 }),
+    ]);
+    assert.strictEqual(scan(p).task, 'the real task');
+  });
+
+  test('empty signals when there is no transcript', () => {
+    assert.deepStrictEqual(scan(undefined), { tokens: null, files: [], task: null });
+  });
+});
+
 describe('decide', () => {
   const T = 150000;
   const R = 120000;
@@ -103,5 +164,18 @@ describe('nudge', () => {
     assert.match(msg, /~157k tokens/);
     assert.match(msg, /\/compact /);
     assert.match(msg, /Drop resolved exploration/);
+  });
+
+  test('weaves the live task and files into the keep-clause when given', () => {
+    const msg = nudge(160000, { task: 'fix the coupon rounding bug', files: ['pricing.js', 'pricing.test.js'] });
+    assert.match(msg, /the current task \(fix the coupon rounding bug\)/);
+    assert.match(msg, /the files in play \(pricing\.js, pricing\.test\.js\)/);
+    assert.match(msg, /still open\. Drop resolved/); // oxford "and" joins the clause, sentence then continues
+  });
+
+  test('falls back to the generic clause with no signals', () => {
+    const msg = nudge(160000, { task: null, files: [] });
+    assert.match(msg, /Keep the current task and goal,/);
+    assert.doesNotMatch(msg, /files in play/);
   });
 });
