@@ -4,6 +4,12 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.4.1-alpha] — 2026-07-23
+
+### Fixed
+
+- A "must not" prohibition that follows its subject ("tests must not X") is detected again — the clause-leading requirement introduced in 0.4.0-alpha had dropped it
+
 ## [0.4.0-alpha] — 2026-07-23
 
 ### Added

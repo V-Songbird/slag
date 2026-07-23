@@ -157,6 +157,12 @@ test("F2 mid-clause negation is a statement, not a prohibition", () => {
   assert.equal(r.value, 0.85);
 });
 
+test("F2 'must not' after a subject is still a prohibition", () => {
+  const r = engine.scoreF2("Tests offered in this section must not be runnable with JUnit.");
+  assert.equal(r.stallRisk, true);
+  assert.equal(r.value, 0.2);
+});
+
 test("F2 clause-leading prohibition with a named action is still the strongest framing", () => {
   const r = engine.scoreF2("A bare label signals internal-only content — cut it, don't rename it.");
   assert.equal(r.value, 0.95);

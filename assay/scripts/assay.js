@@ -794,7 +794,9 @@ function hasContrastNot(text) {
 
 function scoreF2(text) {
   const lower = text.toLowerCase();
-  const isProhibition = PROHIBITION_CLAUSE_RE.test(lower);
+  // "must not" is deontic — it never appears in a factual negation — so it
+  // counts as a prohibition anywhere, even after a subject ("tests must not X").
+  const isProhibition = PROHIBITION_CLAUSE_RE.test(lower) || lower.includes("must not ");
   const isHedged = HEDGED_MARKERS.some((p) => lower.includes(p));
   const hasAlternative = ALTERNATIVE_MARKERS.some((p) => lower.includes(p)) || hasContrastNot(text);
 
