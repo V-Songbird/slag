@@ -1,0 +1,12 @@
+{
+  "name": "brink",
+  "description": "Watches how full the context window is getting and, once you near the edge, surfaces a one-time nudge to run /compact with a ready-made instruction — so the summary keeps the task, decisions, and errors instead of an automatic guess.",
+  "license": "MIT",
+  "author": {
+    "name": "Victor Villegas",
+    "email": "victor.villegas@tuta.com"
+  },
+  "homepage": "https://github.com/V-Songbird/slag/tree/main/brink",
+  "repository": "https://github.com/V-Songbird/slag",
+  "keywords": ["context-window", "compact", "compaction", "tokens", "session", "hooks", "nudge"]
+}

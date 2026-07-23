@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 72" role="img" aria-label="brink">
+  <text x="2" y="50" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="46" font-weight="700" letter-spacing="-1.5" fill="#1b1b1b">brink</text>
+  <path d="M6 63 H150" stroke="#E5582B" stroke-width="4" stroke-linecap="round"/>
+  <rect x="159" y="65" width="7" height="7" rx="1.5" fill="#E5582B" transform="rotate(20 162.5 68.5)"/>
+</svg>
