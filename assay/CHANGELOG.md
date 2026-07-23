@@ -4,6 +4,12 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.5.2-alpha] — 2026-07-23
+
+### Fixed
+
+- Under an output style that stays silent until the work is done, the fix menu no longer appears with no report behind it. The audit now checks whether it can put the report in front of the user before asking anything: when it can't, it skips the menu, ends on the full report, and tells you to rerun with `--fix` or name what to rewrite
+
 ## [0.5.1-alpha] — 2026-07-23
 
 ### Fixed

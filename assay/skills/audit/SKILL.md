@@ -73,11 +73,21 @@ markdown report — corpus grade, per-file grades, weak rules with suggested
 fixes, stall risks, buried rules, stale references, hook opportunities,
 placement candidates, weak skill descriptions.
 
-The report is this skill's deliverable, so it goes in your **final message** —
-the one after step 5, not a preamble before the fix menu. Text written before a
-tool call is discarded under silent output styles, and the user then sees an
-audit that reported nothing. Length limits from an output style do not apply to
-it: reproduce every table in full.
+The report is this skill's deliverable and the user must have read it before
+the step 4 menu asks them to choose anything. Length limits from an output
+style never apply to it: reproduce every table in full.
+
+Some output styles discard text written before a tool call, so the report has
+to reach the user differently depending on the style in force:
+
+- If you can write text before a tool call, print the report now, then go to
+  step 4 and ask the menu underneath it.
+- If you cannot — a style requiring silence until the work is done, or a hook
+  telling you your next output must be a tool call — then **skip step 4
+  entirely**, go to step 5, and make the report your final message. Close it
+  with one line: rerun with `--fix` to apply every rewrite, or name what to
+  rewrite. Never ask the menu when the report cannot precede it; a menu with
+  no report behind it asks the user to choose blind.
 
 Print its markdown **verbatim** —
 each rule cell is a clickable `[rule](file:line)` link, so do not rebuild the
@@ -96,8 +106,9 @@ judgments, fix `.assay-tmp/judgments.json` and rerun.
 ## 4. Offer fixes
 
 Skip this step entirely (go to 5) when the report has no weak rules, no weak
-skill descriptions, and no placement candidates. If `--fix` was passed, skip the
-question and apply every rewrite — weak rules and weak skill descriptions — only.
+skill descriptions, and no placement candidates, or when step 3 left the report
+for the final message. If `--fix` was passed, skip the question and apply every
+rewrite — weak rules and weak skill descriptions — only.
 
 Otherwise ask ONE question with `AskUserQuestion` (`multiSelect: true`,
 header `"Fix menu"`), including only options that have evidence:
@@ -128,5 +139,5 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" clean
 ```
 
 Always run this last, whether or not fixes were applied. Then write the final
-message: the step 3 report verbatim, your three sentences, and what step 4
-changed.
+message: whatever step 3 did not already show, your three sentences, and what
+step 4 changed.
