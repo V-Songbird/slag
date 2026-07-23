@@ -1,8 +1,8 @@
 "use strict";
 
 // Tier-awareness UX (component 5). The default tier is chosen FOR the user based
-// on the config surface, and explained — encoding the rule-lab / skill-lab
-// master findings (spec §6):
+// on the config surface, and explained — encoding the wording-effect research
+// findings (spec §6):
 //
 //   rule wording  → haiku. Sonnet saturates at 1.00 regardless of wording, so a
 //                   rule A/B on sonnet returns a TRUE NULL that reads as tool

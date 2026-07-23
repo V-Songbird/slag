@@ -1,7 +1,7 @@
 "use strict";
 
 // Plain-text report — one table. Per arm: N, compliance, lift, CI, verdict, and
-// realized spend. No HTML, no charts, no ">99%"-style claims.
+// realized spend. No HTML, no charts, no inflated-accuracy claims.
 
 function fmt(x, d = 2) {
   return x == null ? "—" : x.toFixed(d);

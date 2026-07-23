@@ -2,7 +2,7 @@
 
 // Representativeness disclosure (component 3). Printed on EVERY report. States
 // what the number does and does not license, so a tight CI can never be mistaken
-// for general validity. The word "benchmark" appears nowhere — proof is a
+// for general validity. proof is never framed as a scoreboard — it is a
 // directional decision instrument, not a leaderboard (spec §5.4).
 
 function disclosure(tasks) {

@@ -34,6 +34,22 @@ function bootstrapLiftCI(variantScores, baselineScores, rand, iters = BOOTSTRAP_
   return [lifts[Math.floor(0.025 * iters)], lifts[Math.floor(0.975 * iters)]];
 }
 
+// One-sample percentile bootstrap of a rate (the mean of a 0/1 score array):
+// resample the scores with replacement, recompute the mean, take the 2.5/97.5
+// percentiles. Returns [lo, hi] — the baseline band a drift re-check is judged
+// against. Empty in => [null, null].
+function bootstrapRateCI(scores, rand, iters = BOOTSTRAP_ITERS) {
+  if (!scores.length) return [null, null];
+  const rates = [];
+  for (let i = 0; i < iters; i++) {
+    let s = 0;
+    for (let j = 0; j < scores.length; j++) s += scores[Math.floor(rand() * scores.length)];
+    rates.push(s / scores.length);
+  }
+  rates.sort((a, b) => a - b);
+  return [rates[Math.floor(0.025 * iters)], rates[Math.floor(0.975 * iters)]];
+}
+
 // Four-way verdict from a lift CI:
 //   CI entirely above 0       -> CONFIRMED+
 //   CI entirely below 0       -> CONFIRMED-
@@ -46,4 +62,4 @@ function verdictFor(ciLow, ciHigh) {
   return "INCONCLUSIVE";
 }
 
-module.exports = { lcg, mean, bootstrapLiftCI, verdictFor, BOOTSTRAP_ITERS, NULL_BAND };
+module.exports = { lcg, mean, bootstrapLiftCI, bootstrapRateCI, verdictFor, BOOTSTRAP_ITERS, NULL_BAND };

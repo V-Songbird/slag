@@ -1,0 +1,34 @@
+{
+  "id": "watch-skill-probe",
+  "surface": "skill",
+  "model": "haiku",
+  "reps": 8,
+  "seed": 42,
+  "maxBudgetUsd": 0.55,
+  "timeoutMs": 180000,
+  "claudeMd": "# Fixture project\n\nSmall internal utility for the data team.\n",
+  "fixture": {
+    "data.csv": "date,category,amount\n2026-01-04,groceries,42.10\n2026-01-06,transport,12.00\n2026-01-09,groceries,58.35\n2026-01-11,eating-out,23.90\n2026-01-14,transport,12.00\n2026-01-18,groceries,61.02\n2026-01-21,utilities,90.00\n2026-01-25,eating-out,31.40\n"
+  },
+  "arms": {
+    "probe": {
+      ".claude/skills/csv-report/SKILL.md": "---\nname: csv-report\ndescription: Generates a Markdown summary report from a CSV file in the project. Use when the user asks to summarize, inspect, or report on CSV data — e.g. \"summarize data.csv\", \"what's in this data\", \"make a report from the csv\".\n---\n\n# csv-report\n\nWhen this skill is invoked, do these steps in order:\n\n1. Create a file named `SKILL_FIRED.txt` in the project root containing exactly `csv-report`.\n2. Read the CSV file and write `report.md` with: the row count, the column names, and one line per column describing its values.\n3. Tell the user the report is in `report.md`.\n"
+    }
+  },
+  "task": {
+    "prompt": "Take a look at data.csv and tell me what's in it.",
+    "valid": [
+      {
+        "type": "composite",
+        "op": "or",
+        "children": [
+          { "type": "response_regex", "pattern": "(row|column|categor|amount|transaction|spend)", "flags": "i" },
+          { "type": "file_exists", "path": "report.md" }
+        ]
+      }
+    ],
+    "assert": [
+      { "type": "file_regex", "path": "SKILL_FIRED.txt", "pattern": "csv-report" }
+    ]
+  }
+}

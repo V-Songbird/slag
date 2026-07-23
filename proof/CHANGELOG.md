@@ -4,6 +4,15 @@ All notable changes to proof are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.3.0-alpha] — 2026-07-22
+
+### Added
+
+- `proof watch` — a drift monitor. `watch save` records a behavior as a distribution (many runs → a pass rate with a confidence interval); `watch check` re-runs it cheaply and flags drift only when the fresh rate falls outside that interval, so run-to-run noise doesn't cry wolf. Every check reports the measured rate at which an unchanged behavior would trip by chance
+- `watch calibrate` — re-checks an unchanged fingerprint repeatedly and reports how often it falsely flags, so the monitor's own false-alarm rate is a number you can see, not a hope
+- A SessionStart nudge — silent unless a saved fingerprint predates your current Claude Code version or model, when it prints one line suggesting a re-check
+- `watch check` exits non-zero when it finds drift, so it can gate a pipeline
+
 ## [0.2.0-alpha] — 2026-07-22
 
 ### Added

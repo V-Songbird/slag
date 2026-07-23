@@ -64,6 +64,21 @@ Claude fills in the two arms (the config present vs. absent) and real assertions
 
 Each arm comes back as one of four calls: **CONFIRMED+** (behavior moved up; the interval clears zero), **CONFIRMED−** (behavior moved down), **NULL** (a tight interval around zero — a real "no effect," not a shrug), or **INCONCLUSIVE** (the interval's too wide to call — underpowered, not a null; add runs before you conclude anything).
 
+### Watch for drift
+
+A config you measured once won't stay measured — Claude Code ships fast, and a skill that fired reliably last month can quietly stop. `watch` saves a behavior as a *distribution*, not a single run, and re-checks it later.
+
+| You want to… | Just ask |
+| --- | --- |
+| Record a behavior's baseline | "fingerprint this skill's behavior" |
+| Re-check it for drift | "has this behavior drifted since the update" |
+| Measure the monitor's own false-alarm rate | "how often would this watch cry wolf" |
+
+A probe is an ordinary spec with a single arm and a real assertion. `save` runs it many times and stores the pass rate with a confidence interval; `check` re-runs it cheaply and flags drift **only** when the fresh rate lands outside that interval, so ordinary run-to-run noise can't set it off. `check` exits non-zero on drift, so it can gate a pipeline. A one-line nudge appears at session start — and only then — when a saved behavior predates your current Claude Code version.
+
+> [!NOTE]
+> A monitor that cries wolf gets uninstalled, so proof puts a number on its own false-alarm rate. At the default sample size the saved interval itself implies about a **6%** chance an unchanged behavior trips it, and `watch calibrate` lets you measure that number on your own probe before you trust an alert.
+
 ## Under the hood
 
 A paired runner over headless Claude Code on isolated checkouts, a bootstrap confidence interval, and a four-way verdict — all in the plugin's `lib/`, zero dependencies, read it if you want the mechanics. Pairs naturally with [assay](../assay): grade the rule's wording, then measure whether it earned its place.

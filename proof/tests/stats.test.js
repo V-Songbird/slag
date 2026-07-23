@@ -3,7 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { lcg, mean, bootstrapLiftCI, verdictFor } = require("../lib/stats");
+const { lcg, mean, bootstrapLiftCI, bootstrapRateCI, verdictFor } = require("../lib/stats");
 
 test("verdictFor maps a CI to the four-way verdict", () => {
   assert.equal(verdictFor(0.2, 0.8), "CONFIRMED+");
@@ -50,6 +50,14 @@ test("wide low-N mix => INCONCLUSIVE", () => {
   const rand = lcg(3);
   const [lo, hi] = bootstrapLiftCI([1, 0, 1, 0, 1], [0, 1, 0, 1, 0], rand);
   assert.equal(verdictFor(lo, hi), "INCONCLUSIVE");
+});
+
+test("bootstrapRateCI: constant arm => point CI, spread => band inside [0,1]", () => {
+  assert.deepEqual(bootstrapRateCI([1, 1, 1, 1], lcg(1)), [1, 1]);
+  assert.deepEqual(bootstrapRateCI([0, 0, 0, 0], lcg(1)), [0, 0]);
+  const [lo, hi] = bootstrapRateCI([1, 1, 1, 0, 0, 0, 0, 0], lcg(9)); // rate 0.375
+  assert.ok(lo >= 0 && hi <= 1 && lo <= hi, `band in [0,1], got [${lo}, ${hi}]`);
+  assert.deepEqual(bootstrapRateCI([], lcg(1)), [null, null]);
 });
 
 test("mean handles empty arrays", () => {
