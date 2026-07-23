@@ -73,8 +73,12 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" report
 Add `--verbose` or `--json` if the user asked. The command prints the finished
 markdown report — corpus grade, per-file grades, weak rules with suggested
 fixes, stall risks, buried rules, stale references, hook opportunities,
-placement candidates, weak skill descriptions. Present it as-is, then add at
-most 3 sentences of your
+placement candidates, weak skill descriptions. Present it as-is, with one
+exception: the hook section ends with the hooks already wired for this
+project — if a candidate is plainly covered by one of them (same trigger,
+same action), mark it "already enforced by `<command>`" next to the entry
+and drop it from the promote/park counts in step 4. Then add at most 3
+sentences of your
 own: the single most valuable fix and anything project-specific the numbers
 can't see. If the project visibly runs subagents or headless automation, one
 of those sentences should say the grades apply at full severity there; if it

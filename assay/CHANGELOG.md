@@ -4,6 +4,18 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.4.0-alpha] — 2026-07-23
+
+### Added
+
+- Every rule location in the report is now a clickable `file:line` markdown link that opens the rule at its exact line
+- The hook-candidates section now lists the hooks already wired for the project — from project and user settings plus installed plugins — so a candidate that is already enforced gets marked as covered instead of proposed again
+
+### Fixed
+
+- A factual negation mid-sentence ("those APIs don't exist") is no longer read as a prohibition, so informational notes stop landing in "Stall risks" with capped scores
+- A prohibition that names its replacement with "cut" or "drop" now gets credit for the alternative
+
 ## [0.3.1-alpha] — 2026-07-23
 
 ### Fixed

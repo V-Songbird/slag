@@ -18,6 +18,7 @@
 // (trigger-action distance) and F8 (enforceability), supplied via judgments.json.
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const TMP_DIR = ".assay-tmp";
@@ -48,7 +49,7 @@ const VERB_TIERS_RAW = [
       "freeze", "truncate", "rotate", "scaffold", "bootstrap", "populate", "drain", "terminate",
       "preload", "paginate", "escalate", "centralize", "standardize", "prioritize", "coordinate",
       "minimize", "authenticate", "authorize", "archive", "batch", "aggregate", "benchmark",
-      "profile", "isolate", "provision", "orchestrate", "coerce"
+      "profile", "isolate", "provision", "orchestrate", "coerce", "cut", "drop"
     ]
   },
   { score: 0.7, label: "advisory", verbs: ["should", "always"] },
@@ -76,6 +77,15 @@ VERB_TIERS.sort((a, b) => b.verb.length - a.verb.length);
 const ALL_VERBS = new Set(VERB_TIERS.map((t) => t.verb));
 
 const PROHIBITION_MARKERS = ["never ", "do not ", "don't ", "avoid ", "must not "];
+// A prohibition marker only counts when it leads its clause — "those APIs
+// don't exist" is a statement of fact, not a directive, and must not read as
+// a stall-risk prohibition. Mid-clause directives still match after
+// punctuation, a dash, an opening quote/paren, or bold markers.
+const PROHIBITION_CLAUSE_RE = new RegExp(
+  "(?:^|[.!?;:,]\\s|[—–]\\s?|[(\"*])(?:" +
+  ["never", "do not", "don't", "avoid", "must not"].map((m) => escapeRe(m)).join("|") +
+  ")\\b"
+);
 const HEDGED_MARKERS = ["prefer ", "default to ", "when possible"];
 const ALTERNATIVE_MARKERS = ["instead", " rather than "];
 
@@ -784,7 +794,7 @@ function hasContrastNot(text) {
 
 function scoreF2(text) {
   const lower = text.toLowerCase();
-  const isProhibition = PROHIBITION_MARKERS.some((p) => lower.includes(p));
+  const isProhibition = PROHIBITION_CLAUSE_RE.test(lower);
   const isHedged = HEDGED_MARKERS.some((p) => lower.includes(p));
   const hasAlternative = ALTERNATIVE_MARKERS.some((p) => lower.includes(p)) || hasContrastNot(text);
 
@@ -981,6 +991,67 @@ function detectPlacement(ruleText, f8) {
 }
 
 // ---------------------------------------------------------------------------
+// Hook inventory — what's already mechanically enforced
+// ---------------------------------------------------------------------------
+
+// The last path-shaped token of a hook command line names the script; the
+// interpreter and env-var prefixes around it are noise.
+function hookCommandLabel(cmd) {
+  const clean = String(cmd).replace(/["']/g, "");
+  const pathy = clean.split(/\s+/).filter((t) => /[\\/]/.test(t));
+  const token = pathy.length ? pathy[pathy.length - 1] : clean.split(/\s+/)[0];
+  return token.split(/[\\/]/).pop();
+}
+
+function readHookConfig(file, source, entries) {
+  let cfg;
+  try {
+    cfg = JSON.parse(fs.readFileSync(file, "utf-8"));
+  } catch {
+    return; // absent or malformed — no inventory from this file
+  }
+  for (const [event, groups] of Object.entries(cfg.hooks || {})) {
+    if (!Array.isArray(groups)) continue;
+    for (const g of groups) {
+      for (const h of g.hooks || []) {
+        if (!h || !h.command) continue;
+        entries.push({ event, matcher: g.matcher || "*", command: hookCommandLabel(h.command), source });
+      }
+    }
+  }
+}
+
+// Hooks that already run for this project: project + user settings, plus every
+// installed plugin's hooks.json. A rule the audit flags as a hook candidate may
+// already be enforced by one of these — the report lists them so the candidate
+// can be checked instead of rebuilt.
+function collectHooks(root) {
+  const entries = [];
+  readHookConfig(path.join(root, ".claude", "settings.json"), "project", entries);
+  readHookConfig(path.join(root, ".claude", "settings.local.json"), "project", entries);
+  readHookConfig(path.join(os.homedir(), ".claude", "settings.json"), "user", entries);
+  try {
+    const reg = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json"), "utf-8"));
+    for (const [key, installs] of Object.entries(reg.plugins || {})) {
+      const name = key.split("@")[0];
+      for (const inst of Array.isArray(installs) ? installs : []) {
+        if (!inst || !inst.installPath) continue;
+        readHookConfig(path.join(inst.installPath, "hooks", "hooks.json"), "plugin: " + name, entries);
+      }
+    }
+  } catch {
+    // no plugin registry — nothing to add
+  }
+  const seen = new Set();
+  return entries.filter((e) => {
+    const k = e.event + "|" + e.matcher + "|" + e.command + "|" + e.source;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // scan
 // ---------------------------------------------------------------------------
 
@@ -1035,6 +1106,7 @@ function scan(root) {
     files: files.map(({ content, absPath, ...rest }) => rest),
     rules,
     skills: findSkillFiles(root),
+    hookInventory: collectHooks(root),
   };
 }
 
@@ -1134,6 +1206,7 @@ function composeAudit(scanData, judgments) {
 
   return {
     root: scanData.root, files, rules, skills: scanData.skills || [],
+    hookInventory: scanData.hookInventory || [],
     corpusScore: corpus, corpusGrade: corpus === null ? null : grade(corpus),
   };
 }
@@ -1150,7 +1223,7 @@ function pushWeakSkillSection(out, weakSkills) {
   out.push("| Skill | Where | Missing |");
   out.push("|---|---|---|");
   for (const s of weakSkills) {
-    out.push(`| ${s.name} | ${s.path} | ${s.checks.missing.map((k) => SKILL_CHECK_LABELS[k]).join(", ")} |`);
+    out.push(`| ${s.name} | [${s.path}](${s.path}) | ${s.checks.missing.map((k) => SKILL_CHECK_LABELS[k]).join(", ")} |`);
   }
   out.push("");
 }
@@ -1158,6 +1231,9 @@ function pushWeakSkillSection(out, weakSkills) {
 function renderReport(audit, opts = {}) {
   const out = [];
   const { rules, files } = audit;
+  // file:line as a markdown link — Claude Code renders it clickable, opening
+  // the rule at its exact line
+  const loc = (r) => `[${r.file}:${r.lineStart}](${r.file}:${r.lineStart})`;
   const weakSkills = (audit.skills || []).filter((s) => s.checks.missing.length);
   out.push("# Rule audit — " + path.basename(audit.root));
   out.push("");
@@ -1198,7 +1274,7 @@ function renderReport(audit, opts = {}) {
     out.push("|---|---|---|---|---|");
     for (const r of weak) {
       const issue = FACTOR_LABELS[r.dominantWeakness] || r.dominantWeakness;
-      out.push(`| ${r.id} "${truncate(r.text, 60)}" | ${r.file}:${r.lineStart} | ${r.grade} (${fmt(r.score)}) | ${issue} | ${FRIENDLY_FIXES[r.dominantWeakness]} |`);
+      out.push(`| ${r.id} "${truncate(r.text, 60)}" | ${loc(r)} | ${r.grade} (${fmt(r.score)}) | ${issue} | ${FRIENDLY_FIXES[r.dominantWeakness]} |`);
     }
     out.push("");
   }
@@ -1210,7 +1286,7 @@ function renderReport(audit, opts = {}) {
     out.push('A prohibition with no named alternative can stall a run outright when the task needs the banned thing. Pair it with the replacement — "Never X — do Y instead" — or with the escape hatch ("stop and ask").');
     out.push("");
     for (const r of stalls) {
-      out.push(`- ${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}"`);
+      out.push(`- ${r.id} (${loc(r)}) "${truncate(r.text, 80)}"`);
     }
     out.push("");
   }
@@ -1223,7 +1299,7 @@ function renderReport(audit, opts = {}) {
     out.push("");
     for (const r of buried) {
       const total = files[r.fileIndex] ? files[r.fileIndex].lineCount : "?";
-      out.push(`- ${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}" — line ${r.lineStart} of ${total}`);
+      out.push(`- ${r.id} (${loc(r)}) "${truncate(r.text, 80)}" — line ${r.lineStart} of ${total}`);
     }
     out.push("");
   }
@@ -1241,7 +1317,7 @@ function renderReport(audit, opts = {}) {
         if (moved.length === 1) hint = " → likely moved to `" + moved[0] + "`";
         else if (moved.length > 1) hint = " → same name lives at: " + moved.slice(0, 4).map((c) => "`" + c + "`").join(", ");
         else hint = " → no file by that name in the repo";
-        out.push(`- ${r.id} (${r.file}:${r.lineStart}) cites \`${m.ref}\`${hint}`);
+        out.push(`- ${r.id} (${loc(r)}) cites \`${m.ref}\`${hint}`);
       }
     }
     out.push("");
@@ -1254,9 +1330,18 @@ function renderReport(audit, opts = {}) {
     out.push("A hook or script could enforce these mechanically, on every run, instead of relying on Claude to read and remember them:");
     out.push("");
     for (const r of hooks) {
-      out.push(`- ${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}"`);
+      out.push(`- ${r.id} (${loc(r)}) "${truncate(r.text, 80)}"`);
     }
     out.push("");
+    const inv = audit.hookInventory || [];
+    if (inv.length) {
+      out.push("Hooks already wired for this project — a candidate one of these already enforces is done, and its rule can shrink to a pointer:");
+      out.push("");
+      for (const h of inv) {
+        out.push(`- ${h.event} \`${h.matcher}\` → \`${h.command}\` — ${h.source}`);
+      }
+      out.push("");
+    }
   }
 
   const placed = rules.filter((r) => r.placement);
@@ -1269,7 +1354,7 @@ function renderReport(audit, opts = {}) {
       const det = Object.entries(r.placement.detections)
         .map(([prim, d]) => `${prim} ${fmt(d.confidence)} [${d.evidence.join(", ")}]`)
         .join("; ");
-      out.push(`- ${r.id} (${r.file}:${r.lineStart}) → **${r.placement.bestFit}** — "${truncate(r.text, 70)}"`);
+      out.push(`- ${r.id} (${loc(r)}) → **${r.placement.bestFit}** — "${truncate(r.text, 70)}"`);
       out.push(`  - signals: ${det}`);
     }
     out.push("");
@@ -1287,7 +1372,7 @@ function renderReport(audit, opts = {}) {
     for (const r of rules) {
       const v = r.factorValues;
       const cells = FACTOR_COLUMNS.map(([f]) => fmt(f === "F8" ? r.f8 : v[f])).join(" | ");
-      out.push(`| ${r.id} "${truncate(r.text, 40)}" | ${r.file}:${r.lineStart} | ${r.category} | ${cells} | ${fmt(r.score)} | ${r.grade} |`);
+      out.push(`| ${r.id} "${truncate(r.text, 40)}" | ${loc(r)} | ${r.category} | ${cells} | ${fmt(r.score)} | ${r.grade} |`);
     }
     out.push("");
   }

@@ -151,6 +151,18 @@ test("F2 flags a bare prohibition as a stall risk", () => {
   assert.equal(engine.scoreF2("Never use var — use const instead of it.").stallRisk, undefined);
 });
 
+test("F2 mid-clause negation is a statement, not a prohibition", () => {
+  const r = engine.scoreF2("WebStorm APIs don't exist on the platform-base matrix this ships on.");
+  assert.equal(r.stallRisk, undefined);
+  assert.equal(r.value, 0.85);
+});
+
+test("F2 clause-leading prohibition with a named action is still the strongest framing", () => {
+  const r = engine.scoreF2("A bare label signals internal-only content — cut it, don't rename it.");
+  assert.equal(r.value, 0.95);
+  assert.equal(r.stallRisk, undefined);
+});
+
 test("F2 backtick contrast counts as an alternative, predicate negation does not", () => {
   assert.equal(engine.scoreF2("Use `getProjectCommands(project)` not `database.commands` here.").value, 0.95);
   assert.equal(engine.scoreF2("Write tests first, this is not optional.").value, 0.85);
@@ -537,6 +549,38 @@ test("a rule at the bottom of a long file is reported as buried", () => {
   const judgments = { [scanData.rules[0].id]: { F3: 0.8, F8: 0.9 } };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.match(report, /## Buried rules/);
+});
+
+test("scan collects wired hooks and the report lists them under the hook section", () => {
+  const root = tmpProject({
+    ...FIXTURE,
+    ".claude/settings.json": JSON.stringify({
+      hooks: {
+        PostToolUse: [{
+          matcher: "Edit|Write",
+          hooks: [{ type: "command", command: 'python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/auto-regen.py"' }],
+        }],
+      },
+    }),
+  });
+  const scanData = engine.scan(root);
+  assert.deepEqual(scanData.hookInventory[0], {
+    event: "PostToolUse", matcher: "Edit|Write", command: "auto-regen.py", source: "project",
+  });
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /Hooks already wired/);
+  assert.match(report, /auto-regen\.py/);
+});
+
+test("report locations are clickable markdown links", () => {
+  const root = tmpProject(FIXTURE);
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /\[CLAUDE\.md:\d+\]\(CLAUDE\.md:\d+\)/);
 });
 
 test("loadJudgments rejects missing or out-of-range entries", () => {
