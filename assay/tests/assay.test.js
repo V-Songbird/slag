@@ -337,6 +337,40 @@ test("quoted trigger phrases do not count toward concreteness", () => {
   assert.ok(r.missing.includes("concrete"));
 });
 
+test("checkSkillDescription reports combined length and flags over-cap text", () => {
+  const ok = engine.checkSkillDescription(GOOD_DESC);
+  assert.equal(ok.length, GOOD_DESC.length);
+  assert.equal(ok.overCap, false);
+  const padded = GOOD_DESC + " It also reads `a.csv`, `b.csv`, and `c.csv`.".repeat(35);
+  const big = engine.checkSkillDescription(padded);
+  assert.ok(big.length > 1536);
+  assert.equal(big.overCap, true);
+  assert.deepEqual(big.missing, []); // recipe parts intact — over-cap is its own issue
+});
+
+test("checkSkillDescription flags a duplicated trigger, exclusion, or quote", () => {
+  const twoTriggers = engine.checkSkillDescription('Generates a report from a `.csv` file. Load when a csv is opened. Use when the user asks to "summarize the data", "make a report". Do NOT use for single questions.');
+  assert.equal(twoTriggers.redundant, true);
+  assert.deepEqual(twoTriggers.missing, []); // redundancy is its own issue, parts intact
+  const twoExclusions = engine.checkSkillDescription('Generates a report from a `.csv` file. Use when the user asks to "summarize the data", "make a report". Do NOT use for single questions. Do NOT trigger on a config file.');
+  assert.equal(twoExclusions.redundant, true);
+  const dupQuote = engine.checkSkillDescription('Generates a report from a `.csv` file. Use when the user asks to "make a report", "make a report". Do NOT use for single questions.');
+  assert.equal(dupQuote.redundant, true);
+});
+
+test("the recipe's own 'Do NOT use when' shape is not read as a duplicate trigger", () => {
+  assert.equal(engine.checkSkillDescription(GOOD_DESC).redundant, false);
+});
+
+test("a same-verb multi-condition enumeration is not flagged redundant", () => {
+  // Two "Trigger when" conditions under one verb, no "asks to" recipe clause
+  // bolted on — legitimate enumeration, must stay clean.
+  const enume = 'Reference for `foo.kt` internals. Trigger when editing `foo.kt`, and trigger when a Baz appears — e.g. "fix foo", "debug bar". Do NOT use for unrelated code.';
+  const c = engine.checkSkillDescription(enume);
+  assert.deepEqual(c.missing, []);
+  assert.equal(c.redundant, false);
+});
+
 test("findSkillFiles reads folded descriptions and grades them", () => {
   const root = tmpProject({
     ".claude/skills/summarize/SKILL.md": [
@@ -395,7 +429,10 @@ test("assay's own skill descriptions pass the trigger-recipe checks", () => {
     if (!fs.existsSync(skillMd)) continue;
     const fm = engine.parseFrontmatter(fs.readFileSync(skillMd, "utf-8"));
     const desc = [fm.description, fm.when_to_use].filter(Boolean).join(" ");
-    assert.deepEqual(engine.checkSkillDescription(desc).missing, [], name);
+    const checks = engine.checkSkillDescription(desc);
+    assert.deepEqual(checks.missing, [], name);
+    assert.equal(checks.overCap, false, name + " is over the 1,536-char cap");
+    assert.equal(checks.redundant, false, name + " carries a duplicated clause");
   }
 });
 
@@ -409,6 +446,110 @@ test("a recipe-shaped skill stays out of the report", () => {
   for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.doesNotMatch(report, /## Weak skill descriptions/);
+});
+
+test("an over-cap skill is flagged even with every recipe part present", () => {
+  const big = GOOD_DESC + " It also reads `a.csv`, `b.csv`, and `c.csv`.".repeat(35);
+  assert.deepEqual(engine.checkSkillDescription(big).missing, []);
+  const root = tmpProject({
+    ...FIXTURE,
+    ".claude/skills/huge/SKILL.md": "---\nname: huge\ndescription: " + JSON.stringify(big) + "\n---\n",
+  });
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /## Weak skill descriptions/);
+  assert.match(report, /huge/);
+  assert.match(report, /over the 1,536-char listing cap/);
+});
+
+test("a redundant but complete skill description is flagged", () => {
+  const dupe = 'Generates a report from a `.csv` file. Load when a csv opens. Use when the user asks to "summarize the data", "make a report". Do NOT use for single questions.';
+  const checks = engine.checkSkillDescription(dupe);
+  assert.deepEqual(checks.missing, []);
+  assert.equal(checks.overCap, false);
+  const root = tmpProject({
+    ...FIXTURE,
+    ".claude/skills/dupe/SKILL.md": "---\nname: dupe\ndescription: " + JSON.stringify(dupe) + "\n---\n",
+  });
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /## Weak skill descriptions/);
+  assert.match(report, /dupe/);
+  assert.match(report, /duplicated/);
+});
+
+// ---------------------------------------------------------------------------
+// Invocation-flag-aware grading
+// ---------------------------------------------------------------------------
+
+test("an unflagged skill grades on the recipe (model mode), flags default on", () => {
+  const root = tmpProject({
+    ".claude/skills/summarize/SKILL.md": "---\nname: summarize\ndescription: " + JSON.stringify(GOOD_DESC) + "\n---\n",
+  });
+  const s = engine.findSkillFiles(root)[0];
+  assert.equal(s.modelInvocable, true);
+  assert.equal(s.userInvocable, true);
+  assert.equal(s.checks.mode, "model");
+  assert.deepEqual(s.checks.missing, engine.checkSkillDescription(GOOD_DESC).missing);
+});
+
+test("a model-disabled skill is graded as a plain summary, not the recipe", () => {
+  const root = tmpProject({
+    ".claude/skills/cut-release/SKILL.md": "---\nname: cut-release\ndescription: Cuts a release — bumps the version and updates the changelog.\ndisable-model-invocation: true\n---\n",
+  });
+  const s = engine.findSkillFiles(root)[0];
+  assert.equal(s.modelInvocable, false);
+  assert.equal(s.checks.mode, "user-only");
+  assert.equal(s.checks.overSpecified, false); // short plain summary — recipe not demanded
+});
+
+test("a model-disabled skill stuffed with trigger machinery is flagged over-specified", () => {
+  const root = tmpProject({
+    ".claude/skills/cut/SKILL.md": '---\nname: cut\ndescription: Cuts a release. Use when the user asks to "cut a release", "bump the version".\ndisable-model-invocation: true\n---\n',
+  });
+  const s = engine.findSkillFiles(root)[0];
+  assert.equal(s.checks.mode, "user-only");
+  assert.equal(s.checks.overSpecified, true);
+});
+
+test("a skill neither model nor user can invoke is graded dead", () => {
+  const root = tmpProject({
+    ".claude/skills/orphan/SKILL.md": "---\nname: orphan\ndescription: Does a thing.\ndisable-model-invocation: true\nuser-invocable: false\n---\n",
+  });
+  const s = engine.findSkillFiles(root)[0];
+  assert.equal(s.checks.mode, "dead");
+});
+
+test("report: a clean user-only summary stays out; an over-specified one gets the model-disabled advice", () => {
+  const root = tmpProject({
+    ...FIXTURE,
+    ".claude/skills/tidy/SKILL.md": "---\nname: tidy\ndescription: Cuts a release and updates the changelog.\ndisable-model-invocation: true\n---\n",
+    ".claude/skills/stuffed/SKILL.md": '---\nname: stuffed\ndescription: Cuts a release. Use when the user asks to "cut a release", "ship it".\ndisable-model-invocation: true\n---\n',
+  });
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /stuffed/);
+  assert.match(report, /model-disabled/);
+  assert.doesNotMatch(report, /\| tidy \|/);
+});
+
+test("report: a dead skill is flagged for removal", () => {
+  const root = tmpProject({
+    ...FIXTURE,
+    ".claude/skills/orphan/SKILL.md": "---\nname: orphan\ndescription: Does a thing.\ndisable-model-invocation: true\nuser-invocable: false\n---\n",
+  });
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /orphan/);
+  assert.match(report, /recommend removing/);
 });
 
 // ---------------------------------------------------------------------------

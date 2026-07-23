@@ -334,12 +334,29 @@ function findInstructionFiles(root) {
 const SKILL_TRIGGER_CLAUSE = /\b(?:use|trigger|invoke)\s+(?:this\s+skill\s+)?when\b/i;
 const SKILL_QUOTED_PHRASE = /"[^"]+"|“[^”]+”/g;
 const SKILL_EXCLUSION_CLAUSE = /\b(?:do\s+not|don'?t|never)\s+(?:use|trigger|invoke)\b/i;
+// Global variants for counting clauses (String.match needs /g to count them).
+// "load" joins the trigger set here because "Load when …" is a real trigger
+// opener — the append fix bolts a "Use when" beside one, which is the pair we
+// want to catch even though the missing-trigger check keys on the recipe form.
+const SKILL_TRIGGER_CLAUSE_G = /\b(?:use|trigger|invoke|load)\s+(?:this\s+skill\s+)?when\b/gi;
+const SKILL_EXCLUSION_CLAUSE_G = /\b(?:do\s+not|don'?t|never)\s+(?:use|trigger|invoke|load)\b/gi;
 const SKILL_FILE_TYPE_NOUN = /(?:^|[\s(`"'])\.[a-z][a-z0-9]{0,5}\b|\b(?:markdown|csv|json|ya?ml|html?|pdf|svg|xlsx|docx|pptx)\b/i;
+
+// description + when_to_use share one skill-listing entry, truncated past this
+// many characters — and the exclusion clause sits last, so it is the first thing
+// lost. A fix that appends recipe parts can push a description over the cap; the
+// rewrite folds the parts in instead and comes out no longer than it started.
+const DESCRIPTION_CAP = 1536;
 
 const SKILL_CHECK_LABELS = {
   trigger: 'no "Use when" clause with 2+ quoted phrasings',
   concrete: "no concrete artifact or file type named",
   exclusion: 'no "Do NOT use" exclusion clause',
+  redundant: "a clause is duplicated — merge the pair, keep every distinct phrasing",
+  overCap: "over the 1,536-char listing cap — the tail is truncated",
+  overSpecified: "model-disabled — drop when_to_use and trigger phrasings, keep a short user-facing summary",
+  empty: "no description",
+  dead: "no model or user invocation — recommend removing the skill",
 };
 
 function checkSkillDescription(description) {
@@ -354,7 +371,38 @@ function checkSkillDescription(description) {
     missing.push("concrete");
   }
   if (!SKILL_EXCLUSION_CLAUSE.test(text)) missing.push("exclusion");
-  return { quotedPhrases: quotes.length, missing };
+  // Redundancy = the append fix's leftovers, safe to merge: the same quoted
+  // phrase twice, two exclusion clauses, or a second "Use when the user asks
+  // to …" recipe clause bolted beside a trigger that already exists. A plain
+  // "Load when A … also load when B" enumeration under one verb is legitimate
+  // and must NOT flag — the "asks to" guard keeps the trigger-count signal off
+  // it. Strip exclusion openers before counting triggers: the recipe's own
+  // "Do NOT use when …" contains "use when" and must not read as a trigger.
+  const exclusionCount = (text.match(SKILL_EXCLUSION_CLAUSE_G) || []).length;
+  const triggerCount = (text.replace(SKILL_EXCLUSION_CLAUSE_G, " ").match(SKILL_TRIGGER_CLAUSE_G) || []).length;
+  const quoteVals = quotes.map((q) => q.replace(/[“”"]/g, "").trim().toLowerCase()).filter(Boolean);
+  const dupQuote = quoteVals.some((q, i) => quoteVals.indexOf(q) !== i);
+  const recipeTriggerAtop = triggerCount >= 2 && /\b(?:the\s+user\s+)?asks?\s+to\b|\buser\s+asks\b/i.test(text);
+  const redundant = dupQuote || exclusionCount >= 2 || recipeTriggerAtop;
+  return { quotedPhrases: quotes.length, missing, redundant, length: text.length, overCap: text.length > DESCRIPTION_CAP };
+}
+
+// A skill's invocation flags decide what "good" means. The trigger recipe only
+// governs auto-routing (disable-model-invocation unset). A user-only slash
+// command wants a short plain summary, not trigger machinery; a skill neither
+// side can invoke is dead. Defaults are on/on, so an unflagged skill is graded
+// on the recipe exactly as before.
+function gradeSkill(router, whenToUse, modelInvocable, userInvocable) {
+  if (modelInvocable) return { mode: "model", ...checkSkillDescription(router) };
+  const length = router.trim().length;
+  if (!userInvocable) {
+    return { mode: "dead", missing: [], redundant: false, overCap: length > DESCRIPTION_CAP, length };
+  }
+  // user-only: the recipe is irrelevant. Flag only over-specification — trigger
+  // machinery it does not need — or an empty/oversized summary.
+  const quotes = (router.match(SKILL_QUOTED_PHRASE) || []).length;
+  const overSpecified = Boolean(whenToUse.trim()) || (SKILL_TRIGGER_CLAUSE.test(router) && quotes >= 2);
+  return { mode: "user-only", missing: [], redundant: false, overCap: length > DESCRIPTION_CAP, length, overSpecified, empty: length === 0 };
 }
 
 function findSkillFiles(root) {
@@ -365,15 +413,20 @@ function findSkillFiles(root) {
     const skillMd = path.join(skillsDir, name, "SKILL.md");
     if (!fs.existsSync(skillMd)) continue;
     const fm = parseFrontmatter(fs.readFileSync(skillMd, "utf-8"));
+    const descText = typeof fm.description === "string" ? fm.description : "";
+    const whenToUse = typeof fm.when_to_use === "string" ? fm.when_to_use : "";
     // when_to_use carries trigger text in some skills; the router reads both
-    const description = [fm.description, fm.when_to_use]
-      .filter((v) => typeof v === "string" && v)
-      .join(" ");
+    const description = [descText, whenToUse].filter(Boolean).join(" ");
+    // flags default to on: an unflagged skill is model- and user-invocable
+    const modelInvocable = !(fm["disable-model-invocation"] === "true" || fm["disable-model-invocation"] === true);
+    const userInvocable = !(fm["user-invocable"] === "false" || fm["user-invocable"] === false);
     skills.push({
       path: ".claude/skills/" + name + "/SKILL.md",
       name: typeof fm.name === "string" && fm.name ? fm.name : name,
       description,
-      checks: checkSkillDescription(description),
+      modelInvocable,
+      userInvocable,
+      checks: gradeSkill(description, whenToUse, modelInvocable, userInvocable),
     });
   }
   return skills;
@@ -1218,14 +1271,28 @@ function fmt(x) {
 }
 
 function pushWeakSkillSection(out, weakSkills) {
-  out.push(`## Weak skill descriptions (${weakSkills.length} missing recipe parts)`);
+  out.push(`## Weak skill descriptions (${weakSkills.length} to fix)`);
   out.push("");
-  out.push("A skill's frontmatter description is how Claude decides to invoke it. These are missing parts of the trigger recipe, so the skill may never fire when you expect it to. assay can rewrite each one for you from the fix menu.");
+  out.push("A skill's frontmatter description is how Claude decides to invoke it, and its `description` plus `when_to_use` share one listing entry capped at 1,536 characters — past that the tail is silently truncated. Model-invocable skills are graded on the trigger recipe; a `disable-model-invocation` skill is graded as a plain user-facing summary instead, and a skill neither side can invoke is flagged for removal. assay can rewrite each one for you from the fix menu (dead skills are flagged, not rewritten).");
   out.push("");
-  out.push("| Skill | Where | Missing |");
-  out.push("|---|---|---|");
+  out.push("| Skill | Where | Chars | Issue |");
+  out.push("|---|---|---|---|");
   for (const s of weakSkills) {
-    out.push(`| ${s.name} | [${s.path}](${s.path}) | ${s.checks.missing.map((k) => SKILL_CHECK_LABELS[k]).join(", ")} |`);
+    const c = s.checks;
+    let issues;
+    if (c.mode === "dead") {
+      issues = [SKILL_CHECK_LABELS.dead];
+    } else if (c.mode === "user-only") {
+      issues = [];
+      if (c.empty) issues.push(SKILL_CHECK_LABELS.empty);
+      if (c.overSpecified) issues.push(SKILL_CHECK_LABELS.overSpecified);
+      if (c.overCap) issues.push(SKILL_CHECK_LABELS.overCap);
+    } else {
+      issues = c.missing.map((k) => SKILL_CHECK_LABELS[k]);
+      if (c.redundant) issues.push(SKILL_CHECK_LABELS.redundant);
+      if (c.overCap) issues.push(SKILL_CHECK_LABELS.overCap);
+    }
+    out.push(`| ${s.name} | [${s.path}](${s.path}) | ${c.length}/${DESCRIPTION_CAP} | ${issues.join(", ")} |`);
   }
   out.push("");
 }
@@ -1240,7 +1307,12 @@ function renderReport(audit, opts = {}) {
   // a reader, so the rule id + text opens the file at its line. Brackets in the
   // label would break the markdown link, so drop them.
   const ruleLink = (r, n) => `[${r.id} "${truncate(r.text, n).replace(/[[\]]/g, "")}"](${r.file}:${r.lineStart})`;
-  const weakSkills = (audit.skills || []).filter((s) => s.checks.missing.length);
+  const weakSkills = (audit.skills || []).filter((s) => {
+    const c = s.checks;
+    if (c.mode === "dead") return true;
+    if (c.mode === "user-only") return c.overSpecified || c.overCap || c.empty;
+    return c.missing.length || c.overCap || c.redundant;
+  });
   out.push("# Rule audit — " + path.basename(audit.root));
   out.push("");
   if (!rules.length) {
@@ -1435,7 +1507,7 @@ module.exports = {
   parseFrontmatter, findInstructionFiles, stripMetadata, identifyChunks, classifyChunk,
   mergeClarifications, splitCompound, checkStaleness, scoreF1, scoreF2, scoreF4, scoreF5, scoreF7,
   composeScore, grade, detectPlacement, scan, composeAudit, renderReport, loadJudgments,
-  looksLikeStatement, hasImperativeVerb, checkSkillDescription, findSkillFiles,
+  looksLikeStatement, hasImperativeVerb, checkSkillDescription, gradeSkill, findSkillFiles,
 };
 
 if (require.main === module) main();

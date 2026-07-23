@@ -41,19 +41,42 @@ never invent policy the original didn't state.
 ## Rewriting weak skill descriptions
 
 The "Weak skill descriptions" section lists each `.claude/skills/<name>/SKILL.md`
-whose frontmatter `description` is missing part of the trigger recipe. Read
+whose `description` (plus `when_to_use`) is missing part of the trigger recipe,
+carries a duplicated clause, or runs over the 1,536-character listing cap. Read
 `${CLAUDE_PLUGIN_ROOT}/skills/craft-skill/references/recipe.md` first, then fix
-each listed skill by editing only its frontmatter — never the skill body:
+each listed skill by editing only its frontmatter — never the skill body.
 
-1. Read the skill's current `description` (and `when_to_use` if the frontmatter
-   uses it) with `Read`.
-2. Rewrite it to the recipe's three parts: a concrete base sentence naming real
-   artifacts, a "Use when…" clause with two to four quoted phrasings in the
-   user's words, and a "Do NOT use when…" exclusion. Add only the parts the
-   report flagged as missing; keep what already works and keep the author's
-   intent.
-3. Apply with `Edit`, matching the exact current description text. Re-check the
-   result against the recipe's refit checklist before moving on.
+The Issue column says which case each skill is, and the fix differs by case:
+
+- **Model-invocable** (the default) — rewrite to the recipe, as below.
+- **`disable-model-invocation`, still user-invocable** — the description is a
+  slash-command summary, not a router. The fix inverts: trim it to one short
+  plain-English sentence and delete `when_to_use` and any quoted trigger
+  phrasings. No "Use when", no "Do NOT use" — nothing routes on it.
+- **Neither model- nor user-invocable ("dead")** — report only. Tell the user
+  the skill can't be invoked and suggest removing its directory; never edit or
+  delete it as a fix.
+
+For a model-invocable skill: rewrite in place, the way the rule rewrites do — rephrase, don't re-decide, and
+come out **no longer than you started**. Do not append the recipe parts as
+trailing sentences: read what the description already says, then fold the missing
+parts in, turning an existing prose trigger into the quoted "Use when…" form
+rather than adding a second clause beside it.
+
+1. Read the skill's current `description` and `when_to_use` with `Read`, and note
+   the report's Chars figure — that combined length is your budget.
+2. Rewrite to the recipe's three parts: a concrete base sentence naming real
+   artifacts, key use case first; a "Use when…" clause with two to four quoted
+   phrasings in the user's words; and a "Do NOT use when…" exclusion. Keep what
+   already works and keep the author's intent — cut only duplication and padding.
+   Split the load the way the docs do: `description` carries what the skill does
+   plus the primary trigger, `when_to_use` (if present) holds a short extra line
+   of trigger phrases — never repeat a phrasing across both fields.
+3. The combined `description` + `when_to_use` must end **under 1,536 characters**.
+   If it was already over, the rewrite has to remove more than it adds — past the
+   cap the tail truncates in the listing and the "Do NOT use" clause is the first
+   thing lost. Apply with `Edit`, matching the exact current text, then re-check
+   against the recipe's refit checklist.
 
 Fix only the description and `when_to_use`. A skill that needs a whole new body,
 or a brand-new skill, is `/assay:craft-skill`, not this pass.

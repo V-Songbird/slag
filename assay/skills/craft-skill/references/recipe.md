@@ -5,6 +5,16 @@ it when deciding whether to invoke the skill, and recall tracks how much of the
 user's actual phrasing the description covers. Every part below is there because
 it measurably changes whether the skill fires; nothing here is style.
 
+`description` and `when_to_use` share one skill-listing entry capped at 1,536
+characters — write to fit well under it. Past the cap the tail truncates, and the
+exclusion clause sits last, so it is the first thing lost. More words is not more
+recall: spend the budget on distinct trigger phrasings, never on repeating one.
+
+This recipe is for skills Claude can auto-invoke. A `disable-model-invocation`
+skill is a user-only slash command — it doesn't route on its description, so it
+wants a short plain-English summary instead, and none of the trigger machinery
+below applies.
+
 ## The three parts, in order
 
 Every description this plugin writes has exactly this shape:
@@ -69,13 +79,21 @@ says a skill must ALWAYS run, climb the ladder; each step is additive:
 
 ## Refitting an existing description
 
-Diagnose in this order, fix the first miss, re-check:
+Rewrite in place and come out no longer than you started — fold each fix into the
+existing text, never append a trailing clause. Diagnose in this order, fix the
+first miss, re-check:
 
 1. Base sentence names zero concrete artifacts → rewrite it with the real
    file types and outputs.
-2. No "Use when…" clause with quoted phrasings → add part 2; this is the fix
-   that matters most.
+2. No "Use when…" clause with quoted phrasings → fold part 2 in, turning any
+   existing prose trigger into the quoted form rather than adding a second one;
+   this is the fix that matters most.
 3. Quotes echo the base sentence's nouns instead of paraphrasing → rewrite
    them in user language.
-4. No exclusion clause and an adjacent ask exists → add part 3.
-5. User reports it still gets skipped → climb the ladder above.
+4. No exclusion clause and an adjacent ask exists → fold in part 3.
+5. Two trigger clauses, two exclusions, or the same quoted phrase twice → merge
+   the pair into one clause, keeping every distinct phrasing and dropping the
+   repeat. This is the append fix's leftover; clearing it also buys back length.
+6. Combined `description` + `when_to_use` over 1,536 characters → cut duplication
+   and padding until it fits; past the cap the listing drops the tail.
+7. User reports it still gets skipped → climb the ladder above.
