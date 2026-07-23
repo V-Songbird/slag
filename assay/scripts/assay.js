@@ -1236,6 +1236,10 @@ function renderReport(audit, opts = {}) {
   // file:line as a markdown link — Claude Code renders it clickable, opening
   // the rule at its exact line
   const loc = (r) => `[${r.file}:${r.lineStart}](${r.file}:${r.lineStart})`;
+  // The rule cell itself is the click target: a bare line number is useless to
+  // a reader, so the rule id + text opens the file at its line. Brackets in the
+  // label would break the markdown link, so drop them.
+  const ruleLink = (r, n) => `[${r.id} "${truncate(r.text, n).replace(/[[\]]/g, "")}"](${r.file}:${r.lineStart})`;
   const weakSkills = (audit.skills || []).filter((s) => s.checks.missing.length);
   out.push("# Rule audit — " + path.basename(audit.root));
   out.push("");
@@ -1272,11 +1276,13 @@ function renderReport(audit, opts = {}) {
   if (weak.length) {
     out.push(`## Weak rules (${weak.length} below their category floor)`);
     out.push("");
-    out.push("| Rule | Where | Score | Main issue | Suggested fix |");
-    out.push("|---|---|---|---|---|");
+    out.push("Click a rule to open it at its line.");
+    out.push("");
+    out.push("| Rule | Score | Main issue | Suggested fix |");
+    out.push("|---|---|---|---|");
     for (const r of weak) {
       const issue = FACTOR_LABELS[r.dominantWeakness] || r.dominantWeakness;
-      out.push(`| ${r.id} "${truncate(r.text, 60)}" | ${loc(r)} | ${r.grade} (${fmt(r.score)}) | ${issue} | ${FRIENDLY_FIXES[r.dominantWeakness]} |`);
+      out.push(`| ${ruleLink(r, 60)} | ${r.grade} (${fmt(r.score)}) | ${issue} | ${FRIENDLY_FIXES[r.dominantWeakness]} |`);
     }
     out.push("");
   }
@@ -1369,12 +1375,12 @@ function renderReport(audit, opts = {}) {
     out.push("");
     out.push("Each column scores one thing about the rule, 0 (worst) to 1 (best): whether it has a firm verb, names an alternative, has a clear trigger, is scoped right, sits high in the file, is concrete, and how much it needs Claude's judgment rather than a hook.");
     out.push("");
-    out.push("| Rule | Where | Cat | " + FACTOR_COLUMNS.map(([, h]) => h).join(" | ") + " | Score | Grade |");
-    out.push("|---|---|---|" + FACTOR_COLUMNS.map(() => "---").join("|") + "|---|---|");
+    out.push("| Rule | Cat | " + FACTOR_COLUMNS.map(([, h]) => h).join(" | ") + " | Score | Grade |");
+    out.push("|---|---|" + FACTOR_COLUMNS.map(() => "---").join("|") + "|---|---|");
     for (const r of rules) {
       const v = r.factorValues;
       const cells = FACTOR_COLUMNS.map(([f]) => fmt(f === "F8" ? r.f8 : v[f])).join(" | ");
-      out.push(`| ${r.id} "${truncate(r.text, 40)}" | ${loc(r)} | ${r.category} | ${cells} | ${fmt(r.score)} | ${r.grade} |`);
+      out.push(`| ${ruleLink(r, 40)} | ${r.category} | ${cells} | ${fmt(r.score)} | ${r.grade} |`);
     }
     out.push("");
   }

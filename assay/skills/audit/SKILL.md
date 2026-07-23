@@ -73,8 +73,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" report
 Add `--verbose` or `--json` if the user asked. The command prints the finished
 markdown report — corpus grade, per-file grades, weak rules with suggested
 fixes, stall risks, buried rules, stale references, hook opportunities,
-placement candidates, weak skill descriptions. Present it as-is, with one
-exception: the hook section ends with the hooks already wired for this
+placement candidates, weak skill descriptions. Print its markdown **verbatim** —
+each rule cell is a clickable `[rule](file:line)` link, so do not rebuild the
+tables as an artifact, reword the cells, or replace a link with a bare line
+number. Present it as-is, with one exception: the hook section ends with the hooks already wired for this
 project — if a candidate is plainly covered by one of them (same trigger,
 same action), mark it "already enforced by `<command>`" next to the entry
 and drop it from the promote/park counts in step 4. Then add at most 3

@@ -542,6 +542,8 @@ test("the report names factors in plain English, never as F-codes", () => {
   const verbose = engine.renderReport(engine.composeAudit(scanData, judgments), { verbose: true });
   assert.doesNotMatch(verbose, /\bF[1-9]\b/);
   assert.match(verbose, /Trigger \| Scope \| Position/);
+  // the verbose table's rule cell is the clickable link too
+  assert.match(verbose, /\| \[R\d+ "[^\]]*"\]\(CLAUDE\.md:\d+\) \|/);
 });
 
 test("a rule at the bottom of a long file is reported as buried", () => {
@@ -587,6 +589,28 @@ test("report locations are clickable markdown links", () => {
   for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.match(report, /\[CLAUDE\.md:\d+\]\(CLAUDE\.md:\d+\)/);
+});
+
+test("the weak-rules first column is the clickable link, with no bare line-number column", () => {
+  const root = tmpProject(FIXTURE);
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  // the rule cell itself links to file:line
+  assert.match(report, /\| \[R\d+ "[^\]]*"\]\(CLAUDE\.md:\d+\) \|/);
+  // the weak-rules header no longer carries a "Where" column
+  assert.doesNotMatch(report, /\| Rule \| Where \| Score \|/);
+});
+
+test("a rule label with brackets still produces a valid link", () => {
+  const root = tmpProject({ "CLAUDE.md": "- Reference `Drops[].Item` fields in the mob schema.\n" });
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments), { verbose: true });
+  // brackets are stripped from the label, so the [text](href) link stays intact
+  assert.match(report, /\| \[R001 "[^\]]*"\]\(CLAUDE\.md:\d+\) \|/);
 });
 
 test("loadJudgments rejects missing or out-of-range entries", () => {

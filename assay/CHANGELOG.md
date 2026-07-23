@@ -4,6 +4,12 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.4.2-alpha] — 2026-07-23
+
+### Changed
+
+- The rule cell in the weak-rules and full-rules tables is now itself the clickable link that opens the rule at its line; the separate line-number column is gone, since a bare line number gave the reader nothing to act on
+
 ## [0.4.1-alpha] — 2026-07-23
 
 ### Fixed

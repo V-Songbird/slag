@@ -43,7 +43,7 @@ Almost all of the scoring is a plain Node script — deterministic, same input, 
 | Moment | What happens |
 | --- | --- |
 | You run the audit | Every rule is extracted, scored, and graded |
-| The report lands | Weakest rules first, each with its suggested fix — every location is a clickable `file:line` link that opens the rule |
+| The report lands | Weakest rules first, each with its suggested fix — every rule is a clickable link that opens it at its line |
 | You check what to apply | Rewrites happen in place; placement candidates get built from the live official docs, or parked with promotion notes |
 | You're done | Temp files are cleaned up; `git diff` shows exactly what changed |
 
