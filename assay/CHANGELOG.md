@@ -4,7 +4,7 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
-## [Unreleased]
+## [0.3.0-alpha] — 2026-07-23
 
 ### Added
 
