@@ -9,7 +9,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
 
-> **TL;DR** — A sandbox marketplace of plugin experiments. Four are installable from here; two more live in the tree, local-only, until they earn their keep. Nothing has a support promise, and nothing is guaranteed to still exist tomorrow.
+> **TL;DR** — A sandbox marketplace of plugin experiments. Five are installable from here; two more live in the tree, local-only, until they earn their keep. Nothing has a support promise, and nothing is guaranteed to still exist tomorrow.
 
 ---
 
@@ -71,6 +71,14 @@ You tweaked a rule, a skill, a whole `CLAUDE.md`, and it *feels* better — but 
 /plugin install proof@slag
 ```
 
+### [brink](./brink) — A better summary when the context runs out
+
+Long sessions end in an automatic summary that forgets the thing you cared about. brink watches how full the context window is getting and, near the edge, surfaces a one-time nudge to run `/compact` with a ready-made instruction — so the summary keeps the task, the decisions, and the errors instead of an automatic guess.
+
+```
+/plugin install brink@slag
+```
+
 ### Which one first?
 
 | You want to… | Install |
@@ -79,6 +87,7 @@ You tweaked a rule, a skill, a whole `CLAUDE.md`, and it *feels* better — but 
 | Get trustworthy answers about Claude Code | **verity** |
 | Use your JetBrains IDE's brains | **jetbrains-router** |
 | Measure whether a config change moved anything | **proof** |
+| Keep a long session's summary from losing the plot | **brink** |
 
 ### Also in the tree, not in the marketplace
 
@@ -94,6 +103,7 @@ Two experiments live here without a marketplace entry — even more experimental
 ```
 slag/
 ├── assay/
+├── brink/
 ├── gauge/
 ├── jetbrains-router/
 ├── plumb/
