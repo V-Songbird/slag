@@ -91,6 +91,20 @@ test("splitCompound splits semicolon-joined directives, keeps single processes",
   assert.equal(engine.splitCompound(single).length, 1);
 });
 
+test("splitCompound keeps a trailing subordinate clause with its sentence", () => {
+  // Real audit fallout: this one sentence was graded as two rules, the second
+  // being only the tail clause "save the manual steps for ...".
+  const sentence = {
+    text: "Prefer the fixture-based harness for plugin tests, and save the manual steps for real-IDE-only behavior.",
+    lineStart: 45, lineEnd: 45,
+  };
+  assert.deepEqual(engine.splitCompound(sentence).map((p) => p.text), [sentence.text]);
+
+  // A semicolon part whose verb sits mid-clause is a continuation too.
+  const midClause = { text: "Use Vitest for tests; the fixtures they save live next to the source.", lineStart: 1, lineEnd: 1 };
+  assert.equal(engine.splitCompound(midClause).length, 1);
+});
+
 test("verbless bullets under a heading merge with the heading as context", () => {
   const content = "## Error handling\n\n- All API failures through `handleError`.\n";
   const { lines } = engine.stripMetadata(content);

@@ -662,24 +662,32 @@ function mergeClarifications(chunks) {
   return merged;
 }
 
-const SINGLE_PROCESS_PATTERNS = [
-  /\b(?:edit|modify|change).*\band\b.*\b(?:regenerate|rebuild|recompile|restart)/,
-  /\b(?:save|write).*\band\b.*\b(?:commit|push)/,
-  /\b(?:create|add).*\band\b.*\b(?:register|configure|setup)/,
-];
+// [Foreman: 056]
+// A clause is its own directive only when an imperative verb leads it.
+// `hasImperativeVerb` matches a verb anywhere in the text, and the bare
+// imperative tier holds ordinary words (save, keep, cut, drop, report), so a
+// trailing subordinate clause qualified and got graded as a rule of its own.
+function leadsWithImperativeVerb(text) {
+  const lower = text.toLowerCase().replace(/^[^a-z]+/, "");
+  for (const t of VERB_TIERS) {
+    if (!lower.startsWith(t.verb)) continue;
+    const rest = lower.slice(t.verb.length);
+    if (rest === "" || /^[\s,;.)!?]/.test(rest)) return true;
+  }
+  return false;
+}
 
 function splitCompound(chunk) {
   const text = chunk.text;
   const sub = (t) => ({ lineStart: chunk.lineStart, lineEnd: chunk.lineEnd, text: t, isBullet: chunk.isBullet, heading: chunk.heading });
 
+  // razor: only semicolon-joined directives split. A conjunction joins clauses
+  // of one sentence, and the continuation after it is mid-sentence prose, not a
+  // second rule — restore an `and` split only behind a check that the
+  // continuation stands alone on its own.
   if (text.includes(";")) {
     const parts = text.split(";").map((p) => p.trim()).filter(Boolean);
-    if (parts.length >= 2 && parts.every(hasImperativeVerb)) return parts.map(sub);
-  }
-  const andParts = text.split(/,\s+and\s+|\s+and\s+/).map((p) => p.trim());
-  if (andParts.length >= 2 && andParts.every(hasImperativeVerb)) {
-    const lower = text.toLowerCase();
-    if (!SINGLE_PROCESS_PATTERNS.some((p) => p.test(lower))) return andParts.map(sub);
+    if (parts.length >= 2 && parts.every(leadsWithImperativeVerb)) return parts.map(sub);
   }
   return [chunk];
 }
