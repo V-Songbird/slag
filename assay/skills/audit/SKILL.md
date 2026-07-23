@@ -89,16 +89,20 @@ to reach the user differently depending on the style in force:
   rewrite. Never ask the menu when the report cannot precede it; a menu with
   no report behind it asks the user to choose blind.
 
-Print its markdown **verbatim** —
-each rule cell is a clickable `[rule](file:line)` link, so do not rebuild the
-tables as an artifact, reword the cells, or replace a link with a bare line
-number. Present it as-is, with one exception: the hook section ends with the hooks already wired for this
-project — if a candidate is plainly covered by one of them (same trigger,
-same action), mark it "already enforced by `<command>`" next to the entry
-and drop it from the promote/park counts in step 4. Then add at most 3
-sentences of your
-own: the single most valuable fix and anything project-specific the numbers
-can't see. If the project visibly runs subagents or headless automation, one
+Print its markdown **verbatim** — each rule cell is a clickable
+`[rule](file:line)` link, so do not rebuild the tables as an artifact, reword
+the cells, or replace a link with a bare line number.
+
+Present it as-is, with one exception. The scan output carries a
+`hookInventory` — every hook already wired for this project, from its settings,
+the user's, and installed plugins. It is yours to work from, not the user's to
+read: never print it. Use it on the hook-candidates list only. Where a
+candidate is plainly covered by a wired hook (same trigger, same action), mark
+it "already enforced by `<command>`" next to the entry and drop it from the
+promote/park counts in step 4.
+
+Then add at most 3 sentences of your own: the single most valuable fix and
+anything project-specific the numbers can't see. If the project visibly runs subagents or headless automation, one
 of those sentences should say the grades apply at full severity there; if it
 clearly does neither, say severity reads one notch softer. If it errors about
 judgments, fix `.assay-tmp/judgments.json` and rerun.

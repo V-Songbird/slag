@@ -748,7 +748,7 @@ test("a rule at the bottom of a long file is reported as buried", () => {
   assert.match(report, /## Buried rules/);
 });
 
-test("scan collects wired hooks and the report lists them under the hook section", () => {
+test("scan collects wired hooks and the report never prints the inventory", () => {
   const root = tmpProject({
     ...FIXTURE,
     ".claude/settings.json": JSON.stringify({
@@ -766,9 +766,11 @@ test("scan collects wired hooks and the report lists them under the hook section
   });
   const judgments = {};
   for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
-  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
-  assert.match(report, /Hooks already wired/);
-  assert.match(report, /auto-regen\.py/);
+  const audit = engine.composeAudit(scanData, judgments);
+  assert.deepEqual(audit.hookInventory, scanData.hookInventory);
+  const report = engine.renderReport(audit);
+  assert.doesNotMatch(report, /Hooks already wired/);
+  assert.doesNotMatch(report, /auto-regen\.py/);
 });
 
 test("report locations are clickable markdown links", () => {

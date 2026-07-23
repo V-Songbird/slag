@@ -1189,6 +1189,7 @@ function cmdScan(root) {
     files: result.files.map((f) => f.path),
     scanFile: TMP_DIR + "/scan.json",
     judgmentsFile: TMP_DIR + "/judgments.json",
+    hookInventory: result.hookInventory,
     judge: result.rules.map((r) => ({
       id: r.id,
       text: r.text,
@@ -1425,15 +1426,10 @@ function renderReport(audit, opts = {}) {
       out.push(`- ${r.id} (${loc(r)}) "${truncate(r.text, 80)}"`);
     }
     out.push("");
-    const inv = audit.hookInventory || [];
-    if (inv.length) {
-      out.push("Hooks already wired for this project — a candidate one of these already enforces is done, and its rule can shrink to a pointer:");
-      out.push("");
-      for (const h of inv) {
-        out.push(`- ${h.event} \`${h.matcher}\` → \`${h.command}\` — ${h.source}`);
-      }
-      out.push("");
-    }
+    // The wired-hook inventory stays out of the report: it is the reader's
+    // working input for marking a candidate already covered, and once those
+    // marks are in the list above nothing else consumes it. It ships in the
+    // scan summary and in audit.json instead.
   }
 
   const placed = rules.filter((r) => r.placement);
