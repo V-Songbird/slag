@@ -20,6 +20,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const crypto = require("crypto");
 
 const TMP_DIR = ".assay-tmp";
 
@@ -1129,6 +1130,21 @@ function collectHooks(root) {
 // scan
 // ---------------------------------------------------------------------------
 
+// [Foreman: 059]
+// judgments.json is keyed by this, not by the R### display id. The R### is a
+// positional counter, so inserting one rule renumbers every rule after it and a
+// re-scan would hand each one its neighbour's saved judgment — including the
+// notRule verdict from 058, which would then suppress the wrong row. The content
+// hash is stable across edits elsewhere in the file: an unchanged rule keeps its
+// key and its judgment, and only a new or reworded rule presents an unknown key
+// that needs a fresh judgment. File path is folded in so identical wording in two
+// files stays two keys; identical wording twice in one file is the same rule said
+// twice and sharing a judgment is correct.
+function ruleKey(file, text) {
+  const normalized = text.trim().toLowerCase().replace(/\s+/g, " ");
+  return crypto.createHash("sha1").update(file + "\0" + normalized).digest("hex").slice(0, 12);
+}
+
 function scan(root) {
   const files = findInstructionFiles(root);
   const rules = [];
@@ -1154,6 +1170,7 @@ function scan(root) {
         const f1 = scoreF1(part.text);
         const rule = {
           id: "R" + String(counter).padStart(3, "0"),
+          key: ruleKey(file.path, part.text),
           fileIndex,
           file: file.path,
           text: part.text,
@@ -1200,6 +1217,7 @@ function cmdScan(root) {
     hookInventory: result.hookInventory,
     judge: result.rules.map((r) => ({
       id: r.id,
+      key: r.key,
       text: r.text,
       needsF1: r.factors.F1.method === "extraction_failed",
     })),
@@ -1224,13 +1242,15 @@ function loadJudgments(root, rules) {
   }
   const problems = [];
   for (const rule of rules) {
-    const j = judgments[rule.id];
+    // [Foreman: 059] keyed by the stable content hash, not the R### display id
+    const label = rule.id + "=" + rule.key;
+    const j = judgments[rule.key];
     if (!j || typeof j.F3 !== "number" || typeof j.F8 !== "number") {
-      problems.push(rule.id);
+      problems.push(label);
       continue;
     }
     for (const k of ["F3", "F8", "F1"]) {
-      if (j[k] !== undefined && (typeof j[k] !== "number" || j[k] < 0 || j[k] > 1)) problems.push(rule.id + "." + k);
+      if (j[k] !== undefined && (typeof j[k] !== "number" || j[k] < 0 || j[k] > 1)) problems.push(label + "." + k);
     }
     // [Foreman: 058]
     // The verification pass writes its verdict into this same file, so the
@@ -1238,7 +1258,7 @@ function loadJudgments(root, rules) {
     // function of its inputs. A reason is mandatory: an entry vanishes from the
     // report only when the model said, in words, why it was never a rule.
     if (j.notRule !== undefined && (typeof j.notRule !== "string" || !j.notRule.trim())) {
-      problems.push(rule.id + ".notRule");
+      problems.push(label + ".notRule");
     }
   }
   if (problems.length) {
@@ -1249,7 +1269,9 @@ function loadJudgments(root, rules) {
 
 function composeAudit(scanData, judgments) {
   const rules = scanData.rules.map((r) => {
-    const j = judgments[r.id];
+    // [Foreman: 059] keyed by the stable content hash; r.key falls back to r.id
+    // so a hand-written scanData without keys still composes
+    const j = judgments[r.key || r.id];
     const factors = {
       // F1 extraction can fail (value null); fall back to the same 0.5 the
       // composer uses, so the stored value is never null for the report to render

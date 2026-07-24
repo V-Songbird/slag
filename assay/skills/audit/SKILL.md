@@ -57,10 +57,14 @@ Score all rules in one continuous pass — do not interleave other tool calls, o
 your scale drifts between batches. Where a rule has `needsF1: true`, add an `F1`
 value too (verb strength per the rubric note).
 
-Write the result with the `Write` tool to `.assay-tmp/judgments.json`:
+Write the result with the `Write` tool to `.assay-tmp/judgments.json`, keyed by
+each rule's `key` from the `judge` list — the stable content hash, not the `R###`
+display id. Keying by the hash is what lets a judgment survive an edit elsewhere
+in the file: on a re-scan an unchanged rule keeps its key and its judgment, and
+only a new or reworded rule needs a fresh one.
 
 ```json
-{ "R001": { "F3": 0.75, "F8": 0.9 }, "R002": { "F3": 0.45, "F8": 0.15, "F1": 0.7 } }
+{ "a1b2c3d4e5f6": { "F3": 0.75, "F8": 0.9 }, "9f8e7d6c5b4a": { "F3": 0.45, "F8": 0.15, "F1": 0.7 } }
 ```
 
 ## 2b. Verify
@@ -74,7 +78,7 @@ entries and acts on nothing else.
 
 Send **one** `Agent` call — `subagent_type: "general-purpose"`, `model:
 "sonnet"`, `run_in_background: false` — carrying every rule from the `judge` list
-whose text you doubt is a rule at all, id and text each. Ask for exactly one
+whose text you doubt is a rule at all, its `key` and text each. Ask for exactly one
 verdict per entry: is this an instruction to follow, or is it narration,
 history, an example, or a description of what the project does? Ask for a
 one-sentence reason on every entry it rejects, in its own words.
@@ -91,10 +95,11 @@ single request. If that request is unwelcome — a metered key, an offline run �
 before.
 
 Then, for each rejected entry only, add a `notRule` key to that rule's object in
-`.assay-tmp/judgments.json`, holding the returned reason verbatim:
+`.assay-tmp/judgments.json` — the same object you keyed by its `key` in step 2 —
+holding the returned reason verbatim:
 
 ```json
-{ "R001": { "F3": 0.75, "F8": 0.9 }, "R002": { "F3": 0.45, "F8": 0.15, "notRule": "Records what the team decided last quarter; it asks for nothing." } }
+{ "a1b2c3d4e5f6": { "F3": 0.75, "F8": 0.9 }, "9f8e7d6c5b4a": { "F3": 0.45, "F8": 0.15, "notRule": "Records what the team decided last quarter; it asks for nothing." } }
 ```
 
 Change nothing else. The pass may drop an entry and that is all it may do —

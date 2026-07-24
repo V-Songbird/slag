@@ -432,7 +432,7 @@ test("a prose-heavy corpus gets per-rule advice, not one fix repeated down the t
   });
   const scanData = engine.scan(root);
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
 
   const rows = report.split("\n").filter((l) => /^\| \[R\d+/.test(l));
@@ -451,7 +451,7 @@ test("weak skill descriptions land in the report as a rewritable fix", () => {
   const scanData = engine.scan(root);
   assert.equal(scanData.skills.length, 1);
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.match(report, /## Weak skill descriptions/);
   assert.match(report, /rewrite each one/);
@@ -494,7 +494,7 @@ test("a recipe-shaped skill stays out of the report", () => {
   });
   const scanData = engine.scan(root);
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.doesNotMatch(report, /## Weak skill descriptions/);
 });
@@ -508,7 +508,7 @@ test("an over-cap skill is flagged even with every recipe part present", () => {
   });
   const scanData = engine.scan(root);
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.match(report, /## Weak skill descriptions/);
   assert.match(report, /huge/);
@@ -526,7 +526,7 @@ test("a redundant but complete skill description is flagged", () => {
   });
   const scanData = engine.scan(root);
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.match(report, /## Weak skill descriptions/);
   assert.match(report, /dupe/);
@@ -577,7 +577,7 @@ test("report: a model-invocable skill still carrying when_to_use gets the fold-a
   });
   const scanData = engine.scan(root);
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.match(report, /## Weak skill descriptions/);
   assert.match(report, /split/);
@@ -619,7 +619,7 @@ test("report: a clean user-only summary stays out; an over-specified one gets th
   });
   const scanData = engine.scan(root);
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.match(report, /stuffed/);
   assert.match(report, /model-disabled/);
@@ -633,7 +633,7 @@ test("report: a dead skill is flagged for removal", () => {
   });
   const scanData = engine.scan(root);
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.match(report, /orphan/);
   assert.match(report, /recommend removing/);
@@ -687,7 +687,7 @@ test("the report shows where a stale reference likely moved", () => {
   });
   const scanData = engine.scan(root);
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.match(report, /## Stale references/);
   assert.match(report, /likely moved to `docs\/example\.md`/);
@@ -739,7 +739,7 @@ test("composeAudit + renderReport produce a graded markdown report", () => {
   const root = tmpProject(FIXTURE);
   const scanData = engine.scan(root);
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
   const audit = engine.composeAudit(scanData, judgments);
   assert.ok(audit.corpusScore > 0 && audit.corpusScore < 1);
   const stallRule = audit.rules.find((r) => r.stallRisk);
@@ -759,7 +759,7 @@ test("the report names factors in plain English, never as F-codes", () => {
   const root = tmpProject(FIXTURE);
   const scanData = engine.scan(root);
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   // no raw factor code (F1, F3, F8…) reaches the reader
   assert.doesNotMatch(report, /\bF[1-9]\b/);
@@ -782,7 +782,7 @@ test("a rule at the bottom of a long file is reported as buried", () => {
   const scanData = engine.scan(root);
   assert.equal(scanData.rules.length, 1);
   assert.equal(scanData.rules[0].factors.F5.value, 0.4);
-  const judgments = { [scanData.rules[0].id]: { F3: 0.8, F8: 0.9 } };
+  const judgments = { [scanData.rules[0].key]: { F3: 0.8, F8: 0.9 } };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.match(report, /## Buried rules/);
 });
@@ -804,7 +804,7 @@ test("scan collects wired hooks and the report never prints the inventory", () =
     event: "PostToolUse", matcher: "Edit|Write", command: "auto-regen.py", source: "project",
   });
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
   const audit = engine.composeAudit(scanData, judgments);
   assert.deepEqual(audit.hookInventory, scanData.hookInventory);
   const report = engine.renderReport(audit);
@@ -816,7 +816,7 @@ test("report locations are clickable markdown links", () => {
   const root = tmpProject(FIXTURE);
   const scanData = engine.scan(root);
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.match(report, /\[CLAUDE\.md:\d+\]\(CLAUDE\.md:\d+\)/);
 });
@@ -825,7 +825,7 @@ test("the weak-rules first column is the clickable link, with no bare line-numbe
   const root = tmpProject(FIXTURE);
   const scanData = engine.scan(root);
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   // the rule cell itself links to file:line
   assert.match(report, /\| \[R\d+ "[^\]]*"\]\(CLAUDE\.md:\d+\) \|/);
@@ -837,7 +837,7 @@ test("a rule label with brackets still produces a valid link", () => {
   const root = tmpProject({ "CLAUDE.md": "- Reference `Drops[].Item` fields in the mob schema.\n" });
   const scanData = engine.scan(root);
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments), { verbose: true });
   // brackets are stripped from the label, so the [text](href) link stays intact
   assert.match(report, /\| \[R001 "[^\]]*"\]\(CLAUDE\.md:\d+\) \|/);
@@ -855,9 +855,10 @@ test("a suppressed entry leaves the report and returns under --verbose with its 
   const scanData = engine.scan(root);
   assert.equal(scanData.rules.length, 2);
   const reason = "Reads as a note to self, not an instruction to follow.";
+  const [r1, r2] = scanData.rules;
   const judgments = {
-    R001: { F3: 0.8, F8: 0.9 },
-    R002: { F3: 0.2, F8: 0.9, notRule: reason },
+    [r1.key]: { F3: 0.8, F8: 0.9 },
+    [r2.key]: { F3: 0.2, F8: 0.9, notRule: reason },
   };
   const audit = engine.composeAudit(scanData, judgments);
   // the entry keeps its own score — suppression may never rescore
@@ -878,19 +879,40 @@ test("a suppressed entry leaves the report and returns under --verbose with its 
   assert.match(verbose, /R002 \(\[CLAUDE\.md:\d+\]\(CLAUDE\.md:\d+\)\)/);
 });
 
+test("a rule's judgment key survives inserting another rule above it", () => {
+  const two = "- Never use `var` — use `const` instead.\n\n- Always write a test for a bug fix.\n";
+  const root = tmpProject({ "CLAUDE.md": two });
+  const before = engine.scan(root);
+  assert.equal(before.rules.length, 2);
+  const keptKey = before.rules[1].key; // the second rule
+  // insert a new rule at the top — with positional R### ids this rule would
+  // become R003 and inherit R002's saved judgment; the content key must not move
+  fs.writeFileSync(path.join(root, "CLAUDE.md"), "- Prefer named exports over default exports.\n\n" + two);
+  const after = engine.scan(root);
+  assert.equal(after.rules.length, 3);
+  const same = after.rules.find((r) => r.text === before.rules[1].text);
+  assert.equal(same.key, keptKey, "an unchanged rule got a new key after an insert");
+  assert.equal(same.id, "R003", "the display id did shift, as expected");
+  // the inserted rule is genuinely new — its key was not in the prior scan
+  const priorKeys = new Set(before.rules.map((r) => r.key));
+  const inserted = after.rules.find((r) => r.text.includes("named exports"));
+  assert.equal(priorKeys.has(inserted.key), false);
+});
+
 test("loadJudgments rejects a notRule that carries no reason", () => {
   const root = tmpProject({ "CLAUDE.md": "- Never use `var` — use `const` instead.\n" });
   const scanData = engine.scan(root);
   fs.mkdirSync(path.join(root, ".assay-tmp"), { recursive: true });
+  const key = scanData.rules[0].key;
   const write = (j) => fs.writeFileSync(path.join(root, ".assay-tmp", "judgments.json"), JSON.stringify(j));
 
-  write({ R001: { F3: 0.5, F8: 0.5, notRule: "  " } });
-  assert.match(engine.loadJudgments(root, scanData.rules).error, /R001\.notRule/);
+  write({ [key]: { F3: 0.5, F8: 0.5, notRule: "  " } });
+  assert.match(engine.loadJudgments(root, scanData.rules).error, /\.notRule/);
 
-  write({ R001: { F3: 0.5, F8: 0.5, notRule: true } });
-  assert.match(engine.loadJudgments(root, scanData.rules).error, /R001\.notRule/);
+  write({ [key]: { F3: 0.5, F8: 0.5, notRule: true } });
+  assert.match(engine.loadJudgments(root, scanData.rules).error, /\.notRule/);
 
-  write({ R001: { F3: 0.5, F8: 0.5, notRule: "Narration, not a directive." } });
+  write({ [key]: { F3: 0.5, F8: 0.5, notRule: "Narration, not a directive." } });
   assert.equal(engine.loadJudgments(root, scanData.rules).error, undefined);
 });
 
@@ -930,7 +952,7 @@ test("a non-Latin-script rule is flagged and the report says the grade is unreli
   assert.equal(scanData.rules[1].nonLatin, false);
 
   const judgments = {};
-  for (const r of scanData.rules) judgments[r.id] = { F3: 0.7, F8: 0.9 };
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.7, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
   assert.match(report, /1 rule\(s\) contain non-Latin script/);
 });
@@ -939,6 +961,6 @@ test("an all-English corpus carries no non-Latin notice", () => {
   const root = tmpProject({ "CLAUDE.md": "- Never use `var` — use `const` instead.\n" });
   const scanData = engine.scan(root);
   assert.equal(scanData.rules[0].nonLatin, false);
-  const report = engine.renderReport(engine.composeAudit(scanData, { R001: { F3: 0.7, F8: 0.9 } }));
+  const report = engine.renderReport(engine.composeAudit(scanData, { [scanData.rules[0].key]: { F3: 0.7, F8: 0.9 } }));
   assert.doesNotMatch(report, /non-Latin script/);
 });
