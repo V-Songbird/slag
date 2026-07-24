@@ -1638,6 +1638,220 @@ function truncate(text, n) {
   return clean.length > n ? clean.slice(0, n - 1) + "…" : clean;
 }
 
+// ---------------------------------------------------------------------------
+// artifact — self-contained interactive HTML report
+// ---------------------------------------------------------------------------
+
+// [Foreman: 054]
+// The markdown report opens a rule at its line; the artifact is the richer
+// preview the operator reads in a browser — a sortable table where a row
+// expands to the rule's full untruncated text, every factor score, its grade,
+// and the suggested fix. It is built from audit.json, the same object the
+// report renders, so the two never disagree. The generated file is page
+// content only (no <!doctype>/<html>/<head>/<body>) so it both opens standalone
+// in a browser AND publishes unchanged through the Artifact tool, which wraps
+// its own skeleton around it — see docs/foreman/054.md.
+
+// Per-rule payload for the client. hookInventory is deliberately absent: it is
+// the report author's working input, never surfaced to a reader, same as the
+// markdown report. Rule text is carried as data and rendered with textContent
+// client-side, never innerHTML — a rule that contains markup or a URL is shown
+// literally, never loaded or executed.
+function artifactRuleData(audit) {
+  return audit.rules.filter((r) => !r.suppressed).map((r) => {
+    const names = rowWeaknesses(r);
+    return {
+      id: r.id, file: r.file, line: r.lineStart, text: r.text,
+      category: r.category, score: r.score, grade: r.grade, weak: r.weak,
+      stallRisk: r.stallRisk, hookOpportunity: r.hookOpportunity,
+      placement: r.placement ? r.placement.bestFit : null,
+      factors: r.factorValues, f8: r.f8,
+      issues: names.map((n) => FACTOR_LABELS[n] || n),
+      fixes: names.map((n) => FRIENDLY_FIXES[n]).filter(Boolean),
+    };
+  });
+}
+
+const ARTIFACT_STYLE = `<style>
+  #assay-report { font: 14px/1.5 system-ui, sans-serif; max-width: 1100px; margin: 0 auto; padding: 1rem;
+    color: #1a1a1a; }
+  #assay-report h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  #assay-report .sub { color: #666; margin: 0 0 1rem; }
+  #assay-report table { border-collapse: collapse; width: 100%; margin-bottom: 1.5rem; }
+  #assay-report th, #assay-report td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #e2e2e2;
+    vertical-align: top; }
+  #assay-report thead th { cursor: pointer; user-select: none; white-space: nowrap; border-bottom: 2px solid #ccc; }
+  #assay-report thead th.sorted::after { content: " \\25B4"; }
+  #assay-report thead th.sorted.desc::after { content: " \\25BE"; }
+  #assay-report tbody tr.rule { cursor: pointer; }
+  #assay-report tbody tr.rule:hover { background: rgba(0,0,0,.04); }
+  #assay-report .badge { display: inline-block; min-width: 1.4rem; text-align: center; padding: 0 .4rem;
+    border-radius: 4px; font-weight: 600; color: #fff; }
+  #assay-report .g-A { background: #1a7f37; } #assay-report .g-B { background: #4a9c2e; }
+  #assay-report .g-C { background: #b58900; } #assay-report .g-D { background: #cb4b16; }
+  #assay-report .g-F { background: #c1272d; }
+  #assay-report .tag { font-size: .75rem; padding: 0 .35rem; border-radius: 3px; background: #eee; color: #555;
+    margin-left: .3rem; }
+  #assay-report .detail { background: rgba(0,0,0,.03); }
+  #assay-report .detail td { padding: .75rem 1rem 1rem; }
+  #assay-report .detail pre { white-space: pre-wrap; word-break: break-word; margin: 0 0 .75rem; font-size: .85rem;
+    background: rgba(0,0,0,.05); padding: .6rem; border-radius: 4px; }
+  #assay-report .factors { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .6rem; }
+  #assay-report .factors span { font-size: .8rem; padding: .1rem .45rem; border-radius: 3px; background: #ececec; }
+  #assay-report .factors span.low { background: #f4c7c3; color: #7a1c17; }
+  #assay-report .fixes { margin: 0; padding-left: 1.1rem; }
+  #assay-report .muted { color: #777; font-size: .85rem; }
+  @media (prefers-color-scheme: dark) {
+    #assay-report { color: #e6e6e6; }
+    #assay-report .sub, #assay-report .muted { color: #9aa0a6; }
+    #assay-report th, #assay-report td { border-color: #333; }
+    #assay-report thead th { border-bottom-color: #555; }
+    #assay-report tbody tr.rule:hover { background: rgba(255,255,255,.06); }
+    #assay-report .tag { background: #333; color: #bbb; }
+    #assay-report .detail { background: rgba(255,255,255,.04); }
+    #assay-report .detail pre, #assay-report .factors span { background: rgba(255,255,255,.08); }
+    #assay-report .factors span.low { background: #5a1e1a; color: #f4c7c3; }
+  }
+</style>`;
+
+const ARTIFACT_SCRIPT = `<script>
+(function () {
+  var root = document.getElementById("assay-report");
+  var data = JSON.parse(document.getElementById("assay-data").textContent);
+  var GRADES = { A: 0, B: 1, C: 2, D: 3, F: 4 };
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function badge(g) { return el("span", "badge g-" + g, g); }
+
+  var h1 = el("h1", null, "Rule audit — " + data.root);
+  var sub = el("p", "sub");
+  sub.textContent = data.corpusScore == null
+    ? data.rules.length + " rules — no mandate rules to grade"
+    : data.rules.length + " rules — corpus grade " + data.corpusGrade + " (" + data.corpusScore.toFixed(2) + ")"
+      + (data.suppressedCount ? ", " + data.suppressedCount + " suppressed" : "");
+  root.appendChild(h1); root.appendChild(sub);
+
+  var cols = [
+    { key: "id", label: "Rule", get: function (r) { return r.id; } },
+    { key: "file", label: "File", get: function (r) { return r.file + ":" + r.line; } },
+    { key: "category", label: "Cat", get: function (r) { return r.category; } },
+    { key: "issues", label: "Main issue", get: function (r) { return r.issues.join(", "); } },
+    { key: "score", label: "Score", get: function (r) { return r.score.toFixed(2); }, num: true },
+    { key: "grade", label: "Grade", get: function (r) { return GRADES[r.grade]; }, num: true }
+  ];
+  var table = el("table"), thead = el("thead"), htr = el("tr");
+  cols.forEach(function (c, i) {
+    var th = el("th", null, c.label);
+    th.addEventListener("click", function () { sortBy(i); });
+    htr.appendChild(th);
+  });
+  thead.appendChild(htr); table.appendChild(thead);
+  var tbody = el("tbody"); table.appendChild(tbody); root.appendChild(table);
+
+  var rows = data.rules.slice();
+  var sortCol = 4, sortDesc = false; // default: worst score first (ascending)
+
+  function detailRow(r) {
+    var tr = el("tr", "detail"), td = el("td");
+    td.colSpan = cols.length;
+    var pre = el("pre", null, r.text); td.appendChild(pre);
+    var fx = el("div", "factors");
+    data.factorColumns.forEach(function (fc) {
+      var k = fc[0], v = k === "F8" ? r.f8 : r.factors[k];
+      var s = el("span", v != null && v < 0.6 ? "low" : null, fc[1] + " " + (v == null ? "—" : v.toFixed(2)));
+      fx.appendChild(s);
+    });
+    td.appendChild(fx);
+    var flags = [];
+    if (r.stallRisk) flags.push("stall risk");
+    if (r.hookOpportunity) flags.push("better as a hook");
+    if (r.placement) flags.push("placement: " + r.placement);
+    if (flags.length) td.appendChild(el("p", "muted", flags.join(" · ")));
+    if (r.fixes.length) {
+      var ul = el("ul", "fixes");
+      r.fixes.forEach(function (f) { ul.appendChild(el("li", null, f)); });
+      td.appendChild(ul);
+    } else {
+      td.appendChild(el("p", "muted", "No fix suggested — this rule is above its floor."));
+    }
+    tr.appendChild(td);
+    return tr;
+  }
+
+  function render() {
+    tbody.textContent = "";
+    rows.forEach(function (r) {
+      var tr = el("tr", "rule");
+      cols.forEach(function (c) {
+        var td = el("td");
+        if (c.key === "grade") td.appendChild(badge(r.grade));
+        else td.textContent = c.get(r);
+        tr.appendChild(td);
+      });
+      var detail = null;
+      tr.addEventListener("click", function () {
+        if (detail) { detail.remove(); detail = null; return; }
+        detail = detailRow(r);
+        tr.parentNode.insertBefore(detail, tr.nextSibling);
+      });
+      tbody.appendChild(tr);
+    });
+    Array.prototype.forEach.call(thead.querySelectorAll("th"), function (th, i) {
+      th.className = i === sortCol ? "sorted" + (sortDesc ? " desc" : "") : "";
+    });
+  }
+  function sortBy(i) {
+    if (i === sortCol) sortDesc = !sortDesc; else { sortCol = i; sortDesc = false; }
+    var c = cols[i];
+    rows.sort(function (a, b) {
+      var x = c.num ? c.get(a) : c.get(a).toString().toLowerCase();
+      var y = c.num ? c.get(b) : c.get(b).toString().toLowerCase();
+      if (x < y) return sortDesc ? 1 : -1;
+      if (x > y) return sortDesc ? -1 : 1;
+      return 0;
+    });
+    render();
+  }
+  sortBy(4);
+})();
+</script>`;
+
+function renderArtifact(audit) {
+  const payload = {
+    root: path.basename(audit.root),
+    corpusScore: audit.corpusScore,
+    corpusGrade: audit.corpusGrade,
+    suppressedCount: audit.rules.filter((r) => r.suppressed).length,
+    factorColumns: FACTOR_COLUMNS,
+    rules: artifactRuleData(audit),
+  };
+  // Escape "<" so no substring of the embedded data (a rule quoting "</script>"
+  // or any markup) can break out of the JSON <script> block.
+  const json = JSON.stringify(payload).replace(/</g, "\\u003c");
+  return [
+    ARTIFACT_STYLE,
+    '<div id="assay-report"></div>',
+    '<script type="application/json" id="assay-data">' + json + "</script>",
+    ARTIFACT_SCRIPT,
+  ].join("\n");
+}
+
+function cmdArtifact(root) {
+  const auditFile = path.join(root, TMP_DIR, "audit.json");
+  if (!fs.existsSync(auditFile)) {
+    process.stderr.write("No " + TMP_DIR + "/audit.json — run report first.\n");
+    process.exit(1);
+  }
+  const audit = JSON.parse(fs.readFileSync(auditFile, "utf-8"));
+  const outFile = path.join(root, TMP_DIR, "report.html");
+  fs.writeFileSync(outFile, renderArtifact(audit));
+  process.stdout.write(TMP_DIR + "/report.html\n");
+}
+
 function cmdReport(root, opts) {
   const scanFile = path.join(root, TMP_DIR, "scan.json");
   if (!fs.existsSync(scanFile)) {
@@ -1723,9 +1937,10 @@ function main() {
   if (command === "scan") cmdScan(root);
   else if (command === "report") cmdReport(root, opts);
   else if (command === "remeasure") cmdRemeasure(root, opts);
+  else if (command === "artifact") cmdArtifact(root); // [Foreman: 054]
   else if (command === "clean") fs.rmSync(path.join(root, TMP_DIR), { recursive: true, force: true });
   else {
-    process.stderr.write("Usage: assay.js <scan|report|remeasure|clean> [--root <path>] [--verbose] [--json]\n");
+    process.stderr.write("Usage: assay.js <scan|report|remeasure|artifact|clean> [--root <path>] [--verbose] [--json]\n");
     process.exit(2);
   }
 }
@@ -1735,6 +1950,7 @@ module.exports = {
   mergeClarifications, splitCompound, checkStaleness, scoreF1, scoreF2, scoreF4, scoreF5, scoreF7,
   composeScore, grade, detectPlacement, scan, composeAudit, renderReport, loadJudgments,
   looksLikeStatement, hasImperativeVerb, checkSkillDescription, gradeSkill, findSkillFiles,
+  renderArtifact, artifactRuleData,
 };
 
 if (require.main === module) main();

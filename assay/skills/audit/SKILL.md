@@ -13,8 +13,8 @@ description: >-
   files", "which rules are weak or vague", "audit my rules", "which rules should
   be hooks" — or invokes /assay:audit with any flags. Do NOT use to review code,
   PRs, or non-Claude config like eslint.
-argument-hint: "[--fix] [--verbose] [--json] [--no-verify]"
-allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent
+argument-hint: "[--fix] [--verbose] [--json] [--no-verify] [--artifact]"
+allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent, Artifact
 ---
 
 # assay:audit
@@ -156,6 +156,25 @@ anything project-specific the numbers can't see. If the project visibly runs sub
 of those sentences should say the grades apply at full severity there; if it
 clearly does neither, say severity reads one notch softer. If it errors about
 judgments, fix `.assay-tmp/judgments.json` and rerun.
+
+## 3a. Interactive HTML report — only with `--artifact`
+
+Skip this whole step unless `$ARGUMENTS` contains `--artifact`. The markdown
+tables above still print in full either way — this is an extra view of the same
+`audit.json`, never a replacement for them.
+
+When `--artifact` was passed, after the report, build the clickable HTML version:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" artifact
+```
+
+It writes `.assay-tmp/report.html` — a self-contained page (no external assets,
+the audit data embedded as inline JSON) with a sortable rule table where clicking
+a row expands that rule's full untruncated text, every factor score, its grade,
+and the suggested fix. Publish it with the `Artifact` tool, passing that file's
+path: the file is already page content only, so the Artifact skeleton wraps it
+unchanged. Give the reader the returned URL.
 
 ## 4. Offer fixes
 

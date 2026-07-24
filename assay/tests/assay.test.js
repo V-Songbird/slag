@@ -1017,3 +1017,95 @@ test("an all-English corpus carries no non-Latin notice", () => {
   const report = engine.renderReport(engine.composeAudit(scanData, { [scanData.rules[0].key]: { F3: 0.7, F8: 0.9 } }));
   assert.doesNotMatch(report, /non-Latin script/);
 });
+
+// ---------------------------------------------------------------------------
+// artifact — self-contained interactive HTML report
+// ---------------------------------------------------------------------------
+
+// A hand-built audit exercising the escaping, suppression, and hookInventory
+// rules without needing the model-judged pipeline.
+function fixtureAudit() {
+  return {
+    root: "/tmp/demo-project",
+    corpusScore: 0.478,
+    corpusGrade: "D",
+    hookInventory: [{ event: "PreToolUse", matcher: "*", command: "secret-scan.js", source: "project" }],
+    files: [{ path: "CLAUDE.md", ruleCount: 1, score: 0.5, grade: "C", globs: [] }],
+    skills: [],
+    rules: [
+      {
+        id: "R001", key: "aaa", file: "CLAUDE.md", lineStart: 3, lineEnd: 3,
+        text: "Never inline `</script>` — see https://example.com/style instead.",
+        category: "mandate",
+        factorValues: { F1: 0.95, F2: 0.2, F3: 0.5, F4: 0.9, F5: 0.95, F7: 0.8 },
+        f8: 0.3, score: 0.16, grade: "F", weak: true, stallRisk: true,
+        hookOpportunity: true, placement: null, dominantWeakness: "F7", suppressed: false,
+      },
+      {
+        id: "R002", key: "bbb", file: "CLAUDE.md", lineStart: 6, lineEnd: 6,
+        text: "This is a note about the project, not a rule.",
+        category: "mandate",
+        factorValues: { F1: 0.5, F2: 0.85, F3: 0.5, F4: 0.9, F5: 0.95, F7: 0.05 },
+        f8: 0.9, score: 0.3, grade: "F", weak: true, stallRisk: false,
+        hookOpportunity: false, placement: null, dominantWeakness: "F7",
+        suppressed: true, suppressedReason: "Describes the project; asks for nothing.",
+      },
+    ],
+  };
+}
+
+test("renderArtifact emits self-contained page content with no external assets", () => {
+  const html = engine.renderArtifact(fixtureAudit());
+  // no external asset reference — src/href to http, @import, <link>, url(http…)
+  assert.doesNotMatch(html, /(?:src|href)\s*=\s*["']?https?:/i);
+  assert.doesNotMatch(html, /@import|<link\b/i);
+  assert.doesNotMatch(html, /url\(\s*["']?https?:/i);
+  // page content only — the Artifact tool supplies the document skeleton
+  assert.doesNotMatch(html, /<!doctype|<html\b|<head\b|<body\b/i);
+  assert.match(html, /id="assay-data"/);
+});
+
+test("renderArtifact escapes < so embedded rule text can't break out of the script block", () => {
+  const html = engine.renderArtifact(fixtureAudit());
+  // the literal </script> inside the rule text must be escaped in the data block
+  const dataBlock = html.match(/<script type="application\/json" id="assay-data">([\s\S]*?)<\/script>/);
+  assert.ok(dataBlock, "data block present");
+  assert.doesNotMatch(dataBlock[1], /<\/script>/i);
+  assert.ok(dataBlock[1].includes("\\u003c"), "< is escaped in the data block");
+  // and the parsed payload restores the original rule text intact
+  const data = JSON.parse(dataBlock[1]);
+  assert.match(data.rules[0].text, /<\/script>/);
+});
+
+test("renderArtifact never surfaces hookInventory and drops suppressed rules", () => {
+  const html = engine.renderArtifact(fixtureAudit());
+  assert.doesNotMatch(html, /hookInventory|secret-scan\.js/);
+  const dataBlock = html.match(/<script type="application\/json" id="assay-data">([\s\S]*?)<\/script>/);
+  const data = JSON.parse(dataBlock[1].replace(/\u003c/g, "<"));
+  assert.equal(data.rules.length, 1);
+  assert.equal(data.rules[0].id, "R001");
+  assert.equal(data.suppressedCount, 1);
+  assert.equal(data.corpusGrade, "D");
+});
+
+test("artifactRuleData carries full untruncated text, factor scores, and fixes", () => {
+  const rows = engine.artifactRuleData(fixtureAudit());
+  assert.equal(rows.length, 1);
+  const r = rows[0];
+  assert.equal(r.text, "Never inline `</script>` — see https://example.com/style instead.");
+  assert.equal(r.factors.F2, 0.2);
+  assert.equal(r.f8, 0.3);
+  assert.ok(Array.isArray(r.issues) && r.issues.length);
+  assert.ok(Array.isArray(r.fixes) && r.fixes.length);
+});
+
+test("renderArtifact round-trips a real audit built from the scoring pipeline", () => {
+  const root = tmpProject({ "CLAUDE.md": "- Never use `var` — use `const` instead.\n" });
+  const scanData = engine.scan(root);
+  const audit = engine.composeAudit(scanData, { [scanData.rules[0].key]: { F3: 0.7, F8: 0.9 } });
+  const html = engine.renderArtifact(audit);
+  const dataBlock = html.match(/<script type="application\/json" id="assay-data">([\s\S]*?)<\/script>/);
+  const data = JSON.parse(dataBlock[1].replace(/\u003c/g, "<"));
+  assert.equal(data.rules.length, 1);
+  assert.equal(data.factorColumns.length, 7);
+});
