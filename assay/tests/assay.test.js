@@ -418,6 +418,31 @@ test("findSkillFiles reads folded descriptions and grades them", () => {
   assert.deepEqual(skills[1].checks.missing, ["trigger", "concrete", "exclusion"]);
 });
 
+test("a prose-heavy corpus gets per-rule advice, not one fix repeated down the table", () => {
+  // Every one of these floors F7, the heaviest factor, so the dominant weakness
+  // alone made all four rows read "too vague" with one identical fix.
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "# Working agreements",
+      "Prefer clarity over cleverness.",
+      "Never introduce a change you cannot explain.",
+      "Write tests that describe behavior.",
+      "Keep functions small.",
+    ].join("\n\n") + "\n",
+  });
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.id] = { F3: 0.5, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+
+  const rows = report.split("\n").filter((l) => /^\| \[R\d+/.test(l));
+  assert.equal(rows.length, 4);
+  const fixes = new Set(rows.map((l) => l.split("|")[4].trim()));
+  assert.ok(fixes.size > 1, "every weak row carried the same fix: " + [...fixes][0]);
+  // the dominant weakness still leads each diagnosis — the secondary one follows
+  assert.ok(rows.every((l) => l.split("|")[3].trim().startsWith("too vague, ")));
+});
+
 test("weak skill descriptions land in the report as a rewritable fix", () => {
   const root = tmpProject({
     ...FIXTURE,

@@ -1318,6 +1318,27 @@ function pushWeakSkillSection(out, weakSkills) {
   out.push("");
 }
 
+// [Foreman: 057]
+// The dominant weakness alone repeats down the whole table: F7 carries the
+// heaviest weight, so any vague rule floors it and wins the argmax outright —
+// on a prose-heavy corpus every row read "too vague" with one identical fix.
+// Naming every factor that is materially weak, worst-first, gives each row the
+// part that is actually its own.
+// razor: two factors per row. The table is a diagnosis, not a rewrite plan, and
+// a third fix makes the cell unreadable — raise MAX_ROW_FACTORS if the report
+// ever moves somewhere wider than a terminal.
+const WEAK_FACTOR_THRESHOLD = 0.6;
+const MAX_ROW_FACTORS = 2;
+
+function rowWeaknesses(rule) {
+  const values = rule.factorValues || {};
+  const gap = (name) => WEIGHTS[name] * (1 - values[name]);
+  const weak = Object.keys(WEIGHTS)
+    .filter((name) => values[name] != null && values[name] < WEAK_FACTOR_THRESHOLD)
+    .sort((a, b) => gap(b) - gap(a));
+  return weak.length ? weak.slice(0, MAX_ROW_FACTORS) : [rule.dominantWeakness];
+}
+
 function renderReport(audit, opts = {}) {
   const out = [];
   const { rules, files } = audit;
@@ -1374,8 +1395,8 @@ function renderReport(audit, opts = {}) {
     out.push("| Rule | Score | Main issue | Suggested fix |");
     out.push("|---|---|---|---|");
     for (const r of weak) {
-      const issue = FACTOR_LABELS[r.dominantWeakness] || r.dominantWeakness;
-      out.push(`| ${ruleLink(r, 60)} | ${r.grade} (${fmt(r.score)}) | ${issue} | ${FRIENDLY_FIXES[r.dominantWeakness]} |`);
+      const names = rowWeaknesses(r);
+      out.push(`| ${ruleLink(r, 60)} | ${r.grade} (${fmt(r.score)}) | ${names.map((n) => FACTOR_LABELS[n] || n).join(", ")} | ${names.map((n) => FRIENDLY_FIXES[n]).filter(Boolean).join("; ")} |`);
     }
     out.push("");
   }
