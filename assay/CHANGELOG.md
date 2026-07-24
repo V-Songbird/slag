@@ -4,6 +4,12 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.5.5-alpha] — 2026-07-24
+
+### Changed
+
+- The `--verify` pass now asks its "is this a rule at all?" question of a more capable model. On instruction files that phrase real directives as advice or lessons learned, the weaker model it used before dropped a genuine rule roughly one time in four; the current model does not
+
 ## [0.5.4-alpha] — 2026-07-23
 
 ### Added

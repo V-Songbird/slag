@@ -64,19 +64,27 @@ Write the result with the `Write` tool to `.assay-tmp/judgments.json`:
 
 ## 2b. Verify — only when `--verify` was passed
 
-Skip this whole step unless `$ARGUMENTS` contains `--verify`. It is off by
-default and stays off until its false-suppression rate has been measured.
+Skip this whole step unless `$ARGUMENTS` contains `--verify`. It is opt-in by
+choice, not because it is unproven — see the model note below.
 
 Extraction cannot tell a directive from a retrospective, so a lessons file can
 arrive graded as a page of mandates. This step asks one question about those
 entries and acts on nothing else.
 
 Send **one** `Agent` call — `subagent_type: "general-purpose"`, `model:
-"haiku"`, `run_in_background: false` — carrying every rule from the `judge` list
+"sonnet"`, `run_in_background: false` — carrying every rule from the `judge` list
 whose text you doubt is a rule at all, id and text each. Ask for exactly one
 verdict per entry: is this an instruction to follow, or is it narration,
 history, an example, or a description of what the project does? Ask for a
 one-sentence reason on every entry it rejects, in its own words.
+
+The model is `sonnet`, not a cheaper tier, and that is load-bearing. A measured
+run on a realistically-phrased corpus — directives buried in lessons learned,
+requirements stated with soft modals — dropped a real rule about one batch in
+four on haiku, and none at all on sonnet. A directive is only obvious once you
+already see it as one; telling it from a retrospective is the judgment this whole
+step exists for, so it does not get delegated to a model that fails it. One
+batched call per audit, so the cost is a single request either way.
 
 Then, for each rejected entry only, add a `notRule` key to that rule's object in
 `.assay-tmp/judgments.json`, holding the returned reason verbatim:
