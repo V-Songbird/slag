@@ -4,6 +4,12 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.5.6-alpha] — 2026-07-24
+
+### Changed
+
+- The "is this a rule at all?" verification pass now runs by default. A file of notes or history no longer arrives graded as a page of mandates unless you ask for the check. Pass `--no-verify` to skip it — for a metered key or an offline run. It still only drops entries, never rescores or rewords, and `--verbose` lists every drop with its reason
+
 ## [0.5.5-alpha] — 2026-07-24
 
 ### Changed

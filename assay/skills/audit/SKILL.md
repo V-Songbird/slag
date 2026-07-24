@@ -13,7 +13,7 @@ description: >-
   files", "which rules are weak or vague", "audit my rules", "which rules should
   be hooks" — or invokes /assay:audit with any flags. Do NOT use to review code,
   PRs, or non-Claude config like eslint.
-argument-hint: "[--fix] [--verbose] [--json] [--verify]"
+argument-hint: "[--fix] [--verbose] [--json] [--no-verify]"
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent
 ---
 
@@ -22,7 +22,8 @@ allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent
 The script measures everything mechanical; you judge two factors and present the
 result. Never re-derive by hand what the script already computed. Flags in
 `$ARGUMENTS`: `--fix` (apply rewrites without the menu), `--verbose` (full factor
-table), `--json` (machine-readable report), `--verify` (step 2b, off by default).
+table), `--json` (machine-readable report), `--no-verify` (skip step 2b, which
+otherwise runs).
 
 ## 1. Scan
 
@@ -62,10 +63,10 @@ Write the result with the `Write` tool to `.assay-tmp/judgments.json`:
 { "R001": { "F3": 0.75, "F8": 0.9 }, "R002": { "F3": 0.45, "F8": 0.15, "F1": 0.7 } }
 ```
 
-## 2b. Verify — only when `--verify` was passed
+## 2b. Verify
 
-Skip this whole step unless `$ARGUMENTS` contains `--verify`. It is opt-in by
-choice, not because it is unproven — see the model note below.
+Run this step by default. Skip it only when `$ARGUMENTS` contains `--no-verify`.
+A measured run earned it the default slot — see the model note below.
 
 Extraction cannot tell a directive from a retrospective, so a lessons file can
 arrive graded as a page of mandates. This step asks one question about those
@@ -78,13 +79,16 @@ verdict per entry: is this an instruction to follow, or is it narration,
 history, an example, or a description of what the project does? Ask for a
 one-sentence reason on every entry it rejects, in its own words.
 
-The model is `sonnet`, not a cheaper tier, and that is load-bearing. A measured
-run on a realistically-phrased corpus — directives buried in lessons learned,
-requirements stated with soft modals — dropped a real rule about one batch in
-four on haiku, and none at all on sonnet. A directive is only obvious once you
-already see it as one; telling it from a retrospective is the judgment this whole
-step exists for, so it does not get delegated to a model that fails it. One
-batched call per audit, so the cost is a single request either way.
+The model is `sonnet`, not a cheaper tier, and that is load-bearing — it is what
+lets this step run by default. A measured run on a realistically-phrased corpus —
+directives buried in lessons learned, requirements stated with soft modals —
+dropped a real rule about one batch in four on haiku, and none at all on sonnet.
+A directive is only obvious once you already see it as one; telling it from a
+retrospective is the judgment this whole step exists for, so it does not get
+delegated to a model that fails it. One batched call per audit, so the cost is a
+single request. If that request is unwelcome — a metered key, an offline run —
+`--no-verify` skips the step and the report grades every extracted chunk as
+before.
 
 Then, for each rejected entry only, add a `notRule` key to that rule's object in
 `.assay-tmp/judgments.json`, holding the returned reason verbatim:
