@@ -38,6 +38,13 @@ Per-factor moves:
 Keep each rewrite to a single bullet under ~30 words. Never merge two rules,
 never invent policy the original didn't state.
 
+When a file's problem is its shape rather than any one rule's wording — mostly
+narrative, most rules sitting past the midpoint, or simply too long — the
+per-rule rewrite above can't reach it. The report's **Restructure candidates**
+section names those files and the reshape each needs (fence the narrative, move
+the load-bearing rules up, or split into scoped `.claude/rules/` files). Those
+are applied by hand, not by this fix pass — it never rewrites a whole file.
+
 ## Rewriting weak skill descriptions
 
 The "Weak skill descriptions" section lists each `.claude/skills/<name>/SKILL.md`

@@ -819,6 +819,83 @@ test("a rule at the bottom of a long file is reported as buried", () => {
   assert.match(report, /## Buried rules/);
 });
 
+// [Foreman: 062]
+test("scan measures each file's narrative share of the graded content", () => {
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "# Overview",
+      "",
+      "Background: this repository is a personal experiment.",
+      "It carries no runtime dependencies whatsoever.",
+      "The whole tool is plain standard library code.",
+      "The history behind this file is long and winding.",
+      "",
+      "- Run the tests before every commit.",
+    ].join("\n"),
+  });
+  const scanData = engine.scan(root);
+  const file = scanData.files[0];
+  // four prose lines, one rule line — most of the graded content is narrative
+  assert.ok(file.narrativeShare >= 0.6, `narrativeShare was ${file.narrativeShare}`);
+});
+
+// [Foreman: 062]
+test("a mostly-narrative file is a restructure candidate, not a per-rule fix", () => {
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "# Overview",
+      "",
+      "Background: this repository is a personal experiment.",
+      "It carries no runtime dependencies whatsoever.",
+      "The whole tool is plain standard library code.",
+      "The history behind this file is long and winding.",
+      "",
+      "- Run the tests before every commit.",
+    ].join("\n"),
+  });
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.8, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /## Restructure candidates/);
+  assert.match(report, /narrative/);
+  assert.match(report, /assay-ignore/);
+});
+
+// [Foreman: 062]
+test("a long file that buries half its rules is flagged to restructure", () => {
+  const filler = Array.from({ length: 60 }, () => "").join("\n");
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n- Always use functional components with TypeScript.\n" +
+      filler + "\n- Never commit a secret — run the scanner first.\n",
+  });
+  const scanData = engine.scan(root);
+  assert.equal(scanData.rules.length, 2);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.8, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /## Restructure candidates/);
+  assert.match(report, /rules below the midpoint/);
+});
+
+// [Foreman: 062]
+test("a short, rule-dense file is not a restructure candidate", () => {
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "# Rules",
+      "",
+      "- Run the tests before every commit.",
+      "- Never force-push to main — open a pull request instead.",
+      "- Format with prettier before staging changes.",
+    ].join("\n"),
+  });
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.8, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.doesNotMatch(report, /## Restructure candidates/);
+});
+
 test("scan collects wired hooks and the report never prints the inventory", () => {
   const root = tmpProject({
     ...FIXTURE,

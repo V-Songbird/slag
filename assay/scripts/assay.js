@@ -155,6 +155,13 @@ const STALL_RISK_CAP = 0.3;
 // Position only starts to bite in files long enough to bury their bottom rules.
 const LONG_FILE_LINES = 50;
 const BURIED_F5_THRESHOLD = 0.6;
+// [Foreman: 062] A file's problem is shape, not wording, when it is mostly
+// narrative, buries most of its rules, or is simply too long to hold one topic.
+// A per-rule rewrite can't reach any of these — the report names the restructure
+// instead. See docs/foreman/062.md for the threshold choices.
+const RESTRUCTURE_NARRATIVE_SHARE = 0.6; // 60%+ of the graded content is prose
+const RESTRUCTURE_BELOW_MIDPOINT = 0.5;  // half+ of its rules sit past the midpoint
+const RESTRUCTURE_LONG_FILE_LINES = 200; // long enough that one file should be several
 const F8_HOOK_THRESHOLD = 0.4;
 const F4_NO_OVERLAP_SCORE = 0.85;
 const F4_AMBIGUOUS_SCORE = 0.65;
@@ -1187,6 +1194,19 @@ function scan(root) {
     const chunks = identifyChunks(lines);
     const merged = mergeClarifications(chunks);
 
+    // [Foreman: 062] Narrative share = the fraction of graded content that reads
+    // as prose rather than a rule. A file that is mostly motivating narrative is
+    // a restructure candidate, not a per-rule-rewrite one. Blank lines, headings,
+    // fences, and fenced-off spans never enter identifyChunks, so this ratio is
+    // over the graded corpus alone — the same population F5 and the grade see.
+    let proseLines = 0, ruleLines = 0;
+    for (const [chunk, cls] of merged) {
+      const span = chunk.lineEnd - chunk.lineStart + 1;
+      if (cls === "rule") ruleLines += span; else proseLines += span;
+    }
+    const gradedLines = proseLines + ruleLines;
+    file.narrativeShare = gradedLines ? round3(proseLines / gradedLines) : null;
+
     // [Foreman: 060] F5 measures how far down the *graded* content a rule sits,
     // so narrative fenced off above it must not push it toward the bottom. Both
     // the denominator and each rule's position drop the excluded lines.
@@ -1463,6 +1483,56 @@ function pushProgressSection(out, audit, prev) {
   }
 }
 
+// [Foreman: 062]
+// The per-rule rewrite path caps each fix at one short bullet and never merges
+// or moves rules across a file, so a file whose grade is dragged down by its
+// shape — mostly narrative, most of its rules buried, or simply too long — can't
+// be fixed rule by rule. This section names the file-level restructure instead.
+// razor: advisory only, like Buried rules and Placement candidates — it never
+// edits a file. The upgrade path is a whole-file fix mode; if one is ever built,
+// it MUST ship a preservation check that token-diffs version numbers, paths,
+// backticked identifiers, and quoted lines old against new before writing. That
+// guard is the ceiling here — detection now, safe rewriting later.
+function restructureCandidates(audit) {
+  const candidates = [];
+  audit.files.forEach((f, i) => {
+    const own = audit.rules.filter((r) => !r.suppressed && r.fileIndex === i);
+    const belowMid = own.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD);
+    const belowShare = own.length ? belowMid.length / own.length : 0;
+    const reasons = [];
+    const restructures = [];
+    if (f.narrativeShare != null && f.narrativeShare >= RESTRUCTURE_NARRATIVE_SHARE) {
+      reasons.push(`${Math.round(f.narrativeShare * 100)}% narrative`);
+      restructures.push("Fence the narrative with an `<!-- assay-ignore-start -->` / `<!-- assay-ignore-end -->` span, or move it out of the rule file.");
+    }
+    // A short file scores every rule F5 0.95, so a below-midpoint share only
+    // means anything once the file is long enough for position to bite, and it
+    // needs two or more rules for a "share" to exist at all.
+    if (own.length >= 2 && f.lineCount > LONG_FILE_LINES && belowShare >= RESTRUCTURE_BELOW_MIDPOINT) {
+      reasons.push(`${belowMid.length} of ${own.length} rules below the midpoint`);
+      restructures.push("Move the load-bearing rules into the top quarter, or split into scoped `.claude/rules/` files.");
+    }
+    if (f.lineCount > RESTRUCTURE_LONG_FILE_LINES) {
+      reasons.push(`${f.lineCount} lines`);
+      restructures.push("Split into scoped `.claude/rules/` files by topic.");
+    }
+    if (reasons.length) candidates.push({ path: f.path, reasons, restructures });
+  });
+  return candidates;
+}
+
+function pushRestructureSection(out, candidates) {
+  out.push("## Restructure candidates");
+  out.push("");
+  out.push("These files score low because of their shape, not their wording — a per-rule rewrite can't reach the problem. Reshape the file itself:");
+  out.push("");
+  for (const c of candidates) {
+    out.push(`- [${c.path}](${c.path}) — ${c.reasons.join(", ")}`);
+    for (const r of c.restructures) out.push(`  - ${r}`);
+  }
+  out.push("");
+}
+
 function renderReport(audit, opts = {}) {
   const out = [];
   const { files } = audit;
@@ -1560,6 +1630,9 @@ function renderReport(audit, opts = {}) {
     }
     out.push("");
   }
+
+  const restructure = restructureCandidates(audit);
+  if (restructure.length) pushRestructureSection(out, restructure);
 
   const stale = rules.filter((r) => r.staleness.missing.length);
   if (stale.length) {

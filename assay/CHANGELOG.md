@@ -4,6 +4,12 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.5.9-alpha] — 2026-07-24
+
+### Added
+
+- A new **Restructure candidates** section flags files whose grade is dragged down by their shape, not their wording — mostly narrative, most of their rules sitting past the midpoint, or simply too long — and names the restructure each one needs. A per-rule rewrite can't reach any of these, so the report points at the file itself: fence the narrative, move the load-bearing rules up, or split into scoped `.claude/rules/` files
+
 ## [0.5.8-alpha] — 2026-07-24
 
 ### Added
