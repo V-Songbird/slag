@@ -40,6 +40,8 @@ Rules get the same treatment: `/assay:craft-rules` grills you — when should it
 
 Almost all of the scoring is a plain Node script — deterministic, same input, same grades. The model judges exactly two things a script can't: whether a rule's trigger moment is recognizable, and whether a tool could enforce it better. Then the script composes the report.
 
+Run it with `--verify` and one more question gets asked, of a small fast model: is this entry a rule at all? A file of notes or history can otherwise arrive graded as a page of mandates. The answer can only drop an entry from the report — nothing is ever rescored or reworded — and `--verbose` lists every drop with the reason. It's off unless you ask for it.
+
 | Moment | What happens |
 | --- | --- |
 | You run the audit | Every rule is extracted, scored, and graded |

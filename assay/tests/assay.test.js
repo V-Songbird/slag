@@ -843,6 +843,57 @@ test("a rule label with brackets still produces a valid link", () => {
   assert.match(report, /\| \[R001 "[^\]]*"\]\(CLAUDE\.md:\d+\) \|/);
 });
 
+test("a suppressed entry leaves the report and returns under --verbose with its reason", () => {
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "- Never use `var` — use `const` instead.",
+      "",
+      "- Keep it clean.",
+      "",
+    ].join("\n"),
+  });
+  const scanData = engine.scan(root);
+  assert.equal(scanData.rules.length, 2);
+  const reason = "Reads as a note to self, not an instruction to follow.";
+  const judgments = {
+    R001: { F3: 0.8, F8: 0.9 },
+    R002: { F3: 0.2, F8: 0.9, notRule: reason },
+  };
+  const audit = engine.composeAudit(scanData, judgments);
+  // the entry keeps its own score — suppression may never rescore
+  const dropped = audit.rules.find((r) => r.id === "R002");
+  assert.equal(dropped.suppressed, true);
+  assert.equal(typeof dropped.score, "number");
+  // ...but it leaves every count the report averages over
+  assert.equal(audit.files[0].ruleCount, 1);
+
+  const report = engine.renderReport(audit);
+  assert.match(report, /\*\*1 rules across 1 file\(s\)\*\*/);
+  assert.doesNotMatch(report, /R002/);
+  assert.doesNotMatch(report, /Suppressed/);
+
+  const verbose = engine.renderReport(audit, { verbose: true });
+  assert.match(verbose, /## Suppressed \(1 judged not to be rules\)/);
+  assert.ok(verbose.includes(reason), "the model's reason was not quoted");
+  assert.match(verbose, /R002 \(\[CLAUDE\.md:\d+\]\(CLAUDE\.md:\d+\)\)/);
+});
+
+test("loadJudgments rejects a notRule that carries no reason", () => {
+  const root = tmpProject({ "CLAUDE.md": "- Never use `var` — use `const` instead.\n" });
+  const scanData = engine.scan(root);
+  fs.mkdirSync(path.join(root, ".assay-tmp"), { recursive: true });
+  const write = (j) => fs.writeFileSync(path.join(root, ".assay-tmp", "judgments.json"), JSON.stringify(j));
+
+  write({ R001: { F3: 0.5, F8: 0.5, notRule: "  " } });
+  assert.match(engine.loadJudgments(root, scanData.rules).error, /R001\.notRule/);
+
+  write({ R001: { F3: 0.5, F8: 0.5, notRule: true } });
+  assert.match(engine.loadJudgments(root, scanData.rules).error, /R001\.notRule/);
+
+  write({ R001: { F3: 0.5, F8: 0.5, notRule: "Narration, not a directive." } });
+  assert.equal(engine.loadJudgments(root, scanData.rules).error, undefined);
+});
+
 test("loadJudgments rejects missing or out-of-range entries", () => {
   const root = tmpProject(FIXTURE);
   const scanData = engine.scan(root);

@@ -13,8 +13,8 @@ description: >-
   files", "which rules are weak or vague", "audit my rules", "which rules should
   be hooks" — or invokes /assay:audit with any flags. Do NOT use to review code,
   PRs, or non-Claude config like eslint.
-argument-hint: "[--fix] [--verbose] [--json]"
-allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch
+argument-hint: "[--fix] [--verbose] [--json] [--verify]"
+allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent
 ---
 
 # assay:audit
@@ -22,7 +22,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch
 The script measures everything mechanical; you judge two factors and present the
 result. Never re-derive by hand what the script already computed. Flags in
 `$ARGUMENTS`: `--fix` (apply rewrites without the menu), `--verbose` (full factor
-table), `--json` (machine-readable report).
+table), `--json` (machine-readable report), `--verify` (step 2b, off by default).
 
 ## 1. Scan
 
@@ -62,6 +62,35 @@ Write the result with the `Write` tool to `.assay-tmp/judgments.json`:
 { "R001": { "F3": 0.75, "F8": 0.9 }, "R002": { "F3": 0.45, "F8": 0.15, "F1": 0.7 } }
 ```
 
+## 2b. Verify — only when `--verify` was passed
+
+Skip this whole step unless `$ARGUMENTS` contains `--verify`. It is off by
+default and stays off until its false-suppression rate has been measured.
+
+Extraction cannot tell a directive from a retrospective, so a lessons file can
+arrive graded as a page of mandates. This step asks one question about those
+entries and acts on nothing else.
+
+Send **one** `Agent` call — `subagent_type: "general-purpose"`, `model:
+"haiku"`, `run_in_background: false` — carrying every rule from the `judge` list
+whose text you doubt is a rule at all, id and text each. Ask for exactly one
+verdict per entry: is this an instruction to follow, or is it narration,
+history, an example, or a description of what the project does? Ask for a
+one-sentence reason on every entry it rejects, in its own words.
+
+Then, for each rejected entry only, add a `notRule` key to that rule's object in
+`.assay-tmp/judgments.json`, holding the returned reason verbatim:
+
+```json
+{ "R001": { "F3": 0.75, "F8": 0.9 }, "R002": { "F3": 0.45, "F8": 0.15, "notRule": "Records what the team decided last quarter; it asks for nothing." } }
+```
+
+Change nothing else. The pass may drop an entry and that is all it may do —
+never edit an `F3` or `F8` you already wrote, never reword a rule, never add
+`notRule` on your own judgment instead of the subagent's. An entry with
+`notRule` leaves the counts, the file grades, and the corpus grade; it does not
+get rescored.
+
 ## 3. Report
 
 ```
@@ -71,7 +100,11 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" report
 Add `--verbose` or `--json` if the user asked. The command prints the finished
 markdown report — corpus grade, per-file grades, weak rules with suggested
 fixes, stall risks, buried rules, stale references, hook opportunities,
-placement candidates, weak skill descriptions.
+placement candidates, weak skill descriptions. With `--verbose` it also lists
+everything step 2b suppressed, each with its reason quoted. If step 2b
+suppressed anything and the user did not pass `--verbose`, say how many entries
+were dropped in your own three sentences below — a silent drop is the one thing
+this pass must never do.
 
 The report is this skill's deliverable and the user must have read it before
 the step 4 menu asks them to choose anything. Length limits from an output

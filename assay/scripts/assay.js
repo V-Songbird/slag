@@ -1232,9 +1232,17 @@ function loadJudgments(root, rules) {
     for (const k of ["F3", "F8", "F1"]) {
       if (j[k] !== undefined && (typeof j[k] !== "number" || j[k] < 0 || j[k] > 1)) problems.push(rule.id + "." + k);
     }
+    // [Foreman: 058]
+    // The verification pass writes its verdict into this same file, so the
+    // script keeps taking every model judgment from disk and stays a pure
+    // function of its inputs. A reason is mandatory: an entry vanishes from the
+    // report only when the model said, in words, why it was never a rule.
+    if (j.notRule !== undefined && (typeof j.notRule !== "string" || !j.notRule.trim())) {
+      problems.push(rule.id + ".notRule");
+    }
   }
   if (problems.length) {
-    return { error: "Judgments missing or out of range [0,1] for: " + problems.join(", ") };
+    return { error: "Judgments missing, malformed, or out of range [0,1] for: " + problems.join(", ") };
   }
   return { judgments };
 }
@@ -1256,6 +1264,7 @@ function composeAudit(scanData, judgments) {
     const stallRisk = r.factors.F2.stallRisk === true;
     const score = stallRisk ? Math.min(composed.score, STALL_RISK_CAP) : composed.score;
     const placement = detectPlacement(r.text, j.F8);
+    const notRule = typeof j.notRule === "string" && j.notRule.trim() ? j.notRule.trim() : null;
     return {
       ...r,
       factorValues: factors,
@@ -1267,16 +1276,26 @@ function composeAudit(scanData, judgments) {
       hookOpportunity: j.F8 < F8_HOOK_THRESHOLD,
       placement,
       weak: score < (CATEGORY_FLOORS[r.category] ?? CATEGORY_FLOORS.mandate),
+      suppressed: notRule !== null,
+      suppressedReason: notRule,
     };
   });
 
+  // [Foreman: 058]
+  // A suppressed entry keeps its own score and factor values untouched — the
+  // pass may never rescore — but it leaves the population the report averages
+  // over. Counting a lessons file's 18 non-rules into the corpus grade is the
+  // pollution this entry exists to remove, so hiding the rows while keeping the
+  // headline number would fix nothing that matters.
+  const counted = rules.filter((r) => !r.suppressed);
+
   const files = scanData.files.map((f, i) => {
-    const own = rules.filter((r) => r.fileIndex === i);
+    const own = counted.filter((r) => r.fileIndex === i);
     const mean = own.length ? own.reduce((s, r) => s + r.score, 0) / own.length : null;
     return { ...f, ruleCount: own.length, score: mean === null ? null : round3(mean), grade: mean === null ? null : grade(mean) };
   });
 
-  const mandates = rules.filter((r) => r.category === "mandate");
+  const mandates = counted.filter((r) => r.category === "mandate");
   const corpus = mandates.length ? round3(mandates.reduce((s, r) => s + r.score, 0) / mandates.length) : null;
 
   return {
@@ -1339,9 +1358,26 @@ function rowWeaknesses(rule) {
   return weak.length ? weak.slice(0, MAX_ROW_FACTORS) : [rule.dominantWeakness];
 }
 
+// [Foreman: 058]
+// Suppressed entries never disappear silently — --verbose brings every one back
+// with the model's own words for why it was dropped, so the pass stays auditable
+// while its false-suppression rate is still unmeasured.
+function pushSuppressedSection(out, suppressed) {
+  out.push(`## Suppressed (${suppressed.length} judged not to be rules)`);
+  out.push("");
+  out.push("These were extracted and scored, then dropped from every count above — the verification pass judged them prose rather than instructions. Their scores are unchanged; only their membership in the report is.");
+  out.push("");
+  for (const r of suppressed) {
+    out.push(`- ${r.id} ([${r.file}:${r.lineStart}](${r.file}:${r.lineStart})) "${truncate(r.text, 70)}" — "${r.suppressedReason}"`);
+  }
+  out.push("");
+}
+
 function renderReport(audit, opts = {}) {
   const out = [];
-  const { rules, files } = audit;
+  const { files } = audit;
+  const rules = audit.rules.filter((r) => !r.suppressed);
+  const suppressed = audit.rules.filter((r) => r.suppressed);
   // file:line as a markdown link — Claude Code renders it clickable, opening
   // the rule at its exact line
   const loc = (r) => `[${r.file}:${r.lineStart}](${r.file}:${r.lineStart})`;
@@ -1363,9 +1399,16 @@ function renderReport(audit, opts = {}) {
       out.push("");
       pushWeakSkillSection(out, weakSkills);
     }
+    if (opts.verbose && suppressed.length) {
+      out.push("");
+      pushSuppressedSection(out, suppressed);
+    }
     return out.join("\n");
   }
-  out.push(`**${rules.length} rules across ${files.filter((f) => f.ruleCount > 0).length} file(s)** — corpus grade **${audit.corpusGrade} (${fmt(audit.corpusScore)})**, mandate rules only.`);
+  const corpusBit = audit.corpusScore === null
+    ? "no mandate rules left to grade"
+    : `corpus grade **${audit.corpusGrade} (${fmt(audit.corpusScore)})**, mandate rules only`;
+  out.push(`**${rules.length} rules across ${files.filter((f) => f.ruleCount > 0).length} file(s)** — ${corpusBit}.`);
   out.push("");
   out.push("Grades assume the rules must survive the least forgiving reader — small models, subagents, headless runs. If only large models in interactive sessions read this corpus, treat severity one notch softer.");
   out.push("");
@@ -1492,6 +1535,7 @@ function renderReport(audit, opts = {}) {
       out.push(`| ${ruleLink(r, 40)} | ${r.category} | ${cells} | ${fmt(r.score)} | ${r.grade} |`);
     }
     out.push("");
+    if (suppressed.length) pushSuppressedSection(out, suppressed);
   }
 
   return out.join("\n");
