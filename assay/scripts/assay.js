@@ -521,9 +521,29 @@ function stripMetadata(content) {
     }
   }
 
+  // [Foreman: 060]
+  // An author fences off narrative that reads like rules but commands nothing —
+  // a motivating story, a pasted requirement, a tier definition — with a
+  // <!-- assay-ignore-start --> / <!-- assay-ignore-end --> pair. Every line
+  // between them, markers included, leaves the content stream like a code fence
+  // and also leaves the F5 position denominator, so a real rule below the block
+  // is not judged as buried by prose that isn't graded. A start with no end runs
+  // to end of file, the same way an unclosed fence swallows the tail.
+  const ignoreRegions = new Set();
+  let inIgnore = false;
+  for (let i = frontmatterEnd; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!inIgnore) {
+      if (/^<!--\s*assay-ignore-start\s*-->$/.test(t)) { inIgnore = true; ignoreRegions.add(i); }
+    } else {
+      ignoreRegions.add(i);
+      if (/^<!--\s*assay-ignore-end\s*-->$/.test(t)) inIgnore = false;
+    }
+  }
+
   const tableRegions = new Set();
   for (let i = frontmatterEnd; i < lines.length; i++) {
-    if (tableRegions.has(i) || fenceRegions.has(i) || tagRegions.has(i)) continue;
+    if (tableRegions.has(i) || fenceRegions.has(i) || tagRegions.has(i) || ignoreRegions.has(i)) continue;
     if (lines[i].trim().startsWith("|") && i + 1 < lines.length && /^\|[\s:]*-/.test(lines[i + 1].trim())) {
       let j = i;
       while (j < lines.length && lines[j].trim().startsWith("|")) {
@@ -535,7 +555,7 @@ function stripMetadata(content) {
 
   for (let i = frontmatterEnd; i < lines.length; i++) {
     const lineNum = i + 1;
-    if (fenceRegions.has(i) || tableRegions.has(i) || tagRegions.has(i)) continue;
+    if (fenceRegions.has(i) || tableRegions.has(i) || tagRegions.has(i) || ignoreRegions.has(i)) continue;
     const raw = lines[i];
     const stripped = raw.trim();
 
@@ -556,7 +576,14 @@ function stripMetadata(content) {
     result.push({ lineNum, text: stripped, isContent: true, isBlank: false, isHeading: false, raw });
   }
 
-  return { lines: result, annotations, ignored };
+  // [Foreman: 060] lines fenced off as narrative — an assay-ignore span or a
+  // <context>/<example> tag body — that leave the F5 position denominator, keyed
+  // by 1-based line number to match a rule's lineStart
+  const excluded = new Set();
+  for (const i of ignoreRegions) excluded.add(i + 1);
+  for (const i of tagRegions) excluded.add(i + 1);
+
+  return { lines: result, annotations, ignored, excluded };
 }
 
 function identifyChunks(lines) {
@@ -1156,9 +1183,16 @@ function scan(root) {
   const findMoved = makeBasenameResolver(root);
 
   files.forEach((file, fileIndex) => {
-    const { lines, annotations, ignored } = stripMetadata(file.content);
+    const { lines, annotations, ignored, excluded } = stripMetadata(file.content);
     const chunks = identifyChunks(lines);
     const merged = mergeClarifications(chunks);
+
+    // [Foreman: 060] F5 measures how far down the *graded* content a rule sits,
+    // so narrative fenced off above it must not push it toward the bottom. Both
+    // the denominator and each rule's position drop the excluded lines.
+    const excludedSorted = [...excluded].sort((a, b) => a - b);
+    const f5File = { lineCount: file.lineCount - excluded.size };
+    const effectivePosition = (lineStart) => lineStart - excludedSorted.filter((n) => n < lineStart).length;
 
     for (const [chunk, cls] of merged) {
       if (cls !== "rule") continue;
@@ -1187,7 +1221,7 @@ function scan(root) {
             F1: f1,
             F2: scoreF2(part.text),
             F4: scoreF4({ text: part.text, staleness }, file),
-            F5: scoreF5(part.lineStart, file),
+            F5: scoreF5(effectivePosition(part.lineStart), f5File),
             F7: scoreF7(part.text),
           },
         };

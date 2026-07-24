@@ -80,7 +80,7 @@ One scoring script and three skills — the audit with its two rubrics, craft-sk
 - The grade measures **structural clarity** — whether a rule is parseable, triggerable, specific, and placed where it will be seen. It does not predict compliance; a perfectly clear rule can still lose to the model's habits. Clarity is the part you control.
 - Scoring is English-only. Rules in other languages will grade wrong; the report counts the ones in a non-Latin script so their numbers aren't mistaken for real grades.
 - Promoted rules are built at project scope, straight from the current official docs — fetched at promotion time, so the formats are never stale. Nothing else gets installed.
-- Skip a rule you like as-is by putting `<!-- assay-ignore -->` on the line above it.
+- Skip a rule you like as-is by putting `<!-- assay-ignore -->` on the line above it. To fence off a whole block of prose that reads like rules but isn't — a motivating story, a pasted requirement, a glossary — wrap it in `<!-- assay-ignore-start -->` and `<!-- assay-ignore-end -->`. Those lines leave the grade entirely, and a real rule below the block is no longer counted as buried under it.
 - Dead-glob detection (a scoped rules file whose file patterns match nothing) needs Node 22+; everything else runs on older Node.
 - Even a crafted description is a strong hint, not a promise — on any model size. That's why `craft-skill` backs must-run skills with a rule, and names a hook as the only true guarantee.
 

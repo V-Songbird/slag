@@ -54,6 +54,38 @@ test("stripMetadata skips <example>-style tag blocks", () => {
   assert.deepEqual(texts, ["- Never commit secrets.", "- Use Vitest for tests."]);
 });
 
+test("an assay-ignore-start/end span drops narrative that reads like rules", () => {
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "- Never commit a secret.",
+      "",
+      "<!-- assay-ignore-start -->",
+      "- We once shipped a stale lockfile and lost two days.",
+      "- Always ask before deleting a migration, we learned that the hard way.",
+      "<!-- assay-ignore-end -->",
+      "",
+      "- Run the tests before every commit.",
+    ].join("\n"),
+  });
+  const scanData = engine.scan(root);
+  const texts = scanData.rules.map((r) => r.text);
+  assert.equal(scanData.rules.length, 2);
+  assert.ok(!texts.some((t) => t.includes("stale lockfile")), "a fenced-off line was still graded");
+  assert.ok(!texts.some((t) => t.includes("the hard way")), "a fenced-off line was still graded");
+});
+
+test("a rule below a large assay-ignore span is not scored as buried", () => {
+  const narrative = Array.from({ length: 60 }, (_, i) => `- historical note ${i} that reads like an instruction.`).join("\n");
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n<!-- assay-ignore-start -->\n" + narrative + "\n<!-- assay-ignore-end -->\n\n- Always use functional components with TypeScript.\n",
+  });
+  const scanData = engine.scan(root);
+  assert.equal(scanData.rules.length, 1);
+  // physically at the bottom of a 60+-line file, but the excluded narrative
+  // leaves the F5 denominator, so the only graded rule reads as near the top
+  assert.equal(scanData.rules[0].factors.F5.value, 0.95);
+});
+
 test("identifyChunks joins continuation lines into one chunk", () => {
   const { lines } = engine.stripMetadata("- Use Vitest for all tests\n  placed next to the source file.\n");
   const chunks = engine.identifyChunks(lines);

@@ -4,6 +4,12 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.5.8-alpha] — 2026-07-24
+
+### Added
+
+- Fence off a block of prose that reads like rules but isn't — a motivating story, a pasted requirement, a glossary — with `<!-- assay-ignore-start -->` and `<!-- assay-ignore-end -->`. The block leaves the grade entirely, and a real rule below it is no longer counted as buried under prose that was never graded. `<context>` and `<example>` blocks are treated the same way
+
 ## [0.5.7-alpha] — 2026-07-24
 
 ### Added

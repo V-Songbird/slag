@@ -55,3 +55,11 @@ grades it down, and buried rules lose force.
 | A multi-step procedure, or "follow the conventions in <doc>" | Skill — build it with `/assay:craft-skill` |
 | An audit or review duty that needs fresh context | Subagent |
 | "Claude must NEVER, not even once" | Hook — only a hook guarantees; a rule is probabilistic |
+
+Some prose in a rule file is narrative on purpose — a motivating story, a pasted
+requirement, a glossary of tiers. It reads like rules but commands nothing, and
+the audit will grade it as weak mandates and dock the file for it. Fence it off
+so it leaves the grade: `<!-- assay-ignore -->` on the line above a single rule,
+or a `<!-- assay-ignore-start -->` / `<!-- assay-ignore-end -->` pair around a
+whole block. Fenced lines also leave the position denominator, so a real rule
+below the block is not counted as buried under prose that was never graded.
