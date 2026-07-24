@@ -182,9 +182,33 @@ header `"Fix menu"`), including only options that have evidence:
 Apply what was checked, per [references/fixes.md](references/fixes.md). If both
 promote and park are checked, promotion wins and parking covers the remainder.
 Match rules by exact text, never by line number. After applying, remind the
-user to review with `git diff`. Do not loop, re-audit, or offer follow-up
-menus — one pass, then done. If the user wants to measure the improvement they
-can run `/assay:audit` again.
+user to review with `git diff`.
+
+## 4b. Remeasure — once, only if a rewrite was applied
+
+Skip this step unless step 4 rewrote at least one weak rule or skill description.
+Promotions and parks move rules out of the graded files, so they need no
+remeasure; a rewrite changes a rule in place and its effect is exactly what this
+step shows. Do not clean between step 4 and here — the cached judgments and the
+prior `audit.json` are what make the before/after possible.
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" remeasure
+```
+
+It re-scans the rewritten files and reuses every cached judgment whose rule is
+unchanged. A rewrite gives a rule new text, so its content hash is new and its
+old judgment no longer applies: `remeasure` prints those rules as a `judge`
+worklist and a `pending` count instead of a report. When that happens, judge
+only the listed rules exactly as in step 2 (and step 2b if not `--no-verify`),
+**merge** them into `.assay-tmp/judgments.json` without disturbing the existing
+entries, and run `remeasure` once more. The second run finds every hash known and
+prints the report, which now leads with a **Since last audit** section: corpus
+grade before → after, and each file's before/after.
+
+Run `remeasure` at most twice — once to surface the reworded rules, once to
+report. Do not loop further: one rewrite-and-remeasure, then done. Show the
+before/after section to the user; it is the evidence the fixes landed.
 
 ## 5. Clean up
 

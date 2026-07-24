@@ -4,6 +4,12 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.5.7-alpha] — 2026-07-24
+
+### Added
+
+- After rewriting weak rules, the audit now measures again and shows the movement — corpus grade before and after, and each file's grade before and after. Rewording a rule re-judges only that rule; every untouched rule keeps its earlier judgment. One rewrite drops most corpora only part of the way to a good grade, and now you can see how far it went instead of guessing
+
 ## [0.5.6-alpha] — 2026-07-24
 
 ### Changed

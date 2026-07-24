@@ -916,6 +916,27 @@ test("loadJudgments rejects a notRule that carries no reason", () => {
   assert.equal(engine.loadJudgments(root, scanData.rules).error, undefined);
 });
 
+test("remeasure report leads with a before/after section when handed the prior audit", () => {
+  const root = tmpProject({ "CLAUDE.md": "- Always use functional components with TypeScript.\n\n- Never commit a secret.\n" });
+  const scanData = engine.scan(root);
+  const judge = (f3) => {
+    const j = {};
+    for (const r of scanData.rules) j[r.key] = { F3: f3, F8: 0.9 };
+    return engine.composeAudit(scanData, j);
+  };
+  const prev = judge(0.1); // weak first pass
+  const now = judge(0.9);  // after fixes
+  assert.ok(now.corpusScore > prev.corpusScore, "fixture did not move; pick sharper judgments");
+
+  const plain = engine.renderReport(now);
+  assert.doesNotMatch(plain, /Since last audit/);
+
+  const report = engine.renderReport(now, { prev });
+  assert.match(report, /## Since last audit/);
+  assert.match(report, new RegExp(`Corpus grade .*\\(${prev.corpusScore.toFixed(2)}\\).*→.*\\(${now.corpusScore.toFixed(2)}\\)`));
+  assert.match(report, /\| CLAUDE\.md \| [A-F] \(0\.\d\d\) \| [A-F] \(0\.\d\d\) \|/);
+});
+
 test("loadJudgments rejects missing or out-of-range entries", () => {
   const root = tmpProject(FIXTURE);
   const scanData = engine.scan(root);

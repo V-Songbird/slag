@@ -12,6 +12,10 @@
 //                                        merges .assay-tmp/judgments.json, computes
 //                                        composite scores + placement candidates,
 //                                        prints the finished markdown report
+//   node assay.js remeasure [--verbose] [--json] [--root <path>]
+//                                        re-scans after fixes, reuses cached
+//                                        judgments (re-judging only reworded
+//                                        rules), prints a before/after report
 //   node assay.js clean [--root <path>]  removes .assay-tmp/
 //
 // Everything mechanical happens here; the only model-judged inputs are F3
@@ -1395,6 +1399,36 @@ function pushSuppressedSection(out, suppressed) {
   out.push("");
 }
 
+// [Foreman: 061]
+// One audit pass leaves the grade short of where iterating gets it — an observed
+// corpus climbed C→A only across five scan-fix-scan rounds, and a single report
+// never shows whether a fix landed. When `remeasure` hands renderReport the prior
+// audit, this section leads with the movement: corpus grade then, corpus grade
+// now, and each file's before/after. Files are matched by path, so a file that
+// was split or renamed simply drops out of the comparison rather than pairing
+// with the wrong one.
+function gradeCell(score, gradeVal) {
+  return score === null || score === undefined ? "—" : `${gradeVal} (${fmt(score)})`;
+}
+
+function pushProgressSection(out, audit, prev) {
+  out.push("## Since last audit");
+  out.push("");
+  out.push(`Corpus grade ${gradeCell(prev.corpusScore, prev.corpusGrade)} → ${gradeCell(audit.corpusScore, audit.corpusGrade)}.`);
+  out.push("");
+  const prevByPath = new Map((prev.files || []).map((f) => [f.path, f]));
+  const rows = audit.files.filter((f) => prevByPath.has(f.path));
+  if (rows.length) {
+    out.push("| File | Before | After |");
+    out.push("|---|---|---|");
+    for (const f of rows) {
+      const p = prevByPath.get(f.path);
+      out.push(`| ${f.path} | ${gradeCell(p.score, p.grade)} | ${gradeCell(f.score, f.grade)} |`);
+    }
+    out.push("");
+  }
+}
+
 function renderReport(audit, opts = {}) {
   const out = [];
   const { files } = audit;
@@ -1439,6 +1473,8 @@ function renderReport(audit, opts = {}) {
     out.push(`**${nonLatin.length} rule(s) contain non-Latin script.** assay grades English only, so treat their scores as unreliable rather than low.`);
     out.push("");
   }
+
+  if (opts.prev) pushProgressSection(out, audit, opts.prev);
 
   out.push("## Files");
   out.push("");
@@ -1586,6 +1622,59 @@ function cmdReport(root, opts) {
   else process.stdout.write(renderReport(audit, opts) + "\n");
 }
 
+// [Foreman: 061]
+// Remeasure closes the fix-and-check loop: re-scan the edited corpus, reuse every
+// cached judgment whose rule is unchanged (keyed by the 059 content hash), and
+// re-judge only the rules a fix reworded. The previous audit.json is read before
+// the re-scan overwrites it, so the report can lead with before/after. This is
+// why the audit skill no longer bans a second pass — it bounds it to one instead.
+function cmdRemeasure(root, opts) {
+  const tmp = path.join(root, TMP_DIR);
+  const judgeFile = path.join(tmp, "judgments.json");
+  if (!fs.existsSync(judgeFile)) {
+    process.stderr.write("No " + TMP_DIR + "/judgments.json — run a full scan → judge → report before remeasuring.\n");
+    process.exit(1);
+  }
+  const auditFile = path.join(tmp, "audit.json");
+  const prev = fs.existsSync(auditFile) ? JSON.parse(fs.readFileSync(auditFile, "utf-8")) : null;
+
+  const scanData = scan(root);
+  fs.writeFileSync(path.join(tmp, "scan.json"), JSON.stringify(scanData, null, 2));
+
+  let judgments;
+  try {
+    judgments = JSON.parse(fs.readFileSync(judgeFile, "utf-8"));
+  } catch (err) {
+    process.stderr.write(TMP_DIR + "/judgments.json is not valid JSON: " + err.message + "\n");
+    process.exit(1);
+  }
+
+  const unknown = scanData.rules.filter((r) => !judgments[r.key]);
+  if (unknown.length) {
+    // The fixes reworded these, so their hash is new and their old judgment is
+    // gone. Emit them as a worklist and stop — the skill judges only these,
+    // merges, and reruns. Nothing is composed or overwritten on this branch.
+    process.stdout.write(JSON.stringify({
+      remeasure: true,
+      pending: unknown.length,
+      judgmentsFile: TMP_DIR + "/judgments.json",
+      note: "Judge these reworded rules, merge into judgments.json, then rerun remeasure.",
+      judge: unknown.map((r) => ({ id: r.id, key: r.key, text: r.text, needsF1: r.factors.F1.method === "extraction_failed" })),
+    }, null, 2) + "\n");
+    return;
+  }
+
+  const { judgments: valid, error } = loadJudgments(root, scanData.rules);
+  if (error) {
+    process.stderr.write(error + "\n");
+    process.exit(1);
+  }
+  const audit = composeAudit(scanData, valid);
+  fs.writeFileSync(auditFile, JSON.stringify(audit, null, 2));
+  if (opts.json) process.stdout.write(JSON.stringify({ ...audit, previous: prev }, null, 2) + "\n");
+  else process.stdout.write(renderReport(audit, { ...opts, prev }) + "\n");
+}
+
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
@@ -1599,9 +1688,10 @@ function main() {
 
   if (command === "scan") cmdScan(root);
   else if (command === "report") cmdReport(root, opts);
+  else if (command === "remeasure") cmdRemeasure(root, opts);
   else if (command === "clean") fs.rmSync(path.join(root, TMP_DIR), { recursive: true, force: true });
   else {
-    process.stderr.write("Usage: assay.js <scan|report|clean> [--root <path>] [--verbose] [--json]\n");
+    process.stderr.write("Usage: assay.js <scan|report|remeasure|clean> [--root <path>] [--verbose] [--json]\n");
     process.exit(2);
   }
 }
