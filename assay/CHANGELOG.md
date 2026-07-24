@@ -4,6 +4,17 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.5.4-alpha] — 2026-07-23
+
+### Added
+
+- `--verify` asks one more question of a small fast model before the report: is this entry a rule at all? A file of notes or history can otherwise arrive graded as a page of mandates. The answer can only drop an entry — nothing is rescored or reworded — and `--verbose` lists every drop with the reason. Off unless you ask for it
+
+### Fixed
+
+- A sentence joined by "and" is no longer cut in half and graded as two rules. The tail clause was being listed as a rule of its own, scored, and offered for rewrite. Rules that genuinely carry two directives still split on a semicolon
+- The weak-rules table no longer repeats one identical suggested fix on every row. Each row now names the factors that are actually weakest for that rule, so the advice differs where the rules differ
+
 ## [0.5.3-alpha] — 2026-07-23
 
 ### Changed
