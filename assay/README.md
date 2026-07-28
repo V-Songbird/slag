@@ -94,7 +94,7 @@ One scoring script and three skills — the audit with its two rubrics, craft-sk
 - Some files score low because of their shape, not their wording — too much narrative, most of their rules buried low, or just too long. Those land under **Restructure candidates**, which names the fix a per-rule rewrite can't reach: fence the narrative, move the load-bearing rules up, or split the file into scoped rule files.
 - Skip a rule you like as-is by putting `<!-- assay-ignore -->` on the line above it. To fence off a whole block of prose that reads like rules but isn't — a motivating story, a pasted requirement, a glossary — wrap it in `<!-- assay-ignore-start -->` and `<!-- assay-ignore-end -->`. Those lines leave the grade entirely, and a real rule below the block is no longer counted as buried under it.
 - Dead-glob detection (a scoped rules file whose file patterns match nothing) needs Node 22+; everything else runs on older Node.
-- `--semantic` is optional and off by default. It lets the audit propose duplicates and conflicts that share no words — the kind no token comparison finds. Every one is labelled model-proposed, you accept or reject it in conversation, and none of them move a score or a grade.
+- `--semantic` is optional and off by default. It lets the audit propose duplicates and conflicts that share no words — the kind no mechanical check finds. Every one is labelled model-proposed, you accept or reject it in conversation, and none of them move a score or a grade.
 - Even a crafted description is a strong hint, not a promise — on any model size. That's why `craft-skill` backs must-run skills with a rule, and names a hook as the only true guarantee.
 
 ## License
