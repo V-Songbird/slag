@@ -11,6 +11,7 @@ description: >-
   cutting a new verity release, or after a Claude Code update. Do NOT use to
   edit verity's docs or code — only to check and refresh the bundled doc index
   (lastmod-snapshot.json).
+disable-model-invocation: true
 allowed-tools: Bash, Read, Write
 ---
 
