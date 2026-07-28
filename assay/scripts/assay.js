@@ -1671,7 +1671,7 @@ function renderReport(audit, opts = {}) {
     : `corpus grade **${audit.corpusGrade} (${fmt(audit.corpusScore)})**, mandate rules only`;
   out.push(`**${rules.length} rules across ${files.filter((f) => f.ruleCount > 0).length} file(s)** — ${corpusBit}.`);
   out.push("");
-  out.push("Grades assume the rules must survive the least forgiving reader — small models, subagents, headless runs. If only large models in interactive sessions read this corpus, treat severity one notch softer.");
+  out.push("Grades measure structural hygiene — how a rule is written, scoped, and placed — not whether Claude will comply. They assume the least forgiving reader: small models, subagents, headless runs. If only large models in interactive sessions read this corpus, treat severity one notch softer.");
   out.push("");
   const nonLatin = rules.filter((r) => r.nonLatin);
   if (nonLatin.length) {

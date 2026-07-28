@@ -4,12 +4,12 @@
     <img src="assets/logo.svg" alt="assay" width="240" />
   </picture>
   <h1>assay</h1>
-  <p><strong>Your CLAUDE.md is full of rules. assay tells you which ones Claude can actually follow.</strong></p>
+  <p><strong>Your CLAUDE.md is full of rules. assay tells you which ones are too vague, too buried, or too big for prose.</strong></p>
 </div>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
 
-> **TL;DR** — You wrote rules for Claude; it keeps ignoring some. assay grades every rule on whether Claude can tell when it fires and what to do, then offers rewrites for the weak ones. The grading is almost entirely a script — a re-run gives the same numbers. It also builds skills whose descriptions actually trigger.
+> **TL;DR** — assay analyzes the instruction files Claude Code loads for your project: what's vague, what's stale, what's buried, what belongs in a hook instead of a paragraph. It grades structural hygiene — how a rule is written and placed, never whether the model will comply — and offers rewrites for the weak ones. The grading is almost entirely a script; a re-run gives the same numbers.
 
 ---
 
@@ -18,22 +18,22 @@
 
 ## What is this?
 
-You wrote rules for Claude. Claude keeps ignoring some of them. Before you conclude the model is lazy, consider that "write clean, maintainable code" is not a rule — it's a wish. assay reads every rule in your `CLAUDE.md` and `.claude/rules/`, grades each one on whether Claude can actually tell *when it fires* and *what to do*, and offers to rewrite the ones that grade badly.
+"Write clean, maintainable code" is not a rule — it's a wish. assay reads the instruction files Claude Code loads for your project, `CLAUDE.md` and `.claude/rules/`, and grades each rule on the parts you control: does it name *when it fires* and *what to do*, is it specific, and does it sit where the file gets read. Then it offers to rewrite the ones that grade badly.
 
 It also spots the rules that were never meant to be prose at all — "run prettier before committing" is a hook pretending to be a sentence — and offers to park them for promotion into the mechanism that would actually enforce them.
 
-And when the problem is a skill instead of a rule, `/assay:craft-skill` builds one whose description Claude actually notices, or refits a skill Claude keeps ignoring. A skill that must always run gets a rule backing it up — and, when even that isn't promise enough, a hook.
+And when the problem is a skill instead of a rule, `/assay:craft-skill` builds one whose description reads as a trigger instead of a summary of itself, or refits a skill that never seems to fire. A skill that must always run gets a rule backing it up — and, when even that isn't promise enough, a hook.
 
 Rules get the same treatment: `/assay:craft-rules` grills you — when should it fire, what replaces the thing you're banning, what does a violation actually look like — then writes one bullet that would survive its own audit, placed where Claude will actually read it. If what you asked for was never a rule at all, it says so instead of writing you a wish.
 
 ## Why you'd want it
 
-- **You stop guessing which rules work.** Every rule gets a grade and the one factor most worth fixing, not vibes.
+- **You stop guessing which rules are weak.** Every rule gets a grade for how it's written and placed, plus the one factor most worth fixing — not vibes.
 - **Prohibitions that dead-end get flagged.** "Never X" with no alternative can stall a session mid-task, so it grades F until it names the replacement.
 - **The weak ones get rewritten, not lectured about.** One menu, your approval, then in-place edits you review with `git diff`.
 - **Wishes get unmasked as hooks.** Rules a script could enforce with an exit code are flagged, with the evidence, instead of burning goodwill as text. assay reads the hooks already wired for the project — from its settings, yours, and installed plugins — so a candidate that's already enforced gets marked covered, not proposed again.
 - **Stale references get caught — and traced.** A rule citing a file that no longer exists is worse than no rule. assay reads the paths in backticks *and* in markdown links, and when the file has merely moved it names where it went, so the fix is one edit instead of a hunt.
-- **Skills that actually fire.** A skill's description is how Claude decides to use it; most are written as documentation instead. Crafted ones are written as triggers.
+- **Skill descriptions written as triggers.** A skill's description is how Claude decides to use it; most are written as documentation instead. Crafted ones name the moment.
 - **Skills you already have get graded too.** The audit checks every project skill's description against the same trigger recipe and offers to rewrite the ones missing parts, in the same fix menu as the rules.
 
 ## How it works
@@ -78,7 +78,7 @@ One scoring script and three skills — the audit with its two rubrics, craft-sk
 
 ## Good to know
 
-- The grade measures **structural clarity** — whether a rule is parseable, triggerable, specific, and placed where it will be seen. It does not predict compliance; a perfectly clear rule can still lose to the model's habits. Clarity is the part you control.
+- The grade measures **structural hygiene** — whether a rule is parseable, triggerable, specific, and placed where it will be seen. It is not a prediction that Claude will comply; a perfectly clear rule can still lose to the model's habits. Structure is the part you control.
 - Scoring is English-only. Rules in other languages will grade wrong; the report counts the ones in a non-Latin script so their numbers aren't mistaken for real grades.
 - Promoted rules are built at project scope, straight from the current official docs — fetched at promotion time, so the formats are never stale. Nothing else gets installed.
 - Some files score low because of their shape, not their wording — too much narrative, most of their rules buried low, or just too long. Those land under **Restructure candidates**, which names the fix a per-rule rewrite can't reach: fence the narrative, move the load-bearing rules up, or split the file into scoped rule files.

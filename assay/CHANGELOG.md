@@ -4,6 +4,12 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [Unreleased]
+
+### Changed
+
+- The docs, the plugin description, and the report itself now say plainly what a grade measures: how a rule is written, scoped, and placed — structural hygiene, not a prediction that Claude will follow it
+
 ## [0.5.9-alpha] — 2026-07-24
 
 ### Added

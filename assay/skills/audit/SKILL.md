@@ -2,7 +2,7 @@
 name: audit
 description: >-
   Grades every rule in the project's CLAUDE.md and .claude/rules/ for structural
-  clarity — verb strength, framing, trigger distance, loading scope, position in
+  hygiene — verb strength, framing, trigger distance, loading scope, position in
   the file, concreteness — and detects rules that would work better as hooks,
   skills, or subagents. Also grades each project skill's frontmatter description
   in .claude/skills/ against the trigger recipe. Most of the scoring is a
@@ -156,7 +156,9 @@ it "already enforced by `<command>`" next to the entry and drop it from the
 promote/park counts in step 4.
 
 Then add at most 3 sentences of your own: the single most valuable fix and
-anything project-specific the numbers can't see. If the project visibly runs subagents or headless automation, one
+anything project-specific the numbers can't see. Never present a grade as a
+prediction that Claude will or won't follow a rule — it measures how the rule is
+written, scoped, and placed. If the project visibly runs subagents or headless automation, one
 of those sentences should say the grades apply at full severity there; if it
 clearly does neither, say severity reads one notch softer. If it errors about
 judgments, fix `.assay-tmp/judgments.json` and rerun.

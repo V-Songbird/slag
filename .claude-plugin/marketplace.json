@@ -10,7 +10,7 @@
     {
       "name": "assay",
       "source": "./assay",
-      "description": "Grades every rule in CLAUDE.md and .claude/rules/ — can Claude tell when it fires and what to do? — offers rewrites for the weak ones, flags rules better served by hooks, skills, or subagents, crafts skills that reliably trigger, and interviews you to write rules that stick.",
+      "description": "Analyzes the instruction files Claude Code loads — CLAUDE.md and .claude/rules/ — grading each rule's structural hygiene rather than predicting compliance, flagging stale references and rules better served by a hook, skill, or subagent, rewriting the weak ones, and authoring new rules and skill descriptions.",
       "version": "0.5.9-alpha",
       "license": "MIT",
       "author": {
