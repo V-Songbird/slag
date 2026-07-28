@@ -20,13 +20,13 @@
 
 Every long Claude Code session eventually runs low on room. When it does, it compacts — throws away old conversation to make space — and the automatic version summarizes blind. It keeps what a generic summary keeps, which might be your old file listings and not the failing test you've been chasing for an hour.
 
-brink watches how full the window is getting. Once you're near the edge it speaks up, exactly once: here's the `/compact` command, and here's an instruction that keeps what actually matters right now.
+brink watches how full the window is getting. Once you're near the edge it speaks up: here's the `/compact` command, and here's an instruction that keeps what actually matters right now.
 
 ## Why you'd want it
 
 - **A heads-up before the cliff, not after.** It nudges while you can still choose — not once the good part is already gone.
-- **Compaction with a plan.** It hands you a ready-made instruction that keeps the task, the decisions, and the live errors, and drops the dead weight.
-- **It says it once.** One nudge per fill-up, not a reminder every message.
+- **Compaction with a plan.** It hands you a ready-made instruction, ranked: the task you're on now, the files in play, the decisions made, the errors still open. Recent work outranks old history.
+- **Ignoring it doesn't make it go away.** Say nothing and it comes back a while later, with the new number.
 - **Quiet the rest of the time.** Below the line it does nothing and costs you nothing.
 
 ## How it works
@@ -34,9 +34,10 @@ brink watches how full the window is getting. Once you're near the edge it speak
 | Moment | What happens |
 | --- | --- |
 | Your context creeps toward full | brink is watching, and says nothing yet |
-| You cross the line | One message: run `/compact`, with an instruction worth pasting |
+| You cross ~200k tokens | One message: run `/compact`, with an instruction worth pasting |
 | Your client hides that message | Claude repeats it to you in its next reply, so it reaches you either way |
-| You compact and free up room | It resets — ready to warn once more if you fill up again |
+| You keep going instead | It speaks up again every 75k tokens you add |
+| You compact and free up room | It resets — ready to warn again if you fill up again |
 
 ## Install
 
@@ -51,7 +52,7 @@ Takes effect next session. Nothing to configure — it starts watching on its ow
 
 ## Under the hood
 
-One small hook that reads how full the session already is and speaks up once at the edge — it's all in the plugin's files.
+One small hook that reads how full the session already is and speaks up at the edge — it's all in the plugin's files.
 
 ## Settings
 
@@ -59,12 +60,14 @@ Most people never touch these.
 
 | Variable | What it does |
 | --- | --- |
-| `BRINK_THRESHOLD` | How much of the window gets used before brink speaks up (default ~150k) |
+| `BRINK_THRESHOLD` | How much of the window gets used before brink first speaks up (default 200000) |
+| `BRINK_REPEAT` | How many more tokens before it says it again (default 75000) |
 | `BRINK_DISABLE` | Set to `1` and brink stays silent |
 
 ## Good to know
 
 - brink reads the fill level from your session record, which updates each turn — so the nudge lands within a message of crossing the line, not to the exact word.
+- The repeat is measured in tokens, not minutes — a quiet stretch that adds nothing to the window won't trigger another one.
 - It only ever suggests. Whether and how you compact is entirely your call.
 - The nudge goes out on two channels at once. On a client that renders both, you'll see it twice — better than a client that shows it nowhere.
 

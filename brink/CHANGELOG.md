@@ -4,6 +4,17 @@ All notable changes to brink are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.3.0-alpha] — 2026-07-28
+
+### Changed
+
+- The first nudge now lands at ~200k tokens instead of ~150k, so it arrives closer to the edge.
+- The suggested `/compact` instruction now asks for the keep-list in priority order and tells the summary to favour the most recent work over older history.
+
+### Added
+
+- Ignoring a nudge no longer silences it. brink speaks up again every 75k tokens of further growth, and `BRINK_REPEAT` moves that distance.
+
 ## [0.2.0-alpha] — 2026-07-23
 
 ### Fixed

@@ -2,15 +2,17 @@
 
 // brink — UserPromptSubmit hook.
 // Watches how full the context window is and, once it crosses a threshold,
-// surfaces a ONE-TIME nudge to run /compact with a guided instruction — so the
-// summary keeps the live task instead of an auto-summary's guess. It goes out
+// surfaces a nudge to run /compact with a guided instruction — so the summary
+// keeps the live task instead of an auto-summary's guess. It goes out
 // on two channels: `systemMessage`, which reaches the user directly wherever
 // the client renders it, and `additionalContext`, which reaches the assistant
 // with an instruction to relay it — the only channel that survives clients
 // that drop hook system messages. The instruction is tailored
-// from the transcript: the task line and the files currently in play. Re-arms
-// only after the window drops well below the line again (e.g. after a
-// compaction), so a long session gets at most one nudge per fill-up.
+// from the transcript: the task line and the files currently in play, listed in
+// priority order so the most current work survives the summary. Ignoring the
+// first nudge doesn't silence it — it repeats every REPEAT tokens of further
+// growth. Re-arms from scratch once the window drops well below the line again
+// (e.g. after a compaction).
 
 const fs = require('fs');
 const os = require('os');
@@ -213,14 +215,19 @@ function gcState() {
   }
 }
 
-// Pure state machine. Fire once at/above `threshold`; stay silent after; re-arm
-// only once occupancy falls below `rearm` (< threshold, so a value hovering at
-// the line can't flap the nudge on and off every turn).
-function decide(tokensNow, notified, threshold, rearm) {
-  if (typeof tokensNow !== 'number') return { notify: false, notified };
-  if (tokensNow < rearm) return { notify: false, notified: false };
-  if (tokensNow >= threshold && !notified) return { notify: true, notified: true };
-  return { notify: false, notified };
+// Pure state machine. `firedAt` is the occupancy at the last nudge, or null
+// when armed. Fire at/above `threshold`, then again every `repeat` tokens of
+// further growth — so ignoring the first nudge doesn't buy silence. Occupancy
+// falling below `rearm` (< threshold, so a value hovering at the line can't
+// flap) resets to armed, e.g. after a compaction.
+function decide(tokensNow, firedAt, threshold, rearm, repeat) {
+  const at = typeof firedAt === 'number' ? firedAt : null;
+  if (typeof tokensNow !== 'number') return { notify: false, firedAt: at };
+  if (tokensNow < rearm) return { notify: false, firedAt: null };
+  if (tokensNow >= threshold && (at === null || tokensNow >= at + repeat)) {
+    return { notify: true, firedAt: tokensNow };
+  }
+  return { notify: false, firedAt: at };
 }
 
 // Build the suggestion. The keep-clause names the live task and files when the
@@ -236,7 +243,8 @@ function nudge(tokensNow, signals) {
   return (
     `brink: context is ~${k}k tokens and filling. Compact now with an instruction so the ` +
     `summary keeps what matters, e.g.:\n` +
-    `/compact Keep ${clause}. Drop resolved exploration, tool dumps, and file listings.`
+    `/compact Keep, in priority order, ${clause}. Prefer the most recent work over ` +
+    `older history. Drop resolved exploration, tool dumps, and file listings.`
   );
 }
 
@@ -262,16 +270,17 @@ function main() {
   const data = readInput();
   if (setting('DISABLE', '') === '1') return;
 
-  const threshold = settingNum('THRESHOLD', 150000);
+  const threshold = settingNum('THRESHOLD', 200000);
   const rearm = Math.round(threshold * 0.8);
+  const repeat = settingNum('REPEAT', 75000);
 
   const { tokens, files, task } = scan(data.transcript_path);
   if (tokens == null) return;
 
-  const prev = !!readState(data.session_id).notified;
-  const next = decide(tokens, prev, threshold, rearm);
-  if (next.notified !== prev) {
-    writeState(data.session_id, { notified: next.notified });
+  const prev = readState(data.session_id).firedAt;
+  const next = decide(tokens, prev, threshold, rearm, repeat);
+  if (next.firedAt !== (typeof prev === 'number' ? prev : null)) {
+    writeState(data.session_id, { firedAt: next.firedAt });
     gcState();
   }
   if (next.notify) process.stdout.write(JSON.stringify(emit(nudge(tokens, { files, task }))));

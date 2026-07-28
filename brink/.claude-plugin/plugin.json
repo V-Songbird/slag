@@ -1,6 +1,6 @@
 {
   "name": "brink",
-  "description": "Watches how full the context window is getting and, once you near the edge, surfaces a one-time nudge to run /compact with a ready-made instruction — so the summary keeps the task, decisions, and errors instead of an automatic guess.",
+  "description": "Watches how full the context window is getting and, once you near the edge, nudges you to run /compact with a ready-made instruction — so the summary keeps the current task, decisions, and errors instead of an automatic guess.",
   "license": "MIT",
   "author": {
     "name": "Victor Villegas",
