@@ -4,6 +4,14 @@ All notable changes to brink are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.4.0-alpha] — 2026-07-28
+
+### Changed
+
+- The suggested `/compact` instruction now also keeps the facts you already verified this session, so the next stretch doesn't re-check what's settled.
+- A warning that lands mid-edit is no longer wasted. Claude judges whether the moment is right, says so in a line if it isn't, and brink holds the message and offers it again each turn until a clean break arrives.
+- `BRINK_REPEAT` now sets how far the window may grow before a held warning turns urgent and reaches you directly regardless of timing — it no longer sets a silence gap.
+
 ## [0.3.0-alpha] — 2026-07-28
 
 ### Changed

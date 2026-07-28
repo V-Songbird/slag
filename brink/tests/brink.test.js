@@ -131,42 +131,42 @@ describe('decide', () => {
   const P = 75000;
 
   test('fires when armed and at/above the threshold', () => {
-    assert.deepStrictEqual(decide(200000, null, T, R, P), { notify: true, firedAt: 200000 });
-    assert.deepStrictEqual(decide(230000, null, T, R, P), { notify: true, firedAt: 230000 });
+    assert.deepStrictEqual(decide(200000, null, T, R, P), { notify: true, firedAt: 200000, urgent: false });
+    assert.deepStrictEqual(decide(230000, null, T, R, P), { notify: true, firedAt: 230000, urgent: false });
   });
 
-  test('stays silent until the window grows a full repeat step past the last nudge', () => {
-    assert.deepStrictEqual(decide(240000, 200000, T, R, P), { notify: false, firedAt: 200000 });
-    assert.deepStrictEqual(decide(274999, 200000, T, R, P), { notify: false, firedAt: 200000 });
+  test('keeps offering a held nudge every turn, anchored to the first one', () => {
+    assert.deepStrictEqual(decide(240000, 200000, T, R, P), { notify: true, firedAt: 200000, urgent: false });
+    assert.deepStrictEqual(decide(274999, 200000, T, R, P), { notify: true, firedAt: 200000, urgent: false });
   });
 
-  test('repeats every repeat tokens of further growth', () => {
-    assert.deepStrictEqual(decide(275000, 200000, T, R, P), { notify: true, firedAt: 275000 });
-    assert.deepStrictEqual(decide(350000, 275000, T, R, P), { notify: true, firedAt: 350000 });
+  test('turns urgent once the window grows a full repeat step past the first nudge', () => {
+    assert.deepStrictEqual(decide(275000, 200000, T, R, P), { notify: true, firedAt: 200000, urgent: true });
+    assert.deepStrictEqual(decide(350000, 200000, T, R, P), { notify: true, firedAt: 200000, urgent: true });
   });
 
-  test('a custom repeat step moves the next nudge', () => {
-    assert.deepStrictEqual(decide(210000, 200000, T, R, 10000), { notify: true, firedAt: 210000 });
+  test('a custom repeat step moves the urgency line', () => {
+    assert.deepStrictEqual(decide(210000, 200000, T, R, 10000), { notify: true, firedAt: 200000, urgent: true });
   });
 
   test('does not flap between the re-arm band and the threshold', () => {
     // already nudged, drifting down but still above rearm — no re-arm, no nudge.
-    assert.deepStrictEqual(decide(170000, 200000, T, R, P), { notify: false, firedAt: 200000 });
+    assert.deepStrictEqual(decide(170000, 200000, T, R, P), { notify: false, firedAt: 200000, urgent: false });
   });
 
   test('re-arms only after occupancy drops below the rearm line', () => {
-    assert.deepStrictEqual(decide(159999, 200000, T, R, P), { notify: false, firedAt: null });
+    assert.deepStrictEqual(decide(159999, 200000, T, R, P), { notify: false, firedAt: null, urgent: false });
     // armed again: a fresh climb past the threshold fires from scratch.
-    assert.deepStrictEqual(decide(210000, null, T, R, P), { notify: true, firedAt: 210000 });
+    assert.deepStrictEqual(decide(210000, null, T, R, P), { notify: true, firedAt: 210000, urgent: false });
   });
 
   test('armed but still climbing below the threshold: silent, stays armed', () => {
-    assert.deepStrictEqual(decide(190000, null, T, R, P), { notify: false, firedAt: null });
+    assert.deepStrictEqual(decide(190000, null, T, R, P), { notify: false, firedAt: null, urgent: false });
   });
 
   test('a null/absent reading changes nothing', () => {
-    assert.deepStrictEqual(decide(null, 200000, T, R, P), { notify: false, firedAt: 200000 });
-    assert.deepStrictEqual(decide(null, null, T, R, P), { notify: false, firedAt: null });
+    assert.deepStrictEqual(decide(null, 200000, T, R, P), { notify: false, firedAt: 200000, urgent: false });
+    assert.deepStrictEqual(decide(null, null, T, R, P), { notify: false, firedAt: null, urgent: false });
   });
 });
 
@@ -182,7 +182,12 @@ describe('nudge', () => {
     const msg = nudge(160000, { task: 'fix the coupon rounding bug', files: ['pricing.js', 'pricing.test.js'] });
     assert.match(msg, /the current task \(fix the coupon rounding bug\)/);
     assert.match(msg, /the files in play \(pricing\.js, pricing\.test\.js\)/);
-    assert.match(msg, /still open\. Prefer the most recent/); // oxford "and" joins the clause, sentence then continues
+    assert.match(msg, /verified this session\. Prefer the most recent/); // oxford "and" joins the clause, sentence then continues
+  });
+
+  test('keeps what the session already verified, last in the priority list', () => {
+    const msg = nudge(160000);
+    assert.match(msg, /still open, and the facts already verified this session\./);
   });
 
   test('falls back to the generic clause with no signals', () => {
@@ -203,6 +208,25 @@ describe('emit', () => {
     assert.strictEqual(out.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
     assert.match(out.hookSpecificOutput.additionalContext, /^brink: go compact\n\n/);
     assert.match(out.hookSpecificOutput.additionalContext, /verbatim/);
+  });
+
+  test('asks the assistant to judge the timing, and to hold the nudge if it is bad', () => {
+    const ctx = emit('brink: go compact').hookSpecificOutput.additionalContext;
+    assert.match(ctx, /judge the timing first/);
+    assert.match(ctx, /Not a clean break: tell the user in one line/);
+    assert.match(ctx, /offers it again next turn/);
+  });
+
+  test('an urgent nudge drops the timing question', () => {
+    const ctx = emit('brink: go compact', { urgent: true }).hookSpecificOutput.additionalContext;
+    assert.match(ctx, /whatever the moment/);
+    assert.doesNotMatch(ctx, /judge the timing/);
+  });
+
+  test('a re-offer skips the direct channel and rides the assistant one alone', () => {
+    const out = emit('brink: go compact', { direct: false });
+    assert.strictEqual('systemMessage' in out, false);
+    assert.match(out.hookSpecificOutput.additionalContext, /^brink: go compact\n\n/);
   });
 });
 
@@ -241,15 +265,20 @@ describe('hook process', () => {
     assert.strictEqual(run(p), null);
   });
 
-  test('nudges again a repeat step later in the same session, not before', () => {
+  test('re-offers a held nudge on the assistant channel, then escalates a repeat step later', () => {
     const at = (n) => writeTranscript([assistant({ input_tokens: 0, cache_read_input_tokens: n, output_tokens: 0 })]);
     const session = { id: `brink-repeat-${process.pid}`, dir: fs.mkdtempSync(path.join(os.tmpdir(), 'brink-data-')) };
     assert.match(run(at(205000), {}, session).systemMessage, /~205k tokens/);
-    assert.strictEqual(run(at(270000), {}, session), null);
-    assert.match(run(at(280000), {}, session).systemMessage, /~280k tokens/);
+    const held = run(at(270000), {}, session);
+    assert.strictEqual('systemMessage' in held, false);
+    assert.match(held.hookSpecificOutput.additionalContext, /~270k tokens/);
+    // 205k + 75k crossed: back on the direct channel, and no longer optional.
+    const urgent = run(at(285000), {}, session);
+    assert.match(urgent.systemMessage, /~285k tokens/);
+    assert.match(urgent.hookSpecificOutput.additionalContext, /whatever the moment/);
   });
 
-  test('BRINK_REPEAT sets the distance between nudges', () => {
+  test('BRINK_REPEAT sets how far a held nudge runs before it turns urgent', () => {
     const at = (n) => writeTranscript([assistant({ input_tokens: 0, cache_read_input_tokens: n, output_tokens: 0 })]);
     const session = { id: `brink-repeat-cfg-${process.pid}`, dir: fs.mkdtempSync(path.join(os.tmpdir(), 'brink-data-')) };
     const env = { BRINK_REPEAT: '10000' };
