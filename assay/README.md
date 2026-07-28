@@ -42,6 +42,8 @@ Almost all of the scoring is a plain Node script — deterministic, the same inp
 
 Before the report, one more question gets asked of each doubtful entry: is this a rule at all? A file of notes or history would otherwise arrive graded as a page of mandates. The answer can only drop an entry from the report — nothing is ever rescored or reworded — and `--verbose` lists every drop with the reason. It costs one model call per audit; `--no-verify` skips it.
 
+Every report opens with a coverage line stating what it actually looked at: files parsed out of files found, rules graded, prose set aside, lines excluded, entries dropped, and any file it could not read. A number in the report never covers more than that.
+
 | Moment | What happens |
 | --- | --- |
 | You run the audit | Every rule is extracted, scored, and graded |

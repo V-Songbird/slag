@@ -121,11 +121,11 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" report
 Add `--verbose` or `--json` if the user asked. The command prints the finished
 markdown report — corpus grade, per-file grades, weak rules with suggested
 fixes, stall risks, buried rules, stale references, hook opportunities,
-placement candidates, weak skill descriptions. With `--verbose` it also lists
-everything step 2b suppressed, each with its reason quoted. If step 2b
-suppressed anything and the user did not pass `--verbose`, say how many entries
-were dropped in your own three sentences below — a silent drop is the one thing
-this pass must never do.
+placement candidates, weak skill descriptions. It opens with a **Coverage**
+block — what was parsed, graded, set aside, excluded, suppressed, or unreadable —
+so a drop is never silent and you never have to restate those counts yourself.
+With `--verbose` it also lists everything step 2b suppressed, each with its
+reason quoted.
 
 The report is this skill's deliverable and the user must have read it before
 the step 4 menu asks them to choose anything. Length limits from an output

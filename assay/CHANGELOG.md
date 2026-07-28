@@ -6,8 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- Every report opens with a **Coverage** block: how many instruction files were parsed out of how many found, how many rules were graded, how much prose was set aside, and how many lines were excluded. A file assay could not read is named there with the reason instead of quietly missing from the numbers, and the count of entries the verification pass dropped now prints on every report — `--verbose` is what turns that count into the list
+
 ### Changed
 
+- Exit codes are the same across every command: 0 on success, 1 on any failure — a missing or malformed judgments file, a missing audit, an unknown command. A mistyped flag is an error too, instead of being ignored and producing the default output
 - The docs, the plugin description, and the report itself now say plainly what a grade measures: how a rule is written, scoped, and placed — structural hygiene, not a prediction that Claude will follow it
 - Promoting or parking a placement candidate no longer removes the rule. A promotion shows you the hook, skill, or subagent before writing it, installs it only if you approve, and leaves the prose active; parking just records the plan. Retiring the now-duplicated rule is a separate decision you make once you've seen the new mechanism working
 

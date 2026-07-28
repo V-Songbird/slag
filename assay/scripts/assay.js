@@ -333,7 +333,13 @@ function countGlobMatches(globs, root) {
 // Claude Code discovers .md rule files recursively and follows symlinked files
 // and directories. Mirror that loading surface so the audit neither misses a
 // nested policy nor walks forever through a circular link.
-function findRuleMarkdownFiles(rulesDir) {
+//
+// [Foreman: 070] A source the walk cannot open — an unreadable directory, a
+// broken link — used to drop out with no trace, so the report counted what it
+// graded and said nothing about what it never saw. Every swallowed error is
+// recorded into `inaccessible` instead; paths are relative to `rulesDir` and the
+// caller prefixes them.
+function findRuleMarkdownFiles(rulesDir, inaccessible = []) {
   const found = [];
   const visitedDirs = new Set();
 
@@ -341,7 +347,8 @@ function findRuleMarkdownFiles(rulesDir) {
     let realDir;
     try {
       realDir = fs.realpathSync(absDir);
-    } catch {
+    } catch (err) {
+      inaccessible.push({ path: relDir || ".", reason: err.code || err.message });
       return;
     }
     if (visitedDirs.has(realDir)) return;
@@ -350,7 +357,8 @@ function findRuleMarkdownFiles(rulesDir) {
     let entries;
     try {
       entries = fs.readdirSync(absDir, { withFileTypes: true });
-    } catch {
+    } catch (err) {
+      inaccessible.push({ path: relDir || ".", reason: err.code || err.message });
       return;
     }
     entries.sort((a, b) => a.name.localeCompare(b.name));
@@ -361,7 +369,8 @@ function findRuleMarkdownFiles(rulesDir) {
       let stat;
       try {
         stat = entry.isSymbolicLink() ? fs.statSync(abs) : null;
-      } catch {
+      } catch (err) {
+        inaccessible.push({ path: rel, reason: err.code || err.message });
         continue; // broken link
       }
       const isDir = entry.isDirectory() || (stat && stat.isDirectory());
@@ -375,7 +384,7 @@ function findRuleMarkdownFiles(rulesDir) {
   return found;
 }
 
-function findInstructionFiles(root) {
+function findInstructionFiles(root, inaccessible = []) {
   const files = [];
   const rootClaude = path.join(root, "CLAUDE.md");
   const altClaude = path.join(root, ".claude", "CLAUDE.md");
@@ -386,16 +395,30 @@ function findInstructionFiles(root) {
   }
   const rulesDir = path.join(root, ".claude", "rules");
   if (fs.existsSync(rulesDir) && fs.statSync(rulesDir).isDirectory()) {
-    for (const ruleFile of findRuleMarkdownFiles(rulesDir)) {
+    const walkIssues = [];
+    for (const ruleFile of findRuleMarkdownFiles(rulesDir, walkIssues)) {
       files.push({
         path: ".claude/rules/" + ruleFile.rel,
         absPath: ruleFile.abs,
         alwaysLoaded: false,
       });
     }
+    for (const issue of walkIssues) {
+      inaccessible.push({ path: issue.path === "." ? ".claude/rules" : ".claude/rules/" + issue.path, reason: issue.reason });
+    }
   }
+  // [Foreman: 070] A file that is discovered but unreadable leaves the corpus
+  // and is reported, not thrown on: one locked file must not take the whole
+  // audit down, and it must not vanish either.
+  const parsed = [];
   for (const f of files) {
-    const content = fs.readFileSync(f.absPath, "utf-8");
+    let content;
+    try {
+      content = fs.readFileSync(f.absPath, "utf-8");
+    } catch (err) {
+      inaccessible.push({ path: f.path, reason: err.code || err.message });
+      continue;
+    }
     const fm = parseFrontmatter(content);
     let globs = fm.paths || [];
     if (typeof globs === "string") globs = globs ? [globs] : [];
@@ -406,8 +429,9 @@ function findInstructionFiles(root) {
     f.lineCount = content.split("\n").length;
     // an unscoped .claude/rules file loads every session, same as CLAUDE.md
     if (!f.alwaysLoaded && globs.length === 0) f.alwaysLoaded = true;
+    parsed.push(f);
   }
-  return files;
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -1454,9 +1478,11 @@ function ruleKey(file, text) {
 }
 
 function scan(root) {
-  const files = findInstructionFiles(root);
+  const inaccessible = [];
+  const files = findInstructionFiles(root, inaccessible);
   const rules = [];
   let counter = 0;
+  let proseChunks = 0, excludedLines = 0;
   const findMoved = makeBasenameResolver(root);
 
   files.forEach((file, fileIndex) => {
@@ -1472,8 +1498,9 @@ function scan(root) {
     let proseLines = 0, ruleLines = 0;
     for (const [chunk, cls] of merged) {
       const span = chunk.lineEnd - chunk.lineStart + 1;
-      if (cls === "rule") ruleLines += span; else proseLines += span;
+      if (cls === "rule") ruleLines += span; else { proseLines += span; proseChunks++; }
     }
+    excludedLines += excluded.size;
     const gradedLines = proseLines + ruleLines;
     file.narrativeShare = gradedLines ? round3(proseLines / gradedLines) : null;
 
@@ -1540,6 +1567,15 @@ function scan(root) {
     rules,
     skills: findSkillFiles(root),
     hookInventory: collectHooks(root),
+    // [Foreman: 070] What the audit did and did not look at. The report prints
+    // this so a number is never read as covering more than it measured.
+    coverage: {
+      filesDiscovered: files.length + inaccessible.length,
+      filesParsed: files.length,
+      inaccessible,
+      proseChunks,
+      excludedLines,
+    },
   };
 }
 
@@ -1666,6 +1702,7 @@ function composeAudit(scanData, judgments) {
   return {
     root: scanData.root, files, rules, skills: scanData.skills || [],
     hookInventory: scanData.hookInventory || [],
+    coverage: scanData.coverage || null,
     corpusScore: corpus, corpusGrade: corpus === null ? null : grade(corpus),
   };
 }
@@ -1818,6 +1855,36 @@ function pushRestructureSection(out, candidates) {
   out.push("");
 }
 
+// [Foreman: 070]
+// Every count above is over what the audit actually parsed, and until this block
+// existed nothing said what that excluded. It prints on every report, not just
+// --verbose: the suppressed ROWS stay verbose-only, but a silent drop is the one
+// thing the verification pass must never do, so its count belongs here.
+// razor: counts and one line per unreadable source — not a per-file table. The
+// per-file breakdown already exists under "## Files".
+function pushCoverageSection(out, audit, rules, suppressed) {
+  const cov = audit.coverage || {};
+  const parsed = cov.filesParsed != null ? cov.filesParsed : audit.files.length;
+  const discovered = cov.filesDiscovered != null ? cov.filesDiscovered : parsed;
+  out.push("## Coverage");
+  out.push("");
+  out.push(`- ${parsed} of ${discovered} instruction file(s) parsed, ${rules.length} rule(s) graded, ${cov.proseChunks || 0} prose chunk(s) set aside`);
+  out.push(`- ${cov.excludedLines || 0} line(s) excluded from grading (assay-ignore spans, tag bodies, comment-only lines)`);
+  if (suppressed.length) {
+    out.push(`- ${suppressed.length} entr${suppressed.length === 1 ? "y" : "ies"} suppressed by the verification pass as not rules — rerun with \`--verbose\` to see each one with its reason`);
+  }
+  const nonLatin = rules.filter((r) => r.nonLatin).length;
+  if (nonLatin) {
+    out.push(`- ${nonLatin} rule(s) contain non-Latin script — assay grades English only, so treat those scores as unreliable rather than low`);
+  }
+  const badCategories = rules.filter((r) => r.invalidCategory).length;
+  if (badCategories) out.push(`- ${badCategories} unknown category annotation(s) — listed below`);
+  for (const s of cov.inaccessible || []) {
+    out.push(`- could not read \`${s.path}\` (${s.reason}) — nothing in it was graded`);
+  }
+  out.push("");
+}
+
 function renderReport(audit, opts = {}) {
   const out = [];
   const { files } = audit;
@@ -1840,8 +1907,9 @@ function renderReport(audit, opts = {}) {
   out.push("");
   if (!rules.length) {
     out.push("No rules found in CLAUDE.md or .claude/rules/.");
+    out.push("");
+    pushCoverageSection(out, audit, rules, suppressed);
     if (weakSkills.length) {
-      out.push("");
       pushWeakSkillSection(out, weakSkills);
     }
     if (opts.verbose && suppressed.length) {
@@ -1857,11 +1925,7 @@ function renderReport(audit, opts = {}) {
   out.push("");
   out.push("Grades measure structural hygiene — how a rule is written, scoped, and placed — not whether Claude will comply. They assume the least forgiving reader: small models, subagents, headless runs. If only large models in interactive sessions read this corpus, treat severity one notch softer.");
   out.push("");
-  const nonLatin = rules.filter((r) => r.nonLatin);
-  if (nonLatin.length) {
-    out.push(`**${nonLatin.length} rule(s) contain non-Latin script.** assay grades English only, so treat their scores as unreliable rather than low.`);
-    out.push("");
-  }
+  pushCoverageSection(out, audit, rules, suppressed);
 
   if (opts.prev) pushProgressSection(out, audit, opts.prev);
 
@@ -2304,9 +2368,33 @@ function cmdRemeasure(root, opts) {
 // main
 // ---------------------------------------------------------------------------
 
+// [Foreman: 070] One exit-code contract: 0 on success, 1 on any expected
+// failure — a missing input, a malformed judgments file, a usage error.
+const COMMANDS = ["scan", "report", "remeasure", "artifact", "clean"];
+const FLAGS = new Set(["--verbose", "--json"]);
+const USAGE = "Usage: assay.js <" + COMMANDS.join("|") + "> [--root <path>] [--verbose] [--json]";
+
+function usageError(message) {
+  process.stderr.write(message + "\n" + USAGE + "\n");
+  process.exit(1);
+}
+
 function main() {
   const args = process.argv.slice(2);
   const command = args[0];
+  if (!COMMANDS.includes(command)) {
+    usageError(command ? "Unknown command: " + command : "No command given.");
+  }
+  // An unrecognized flag used to be ignored, so a typo silently produced the
+  // default output instead of what was asked for.
+  for (let i = 1; i < args.length; i++) {
+    if (args[i] === "--root") {
+      if (!args[i + 1]) usageError("--root needs a path.");
+      i++;
+      continue;
+    }
+    if (!FLAGS.has(args[i])) usageError("Unknown flag: " + args[i]);
+  }
   const rootIdx = args.indexOf("--root");
   const root = rootIdx !== -1 ? args[rootIdx + 1] : process.cwd();
   const opts = { verbose: args.includes("--verbose"), json: args.includes("--json") };
@@ -2315,11 +2403,7 @@ function main() {
   else if (command === "report") cmdReport(root, opts);
   else if (command === "remeasure") cmdRemeasure(root, opts);
   else if (command === "artifact") cmdArtifact(root); // [Foreman: 054]
-  else if (command === "clean") fs.rmSync(path.join(root, TMP_DIR), { recursive: true, force: true });
-  else {
-    process.stderr.write("Usage: assay.js <scan|report|remeasure|artifact|clean> [--root <path>] [--verbose] [--json]\n");
-    process.exit(2);
-  }
+  else fs.rmSync(path.join(root, TMP_DIR), { recursive: true, force: true }); // clean
 }
 
 module.exports = {

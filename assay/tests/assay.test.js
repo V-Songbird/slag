@@ -2,6 +2,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -1400,4 +1402,323 @@ test("renderArtifact round-trips a real audit built from the scoring pipeline", 
   const data = JSON.parse(dataBlock[1].replace(/\u003c/g, "<"));
   assert.equal(data.rules.length, 1);
   assert.equal(data.factorColumns.length, 7);
+});
+
+// ---------------------------------------------------------------------------
+// Command-level CLI — [Foreman: 070]
+// ---------------------------------------------------------------------------
+
+const CLI = path.join(__dirname, "..", "scripts", "assay.js");
+
+function cli(root, ...args) {
+  const r = spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: "utf-8" });
+  return { code: r.status, out: r.stdout, err: r.stderr };
+}
+
+// One strong rule, one weak rule, and a paragraph of prose, so every count in
+// the Coverage block has something to report.
+const FIXTURE_CLAUDE = [
+  "# Project rules",
+  "",
+  "- Never use `var` — use `const` instead.",
+  "- Write clean, maintainable code.",
+  "",
+  "This paragraph is background for the reader, not a rule.",
+  "",
+].join("\n");
+
+function cliFixture(extra) {
+  return tmpProject({ "CLAUDE.md": FIXTURE_CLAUDE, ...(extra || {}) });
+}
+
+// scan, then write a judgment for every scanned key — the state `report` needs
+function judgeAll(root) {
+  const scanned = cli(root, "scan");
+  assert.equal(scanned.code, 0, scanned.err);
+  const summary = JSON.parse(scanned.out);
+  const judgments = {};
+  for (const j of summary.judge) judgments[j.key] = { F3: 0.7, F8: 0.9 };
+  fs.writeFileSync(path.join(root, ".assay-tmp", "judgments.json"), JSON.stringify(judgments));
+  return summary;
+}
+
+// Content hash + mtime of every file outside .assay-tmp, for the read-only check
+function snapshotTree(root) {
+  const snap = {};
+  const stack = ["."];
+  while (stack.length) {
+    const rel = stack.pop();
+    for (const e of fs.readdirSync(path.join(root, rel), { withFileTypes: true })) {
+      const child = rel === "." ? e.name : rel + "/" + e.name;
+      if (e.isDirectory()) {
+        if (e.name !== ".assay-tmp") stack.push(child);
+      } else if (e.isFile()) {
+        const full = path.join(root, child);
+        snap[child] = crypto.createHash("sha1").update(fs.readFileSync(full)).digest("hex") +
+          ":" + fs.statSync(full).mtimeMs;
+      }
+    }
+  }
+  return snap;
+}
+
+test("scan exits 0 and writes a parseable scan.json carrying coverage", () => {
+  const root = cliFixture();
+  const { code, out } = cli(root, "scan");
+  assert.equal(code, 0);
+  const summary = JSON.parse(out);
+  assert.equal(summary.ruleCount, 2);
+  assert.equal(summary.judge.length, 2);
+  const scanFile = path.join(root, ".assay-tmp", "scan.json");
+  assert.ok(fs.existsSync(scanFile));
+  const scanData = JSON.parse(fs.readFileSync(scanFile, "utf-8"));
+  assert.deepEqual(scanData.coverage, {
+    filesDiscovered: 1, filesParsed: 1, inaccessible: [], proseChunks: 1, excludedLines: 0,
+  });
+});
+
+test("scan on a project with no instruction files reports zero and still exits 0", () => {
+  const root = tmpProject({ "README.md": "# Not an instruction file\n" });
+  const { code, out } = cli(root, "scan");
+  assert.equal(code, 0);
+  const summary = JSON.parse(out);
+  assert.equal(summary.ruleCount, 0);
+  assert.equal(summary.skillCount, 0);
+  assert.equal(summary.fileCount, 0);
+  assert.deepEqual(summary.judge, []);
+  // the scan file is still written, so `report` has something to read
+  assert.ok(fs.existsSync(path.join(root, ".assay-tmp", "scan.json")));
+});
+
+test("report exits 0 and prints the header and the Coverage block", () => {
+  const root = cliFixture();
+  judgeAll(root);
+  const { code, out } = cli(root, "report");
+  assert.equal(code, 0);
+  assert.match(out, /^# Rule audit — /m);
+  assert.match(out, /## Coverage/);
+  assert.match(out, /1 of 1 instruction file\(s\) parsed, 2 rule\(s\) graded, 1 prose chunk\(s\) set aside/);
+  assert.match(out, /0 line\(s\) excluded from grading/);
+  assert.ok(fs.existsSync(path.join(root, ".assay-tmp", "audit.json")));
+});
+
+test("the Coverage block counts suppressed entries even though the rows stay verbose-only", () => {
+  const root = cliFixture();
+  const summary = judgeAll(root);
+  const judgments = {};
+  for (const j of summary.judge) judgments[j.key] = { F3: 0.7, F8: 0.9 };
+  judgments[summary.judge[1].key].notRule = "Describes an aspiration; asks for nothing.";
+  fs.writeFileSync(path.join(root, ".assay-tmp", "judgments.json"), JSON.stringify(judgments));
+  const plain = cli(root, "report");
+  assert.equal(plain.code, 0);
+  assert.match(plain.out, /1 entry suppressed by the verification pass/);
+  assert.doesNotMatch(plain.out, /## Suppressed/);
+  const verbose = cli(root, "report", "--verbose");
+  assert.equal(verbose.code, 0);
+  assert.match(verbose.out, /## Suppressed/);
+  assert.match(verbose.out, /asks for nothing/);
+});
+
+test("report without a judgments file exits 1 and names the missing file", () => {
+  const root = cliFixture();
+  assert.equal(cli(root, "scan").code, 0);
+  const { code, err } = cli(root, "report");
+  assert.equal(code, 1);
+  assert.match(err, /Missing \.assay-tmp\/judgments\.json/);
+});
+
+test("report on malformed judgments exits 1 and names the problem", () => {
+  const root = cliFixture();
+  const summary = judgeAll(root);
+  const judgeFile = path.join(root, ".assay-tmp", "judgments.json");
+
+  fs.writeFileSync(judgeFile, "{ not json");
+  const broken = cli(root, "report");
+  assert.equal(broken.code, 1);
+  assert.match(broken.err, /judgments\.json is not valid JSON/);
+
+  // schema-invalid: a score outside [0,1]
+  fs.writeFileSync(judgeFile, JSON.stringify({ [summary.judge[0].key]: { F3: 5, F8: 0.9 } }));
+  const outOfRange = cli(root, "report");
+  assert.equal(outOfRange.code, 1);
+  assert.match(outOfRange.err, /out of range \[0,1\]/);
+  assert.match(outOfRange.err, new RegExp(summary.judge[0].key));
+
+  // schema-invalid: notRule present but not a non-empty string
+  fs.writeFileSync(judgeFile, JSON.stringify({
+    [summary.judge[0].key]: { F3: 0.7, F8: 0.9, notRule: "" },
+    [summary.judge[1].key]: { F3: 0.7, F8: 0.9 },
+  }));
+  const badNotRule = cli(root, "report");
+  assert.equal(badNotRule.code, 1);
+  assert.match(badNotRule.err, /\.notRule/);
+});
+
+test("report before scan exits 1 and says to run scan first", () => {
+  const root = cliFixture();
+  const { code, err } = cli(root, "report");
+  assert.equal(code, 1);
+  assert.match(err, /No \.assay-tmp\/scan\.json — run scan first/);
+});
+
+test("artifact writes report.html from audit.json, and exits 1 without one", () => {
+  const root = cliFixture();
+  const missing = cli(root, "artifact");
+  assert.equal(missing.code, 1);
+  assert.match(missing.err, /No \.assay-tmp\/audit\.json — run report first/);
+
+  judgeAll(root);
+  assert.equal(cli(root, "report").code, 0);
+  const { code, out } = cli(root, "artifact");
+  assert.equal(code, 0);
+  assert.match(out, /report\.html/);
+  const html = fs.readFileSync(path.join(root, ".assay-tmp", "report.html"), "utf-8");
+  assert.match(html, /id="assay-data"/);
+});
+
+test("remeasure lists reworded rules first, then composes a before/after report", () => {
+  const root = cliFixture();
+  judgeAll(root);
+  assert.equal(cli(root, "report").code, 0);
+
+  // rewording a rule changes its content hash, so its cached judgment is gone
+  fs.writeFileSync(
+    path.join(root, "CLAUDE.md"),
+    FIXTURE_CLAUDE.replace("Write clean, maintainable code.", "Write typed handlers in `src/api/handler.ts`.")
+  );
+  const pending = cli(root, "remeasure");
+  assert.equal(pending.code, 0);
+  const worklist = JSON.parse(pending.out);
+  assert.equal(worklist.remeasure, true);
+  assert.equal(worklist.pending, 1);
+  assert.match(worklist.judge[0].text, /typed handlers/);
+
+  const judgeFile = path.join(root, ".assay-tmp", "judgments.json");
+  const judgments = JSON.parse(fs.readFileSync(judgeFile, "utf-8"));
+  judgments[worklist.judge[0].key] = { F3: 0.7, F8: 0.9 };
+  fs.writeFileSync(judgeFile, JSON.stringify(judgments));
+
+  const composed = cli(root, "remeasure");
+  assert.equal(composed.code, 0);
+  assert.match(composed.out, /## Since last audit/);
+  assert.match(composed.out, /Corpus grade .* → /);
+  assert.match(composed.out, /## Coverage/);
+});
+
+test("remeasure without judgments exits 1 and says to run a full audit first", () => {
+  const root = cliFixture();
+  const { code, err } = cli(root, "remeasure");
+  assert.equal(code, 1);
+  assert.match(err, /No \.assay-tmp\/judgments\.json/);
+});
+
+test("clean removes .assay-tmp and exits 0", () => {
+  const root = cliFixture();
+  judgeAll(root);
+  assert.ok(fs.existsSync(path.join(root, ".assay-tmp")));
+  const { code } = cli(root, "clean");
+  assert.equal(code, 0);
+  assert.equal(fs.existsSync(path.join(root, ".assay-tmp")), false);
+  // and cleaning twice is not an error
+  assert.equal(cli(root, "clean").code, 0);
+});
+
+test("an unknown command, an unknown flag, or a bare --root prints usage and exits 1", () => {
+  const root = cliFixture();
+  const noCommand = cli(root);
+  assert.equal(noCommand.code, 1);
+  assert.match(noCommand.err, /No command given\./);
+  assert.match(noCommand.err, /Usage: assay\.js <scan\|report\|remeasure\|artifact\|clean>/);
+
+  const badCommand = cli(root, "frobnicate");
+  assert.equal(badCommand.code, 1);
+  assert.match(badCommand.err, /Unknown command: frobnicate/);
+  assert.match(badCommand.err, /Usage: assay\.js/);
+
+  const badFlag = cli(root, "scan", "--verbse");
+  assert.equal(badFlag.code, 1);
+  assert.match(badFlag.err, /Unknown flag: --verbse/);
+  assert.equal(fs.existsSync(path.join(root, ".assay-tmp")), false);
+
+  const bareRoot = cli(root, "scan", "--root");
+  assert.equal(bareRoot.code, 1);
+  assert.match(bareRoot.err, /--root needs a path/);
+});
+
+test("installation to report: a fresh project runs scan, judge, report and artifact", () => {
+  const root = tmpProject({
+    "CLAUDE.md": FIXTURE_CLAUDE,
+    ".claude/rules/api.md": '---\npaths: ["src/**/*.ts"]\n---\n\n- Validate every request body at the handler boundary.\n',
+    "src/api/handler.ts": "export {};",
+  });
+
+  const scanned = cli(root, "scan");
+  assert.equal(scanned.code, 0, scanned.err);
+  const summary = JSON.parse(scanned.out);
+  assert.equal(summary.fileCount, 2);
+  assert.equal(summary.judge.length, 3);
+  assert.ok(fs.existsSync(path.join(root, ".assay-tmp", "scan.json")));
+
+  const judgments = {};
+  for (const j of summary.judge) judgments[j.key] = { F3: 0.7, F8: 0.9 };
+  fs.writeFileSync(path.join(root, ".assay-tmp", "judgments.json"), JSON.stringify(judgments));
+
+  const reported = cli(root, "report");
+  assert.equal(reported.code, 0, reported.err);
+  assert.match(reported.out, /# Rule audit — /);
+  assert.match(reported.out, /2 of 2 instruction file\(s\) parsed, 3 rule\(s\) graded/);
+  // the report names the fixture's own weak rule, at its line
+  assert.match(reported.out, /Write clean, maintainable code\./);
+  assert.match(reported.out, /\(CLAUDE\.md:4\)/);
+  assert.ok(fs.existsSync(path.join(root, ".assay-tmp", "audit.json")));
+
+  const artifact = cli(root, "artifact");
+  assert.equal(artifact.code, 0, artifact.err);
+  const html = fs.readFileSync(path.join(root, ".assay-tmp", "report.html"), "utf-8");
+  assert.match(html, /Write clean, maintainable code/);
+});
+
+test("scan, report, artifact and remeasure write nothing outside .assay-tmp", () => {
+  const root = tmpProject({
+    "CLAUDE.md": FIXTURE_CLAUDE,
+    ".claude/rules/api.md": "- Validate every request body at the handler boundary.\n",
+    ".claude/settings.json": '{ "hooks": {} }\n',
+    "src/api/handler.ts": "export {};",
+  });
+  const before = snapshotTree(root);
+  judgeAll(root);
+  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "artifact").code, 0);
+  assert.equal(cli(root, "remeasure").code, 0);
+  assert.deepEqual(snapshotTree(root), before);
+  // no policy file was invented either
+  assert.equal(fs.existsSync(path.join(root, ".claude", "assay-promotions.md")), false);
+});
+
+test("a discovered file that cannot be read is counted and named, not dropped silently", () => {
+  const root = tmpProject({ ".claude/rules/basics.md": "- Run `npm test` before committing.\n" });
+  // a directory where CLAUDE.md should be: discovered, then unreadable
+  fs.mkdirSync(path.join(root, "CLAUDE.md"));
+  const scanData = engine.scan(root);
+  assert.equal(scanData.coverage.filesDiscovered, 2);
+  assert.equal(scanData.coverage.filesParsed, 1);
+  assert.equal(scanData.coverage.inaccessible.length, 1);
+  assert.equal(scanData.coverage.inaccessible[0].path, "CLAUDE.md");
+  assert.ok(scanData.coverage.inaccessible[0].reason);
+  // the readable file still grades, and the report says what it never saw
+  assert.equal(scanData.rules.length, 1);
+  const judgments = { [scanData.rules[0].key]: { F3: 0.7, F8: 0.9 } };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /1 of 2 instruction file\(s\) parsed/);
+  assert.match(report, /could not read `CLAUDE\.md`/);
+});
+
+test("findRuleMarkdownFiles records a directory it cannot walk", () => {
+  const root = tmpProject({ ".claude/rules": "not a directory\n" });
+  const inaccessible = [];
+  const found = engine.findRuleMarkdownFiles(path.join(root, ".claude", "rules"), inaccessible);
+  assert.deepEqual(found, []);
+  assert.equal(inaccessible.length, 1);
+  assert.equal(inaccessible[0].path, ".");
+  assert.ok(inaccessible[0].reason);
 });
