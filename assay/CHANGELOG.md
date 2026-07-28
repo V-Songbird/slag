@@ -14,6 +14,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - A result measured against wording you have since edited still appears, labelled as having measured the earlier text
 - A link whose saved result has moved or gone unreadable is reported as unavailable evidence, along with what it once recorded — never silently dropped
 - Links are attached by hand and only by hand: assay never decides on its own that a measurement was about a particular rule. Cleanup keeps them, because no rerun regenerates a measurement
+- Rules and skill descriptions written in Spanish, Portuguese, French, Italian, or German are detected and set aside from the English wording checks instead of being scored as bad English. Each one names the language it reads as, and the report says plainly that the wording checks were skipped and which checks still ran
+- A set-aside rule keeps every finding that doesn't depend on the language — stale references, duplicates, conflicts, what the host loads, the byte budgets — and no longer drags its file's grade or the corpus grade
+- Coverage counts the set-aside rules and skill descriptions per language, so a report's numbers never quietly cover text the rubric couldn't read
+- A new `assay.js ci` command for build pipelines: it scans, evaluates, prints a summary, and writes nothing at all — no records, no state, no temp files. Exit 0 when nothing gated fires, 2 when a gate fails, 1 on a usage error
+- `--fail-on` picks which gates may fail a build from a closed set: availability, schema, stale-targets, conflicts, duplicates, malformed-config. Omitted, the first four apply. Anything else is refused with the list, and only findings computed from files, paths, and configuration can ever fail a build — heuristic and model-judged findings stay advisory with no way to opt in
+- `assay.js ci --json` emits a stable, sorted, timestamp-free summary, so two runs over an unchanged project produce identical output
+
+### Changed
+
+- A rule in a script assay can't read no longer carries a grade at all. It used to be scored and flagged as unreliable; now the score is withheld and the reason is stated beside the rule
 
 ## [0.9.0-alpha] — 2026-07-28
 

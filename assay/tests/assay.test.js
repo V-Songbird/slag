@@ -1431,28 +1431,28 @@ test("a misspelled category annotation is reported, not silently accepted", () =
   assert.match(report, /\(\[CLAUDE\.md:1\]\(CLAUDE\.md:1\)\)/);
 });
 
-test("a non-Latin-script rule is flagged and the report says the grade is unreliable", () => {
+test("a non-Latin-script rule is flagged and the report says the grade never applied", () => {
   const cyrillic = "Перед commit запустите тесты.";
   const root = tmpProject({
     "CLAUDE.md": ["- " + cyrillic, "", "- Never use `var` — use `const` instead.", ""].join("\n"),
   });
   const scanData = engine.scan(root);
   assert.equal(scanData.rules.length, 2);
-  assert.equal(scanData.rules[0].nonLatin, true);
-  assert.equal(scanData.rules[1].nonLatin, false);
+  assert.equal(scanData.rules[0].languageMode, "non-latin-script");
+  assert.equal(scanData.rules[1].languageMode, "english");
 
   const judgments = {};
   for (const r of scanData.rules) judgments[r.key] = { F3: 0.7, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
-  assert.match(report, /1 rule\(s\) contain non-Latin script/);
+  assert.match(report, /1 rule\(s\) or skill description\(s\) read as a non-Latin script/);
 });
 
-test("an all-English corpus carries no non-Latin notice", () => {
+test("an all-English corpus carries no unsupported-language notice", () => {
   const root = tmpProject({ "CLAUDE.md": "- Never use `var` — use `const` instead.\n" });
   const scanData = engine.scan(root);
-  assert.equal(scanData.rules[0].nonLatin, false);
+  assert.equal(scanData.rules[0].languageMode, "english");
   const report = engine.renderReport(engine.composeAudit(scanData, { [scanData.rules[0].key]: { F3: 0.7, F8: 0.9 } }));
-  assert.doesNotMatch(report, /non-Latin script/);
+  assert.doesNotMatch(report, /read as a non-Latin script/);
 });
 
 // ---------------------------------------------------------------------------
@@ -3012,7 +3012,7 @@ test("an unknown command, an unknown flag, or a bare --root prints usage and exi
   const noCommand = cli(root);
   assert.equal(noCommand.code, 1);
   assert.match(noCommand.err, /No command given\./);
-  assert.match(noCommand.err, /Usage: assay\.js <scan\|report\|remeasure\|artifact\|clean\|plan\|apply\|validate\|rollback\|retire\|link>/);
+  assert.match(noCommand.err, /Usage: assay\.js <scan\|report\|remeasure\|artifact\|clean\|plan\|apply\|validate\|rollback\|retire\|link\|ci>/);
 
   const badCommand = cli(root, "frobnicate");
   assert.equal(badCommand.code, 1);
@@ -3526,7 +3526,7 @@ test("non-Latin rules stay inventoried and flagged, table cells included", () =>
   assert.ok(texts.includes("Перед commit запустите тесты."));
   assert.ok(texts.includes("コードレビューを必ず実行する。"));
   assert.ok(texts.includes("Never коммитить `secrets.env`"), "a non-Latin table cell vanished");
-  assert.ok(scanData.rules.every((r) => r.nonLatin));
+  assert.ok(scanData.rules.every((r) => r.languageMode === "non-latin-script"));
   // the letter-free cell is layout, not a lost rule
   assert.ok(!texts.includes("3"));
 });
@@ -5581,4 +5581,310 @@ test("clean keeps the Proof link store, which no rerun can regenerate", () => {
   assert.equal(closed.code, 0);
   assert.match(closed.out, /Kept 1 plan artifact\(s\) and 1 Proof link\(s\) in \.assay\//);
   assert.equal(storedLinks(root).length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Language modes — [Foreman: 084]
+// ---------------------------------------------------------------------------
+
+const SPANISH_STALE = "- Antes de hacer commit, revisa el archivo `docs/guia-perdida.md` y ejecuta las pruebas.";
+const ENGLISH_RULE = "- Never use `var` — use `const` instead.";
+
+test("a Spanish-prose rule is named its mode, ungraded, and still carries its mechanical finding", () => {
+  const audit = auditOf({ "CLAUDE.md": ["# Reglas", "", SPANISH_STALE, "", ENGLISH_RULE, ""].join("\n") });
+  const [spanish, english] = audit.rules;
+
+  assert.equal(spanish.languageMode, "latin-unsupported:es");
+  assert.equal(english.languageMode, "english");
+
+  // English scoring withdrew entirely — and every English PATTERN with it
+  assert.equal(spanish.score, null);
+  assert.equal(spanish.grade, null);
+  assert.equal(spanish.weak, false);
+  assert.equal(spanish.placement, null);
+  assert.equal(spanish.stallRisk, false);
+
+  // the mechanical half still ran: the dead path is still a blocked state
+  assert.equal(primaryState(audit, spanish.id).state, "blocked");
+  assert.match(primaryState(audit, spanish.id).summary, /docs\/guia-perdida\.md/);
+  assert.equal(primaryState(audit, spanish.id).evidence.level, "mechanical");
+
+  // and it is disclosed rather than silently dropped
+  const unsupported = findingsOfType(audit, "unsupported-language");
+  assert.equal(unsupported.length, 1);
+  assert.equal(unsupported[0].mode, "latin-unsupported:es");
+  assert.match(unsupported[0].summary, /wording checks need English — this reads as Spanish/);
+  assert.match(unsupported[0].summary, /the mechanical findings still apply/);
+  assert.deepEqual(unsupported[0].sources, [{ path: "CLAUDE.md", lineStart: 3, lineEnd: 3 }]);
+  // the language guess is a guess and the evidence says so
+  assert.equal(unsupported[0].evidence.level, "heuristic");
+  assert.match(unsupported[0].evidence.limits, /not English/);
+});
+
+test("an unsupported-language rule does not drag the file grade or the corpus grade", () => {
+  const withSpanish = auditOf({ "CLAUDE.md": ["# Reglas", "", SPANISH_STALE, "", ENGLISH_RULE, ""].join("\n") });
+  const englishOnly = auditOf({ "CLAUDE.md": ["# Reglas", "", ENGLISH_RULE, ""].join("\n") });
+
+  // the file's mean is the English rule's score alone — a misread Spanish
+  // sentence would have averaged in as a bad English one
+  assert.equal(withSpanish.files[0].score, englishOnly.files[0].score);
+  assert.equal(withSpanish.files[0].grade, englishOnly.files[0].grade);
+  assert.equal(withSpanish.corpusScore, englishOnly.corpusScore);
+  // it is still inventoried as a rule; only the scoring withdrew
+  assert.equal(withSpanish.files[0].ruleCount, 2);
+  assert.equal(englishOnly.files[0].ruleCount, 1);
+});
+
+test("short, ambiguous, and backtick-heavy English lines all stay English-scored", () => {
+  // The conservative asymmetry, made mechanical: a false "unsupported" silently
+  // ungrades a real English rule, so only strong signal reclassifies. Everything
+  // here is either too short to screen, mixed, or technical English that happens
+  // to carry a foreign-looking token.
+  const staysEnglish = [
+    "Use `const`, not `var`.",
+    "de la el",
+    "Run `npm test` before `git commit`.",
+    "Use the `src/api/handler.ts` boundary for every request, and validate the body with `zod`.",
+    "Always run the formatter, the linter, the type checker and the test suite before pushing.",
+    // mixed: real Spanish function words, but English ones beside them
+    "Always revisa el archivo before you commit anything to the main branch.",
+    // language-neutral tokens only — nothing to screen, so nothing is claimed
+    "Run lint, build, typecheck, format, test, package, publish.",
+  ];
+  for (const text of staysEnglish) {
+    assert.equal(engine.detectLanguageMode(text), "english", text);
+  }
+
+  // and the paths, identifiers and backtick spans never reach the screen at all
+  assert.deepEqual(engine.languageTokens("Use `el archivo de la configuracion` in `src/de/la/el.ts`."), ["use", "in"]);
+});
+
+test("every screened language is recognized from its own closed-class words", () => {
+  const cases = [
+    ["latin-unsupported:es", "Nunca uses variables globales; usa el contenedor de dependencias para cada modulo."],
+    ["latin-unsupported:pt", "Antes de cada commit execute os testes e verifique se a configuracao esta correta."],
+    ["latin-unsupported:fr", "Avant de committer, lancez les tests et verifiez que la configuration est correcte."],
+    ["latin-unsupported:it", "Prima di ogni commit esegui i test e controlla che la configurazione sia corretta."],
+    ["latin-unsupported:de", "Vor jedem Commit werden die Tests ausgefuehrt und die Konfiguration wird geprueft."],
+  ];
+  for (const [mode, text] of cases) assert.equal(engine.detectLanguageMode(text), mode, text);
+
+  // a word shared between English and a screened language is evidence for
+  // neither side, so it leaves both lists rather than tipping the screen
+  for (const lang of ["es", "pt", "fr", "it", "de"]) {
+    for (const word of engine.FUNCTION_WORDS[lang]) {
+      assert.equal(engine.FUNCTION_WORDS.en.has(word), false, "`" + word + "` counts on both sides");
+    }
+  }
+});
+
+test("a non-Latin rule takes the same mode vocabulary and the same withdrawal", () => {
+  const audit = auditOf({ "CLAUDE.md": ["- Перед commit запустите тесты.", "", ENGLISH_RULE, ""].join("\n") });
+  assert.equal(audit.rules[0].languageMode, "non-latin-script");
+  assert.equal(audit.rules[0].score, null);
+  assert.equal(audit.rules[0].grade, null);
+  const unsupported = findingsOfType(audit, "unsupported-language");
+  assert.equal(unsupported.length, 1);
+  assert.equal(unsupported[0].mode, "non-latin-script");
+  assert.equal(unsupported[0].analyzer, "language-mode");
+  assert.match(unsupported[0].evidence.basis, /non-Latin script detection/);
+});
+
+test("coverage reports unsupported-language counts per mode", () => {
+  const audit = auditOf({
+    "CLAUDE.md": [
+      "# Reglas", "",
+      SPANISH_STALE, "",
+      "- Nunca uses variables globales; usa el contenedor de dependencias para cada modulo.", "",
+      "- Перед commit запустите тесты.", "",
+      ENGLISH_RULE, "",
+    ].join("\n"),
+  });
+  const report = engine.renderReport(audit);
+  // the "graded" count is a claim about what a rubric read, so it excludes them
+  assert.match(report, /1 of 1 instruction file\(s\) parsed, 1 rule\(s\) graded of 4 extracted/);
+  assert.match(report, /2 rule\(s\) or skill description\(s\) read as Spanish \(`latin-unsupported:es`\)/);
+  assert.match(report, /1 rule\(s\) or skill description\(s\) read as a non-Latin script \(`non-latin-script`\)/);
+  assert.match(report, /set aside from English wording checks and from every grade/);
+});
+
+test("a skill description the trigger recipe cannot read is set aside, not graded weak", () => {
+  const audit = auditOf({
+    "CLAUDE.md": ENGLISH_RULE + "\n",
+    ".claude/skills/despliegue/SKILL.md": [
+      "---",
+      "name: despliegue",
+      "description: Ejecuta el despliegue del proyecto cuando el usuario pide una nueva version de la aplicacion.",
+      "---",
+      "",
+      "# Despliegue",
+      "",
+    ].join("\n"),
+  });
+  const skill = audit.skills[0];
+  assert.equal(skill.languageMode, "latin-unsupported:es");
+  assert.equal(skill.checks.mode, "unsupported-language");
+  assert.deepEqual(skill.checks.missing, []);
+
+  const report = engine.renderReport(audit);
+  // it never appears as a weak description with an English verdict against it
+  assert.doesNotMatch(report, /Weak skill descriptions \(1 to fix\)/);
+  const unsupported = findingsOfType(audit, "unsupported-language");
+  assert.equal(unsupported.length, 1);
+  assert.match(unsupported[0].summary, /describes itself in Spanish/);
+  assert.deepEqual(unsupported[0].sources, [
+    { path: ".claude/skills/despliegue/SKILL.md", lineStart: 1, lineEnd: 1 },
+  ]);
+});
+
+// ---------------------------------------------------------------------------
+// ci — opt-in CI output — [Foreman: 084]
+// ---------------------------------------------------------------------------
+
+const CI_CLEAN = ["# Project rules", "", ENGLISH_RULE, ""].join("\n");
+
+test("ci exits 0 on a clean fixture and names the default gate set", () => {
+  const root = tmpProject({ "CLAUDE.md": CI_CLEAN });
+  const { code, out } = cli(root, "ci");
+  assert.equal(code, 0, out);
+  assert.match(out, /^assay ci — claude-code profile \d+, analyzer /m);
+  assert.match(out, /^gates: availability, schema, stale-targets, conflicts$/m);
+  assert.match(out, /^gated findings: none$/m);
+  assert.match(out, /^advisory \(never gates\): \d+/m);
+});
+
+test("ci writes nothing at all — no record, no state, no temp file", () => {
+  const root = tmpProject({ "CLAUDE.md": CI_CLEAN });
+  const before = fs.readdirSync(root).sort();
+  assert.equal(cli(root, "ci").code, 0);
+  assert.equal(cli(root, "ci", "--json").code, 0);
+  assert.deepEqual(fs.readdirSync(root).sort(), before);
+  assert.equal(fs.existsSync(path.join(root, ".assay-tmp")), false);
+  assert.equal(fs.existsSync(path.join(root, ".assay")), false);
+});
+
+test("ci exits 2 on a planted stale target under the default gates", () => {
+  const root = tmpProject({
+    "CLAUDE.md": ["# Project rules", "", "- Follow [the guide](docs/missing-guide.md) when editing handlers.", ""].join("\n"),
+  });
+  const { code, out } = cli(root, "ci");
+  assert.equal(code, 2, out);
+  assert.match(out, /^gated findings: 1 \(stale-targets 1\)$/m);
+  assert.match(out, /^ {2}stale-targets {2}CLAUDE\.md:3 {2}it requires `docs\/missing-guide\.md`.*\[mechanical\]$/m);
+});
+
+test("ci --fail-on selects within the closed set; what is not selected is advisory", () => {
+  const root = tmpProject({
+    "CLAUDE.md": ["# Project rules", "", "- Follow [the guide](docs/missing-guide.md) when editing handlers.", "", PIN_YES, ""].join("\n"),
+    ".claude/rules/deps.md": "# Deps\n\n" + PIN_NO + "\n",
+    "src/app.ts": "export {};\n",
+  });
+  // the whole default set fails on the stale target
+  assert.equal(cli(root, "ci").code, 2);
+
+  // narrowed to availability alone, nothing gates and the stale target is
+  // reported as advisory instead of dropped
+  const narrowed = cli(root, "ci", "--fail-on", "availability");
+  assert.equal(narrowed.code, 0, narrowed.out);
+  assert.match(narrowed.out, /^gates: availability$/m);
+  assert.match(narrowed.out, /^gated findings: none$/m);
+  assert.match(narrowed.out, /advisory \(never gates\).*blocked 1/m);
+
+  // the conflict is present, selectable by name, and still never gates — its
+  // evidence is heuristic, and the evidence bound outranks the gate table
+  const conflicts = cli(root, "ci", "--fail-on", "conflicts");
+  assert.equal(conflicts.code, 0, conflicts.out);
+  assert.match(conflicts.out, /^gates: conflicts$/m);
+  assert.match(conflicts.out, /advisory \(never gates\).*conflicting 2/m);
+  assert.match(conflicts.out, /conflict 1/);
+
+  // a selection is canonically ordered, so the same gates always print the same
+  assert.match(cli(root, "ci", "--fail-on", "conflicts,availability").out, /^gates: availability, conflicts$/m);
+});
+
+test("ci --fail-on refuses anything outside the closed set and names it, exit 1", () => {
+  const root = tmpProject({ "CLAUDE.md": CI_CLEAN });
+  for (const bad of ["at-risk", "context-pressure", "mechanical-candidate", "everything", ",", "availability,at-risk"]) {
+    const run = cli(root, "ci", "--fail-on", bad);
+    assert.equal(run.code, 1, "`" + bad + "` was accepted");
+    assert.match(run.err, /The gate set is closed: availability, schema, stale-targets, conflicts, duplicates, malformed-config\./);
+    assert.match(run.err, /advisory by design/);
+  }
+  // and the flag still needs a value — bare or empty is the same usage error
+  for (const args of [["ci", "--fail-on"], ["ci", "--fail-on", ""]]) {
+    const bare = cli(root, ...args);
+    assert.equal(bare.code, 1);
+    assert.match(bare.err, /--fail-on needs a comma-separated gate list/);
+  }
+});
+
+test("a gated type labelled heuristic cannot fail a build — the evidence bound is structural", () => {
+  // Everything below is a gated type under a selected gate. Only the evidence
+  // level differs, and it alone decides.
+  const gated = (level) => ({
+    findings: [{
+      id: "F001", type: "conflict", severity: "high", analyzer: "conflict-detection",
+      summary: "planted", explanation: "planted", evidence: { level, basis: "planted" },
+      sources: [{ path: "CLAUDE.md", lineStart: 1, lineEnd: 1 }], safeActions: [],
+    }],
+  });
+  for (const level of ["mechanical", "documented"]) {
+    assert.equal(engine.ciEvaluate(gated(level), ["conflicts"]).failed.length, 1, level);
+  }
+  for (const level of ["heuristic", "model-inferred", "experiment-supported", "behavior-observed"]) {
+    const result = engine.ciEvaluate(gated(level), ["conflicts"]);
+    assert.deepEqual(result.failed, [], level + " failed a build");
+    assert.deepEqual(result.advisory, { conflict: 1 }, level);
+  }
+  // and a mechanical finding of a type NO gate names is still advisory
+  const ungated = { findings: [{
+    id: "F001", type: "context-pressure", severity: "low", analyzer: "context-pressure",
+    summary: "planted", explanation: "planted", evidence: { level: "mechanical", basis: "planted" },
+    sources: [{ path: "CLAUDE.md", lineStart: 1, lineEnd: 1 }], safeActions: [],
+  }] };
+  assert.deepEqual(engine.ciEvaluate(ungated, engine.CI_GATE_NAMES).failed, []);
+});
+
+test("ci --json emits a stable, deterministic, schema-versioned shape", () => {
+  const root = tmpProject({
+    "CLAUDE.md": ["# Project rules", "", "- Follow [the guide](docs/missing-guide.md) when editing handlers.", "",
+      "- Antes de hacer commit, revisa el archivo de configuracion y ejecuta las pruebas.", ""].join("\n"),
+  });
+  const first = cli(root, "ci", "--json");
+  const second = cli(root, "ci", "--json");
+  assert.equal(first.code, 2);
+  // no clock, no run id, nothing that moves between two runs of one tree
+  assert.equal(first.out, second.out);
+
+  const record = JSON.parse(first.out);
+  assert.equal(record.schemaVersion, engine.SCHEMA_VERSION);
+  assert.equal(record.analyzer.name, "assay");
+  assert.equal(record.analyzer.version, engine.ANALYZER_VERSION);
+  assert.equal(typeof record.profile.host, "string");
+  assert.deepEqual(record.gates, engine.CI_DEFAULT_GATES);
+  assert.deepEqual(record.allowedGates, engine.CI_GATE_NAMES);
+  assert.equal(record.exitCode, 2);
+  assert.deepEqual(record.failed, [{
+    gate: "stale-targets", state: "blocked", severity: "high", evidence: "mechanical",
+    path: "CLAUDE.md", line: 3,
+    summary: "it requires `docs/missing-guide.md`, which the project does not contain",
+  }]);
+  // the language modes reach CI as advisory counts, carrying the mode
+  assert.equal(record.advisory["unsupported-language:latin-unsupported:es"], 1);
+  // advisory keys are sorted, so two runs on two machines diff cleanly
+  assert.deepEqual(Object.keys(record.advisory), [...Object.keys(record.advisory)].sort());
+});
+
+test("ci never runs a model step and never reads a judgments file", () => {
+  const root = tmpProject({ "CLAUDE.md": CI_CLEAN });
+  assert.equal(cli(root, "scan").code, 0);
+  const keys = JSON.parse(cli(root, "scan").out).judge.map((j) => j.key);
+  const judgments = {};
+  // judgments that WOULD move a state if anything here read them
+  for (const k of keys) judgments[k] = { F3: 0.1, F8: 0.1 };
+  fs.writeFileSync(path.join(root, ".assay-tmp", "judgments.json"), JSON.stringify(judgments));
+  const withJudgments = cli(root, "ci", "--json");
+  fs.rmSync(path.join(root, ".assay-tmp"), { recursive: true, force: true });
+  const without = cli(root, "ci", "--json");
+  assert.equal(withJudgments.out, without.out);
 });

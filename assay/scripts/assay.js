@@ -48,6 +48,14 @@
 //                                        evidence key read out of that record
 //   node assay.js link --list            every stored link, with its key
 //
+// [Foreman: 084] Opt-in CI output — deterministic, read-only, writes nothing:
+//   node assay.js ci [--host <name>] [--project-only] [--fail-on <gate>[,…]] [--json]
+//                                        scans, composes and evaluates in
+//                                        memory; exits 0 clean, 2 when a
+//                                        selected gate failed, 1 on a usage
+//                                        error. The gate set is closed and
+//                                        evidence-bounded — see CI_GATES
+//
 // --project-only skips user-scope discovery; ASSAY_USER_DIR overrides where the
 // user's own instruction files are looked for (default ~/.claude).
 //
@@ -501,12 +509,129 @@ const NUMERIC_THRESHOLD_REGEX = [
 // borrowed token — a Cyrillic sentence containing "commit" scores F1 0.85 by
 // lookup — so the grade reads confident while English-only scoring never
 // applied. Flagging the script lets the report say so.
-// razor: ceiling is script detection, not language detection — Latin-script
-// non-English (Spanish, French, German) is not covered and is not meant to be.
 const NON_LATIN_SCRIPT = new RegExp(
   "[\\u0370-\\u03FF\\u0400-\\u04FF\\u0530-\\u058F\\u0590-\\u05FF\\u0600-\\u06FF" +
   "\\u0900-\\u097F\\u0E00-\\u0E7F\\u3040-\\u30FF\\u3400-\\u4DBF\\u4E00-\\u9FFF\\uAC00-\\uD7AF]"
 );
+
+// [Foreman: 084]
+// The explicit language mode every rule and skill description carries. English
+// is the one SUPPORTED mode and the only mode anything here is scored under.
+//
+//   "english"                  — the wording rubric applies
+//   "non-latin-script"         — the script screen fired (the 065 behavior,
+//                                now stated in this vocabulary)
+//   "latin-unsupported:<lang>" — the function-word screen read one non-English
+//                                Latin-script language
+//
+// This detects and discloses. It does not score: SCOPE.md's standing rule is
+// that a wording score for a new language requires a separate VALIDATED
+// language-specific analyzer, and none is built here. An unsupported mode
+// therefore withdraws the English factors and the grade from that rule and says
+// so; every language-independent mechanical analysis still runs on it in full.
+//
+// The asymmetry between the two possible mistakes is what sets the thresholds.
+// A false "unsupported" silently ungrades a real English rule — the rubric goes
+// quiet on exactly the rule that needed it, and nothing in the report says a
+// check was skipped in error. A false "english" only reproduces the misread
+// that already existed. The second is the cheaper error, so reclassification
+// takes STRONG evidence and everything ambiguous, mixed or short stays
+// English-scored.
+//
+// razor: hardcoded closed-class word lists for the five obvious Latin-script
+// cases, not a language identifier. Upgrade path is a validated per-language
+// analyzer, which SCOPE.md requires before any of these modes could be SCORED
+// rather than merely named.
+const LANGUAGE_NAMES = { es: "Spanish", pt: "Portuguese", fr: "French", it: "Italian", de: "German" };
+const FUNCTION_WORDS_RAW = {
+  en: ["the", "a", "an", "of", "to", "in", "for", "with", "when", "before", "after", "and", "or",
+    "that", "this", "is", "are", "be", "on", "at", "from", "by", "as", "it", "its", "every",
+    "each", "never", "always", "must", "not", "into", "than", "then", "if", "while", "any",
+    "no", "only", "out", "over", "under", "per", "without", "you", "your", "we", "our", "but"],
+  es: ["el", "la", "los", "las", "un", "una", "y", "o", "no", "que", "de", "del", "para", "con",
+    "en", "al", "se", "su", "sus", "sobre", "siempre", "nunca", "antes", "después", "cada",
+    "es", "son", "este", "esta", "como", "donde", "cuando", "porque", "pero", "más", "ya"],
+  pt: ["o", "a", "os", "as", "do", "da", "dos", "das", "um", "uma", "e", "ou", "não", "que",
+    "para", "com", "em", "no", "na", "nos", "nas", "sempre", "nunca", "antes", "depois",
+    "cada", "é", "são", "este", "esta", "ao", "pelo", "pela", "se", "como", "mas"],
+  fr: ["le", "la", "les", "des", "du", "un", "une", "et", "ou", "ne", "pas", "que", "qui", "dans",
+    "pour", "avec", "sur", "sous", "avant", "après", "toujours", "jamais", "chaque", "est",
+    "sont", "ce", "cette", "aux", "au", "par", "se", "son", "ses", "plus", "tout", "mais"],
+  it: ["il", "lo", "la", "gli", "le", "dei", "delle", "un", "una", "e", "o", "non", "che", "chi",
+    "nel", "nella", "per", "con", "su", "prima", "dopo", "sempre", "mai", "ogni", "è", "sono",
+    "questo", "questa", "al", "dal", "da", "si", "come", "ma"],
+  de: ["der", "die", "das", "den", "dem", "und", "oder", "nicht", "mit", "für", "bei", "vor",
+    "nach", "immer", "nie", "wenn", "ein", "eine", "einen", "im", "ist", "sind", "sich", "auf",
+    "aus", "zu", "von", "als", "wird", "werden", "kein", "keine", "aber"],
+};
+// A word that is English AND one of the screened languages — "no", "a", "in",
+// "son", "die" — is evidence for neither side, so it leaves every list here
+// rather than being curated out by hand and forgotten.
+const FUNCTION_WORDS = (() => {
+  const others = new Set(Object.entries(FUNCTION_WORDS_RAW)
+    .filter(([lang]) => lang !== "en").flatMap(([, words]) => words));
+  const shared = new Set(FUNCTION_WORDS_RAW.en.filter((w) => others.has(w)));
+  return Object.fromEntries(Object.entries(FUNCTION_WORDS_RAW)
+    .map(([lang, words]) => [lang, new Set(words.filter((w) => !shared.has(w)))]));
+})();
+// The order a tie between two screened languages resolves in — Spanish and
+// Portuguese share most of their closed class, and a stable order beats a coin
+// flip. Which of the two is named is a guess and the finding says so; that it
+// is NOT English is what the screen actually established.
+const LANGUAGE_ORDER = ["es", "pt", "fr", "it", "de"];
+// Fewer prose tokens than this and there is nothing to screen: a short line
+// stays English-scored.
+const LANGUAGE_MIN_TOKENS = 6;
+// Distinct closed-class words of one language needed to reclassify.
+const LANGUAGE_MIN_HITS = 3;
+// Any English closed-class word at all makes the line mixed, and mixed stays
+// English-scored — see the asymmetry above.
+const LANGUAGE_MAX_ENGLISH_HITS = 0;
+
+// The prose a language screen may read: code identifiers, paths, file names and
+// backtick spans are language-neutral and would answer for whichever list their
+// letters happened to match, so none of them reaches the token count.
+function languageTokens(text) {
+  const prose = String(text)
+    .replace(/`[^`]*`/g, " ")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[\w.-]*[/\\][\w./\\-]*/g, " ")
+    .replace(/\b[\w-]+\.[A-Za-z]{1,5}\b/g, " ")
+    .replace(/\b[\w-]*_[\w-]*\b/g, " ");
+  return (prose.match(/\p{L}[\p{L}'’-]*/gu) || [])
+    .filter((w) => !/\p{Lu}/u.test(w.slice(1)))
+    .map((w) => w.toLowerCase());
+}
+
+function detectLanguageMode(text) {
+  if (NON_LATIN_SCRIPT.test(String(text || ""))) return "non-latin-script";
+  const tokens = languageTokens(text);
+  if (tokens.length < LANGUAGE_MIN_TOKENS) return "english";
+  const seen = new Set(tokens);
+  let english = 0;
+  for (const w of seen) if (FUNCTION_WORDS.en.has(w)) english++;
+  if (english > LANGUAGE_MAX_ENGLISH_HITS) return "english";
+  let best = null, bestHits = 0;
+  for (const lang of LANGUAGE_ORDER) {
+    let hits = 0;
+    for (const w of seen) if (FUNCTION_WORDS[lang].has(w)) hits++;
+    if (hits > bestHits) { best = lang; bestHits = hits; }
+  }
+  if (!best || bestHits < LANGUAGE_MIN_HITS) return "english";
+  return "latin-unsupported:" + best;
+}
+
+// English scoring applies, or it does not. One predicate, read everywhere the
+// rubric, the grade or an English pattern would otherwise fire.
+function englishScored(subject) {
+  return ((subject && subject.languageMode) || "english") === "english";
+}
+
+function languageModeLabel(mode) {
+  if (mode === "non-latin-script") return "a non-Latin script";
+  const lang = LANGUAGE_NAMES[String(mode).split(":")[1]];
+  return lang ? lang : "a language assay does not score";
+}
 
 const ABSTRACT_MARKERS = [
   "good", "appropriate", "reasonable", "clean", "thoughtful", "proper", "correct", "careful",
@@ -978,13 +1103,25 @@ function readSkills(found, policy = DEFAULT_POLICY) {
     // flags default to on: an unflagged skill is model- and user-invocable
     const modelInvocable = !(fm["disable-model-invocation"] === "true" || fm["disable-model-invocation"] === true);
     const userInvocable = !(fm["user-invocable"] === "false" || fm["user-invocable"] === false);
+    // [Foreman: 084] The trigger recipe is an English recipe — quoted trigger
+    // phrasings, an exclusion clause, a concrete noun — so a description it
+    // cannot read is set aside exactly as a rule is. The one check that survives
+    // is the character cap, which counts characters and asks no language.
+    const languageMode = detectLanguageMode(description);
+    const checks = englishScored({ languageMode })
+      ? gradeSkill(description, whenToUse, modelInvocable, userInvocable)
+      : {
+        mode: "unsupported-language", missing: [], redundant: false,
+        length: description.trim().length, overCap: description.trim().length > DESCRIPTION_CAP,
+      };
     skills.push({
       path: s.path,
       name: typeof fm.name === "string" && fm.name ? fm.name : s.name,
       description,
+      languageMode,
       modelInvocable,
       userInvocable,
-      checks: gradeSkill(description, whenToUse, modelInvocable, userInvocable),
+      checks,
     });
   }
   return skills;
@@ -2137,7 +2274,9 @@ function scan(root, options = {}) {
           category,
           invalidCategory,
           staleness,
-          nonLatin: NON_LATIN_SCRIPT.test(effectiveText),
+          // [Foreman: 084] Which language rubric this rule is read under. Set
+          // in scan because it is a property of the text, like staleness.
+          languageMode: detectLanguageMode(effectiveText),
           factors: {
             F1: f1,
             F2: scoreF2(effectiveText),
@@ -2443,17 +2582,26 @@ function composeAudit(scanData, judgments) {
     const score = stallRisk ? Math.min(composed.score, STALL_RISK_CAP) : composed.score;
     const placement = detectPlacement(r.contextText || r.text, f8);
     const notRule = typeof j.notRule === "string" && j.notRule.trim() ? j.notRule.trim() : null;
+    // [Foreman: 084] The one place an unsupported language withdraws English
+    // scoring. The factor VALUES stay in the record — they are inventory, and a
+    // reader can see what the English tables made of a sentence they never
+    // covered — but nothing composed from them is presented as a judgment, and
+    // the rule leaves the populations the file and corpus grades average over.
+    // Every English PATTERN dies with them: the stall-risk cap and the
+    // placement signals are English regexes, so firing either on this text
+    // would be the same misread wearing a different name.
+    const english = englishScored(r);
     return {
       ...r,
       factorValues: factors,
       f8,
       ...composed,
-      score: graded ? score : null,
-      grade: graded ? grade(score) : null,
-      stallRisk,
+      score: graded && english ? score : null,
+      grade: graded && english ? grade(score) : null,
+      stallRisk: english && stallRisk,
       hookOpportunity: f8 != null && f8 < F8_HOOK_THRESHOLD,
-      placement,
-      weak: graded && score < (CATEGORY_FLOORS[r.category] ?? CATEGORY_FLOORS.mandate),
+      placement: english ? placement : null,
+      weak: graded && english && score < (CATEGORY_FLOORS[r.category] ?? CATEGORY_FLOORS.mandate),
       suppressed: notRule !== null,
       suppressedReason: notRule,
     };
@@ -2469,7 +2617,11 @@ function composeAudit(scanData, judgments) {
 
   const files = scanData.files.map((f, i) => {
     const own = counted.filter((r) => r.fileIndex === i);
-    const mean = graded && own.length ? own.reduce((s, r) => s + r.score, 0) / own.length : null;
+    // [Foreman: 084] A rule the rubric could not read carries no score, so it
+    // cannot drag the file's mean the way a misread English sentence would. It
+    // is still counted as a rule — inventory is not scoring.
+    const scored = own.filter((r) => r.score !== null);
+    const mean = graded && scored.length ? scored.reduce((s, r) => s + r.score, 0) / scored.length : null;
     return { ...f, ruleCount: own.length, score: mean === null ? null : round3(mean), grade: mean === null ? null : grade(mean) };
   });
 
@@ -2478,7 +2630,9 @@ function composeAudit(scanData, judgments) {
   // would move a number the project's own authors cannot fix.
   // [Foreman: 076] A shadowed file's rules never take effect, so grading the
   // project on them would score policy the host never reads.
-  const mandates = !graded ? [] : counted.filter((r) => r.category === "mandate" &&
+  // [Foreman: 084] A rule under an unsupported language mode has no score to
+  // average, for the same reason: the rubric never read it.
+  const mandates = !graded ? [] : counted.filter((r) => r.category === "mandate" && r.score !== null &&
     (files[r.fileIndex] || {}).scope !== "user" && (files[r.fileIndex] || {}).selected !== false);
   const corpus = mandates.length ? round3(mandates.reduce((s, r) => s + r.score, 0) / mandates.length) : null;
 
@@ -2791,7 +2945,11 @@ function deriveRuleState(rule, file, conflicted = new Map(), policy = DEFAULT_PO
   const factors = rule.factors || {};
   const values = rule.factorValues || {};
   const globs = (file && file.globs) || [];
-  const rubric = policy.wordingRubric !== false;
+  // [Foreman: 084] Two independent reasons the English wording rubric may not
+  // apply: the profile withholds it, or the rule is not in English. Either way
+  // the rows below that read a wording factor stay silent, and the mechanical
+  // rows — selection, budget, glob, reference resolution, conflict — do not.
+  const rubric = policy.wordingRubric !== false && englishScored(rule);
 
   // [Foreman: 079] The host's own documented budget ran out before this file.
   // The instruction exists, reads like live policy, and the session never
@@ -3130,7 +3288,8 @@ function deriveFindings(audit) {
   // host will fail on it. Under a rubric this is the `ambiguous` state instead,
   // and this loop is silent.
   if (policy.wordingRubric === false) {
-    for (const rule of rules.filter((r) => (r.factors || {}).F1 && r.factors.F1.method === "extraction_failed")) {
+    for (const rule of rules.filter((r) => englishScored(r) &&
+      (r.factors || {}).F1 && r.factors.F1.method === "extraction_failed")) {
       push({
         type: "action-clarity", severity: "low", analyzer: "verb-strength", rule: rule.id, tier: "maintainability",
         summary: "no directive verb could be read out of it — whatever it asks for is left to the reader",
@@ -3143,16 +3302,41 @@ function deriveFindings(audit) {
       });
     }
   }
-  for (const rule of rules.filter((r) => r.nonLatin)) {
+  // [Foreman: 084] One finding per rule and per skill description the wording
+  // rubric could not read, naming the mode it was set aside under. The rule is
+  // not ungraded quietly: this is where the report says the checks were skipped
+  // and which of them still ran.
+  const unsupportedText = (mode) => "Wording checks need English and this reads as " +
+    languageModeLabel(mode) + ", so no English factor and no grade was applied to it. " +
+    "The language-independent checks still did: stale references, duplicates and conflicts, " +
+    "availability, and the byte budgets. assay names the language it could not score; it does not score it.";
+  const unsupportedEvidence = (mode) => ({
+    level: "heuristic",
+    basis: mode === "non-latin-script" ? "non-Latin script detection" : "closed-class function-word screen",
+    limits: mode === "non-latin-script"
+      ? "script detection — it establishes that the text is not Latin script, not which language it is"
+      : "the language named is a guess and related languages are easily confused; what the screen establishes is that the text is not English",
+  });
+  for (const rule of rules.filter((r) => !englishScored(r))) {
     push({
-      type: "unsupported-language", severity: "low", analyzer: "language-script", rule: rule.id,
-      summary: "written in a non-Latin script — English-only scoring never applied to it",
-      explanation: "Wording checks are English-only, so this rule's factor scores measure nothing. Read them as unreliable, not as low.",
-      evidence: {
-        level: "heuristic", basis: "non-Latin script detection",
-        limits: "script detection, not language detection — Latin-script non-English is not covered",
-      },
+      type: "unsupported-language", severity: "low", analyzer: "language-mode",
+      rule: rule.id, mode: rule.languageMode,
+      summary: "wording checks need English — this reads as " + languageModeLabel(rule.languageMode) +
+        "; the mechanical findings still apply",
+      explanation: unsupportedText(rule.languageMode),
+      evidence: unsupportedEvidence(rule.languageMode),
       sources: ruleSpan(rule), safeActions: ["translate the rule", "exclude the file from grading"],
+    });
+  }
+  for (const skill of (audit.skills || []).filter((s) => !englishScored(s))) {
+    push({
+      type: "unsupported-language", severity: "low", analyzer: "language-mode", mode: skill.languageMode,
+      summary: "`" + skill.path + "` describes itself in " + languageModeLabel(skill.languageMode) +
+        " — the trigger recipe was not applied to it",
+      explanation: unsupportedText(skill.languageMode),
+      evidence: unsupportedEvidence(skill.languageMode),
+      sources: [{ path: skill.path, lineStart: 1, lineEnd: 1 }],
+      safeActions: ["translate the description", "leave it as is — routing is the host's call, not assay's"],
     });
   }
   for (const rule of rules.filter((r) => r.invalidCategory)) {
@@ -3558,6 +3742,9 @@ const SKILL_FINDING_TYPES = new Set([
 function isWeakSkill(s) {
   const c = s.checks || {};
   if (c.mode === "required-metadata") return false;
+  // [Foreman: 084] A description the recipe could not read has no recipe
+  // verdict; only the character cap, which counts characters, still holds.
+  if (c.mode === "unsupported-language") return Boolean(c.overCap);
   if (c.mode === "dead") return true;
   if (c.mode === "user-only") return c.overSpecified || c.overCap || c.empty;
   return c.missing.length || c.overCap || c.redundant || c.hasWhenToUse;
@@ -3848,7 +4035,15 @@ function coverageLines(audit, rules, suppressed, findings) {
   const discovered = cov.filesDiscovered != null ? cov.filesDiscovered : parsed;
   const out = [];
   const add = (text, finding = null, depth = 0) => out.push({ text, finding, depth });
-  add(`${parsed} of ${discovered} instruction file(s) parsed, ${rules.length} rule(s) graded, ${cov.proseChunks || 0} prose chunk(s) set aside`);
+  // [Foreman: 084] "graded" is a claim, so it counts the rules a rubric actually
+  // read. A rule set aside for its language is extracted and inventoried; saying
+  // it was graded would be the exact overreach the mode vocabulary exists to
+  // stop. With an all-English corpus the two numbers are equal and the line
+  // reads as it always did.
+  const gradedRules = rules.filter(englishScored).length;
+  add(`${parsed} of ${discovered} instruction file(s) parsed, ${gradedRules} rule(s) graded` +
+    (gradedRules === rules.length ? "" : ` of ${rules.length} extracted`) +
+    `, ${cov.proseChunks || 0} prose chunk(s) set aside`);
   add(`${cov.excludedLines || 0} line(s) excluded from grading (assay-ignore spans, tag bodies, comment-only lines)`);
   // [Foreman: 076] What every session pays before it reads anything. The count
   // always prints; it only becomes a finding above assay's own threshold, and
@@ -3879,9 +4074,16 @@ function coverageLines(audit, rules, suppressed, findings) {
   if (suppressed.length) {
     add(`${suppressed.length} entr${suppressed.length === 1 ? "y" : "ies"} suppressed by the verification pass as not rules — rerun with \`--verbose\` to see each one with its reason`);
   }
-  const nonLatin = rules.filter((r) => r.nonLatin).length;
-  if (nonLatin) {
-    add(`${nonLatin} rule(s) contain non-Latin script — assay grades English only, so treat those scores as unreliable rather than low`);
+  // [Foreman: 084] Per mode, so the report's numbers never silently cover text
+  // the rubric could not read. This generalizes the non-Latin line rather than
+  // sitting beside it — one vocabulary, one count.
+  const byMode = new Map();
+  for (const subject of [...rules, ...(audit.skills || [])]) {
+    if (englishScored(subject)) continue;
+    byMode.set(subject.languageMode, (byMode.get(subject.languageMode) || 0) + 1);
+  }
+  for (const mode of [...byMode.keys()].sort()) {
+    add(`${byMode.get(mode)} rule(s) or skill description(s) read as ${languageModeLabel(mode)} (\`${mode}\`) — set aside from English wording checks and from every grade; the mechanical findings still cover them`);
   }
   const badCategories = rules.filter((r) => r.invalidCategory).length;
   if (badCategories) add(`${badCategories} unknown category annotation(s) — listed below`);
@@ -4945,9 +5147,12 @@ function renderArtifact(audit) {
     "The host requires some skill metadata and publishes a budget for the list it builds at session start. Read out of the files, never judged.",
     findings.filter((f) => SKILL_FINDING_TYPES.has(f.type)).map((f) =>
       item(f, redactSecrets(f.summary) + " " + evidenceTag(f.evidence), [f.explanation]))));
-  operational.push(artifactSection("nonlatin", 3, "Non-Latin script",
-    "Wording checks are English-only, so these factor scores measure nothing. Read them as unreliable, not as low.",
-    byType("unsupported-language").map((f) => item(f, `${ruleAt(f.rule)} — ${f.summary}`))));
+  // [Foreman: 084] A skill description carries no rule id, so the location comes
+  // off the finding's own span when there is no rule behind it.
+  operational.push(artifactSection("language", 3, "Unsupported language",
+    "Wording checks need English. Nothing below was scored or graded on its wording; every language-independent check still applies to it.",
+    byType("unsupported-language").map((f) =>
+      item(f, `${f.rule ? ruleAt(f.rule) : at(f.sources[0])} — ${f.summary}`))));
   if (operational.some(Boolean)) {
     body.push('<section data-section="operational" id="assay-operational"><h2>Operational findings</h2>' +
       '<p class="note">Rules the host loads that carry a risk to how reliably they act. Each line names the kind of evidence behind it.</p></section>');
@@ -5036,12 +5241,9 @@ function renderArtifact(audit) {
 
   // Weak skills — the same rows the markdown table carries.
   const weakSkills = [];
-  pushWeakSkillSection(weakSkills, (audit.skills || []).filter((s) => {
-    const c = s.checks;
-    if (c.mode === "dead") return true;
-    if (c.mode === "user-only") return c.overSpecified || c.overCap || c.empty;
-    return c.missing.length || c.overCap || c.redundant || c.hasWhenToUse;
-  }));
+  // [Foreman: 084] One predicate for both renderers — the copy that used to live
+  // here could not see a mode it did not know about.
+  pushWeakSkillSection(weakSkills, (audit.skills || []).filter(isWeakSkill));
   const skillRows = weakSkills.filter((l) => l.startsWith("| ") && !l.startsWith("| Skill") && !l.startsWith("|---"))
     .map((l) => l.split("|").slice(1, -1).map((c) => plainText(c.trim())));
   body.push(artifactTable("skills", 2, "Weak skill descriptions", "Every check below is read out of the frontmatter, not judged. [mechanical]",
@@ -6569,6 +6771,170 @@ function cmdClean(root) {
 }
 
 // ---------------------------------------------------------------------------
+// ci — [Foreman: 084]
+// ---------------------------------------------------------------------------
+
+// SCOPE.md ratified two halves of one sentence: CI output is OPT-IN, and it may
+// hard-fail only on stable mechanical findings. This command is the first half;
+// everything below is the second, enforced structurally rather than by
+// convention.
+//
+// The gate set is CLOSED. Each name maps to the finding states and types that
+// may fail a build, and there is no flag, env var or config file that adds one:
+// a heuristic or model-inferred finding is advisory, period, and "opt in to
+// failing on it" is not an option assay offers. `--fail-on` selects WITHIN this
+// table and nothing else.
+//
+// The split between `availability` and `stale-targets` is deliberate rather
+// than cosmetic: both are hard gates, but "the host never loads this" and "the
+// host loads it and its target is gone" are different build failures with
+// different fixes, and a CI log that cannot tell them apart is worth less. Both
+// are in the default set, so the default behavior is the union.
+//
+// `budget-truncation` is NOT here and belongs to no gate. The host's own
+// documentation says where its cap lands and does not say whether the crossing
+// file arrives whole — an unsettled question is not a stable mechanical
+// finding, and a build must not fail on one.
+const CI_GATES = {
+  availability: { states: ["inactive", "shadowed"], types: ["budget-exceeded"] },
+  schema: { states: [], types: ["unknown-category", "skill-metadata"] },
+  "stale-targets": { states: ["blocked"], types: [] },
+  conflicts: { states: ["conflicting"], types: ["conflict"] },
+  duplicates: { states: [], types: ["duplicate", "skill-name-collision", "mechanism-overlap"] },
+  "malformed-config": { states: [], types: ["skill-metadata-unreadable", "inaccessible-source"] },
+};
+const CI_GATE_NAMES = Object.keys(CI_GATES);
+// The conservative core, applied when --fail-on is omitted: what the host will
+// not load, what does not validate, what points at nothing, and what
+// contradicts itself. `duplicates` and `malformed-config` are real gates and
+// stay opt-in — a duplicated duty and an unreadable sidecar are worth fixing
+// and are not worth stopping a merge by default.
+const CI_DEFAULT_GATES = ["availability", "schema", "stale-targets", "conflicts"];
+// The second bound, and the one that holds even if the table above is wrong. A
+// finding fails a build only when its own evidence level is mechanical or
+// documented, so a gated TYPE whose evidence is heuristic — every `conflict`
+// today, and every near `duplicate` — is reported and never gates. Mislabeling
+// a future type into this table cannot make a heuristic finding fail a build.
+const CI_GATE_EVIDENCE = new Set(["mechanical", "documented"]);
+// 0 = clean, 2 = a gate failed, 1 = usage or analysis error. Two rather than
+// one so a CI job can tell "assay found something" from "assay could not run".
+const CI_EXIT_GATE_FAILED = 2;
+
+function ciGateOf(finding, gates) {
+  for (const name of gates) {
+    const gate = CI_GATES[name];
+    const hit = finding.state ? gate.states.includes(finding.state) : gate.types.includes(finding.type);
+    if (hit) return name;
+  }
+  return null;
+}
+
+// What a run would exit on, as data. Pure over the audit, so a test can plant a
+// finding and check the boundary without spawning anything.
+function ciEvaluate(audit, gates) {
+  const failed = [];
+  const advisory = new Map();
+  for (const finding of audit.findings || []) {
+    const gate = ciGateOf(finding, gates);
+    if (gate && CI_GATE_EVIDENCE.has((finding.evidence || {}).level)) {
+      const at = finding.sources && finding.sources[0];
+      failed.push({
+        gate,
+        ...(finding.state ? { state: finding.state } : { type: finding.type }),
+        severity: finding.severity,
+        evidence: finding.evidence.level,
+        path: at ? at.path : null,
+        line: at ? at.lineStart : null,
+        summary: redactSecrets(finding.summary),
+      });
+      continue;
+    }
+    // [Foreman: 084] The language modes land here by construction: no gate
+    // names `unsupported-language`, and the mode travels with the count so a CI
+    // log says which text the rubric could not read.
+    const key = finding.type === "unsupported-language"
+      ? finding.type + ":" + finding.mode
+      : finding.state || finding.type;
+    advisory.set(key, (advisory.get(key) || 0) + 1);
+  }
+  failed.sort((a, b) => gates.indexOf(a.gate) - gates.indexOf(b.gate) ||
+    String(a.path).localeCompare(String(b.path)) || (a.line || 0) - (b.line || 0) ||
+    a.summary.localeCompare(b.summary));
+  return { failed, advisory: Object.fromEntries([...advisory].sort((a, b) => a[0].localeCompare(b[0]))) };
+}
+
+function ciCounts(entries, key) {
+  const counts = new Map();
+  for (const e of entries) counts.set(e[key], (counts.get(e[key]) || 0) + 1);
+  return [...counts].map(([k, n]) => k + " " + n).join(", ");
+}
+
+// Nothing here carries a clock, a temp path or a project root: two runs over an
+// unchanged tree print byte-identical output, which is what makes the exit code
+// worth reading in a log.
+function ciSummary(audit, gates, result) {
+  const profile = audit.profile || {};
+  const lines = [
+    `assay ci — ${profile.host || PROFILE_HOST} profile ${profile.version || PROFILE_VERSION}, analyzer ${ANALYZER_VERSION}`,
+    `gates: ${gates.join(", ")}`,
+  ];
+  if (result.failed.length) {
+    lines.push(`gated findings: ${result.failed.length} (${ciCounts(result.failed, "gate")})`);
+    for (const f of result.failed) {
+      lines.push(`  ${f.gate}  ${f.path}:${f.line}  ${f.summary}  [${f.evidence}]`);
+    }
+  } else {
+    lines.push("gated findings: none");
+  }
+  const advisoryTotal = Object.values(result.advisory).reduce((n, c) => n + c, 0);
+  lines.push(`advisory (never gates): ${advisoryTotal}` +
+    (advisoryTotal ? ` (${Object.entries(result.advisory).map(([k, n]) => k + " " + n).join(", ")})` : ""));
+  return lines.join("\n");
+}
+
+function parseFailOn(raw) {
+  const named = String(raw).split(",").map((s) => s.trim()).filter(Boolean);
+  const unknown = named.filter((n) => !CI_GATE_NAMES.includes(n));
+  if (!named.length || unknown.length) {
+    usageError((unknown.length ? "--fail-on names no gate assay may fail on: " + unknown.join(", ") : "--fail-on names no gate") +
+      ".\nThe gate set is closed: " + CI_GATE_NAMES.join(", ") + "." +
+      "\nHeuristic and model-inferred findings are advisory by design — SCOPE.md rules out hard CI failures from them, and no flag opts back in.");
+  }
+  // Canonical order, so the same selection always prints and sorts the same way.
+  return CI_GATE_NAMES.filter((n) => named.includes(n));
+}
+
+// Read-only in the strongest sense available: the scan reads the working tree,
+// the audit is composed in memory, and NOTHING is written — no `.assay-tmp`
+// record, no `.assay` state, not even a temp file. A CI job that runs this
+// leaves the checkout exactly as it found it, so the command is safe on a
+// shared workspace and produces no artifact anyone has to clean up. The host is
+// not probed either: a version subprocess is a dependency a build should not
+// need, and no gate reads the answer.
+function cmdCi(root, opts) {
+  const gates = opts.failOn ? parseFailOn(opts.failOn) : CI_DEFAULT_GATES;
+  const audit = composeAudit(scan(root, {
+    projectOnly: opts.projectOnly, probeHost: false, adapter: opts.adapter,
+  }), null);
+  const result = ciEvaluate(audit, gates);
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({
+      schemaVersion: SCHEMA_VERSION,
+      analyzer: { name: "assay", version: ANALYZER_VERSION },
+      profile: audit.profile || { host: PROFILE_HOST, version: PROFILE_VERSION },
+      gates,
+      allowedGates: CI_GATE_NAMES,
+      failed: result.failed,
+      advisory: result.advisory,
+      exitCode: result.failed.length ? CI_EXIT_GATE_FAILED : 0,
+    }, null, 2) + "\n");
+  } else {
+    process.stdout.write(ciSummary(audit, gates, result) + "\n");
+  }
+  if (result.failed.length) process.exit(CI_EXIT_GATE_FAILED);
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -6578,8 +6944,12 @@ function cmdClean(root) {
 // unknown change id, a failed validation and a refused retirement all exit 1.
 // [Foreman: 083] `link` joins the same contract: an unknown anchor, an
 // unreadable Proof record and a missing audit all exit 1.
+// [Foreman: 084] `ci` adds the ONE second failure code in this engine: 2 means
+// a selected gate failed, and it is distinct from 1 precisely so a build can
+// tell a finding from a broken invocation. A `--fail-on` naming a gate outside
+// the closed set is still 1 — that is a usage error, not a finding.
 const COMMANDS = ["scan", "report", "remeasure", "artifact", "clean",
-  "plan", "apply", "validate", "rollback", "retire", "link"];
+  "plan", "apply", "validate", "rollback", "retire", "link", "ci"];
 const FLAGS = new Set(["--verbose", "--json", "--project-only", "--list"]);
 // [Foreman: 079] Flags that take a value, mapped to what that value is, so the
 // parser skips the argument instead of rejecting it as an unknown flag and the
@@ -6592,6 +6962,8 @@ const VALUE_FLAGS = new Map([
   ["--transaction", "transaction id"], ["--external", '"<kind>: <result>"'], ["--proof", "record pointer"],
   // [Foreman: 083] the anchors a Proof link may name
   ["--rule", "rule key or R### id"], ["--skill", "skill name"], ["--finding", "F### id or type@path:line"],
+  // [Foreman: 084] which gates may fail a ci run, from the closed set
+  ["--fail-on", "comma-separated gate list (" + CI_GATE_NAMES.join(", ") + ")"],
 ]);
 const USAGE = [
   "Usage: assay.js <" + COMMANDS.join("|") + "> [--root <path>]",
@@ -6605,6 +6977,10 @@ const USAGE = [
   "  retire          --change <id>",
   "  link            --proof <pointer> --rule <key> | --skill <name> | --finding <ref> | --change <id>",
   "  link            --list",
+  "  ci              [--host <" + Object.keys(ADAPTERS).join("|") + ">] [--project-only] [--fail-on <gate>[,<gate>…]] [--json]",
+  "                  deterministic, writes nothing; exit 0 clean, 2 a gate failed, 1 usage error",
+  "                  gates (closed set): " + CI_GATE_NAMES.join(", "),
+  "                  default: " + CI_DEFAULT_GATES.join(", "),
 ].join("\n");
 
 // Every occurrence of a repeatable value flag, in the order they were given.
@@ -6663,6 +7039,8 @@ function main() {
     list: args.includes("--list"),
     anchorArgs: Object.fromEntries(Object.keys(LINK_ANCHOR_FLAGS)
       .map((flag) => [flag, args.includes(flag) ? args[args.indexOf(flag) + 1] : null])),
+    // [Foreman: 084] null means the conservative default set, not "no gates".
+    failOn: args.includes("--fail-on") ? args[args.indexOf("--fail-on") + 1] : null,
   };
 
   if (command === "scan") cmdScan(root, opts);
@@ -6675,6 +7053,7 @@ function main() {
   else if (command === "rollback") cmdRollback(root, opts);
   else if (command === "retire") cmdRetire(root, opts);
   else if (command === "link") cmdLink(root, opts); // [Foreman: 083]
+  else if (command === "ci") cmdCi(root, opts); // [Foreman: 084]
   else cmdClean(root);
 }
 
@@ -6716,6 +7095,12 @@ module.exports = {
   // [Foreman: 071] the semantic contract: rubric axis + the candidate kinds a
   // later entry's semantic pass may propose
   RUBRIC_VERSION, SEMANTIC_CANDIDATE_KINDS,
+  // [Foreman: 084] the language contract: which rubric a text is read under,
+  // and the screen that decides
+  detectLanguageMode, languageTokens, englishScored, languageModeLabel, FUNCTION_WORDS,
+  // [Foreman: 084] the CI contract: the closed gate set, its default, the
+  // evidence bound that holds regardless of it, and the pure evaluation
+  CI_GATES, CI_GATE_NAMES, CI_DEFAULT_GATES, CI_GATE_EVIDENCE, CI_EXIT_GATE_FAILED, ciEvaluate,
 };
 
 if (require.main === module) main();
