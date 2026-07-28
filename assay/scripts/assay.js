@@ -2654,6 +2654,15 @@ function composeAudit(scanData, judgments) {
     coverage: scanData.coverage || null,
     corpusScore: corpus, corpusGrade: corpus === null ? null : grade(corpus),
   };
+  // [Foreman: 085] An analysis that did not run is part of what the audit
+  // covered, so it lands in coverage beside every other honest gap — one field
+  // in the record, one line both renderers already read. It is a disclosure and
+  // never a finding: nothing about a large corpus is a defect in it, and a
+  // build must not fail because assay declined to pair.
+  const comparableCount = comparableRules(audit).length;
+  if (comparableCount > PAIRWISE_RULE_CAP) {
+    audit.coverage = { ...(audit.coverage || {}), pairwiseSkipped: comparableCount };
+  }
   // [Foreman: 071] What the model contributed, if anything. Absent on a
   // deterministic run — the audit does not claim a semantic pass it never had.
   if (!deterministic) {
@@ -2793,6 +2802,33 @@ function comparableRules(audit) {
   return (audit.rules || []).filter((r) => !r.suppressed && hostReceives(r, files[r.fileIndex]));
 }
 
+// [Foreman: 085] Both relationship walks compare every comparable rule with
+// every other one. At a few hundred rules that is free; past this line the pair
+// count — and the findings it can emit — grows as the square, and a corpus of a
+// few thousand near-identical rules produced an audit record too large for
+// `JSON.stringify` to return, which crashed the report outright.
+//
+// The cap is 500 because 500 rules is already a corpus no one reads end to end,
+// it is an order of magnitude above any real instruction system assay has been
+// pointed at, and 500 × 500 pairs still composes in well under a second.
+//
+// Past it the pairwise analysis does not run AT ALL, and says so. Sampling was
+// the obvious alternative and is the wrong one: a partial walk reports "no
+// conflicts" when it means "did not look everywhere", which is precisely the
+// false assurance this product exists to remove.
+//
+// razor: a hard cap with a disclosure, not a faster algorithm. The upgrade path
+// is an inverted index over content tokens — candidates come from shared rare
+// tokens, and only candidate pairs are compared — which removes the cap instead
+// of raising it. Named, not built.
+const PAIRWISE_RULE_CAP = 500;
+
+// The comparable rules, or null when there are too many to pair honestly.
+function pairwiseRules(audit) {
+  const rules = comparableRules(audit);
+  return rules.length > PAIRWISE_RULE_CAP ? null : rules;
+}
+
 function byPairPosition(p, q) {
   return p.a.file.localeCompare(q.a.file) || p.a.lineStart - q.a.lineStart ||
     p.b.file.localeCompare(q.b.file) || p.b.lineStart - q.b.lineStart;
@@ -2805,8 +2841,10 @@ function byPairPosition(p, q) {
 // their content tokens overlap, and reporting both would name the same pair
 // twice with contradictory advice.
 function duplicatePairs(audit) {
+  const comparable = pairwiseRules(audit);
+  if (!comparable) return [];
   const conflicting = new Set(conflictPairs(audit).map((p) => p.a.id + "|" + p.b.id));
-  const graded = comparableRules(audit).map((r) => {
+  const graded = comparable.map((r) => {
     const text = r.contextText || r.text;
     return { rule: r, normalized: text.trim().toLowerCase().replace(/\s+/g, " "), tokens: contentTokens(text) };
   });
@@ -2879,7 +2917,9 @@ function carriesAlternative(rule) {
 }
 
 function conflictPairs(audit) {
-  const graded = comparableRules(audit).map((r) => {
+  const comparable = pairwiseRules(audit);
+  if (!comparable) return [];
+  const graded = comparable.map((r) => {
     const text = r.contextText || r.text;
     return {
       rule: r, text,
@@ -4061,6 +4101,11 @@ function coverageLines(audit, rules, suppressed, findings) {
   }
   const pressure = (findings || []).find((f) => f.type === "context-pressure");
   if (pressure) add(`${pressure.summary} ${evidenceTag(pressure.evidence)} — ${pressure.evidence.limits}`, pressure, 1);
+  // [Foreman: 085] The pairwise analyses that did not run, named with the number
+  // that stopped them — never left to read as "no duplicates, no conflicts".
+  if (cov.pairwiseSkipped) {
+    add(`${cov.pairwiseSkipped} rules exceed the pairwise-analysis cap of ${PAIRWISE_RULE_CAP} — duplicate and conflict detection did not run; every other check did`);
+  }
   // [Foreman: 079] What this profile does not cover, in the profile's own words.
   // Coverage is a promise about what was looked at; a profile that analyzes one
   // surface of a host says so here rather than letting an empty section imply
@@ -5665,9 +5710,25 @@ function readJournal(root) {
   const file = statePath(root, JOURNAL_FILE);
   if (!fs.existsSync(file)) return [];
   const rows = [];
-  for (const line of fs.readFileSync(file, "utf-8").split("\n")) {
-    if (!line.trim()) continue;
-    try { rows.push(JSON.parse(line)); } catch { /* a torn last line is an interrupted append, not a lie */ }
+  // [Foreman: 085] A torn LAST line is an interrupted append — the write died
+  // mid-row and there is nothing after it to lose. A torn line with rows behind
+  // it is damage, and skipping it would silently drop a pre-image this file
+  // holds the only copy of. So the two cases are told apart rather than both
+  // being swallowed: the first is tolerated, the second refuses to be read.
+  const lines = fs.readFileSync(file, "utf-8").split("\n");
+  const last = lines.reduce((n, line, i) => (line.trim() ? i : n), -1);
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    try {
+      rows.push(JSON.parse(lines[i]));
+    } catch (err) {
+      if (i === last) continue;
+      throw expected(STATE_DIR + "/" + JOURNAL_FILE + " is damaged: line " + (i + 1) + " of " +
+        (last + 1) + " is not valid JSON (" + err.message + ")." +
+        "\n  Only a torn final line is an interrupted append. An earlier one means the journal was" +
+        " edited or truncated, and it holds the only copy of the files as they were — repair or" +
+        " remove that line before running a transaction command again.");
+    }
   }
   return rows;
 }
@@ -5877,6 +5938,16 @@ function findBatch(root, batchId) {
 function fail(message) {
   process.stderr.write(message + "\n");
   process.exit(1);
+}
+
+// [Foreman: 085] An expected failure raised from deep inside a read, where
+// `fail` cannot be used because the caller may be a library consumer rather
+// than the CLI. The entry point turns it into the same exit 1 and message; an
+// unmarked throw is a bug and keeps its stack.
+function expected(message) {
+  const err = new Error(message);
+  err.expected = true;
+  return err;
 }
 
 // ---------------------------------------------------------------------------
@@ -7070,6 +7141,9 @@ module.exports = {
   deriveFindings, evidenceTag, FINDING_STATES,
   // [Foreman: 076] the corpus relationship contract
   deriveRelationships, conflictPairs, duplicatePairs, CONTEXT_PRESSURE_BYTES,
+  // [Foreman: 085] the ceiling on pairwise relationship analysis, and the
+  // disclosure that stands in for it
+  PAIRWISE_RULE_CAP,
   // [Foreman: 077] the mechanism contract: the ladder and its limits vocabulary
   deriveMechanisms, MECHANISM_LEVELS, MECHANISM_LIMITS,
   looksLikeStatement, hasImperativeVerb, checkSkillDescription, gradeSkill, findSkillFiles,
@@ -7103,4 +7177,14 @@ module.exports = {
   CI_GATES, CI_GATE_NAMES, CI_DEFAULT_GATES, CI_GATE_EVIDENCE, CI_EXIT_GATE_FAILED, ciEvaluate,
 };
 
-if (require.main === module) main();
+if (require.main === module) {
+  // [Foreman: 085] A partial artifact is an expected condition, not a crash: it
+  // exits 1 with the file named. Anything unmarked is a defect and keeps its
+  // stack, because hiding one behind a tidy message is how bugs get shipped.
+  try {
+    main();
+  } catch (err) {
+    if (!err || !err.expected) throw err;
+    fail(err.message);
+  }
+}

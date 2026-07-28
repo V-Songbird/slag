@@ -1892,6 +1892,74 @@ test("the always-loaded byte count always prints; only real heft is a finding", 
   assert.match(engine.renderReport(heavy), /bytes of instructions load before every session/);
 });
 
+// [Foreman: 085] The pairwise walks are O(n²) in comparable rules. Past the cap
+// they do not run, and the corpus is told so — the alternative was an audit
+// record too large for JSON.stringify, which crashed the report outright.
+
+// Rules that pair with nothing: every content token carries its own index, so
+// the filler never becomes a duplicate of itself 100,000 times over.
+const fillerRules = (n) => Array.from({ length: n },
+  (_, i) => `- Always run \`task-${i}\` before \`stage-${i}\` when editing \`module-${i}\`.`);
+
+test("a corpus past the pairwise cap says so instead of failing", () => {
+  const root = tmpProject({
+    "CLAUDE.md": ["# Rules", "", ...fillerRules(engine.PAIRWISE_RULE_CAP + 400), ""].join("\n"),
+  });
+
+  // it completes, through the public surface, with no record too large to write
+  const scanned = cli(root, "scan");
+  assert.equal(scanned.code, 0, scanned.err);
+  const reported = cli(root, "report");
+  assert.equal(reported.code, 0, reported.err);
+  assert.equal(reported.err, "");
+
+  const disclosure = new RegExp(`\\d+ rules exceed the pairwise-analysis cap of ${engine.PAIRWISE_RULE_CAP} — duplicate and conflict detection did not run`);
+  assert.match(reported.out, disclosure);
+
+  const audit = readJson(root, "audit.json");
+  assert.equal(audit.coverage.pairwiseSkipped, audit.rules.length);
+  assert.equal(engine.validateRecord(audit, "audit"), null);
+  // nothing was reported that the skipped walk would have decided
+  assert.deepEqual(findingsOfType(audit, "duplicate"), []);
+  assert.deepEqual(findingsOfType(audit, "conflict"), []);
+  assert.deepEqual(audit.relationships.filter((r) => ["duplicate", "conflict"].includes(r.kind)), []);
+
+  // and the third view carries the same sentence
+  assert.equal(cli(root, "artifact").code, 0);
+  const html = fs.readFileSync(path.join(root, ".assay-tmp", "report.html"), "utf-8");
+  assert.match(html, disclosure);
+});
+
+test("a corpus at the cap still gets the real pairwise analysis", () => {
+  const root = tmpProject({
+    "CLAUDE.md": ["# Rules", "",
+      ...fillerRules(engine.PAIRWISE_RULE_CAP - 4),
+      PIN_YES,
+      PIN_NO,
+      "- Never use `var` — use `const` instead.",
+      ""].join("\n"),
+    ".claude/rules/dupe.md": "# Dupe\n\n- Never use `var` — use `const` instead.\n",
+  });
+  const audit = engine.composeAudit(engine.scan(root, { projectOnly: true }), null);
+
+  assert.equal(audit.rules.length, engine.PAIRWISE_RULE_CAP, "the fixture must sit exactly on the line");
+  assert.equal(audit.coverage.pairwiseSkipped, undefined, "the cap fired one rule early");
+  assert.equal(findingsOfType(audit, "conflict").length, 1);
+  assert.equal(findingsOfType(audit, "duplicate").length, 1);
+});
+
+test("the pairwise disclosure is coverage, never a gate", () => {
+  const root = tmpProject({
+    "CLAUDE.md": ["# Rules", "", ...fillerRules(engine.PAIRWISE_RULE_CAP + 1), ""].join("\n"),
+  });
+  const run = cli(root, "ci", "--json");
+  assert.equal(run.code, 0, run.out);
+  const result = JSON.parse(run.out);
+  assert.deepEqual(result.failed, []);
+  // it is not a finding at all, so no gate could select it even by name
+  assert.equal(Object.keys(result.advisory).some((k) => /pairwise/.test(k)), false);
+});
+
 // [Foreman: 076] The proposal channel is additive: it renders, and it moves
 // nothing the deterministic layer decided.
 test("model-proposed relationships render, labelled, and change nothing", () => {
@@ -3353,6 +3421,56 @@ test("the golden fixture is inventoried construct by construct", () => {
   assert.equal(at(25), "content", "a table row is content until scan marks its rule");
 });
 
+// [Foreman: 085] The same fixture, asserted line by line rather than in totals:
+// a count can be right while two lines swapped classes. The table tiles the file
+// exactly once — that tiling IS the inventory invariant, so it is checked before
+// it is used.
+const GOLDEN_INVENTORY = [
+  [1, 19, "content"], //      frontmatter, ATX heading, setext heading, paragraph
+  [20, 21, "instruction"], // the nested list, both levels
+  [22, 24, "content"], //     blank, table header, separator
+  [25, 25, "instruction"], // the table body cell
+  [26, 30, "content"], //     quote, bare link, blanks
+  [31, 31, "excluded"], //    a block comment the host never receives
+  [32, 46, "content"], //     three fence styles and everything inside them
+  [47, 47, "instruction"], // the rule whose inline comment was stripped
+  [48, 48, "content"],
+  [49, 51, "ignored"], //     the assay-ignore span, markers included
+  [52, 52, "content"],
+  [53, 55, "excluded"], //    a tag body
+  [56, 56, "content"],
+];
+
+test("every line of the golden fixture is inventoried, one class each", () => {
+  const lines = GOLDEN.split("\n");
+
+  // the table covers every line exactly once, with no gap and no overlap
+  const covered = new Array(lines.length).fill(0);
+  for (const [from, to, cls] of GOLDEN_INVENTORY) {
+    assert.ok(["instruction", "content", "ignored", "excluded", "unsupported"].includes(cls), cls);
+    for (let n = from; n <= to; n++) covered[n - 1]++;
+  }
+  assert.deepEqual(covered, new Array(lines.length).fill(1), "the expected inventory is not a partition");
+
+  const root = tmpProject({ "CLAUDE.md": GOLDEN, "docs/style.md": "x\n", "src/app.ts": "export {};" });
+  const scanData = engine.scan(root);
+  const classes = engine.stripMetadata(GOLDEN).classes;
+  // instruction is the class scan assigns, not the parser: a table cell is
+  // content until a rule is recovered from it
+  const ruleLines = new Set();
+  for (const r of scanData.rules) {
+    for (let n = r.lineStart; n <= r.lineEnd; n++) ruleLines.add(n);
+  }
+
+  for (const [from, to, expected] of GOLDEN_INVENTORY) {
+    for (let n = from; n <= to; n++) {
+      const actual = ruleLines.has(n) ? "instruction" : classes[n - 1];
+      assert.equal(actual, expected, `line ${n} (${JSON.stringify(lines[n - 1])})`);
+    }
+  }
+  assert.equal(classes.length, lines.length, "the parser lost or invented a line");
+});
+
 test("a rule's source range slices the file back to its own text", () => {
   const root = tmpProject({ "CLAUDE.md": GOLDEN, "docs/style.md": "x\n", "src/app.ts": "export {};" });
   const rules = engine.scan(root).rules;
@@ -3514,6 +3632,102 @@ test("a mangled fixture never throws and never loses a line", () => {
     assertLossless(scanData);
     assert.equal(scanData.sources[0].lineCount, broken.split("\n").length, "seed " + seed);
   }
+});
+
+// [Foreman: 085] A property test over generated corpora, not one hand-written
+// file. The generator is a plain LCG on a FIXED literal seed, so the same 200
+// files are produced on this machine, on CI, and next year — a fuzz test whose
+// failures cannot be reproduced is a rumour, not a test.
+function lcg(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+}
+
+const LINE_SHAPES = [
+  () => "- Always run `npm test` before committing.",
+  () => "  - Never use `var` — use `const` instead.",
+  () => "1. Validate every request body at the handler boundary.",
+  () => "* Use `const` for local bindings.",
+  () => "> Quoted context, still inventoried.",
+  () => "# A heading",
+  () => "Setext heading",
+  () => "--------------",
+  () => "| Do | Don't |",
+  () => "|---|---|",
+  () => "| Run `npm test` | Never use `var` |",
+  () => "This paragraph is background for the reader, not a rule.",
+  () => "```js",
+  () => "const x = 1;",
+  () => "```",
+  () => "<!-- a comment -->",
+  () => "<!-- assay-ignore-start -->",
+  () => "<!-- assay-ignore-end -->",
+  () => "<example>",
+  () => "</example>",
+  () => "- Follow [the guide](docs/guide.md) when editing handlers.",
+  () => "",
+  () => "---",
+];
+
+test("generated rule-ish files keep every line in exactly one class", () => {
+  const rand = lcg(20260728);
+  const root = tmpProject({ "CLAUDE.md": "" });
+  const target = path.join(root, "CLAUDE.md");
+  for (let n = 0; n < 200; n++) {
+    const lineCount = 1 + Math.floor(rand() * 40);
+    const lines = [];
+    for (let i = 0; i < lineCount; i++) lines.push(LINE_SHAPES[Math.floor(rand() * LINE_SHAPES.length)]());
+    const generated = lines.join("\n");
+    fs.writeFileSync(target, generated);
+
+    let scanData;
+    assert.doesNotThrow(() => { scanData = engine.scan(root); }, "case " + n + ":\n" + generated);
+    assertLossless(scanData);
+    assert.equal(scanData.sources[0].lineCount, generated.split("\n").length, "case " + n);
+    // and every recovered rule still points at real lines of the file it came from
+    for (const r of scanData.rules) {
+      assert.ok(r.lineStart >= 1 && r.lineEnd <= scanData.sources[0].lineCount, "case " + n + ": " + r.id);
+    }
+  }
+});
+
+// [Foreman: 085] Two languages in ONE file: the mode is a property of each rule,
+// not of the file it sits in, and the inventory has to survive the split.
+test("an English and Spanish file splits by mode and still loses no line", () => {
+  const mixed = [
+    "# House rules",
+    "",
+    "- Never use `var` — use `const` instead.",
+    "- Antes de hacer commit, ejecuta las pruebas y revisa el archivo de configuracion.",
+    "- Always run `npm test` before committing.",
+    "- Nunca uses variables globales; usa el contenedor de dependencias para cada modulo.",
+    "",
+  ].join("\n");
+  const scanData = engine.scan(tmpProject({ "CLAUDE.md": mixed }));
+  assertLossless(scanData);
+
+  // the split is per rule, in one file, and neither side is dropped
+  assert.deepEqual(scanData.rules.map((r) => r.languageMode),
+    ["english", "latin-unsupported:es", "english", "latin-unsupported:es"]);
+  assert.equal(scanData.sources[0].spans.instruction, 4);
+
+  const audit = engine.composeAudit(scanData, null);
+  const spanish = audit.rules.filter((r) => r.languageMode === "latin-unsupported:es");
+  assert.equal(spanish.length, 2);
+  for (const r of spanish) assert.equal(r.score, null, "a set-aside rule kept a wording score");
+  assert.equal(findingsOfType(audit, "unsupported-language").length, 2);
+  // the English half is graded exactly as it would be on its own
+  const englishOnly = auditOf({
+    "CLAUDE.md": ["# House rules", "", "- Never use `var` — use `const` instead.",
+      "- Always run `npm test` before committing.", ""].join("\n"),
+  }, () => ({}));
+  assert.deepEqual(
+    audit.rules.filter((r) => r.languageMode === "english").map((r) => r.grade),
+    englishOnly.rules.map((r) => r.grade)
+  );
 });
 
 test("non-Latin rules stay inventoried and flagged, table cells included", () => {
