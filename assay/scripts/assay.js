@@ -118,8 +118,10 @@ const RECORD_SCHEMA = {
   // [Foreman: 076] `relationships` left it as well: an audit record emits the
   // deterministic relationship graph. Still not required, so an audit written
   // before 076 stays readable.
+  // [Foreman: 077] `mechanisms` left it too — see the block below. Still
+  // optional: an audit written before 077 loses its ladder and nothing else.
   reserved: [
-    "instructions", "mechanisms",
+    "instructions",
     "evidence", "plans", "changes", "validation", "proofLinks",
   ],
 };
@@ -156,6 +158,38 @@ const RECORD_SCHEMA = {
 const SEMANTIC_CANDIDATE_KINDS = [
   "paraphrase-duplicate", "indirect-conflict", "ambiguous-meaning", "placement", "rewrite",
 ];
+
+// [Foreman: 077]
+// `mechanisms` — optional audit payload. One entry per mechanism instance the
+// project has wired, at its level on SCOPE.md's enforcement ladder. Level 1 is
+// the prose itself and gets no entry: the rules ARE the corpus.
+//
+//   { id, type, level, name, source,
+//     states:   { configured, enabled, trusted, applicable, verified },
+//     coverage: { events?, matchers?, tools?, paths?, limits: [] },
+//     provenance }
+//
+// Each state is `true`, `false`, or `"unknown"` — three different answers, and
+// the report prints all three rather than collapsing the last two. `verified` is
+// never true: assay reads configuration and never watches anything run, so no
+// entry here is evidence that a mechanism executed. Presence is not strength.
+const MECHANISM_LEVELS = { skill: 2, subagent: 2, hook: 3, "repo-check": 4, "remote-gate": 5 };
+const MECHANISM_LEVEL_LABELS = {
+  1: "advisory prose",
+  2: "skill and subagent workflows",
+  3: "agent lifecycle guardrails",
+  4: "repository enforcement",
+  5: "remote enforcement",
+};
+// The limits vocabulary, deliberately small: a reader learns five sentences, not
+// one phrasing per mechanism.
+const MECHANISM_LIMITS = {
+  notExecuted: "configured is not executed — assay read this out of a file and never watched it run",
+  routing: "invocation is probabilistic — a description routes it, nothing guarantees it is reached",
+  trust: "workspace trust is not introspectable from a static read",
+  repo: "presence in the repository — assay does not check that any gate actually runs it",
+  remote: "the workflow file exists — assay does not read its triggers, its jobs, or the branch policy",
+};
 
 function isRecordObject(x) {
   return Boolean(x) && typeof x === "object" && !Array.isArray(x);
@@ -1949,6 +1983,9 @@ function scan(root, options = {}) {
     rules,
     skills: readSkills(skillsFound.project || []),
     hookInventory: adapter.discoverHooks(context),
+    // [Foreman: 077] Levels 4 and 5 of the ladder, as the adapter found them.
+    // Raw discovery, like hookInventory: `mechanisms` is derived from it.
+    repoChecks: adapter.discoverRepoChecks ? adapter.discoverRepoChecks(context) : { checks: [], inaccessible: [] },
     // [Foreman: 070] What the audit did and did not look at. The report prints
     // this so a number is never read as covering more than it measured.
     coverage: {
@@ -2157,6 +2194,9 @@ function composeAudit(scanData, judgments) {
     root: scanData.root, context: scanData.context || null,
     files, rules, skills: scanData.skills || [],
     hookInventory: scanData.hookInventory || [],
+    // [Foreman: 077] raw level-4/5 discovery, carried so the derivation below
+    // stays a pure function of the audit
+    repoChecks: scanData.repoChecks || null,
     // [Foreman: 073] the inventory travels with the audit, unchanged
     sources: scanData.sources || [],
     // [Foreman: 076] resolved in scan, where the globs are; read by the
@@ -2178,6 +2218,8 @@ function composeAudit(scanData, judgments) {
       candidates: Array.isArray(judgments._candidates) ? judgments._candidates : [],
     };
   }
+  // [Foreman: 077] The enforcement ladder, before the findings that read it.
+  audit.mechanisms = deriveMechanisms(audit);
   // [Foreman: 075] Findings are the product's primary output, so they are part
   // of the composed audit, not something a renderer invents on the way out.
   audit.findings = deriveFindings(audit);
@@ -2604,6 +2646,69 @@ function hookCoverage(audit) {
   return covered;
 }
 
+// [Foreman: 077]
+// Every mechanism this project has wired, at its ladder level, with the state
+// chain the placement contract names. Pure over the audit, emitted level-first
+// so two runs produce identical ids.
+//
+// The honesty rules, per type, are the whole point of the function:
+//   - a hook is configured and loads, but workspace trust cannot be read from
+//     here, and its matcher is a coverage limit, not a footnote;
+//   - a skill or subagent carries no trust gate and no guarantee of invocation;
+//   - a repository or remote check is a name in a manifest or a file on disk —
+//     everything past `configured` is unknown.
+// `verified` is false everywhere, always. Nothing in this codebase watches a
+// mechanism run, so nothing here may say it did.
+function deriveMechanisms(audit) {
+  const mechs = [];
+  const add = (type, name, source, states, limits, coverage = {}) => {
+    mechs.push({
+      type, level: MECHANISM_LEVELS[type], name, source,
+      states: { verified: false, ...states },
+      coverage: { ...coverage, limits },
+      provenance: source,
+    });
+  };
+
+  const skillStates = { configured: true, enabled: true, trusted: true, applicable: "unknown" };
+  const skillLimits = [MECHANISM_LIMITS.routing, MECHANISM_LIMITS.notExecuted];
+  for (const skill of audit.skills || []) {
+    add("skill", skill.name, skill.path || ".claude/skills/", skillStates, skillLimits);
+  }
+  for (const skill of ((audit.coverage || {}).userSkills) || []) {
+    add("skill", skill.name, "user scope", skillStates, skillLimits);
+  }
+  for (const name of ((audit.coverage || {}).agents) || []) {
+    add("subagent", name, ".claude/agents/" + name + ".md", skillStates, skillLimits);
+  }
+  for (const hook of audit.hookInventory || []) {
+    const matcher = hook.matcher || "*";
+    const restricts = matcher !== "*" && matcher !== "";
+    const limits = [MECHANISM_LIMITS.trust, MECHANISM_LIMITS.notExecuted];
+    if (restricts) {
+      limits.unshift(`the \`${matcher}\` matcher is the whole of this hook's reach — it raises no event for any other tool`);
+    }
+    add("hook", hook.command, hook.source, {
+      // A hook wired in project or user settings, or shipped by an installed
+      // plugin, loads when it is present. Whether the workspace is trusted is
+      // the axis a static read cannot settle.
+      configured: true, enabled: true, trusted: "unknown", applicable: true,
+    }, limits, restricts
+      ? { events: [hook.event], matchers: [matcher], tools: matcher.split("|") }
+      : { events: [hook.event], matchers: [matcher] });
+  }
+  for (const check of ((audit.repoChecks || {}).checks) || []) {
+    add(check.type, check.name, check.path, {
+      configured: true, enabled: "unknown", trusted: "unknown", applicable: "unknown",
+    }, [check.type === "remote-gate" ? MECHANISM_LIMITS.remote : MECHANISM_LIMITS.repo, MECHANISM_LIMITS.notExecuted]);
+  }
+
+  // Stable by construction: the sort is stable, and every list above arrives
+  // sorted from the adapter.
+  return mechs.sort((a, b) => a.level - b.level)
+    .map((m, i) => ({ id: "M" + String(i + 1).padStart(3, "0"), ...m }));
+}
+
 // Every finding in the audit, rule states first, then the findings that belong
 // to a file, an annotation, or the corpus rather than to one rule. Pure: two
 // derivations over the same audit produce the same list in the same order.
@@ -2692,6 +2797,22 @@ function deriveFindings(audit) {
       },
       sources: ruleSpan(covered.rule),
       safeActions: ["confirm the hook covers this rule", "retire the prose once the hook is confirmed"],
+    });
+  }
+  // [Foreman: 077] One skill name defined in two scopes. Mechanical and cheap:
+  // two names matched, nothing inferred about which one the host picks.
+  const projectSkillNames = new Set((audit.skills || []).map((s) => s.name));
+  for (const skill of ((audit.coverage || {}).userSkills) || []) {
+    if (!projectSkillNames.has(skill.name)) continue;
+    push({
+      type: "mechanism-overlap", severity: "low", analyzer: "mechanism-coverage",
+      summary: `the project and user scopes both define skill \`${skill.name}\``,
+      explanation: "Two mechanisms carry the same name at different scopes. Which one a session reaches for is host-defined — assay reads both directories and does not resolve the routing, so treat the duplicate name as ambiguity to remove rather than as redundancy that helps.",
+      evidence: {
+        level: "mechanical", basis: "skill names matched across project and user scope",
+        limits: "names only — the two skills may do entirely different things",
+      },
+      sources: [], safeActions: ["rename one of the two skills", "retire the copy that no longer applies"],
     });
   }
   // [Foreman: 076] The window cost of everything loaded before the session
@@ -3094,6 +3215,73 @@ function pushCoverageSection(out, audit, rules, suppressed, findings) {
   out.push("");
 }
 
+// [Foreman: 077]
+// The enforcement ladder: what this project has at each level, and the state
+// chain of every mechanism in it. One line per level that has entries, plus the
+// prose level read from the corpus itself.
+//
+// The standing line is the section's whole discipline: nothing here is evidence
+// that anything ran. A hook listed at level 3 is a hook somebody wired, and that
+// is all the report is allowed to say about it.
+const MECHANISM_TYPE_WORDS = {
+  skill: "skill", subagent: "subagent", hook: "hook",
+  "repo-check": "repository check", "remote-gate": "remote gate",
+};
+const STATE_GLYPHS = { true: "✓", false: "✗", unknown: "?" };
+const STATE_ORDER = ["configured", "enabled", "trusted", "applicable", "verified"];
+
+function stateChain(states) {
+  return STATE_ORDER.map((k) => `${k} ${STATE_GLYPHS[String(states[k])] || "?"}`).join(" · ");
+}
+
+function mechanismDetail(m) {
+  return m.type === "hook" ? `${(m.coverage.events || [])[0]}: ${m.name}` : m.name;
+}
+
+// The level line names what is there, not everything that is there: a project
+// with two dozen plugin hooks would bury the ladder in one line. `--verbose`
+// prints every entry with its state chain.
+const LADDER_DETAIL_CAP = 4;
+
+function mechanismDetails(atLevel) {
+  const shown = atLevel.slice(0, LADDER_DETAIL_CAP).map(mechanismDetail);
+  const rest = atLevel.length - shown.length;
+  return shown.join(", ") + (rest > 0 ? `, +${rest} more` : "");
+}
+
+function pushLadderSection(out, audit, mechanisms, activeRules, opts) {
+  out.push("### Enforcement ladder");
+  out.push("");
+  out.push("A mechanism listed here is configured. Only validation can show it runs — assay never infers execution from presence.");
+  out.push("");
+  out.push(`- **Level 1 — ${MECHANISM_LEVEL_LABELS[1]}**: ${activeRules} active rule(s)`);
+  for (const level of [2, 3, 4, 5]) {
+    const atLevel = mechanisms.filter((m) => m.level === level);
+    if (!atLevel.length) continue;
+    const counts = [];
+    for (const type of Object.keys(MECHANISM_TYPE_WORDS)) {
+      const n = atLevel.filter((m) => m.type === type).length;
+      if (n) counts.push(`${n} ${MECHANISM_TYPE_WORDS[type]}${n === 1 ? "" : "s"}`);
+    }
+    out.push(`- **Level ${level} — ${MECHANISM_LEVEL_LABELS[level]}**: ${counts.join(", ")} (${mechanismDetails(atLevel)}) — configured, not verified`);
+    if (!opts.verbose) continue;
+    for (const m of atLevel) {
+      out.push(`  - ${m.id} \`${m.name}\` (${m.source}) — ${stateChain(m.states)}`);
+      for (const limit of m.coverage.limits || []) out.push(`    - ${limit}`);
+    }
+  }
+  // A surface that exists and could not be read is a hole in this ladder, named
+  // here rather than counted as an empty level.
+  for (const s of ((audit.repoChecks || {}).inaccessible) || []) {
+    out.push(`- could not read \`${s.path}\` (${s.reason}) — any gate there is missing from this ladder`);
+  }
+  if (!opts.verbose) {
+    out.push("");
+    out.push("Rerun with `--verbose` for each mechanism's full state chain and coverage limits.");
+  }
+  out.push("");
+}
+
 // [Foreman: 075]
 // The report leads with findings and ends with the hygiene grade. Four sections
 // carry the whole diagnosis — hard gates, operational findings, policy
@@ -3334,9 +3522,12 @@ function renderReport(audit, opts = {}) {
   const advisory = findings.filter((f) => f.state === "advisory");
   const advisoryByCategory = advisory.filter((f) => f.evidence.level === "mechanical").length;
   const advisoryByModel = advisory.length - advisoryByCategory;
+  // [Foreman: 077] Every mechanism the project already has, by ladder level.
+  const mechanisms = audit.mechanisms || deriveMechanisms(audit);
+  const activeRules = rules.filter((r) => !gated.has(r.id)).length;
   out.push("## Policy placement");
   out.push("");
-  if (!hooks.length && !placed.length && !restructure.length && !advisory.length && !redundant.length) {
+  if (!hooks.length && !placed.length && !restructure.length && !advisory.length && !redundant.length && !mechanisms.length) {
     out.push("None — nothing here is better owned by another mechanism.");
     out.push("");
   } else {
@@ -3352,6 +3543,8 @@ function renderReport(audit, opts = {}) {
     }
     if (advisory.length) out.push("");
   }
+
+  if (mechanisms.length) pushLadderSection(out, audit, mechanisms, activeRules, opts);
 
   // [Foreman: 076] A rule whose moment a wired hook already fires on. The hook
   // is read out of the settings files, never watched — so this says "already
@@ -3386,7 +3579,13 @@ function renderReport(audit, opts = {}) {
   if (placed.length) {
     out.push("### Placement candidates");
     out.push("");
-    out.push("Rules whose job fits a Claude Code primitive better than rule prose: [heuristic]");
+    // [Foreman: 077] Said once, in the intro: a candidate row names the
+    // primitive that fits its wording, and the ladder is what says a stronger
+    // level is available at all.
+    const higher = mechanisms.some((m) => m.level >= 4)
+      ? " Repository and remote gates exist in this project; a policy that must be impossible to merge belongs there, not in a hook."
+      : "";
+    out.push("Rules whose job fits a Claude Code primitive better than rule prose:" + higher + " [heuristic]");
     out.push("");
     for (const r of placed) {
       const det = Object.entries(r.placement.detections)
@@ -3876,6 +4075,8 @@ module.exports = {
   deriveFindings, evidenceTag, FINDING_STATES,
   // [Foreman: 076] the corpus relationship contract
   deriveRelationships, conflictPairs, duplicatePairs, CONTEXT_PRESSURE_BYTES,
+  // [Foreman: 077] the mechanism contract: the ladder and its limits vocabulary
+  deriveMechanisms, MECHANISM_LEVELS, MECHANISM_LIMITS,
   looksLikeStatement, hasImperativeVerb, checkSkillDescription, gradeSkill, findSkillFiles,
   renderArtifact, artifactRuleData,
   // [Foreman: 072] the record contract

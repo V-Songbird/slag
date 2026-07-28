@@ -13,6 +13,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - A `CLAUDE.md` variant the host doesn't select — a `.claude/CLAUDE.md` sitting beside a root one — is reported as shadowed instead of graded as live policy. It stays out of the grade, because it never takes effect
 - A rule whose moment a wired hook already fires on is named as already wired, so the prose can be checked instead of trusted
 - Every report counts the bytes of instructions that load before a session starts, and flags real heft with the three files carrying it
+- The report shows the project's enforcement ladder: what exists at each level from advisory prose to remote gates, each mechanism with its honest state chain — configured is not executed, and `--verbose` prints every state and coverage limit
+- A skill defined in both user and project scope is flagged, because which one a session reaches for is host-defined
 - With `--semantic`, the audit can also propose paraphrased duplicates and indirect conflicts — the ones token overlap can't see. Every proposal is labelled model-proposed, you accept or reject it in conversation, and none of them move a score or a grade
 
 - The JSON assay writes is a versioned record: it names the analyzer and its version, the parser, the host profile, and the context the analysis ran in — project root, startup directory, and the time it ran. Everything in it but the timestamp is identical between two runs over an unchanged project

@@ -1219,7 +1219,7 @@ test("a duplicate never moves a rule's score or the corpus grade", () => {
   assert.equal(withDup.corpusScore, Math.round(mean * 1000) / 1000);
 });
 
-test("scan collects wired hooks and the report never prints the inventory", () => {
+test("scan collects wired hooks; the report names them on the ladder, never as a raw inventory", () => {
   const root = tmpProject({
     ...FIXTURE,
     ".claude/settings.json": JSON.stringify({
@@ -1241,7 +1241,9 @@ test("scan collects wired hooks and the report never prints the inventory", () =
   assert.deepEqual(audit.hookInventory, scanData.hookInventory);
   const report = engine.renderReport(audit);
   assert.doesNotMatch(report, /Hooks already wired/);
-  assert.doesNotMatch(report, /auto-regen\.py/);
+  // [Foreman: 077] The hook is named once, on the ladder, with its level and the
+  // standing not-verified clause — never as a bare inventory dump.
+  assert.match(report, /\*\*Level 3 — agent lifecycle guardrails\*\*: 1 hook \(PostToolUse: auto-regen\.py\) — configured, not verified/);
 });
 
 test("report locations are clickable markdown links", () => {
@@ -1988,7 +1990,178 @@ test("two audits of one corpus derive the same relationships and findings", () =
   assert.deepEqual(a.relationships, b.relationships);
   assert.deepEqual(a.findings, b.findings);
   assert.deepEqual(a.scopeOverlaps, b.scopeOverlaps);
+  // [Foreman: 077] the ladder is derived, so it is identical too
+  assert.deepEqual(a.mechanisms, b.mechanisms);
   assert.equal(engine.renderReport(a), engine.renderReport(b));
+});
+
+// ---------------------------------------------------------------------------
+// [Foreman: 077] mechanisms — the enforcement ladder
+// ---------------------------------------------------------------------------
+
+// A fixture with something at every level. `userDir` is passed explicitly (never
+// --project-only) because the hook inventory falls back to the real ~/.claude
+// when no user directory is fixed — which would make every count below depend on
+// the developer's own machine.
+const LADDER_RULES = "# Rules\n\n- Always run the full test suite before committing.\n- Use `const` for locals.\n";
+const LADDER_HOOKS = JSON.stringify({
+  hooks: {
+    PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "node .claude/hooks/check-tests.js" }] }],
+    Stop: [{ hooks: [{ type: "command", command: "node .claude/hooks/gate.js" }] }],
+  },
+});
+
+function ladderAudit(extra = {}, userFiles = {}, judge) {
+  const userDir = tmpProject(userFiles);
+  const scanData = engine.scan(tmpProject({ "CLAUDE.md": LADDER_RULES, ...extra }), { userDir });
+  return engine.composeAudit(scanData, judge ? judgeEvery(scanData, judge) : judgeEvery(scanData));
+}
+
+const mechsOfType = (audit, type) => audit.mechanisms.filter((m) => m.type === type);
+
+test("every mechanism carries the state chain its type honestly supports", () => {
+  const audit = ladderAudit({
+    ".claude/settings.json": LADDER_HOOKS,
+    ".claude/skills/deploy/SKILL.md": "---\nname: deploy\ndescription: Deploys the app when the user says \"deploy\".\n---\n\nbody\n",
+    ".claude/agents/reviewer.md": "---\nname: reviewer\n---\n\nbody\n",
+    "package.json": JSON.stringify({ name: "x", scripts: { test: "node --test", lint: "eslint .", build: "tsc" } }),
+    ".pre-commit-config.yaml": "repos: []\n",
+    ".git/config": "[core]\n\thooksPath = scripts/git-hooks\n",
+    ".github/workflows/ci.yml": "on: push\n",
+  }, { "skills/other/SKILL.md": "---\nname: other\ndescription: Something personal.\n---\n\nbody\n" });
+
+  // ids are sequential and the ladder is emitted level-first
+  assert.deepEqual(audit.mechanisms.map((m) => m.id), audit.mechanisms.map((_, i) => "M" + String(i + 1).padStart(3, "0")));
+  assert.deepEqual(audit.mechanisms.map((m) => m.level), [...audit.mechanisms.map((m) => m.level)].sort((a, b) => a - b));
+  // nothing, anywhere, is verified
+  for (const m of audit.mechanisms) assert.equal(m.states.verified, false, m.name);
+
+  // level 2 — skills carry no trust gate, and no guarantee of invocation
+  assert.deepEqual(mechsOfType(audit, "skill").map((m) => m.name), ["deploy", "other"]);
+  const skill = mechsOfType(audit, "skill")[0];
+  assert.equal(skill.level, 2);
+  assert.deepEqual(skill.states, { verified: false, configured: true, enabled: true, trusted: true, applicable: "unknown" });
+  assert.ok(skill.coverage.limits.includes(engine.MECHANISM_LIMITS.routing));
+  assert.equal(mechsOfType(audit, "skill")[1].source, "user scope");
+  const agent = mechsOfType(audit, "subagent")[0];
+  assert.equal(agent.level, 2);
+  assert.deepEqual(agent.states, skill.states);
+
+  // level 3 — a hook is wired and loads; workspace trust is not readable here
+  const hooks = mechsOfType(audit, "hook");
+  assert.deepEqual(hooks.map((m) => m.name), ["check-tests.js", "gate.js"]);
+  assert.deepEqual(hooks[0].states, { verified: false, configured: true, enabled: true, trusted: "unknown", applicable: true });
+  assert.deepEqual(hooks[0].coverage.events, ["PreToolUse"]);
+  assert.deepEqual(hooks[0].coverage.tools, ["Bash"]);
+  assert.match(hooks[0].coverage.limits[0], /`Bash` matcher is the whole of this hook's reach/);
+  assert.ok(hooks[0].coverage.limits.includes(engine.MECHANISM_LIMITS.trust));
+  // an absent matcher covers the event broadly, so no restriction sentence
+  assert.deepEqual(hooks[1].coverage.matchers, ["*"]);
+  assert.equal(hooks[1].coverage.tools, undefined);
+  assert.deepEqual(hooks[1].coverage.limits, [engine.MECHANISM_LIMITS.trust, engine.MECHANISM_LIMITS.notExecuted]);
+
+  // level 4 — only the four named scripts, one entry each; `build` is not one
+  assert.deepEqual(mechsOfType(audit, "repo-check").map((m) => m.name),
+    ["npm script: lint", "npm script: test", ".pre-commit-config.yaml", "git hooks: scripts/git-hooks"]);
+  const repo = mechsOfType(audit, "repo-check")[0];
+  assert.equal(repo.level, 4);
+  assert.deepEqual(repo.states, { verified: false, configured: true, enabled: "unknown", trusted: "unknown", applicable: "unknown" });
+  assert.ok(repo.coverage.limits.includes(engine.MECHANISM_LIMITS.repo));
+
+  // level 5 — the workflow file, and nothing read out of it
+  const remote = mechsOfType(audit, "remote-gate")[0];
+  assert.deepEqual([remote.name, remote.level, remote.source], ["ci.yml", 5, ".github/workflows/ci.yml"]);
+  assert.deepEqual(remote.states, repo.states);
+  assert.ok(remote.coverage.limits.includes(engine.MECHANISM_LIMITS.remote));
+
+  // the record still validates, and an audit written before 077 still does
+  const record = engine.makeRecord("audit", audit, audit.root);
+  assert.equal(engine.validateRecord(record, "audit"), null);
+  delete record.mechanisms;
+  assert.equal(engine.validateRecord(record, "audit"), null);
+});
+
+test("repository and remote detection fails open on everything missing or malformed", () => {
+  const bare = ladderAudit();
+  assert.deepEqual(mechsOfType(bare, "repo-check"), []);
+  assert.deepEqual(mechsOfType(bare, "remote-gate"), []);
+
+  const junk = ladderAudit({
+    "package.json": "{ not json",
+    ".git/config": "[core]\n\tbare = false\n",
+    ".github/workflows/README.md": "not a workflow\n",
+  });
+  assert.deepEqual(junk.mechanisms, []);
+});
+
+test("the ladder renders the levels present, skips the empty ones, and never says enforced", () => {
+  const full = engine.renderReport(ladderAudit({
+    ".claude/settings.json": LADDER_HOOKS,
+    ".claude/skills/deploy/SKILL.md": "---\nname: deploy\ndescription: Deploys the app when the user says \"deploy\".\n---\n\nbody\n",
+    ".claude/agents/reviewer.md": "---\nname: reviewer\n---\n\nbody\n",
+    "package.json": JSON.stringify({ name: "x", scripts: { lint: "eslint ." } }),
+    ".github/workflows/ci.yml": "on: push\n",
+    // a mechanical rule, so the placement-candidate section renders and can
+    // carry the contextual clause
+  }, {}, { F3: 0.7, F8: 0.15 }));
+  assert.match(full, /### Enforcement ladder/);
+  assert.match(full, /A mechanism listed here is configured\. Only validation can show it runs — assay never infers execution from presence\./);
+  assert.match(full, /- \*\*Level 1 — advisory prose\*\*: 2 active rule\(s\)/);
+  assert.match(full, /- \*\*Level 2 — skill and subagent workflows\*\*: 1 skill, 1 subagent \(deploy, reviewer\) — configured, not verified/);
+  assert.match(full, /- \*\*Level 3 — agent lifecycle guardrails\*\*: 2 hooks \(PreToolUse: check-tests\.js, Stop: gate\.js\) — configured, not verified/);
+  assert.match(full, /- \*\*Level 4 — repository enforcement\*\*: 1 repository check \(npm script: lint\) — configured, not verified/);
+  assert.match(full, /- \*\*Level 5 — remote enforcement\*\*: 1 remote gate \(ci\.yml\) — configured, not verified/);
+  // nothing in the ladder itself claims enforcement
+  const block = full.slice(full.indexOf("### Enforcement ladder"), full.indexOf("### Already wired"));
+  assert.doesNotMatch(block, /enforc(ed|es)\b/);
+  // the contextual clause is said once, in the placement intro, because a level
+  // 4/5 mechanism exists here
+  assert.match(full, /Repository and remote gates exist in this project; a policy that must be impossible to merge belongs there/);
+
+  // a project with only hooks shows only the levels it has
+  const hooksOnly = engine.renderReport(ladderAudit({ ".claude/settings.json": LADDER_HOOKS }));
+  assert.match(hooksOnly, /- \*\*Level 3 — agent lifecycle guardrails\*\*: 2 hooks/);
+  for (const level of [2, 4, 5]) assert.doesNotMatch(hooksOnly, new RegExp("Level " + level + " — "));
+  assert.doesNotMatch(hooksOnly, /Repository and remote gates exist/);
+
+  // nothing wired at all: no ladder at all, and the section keeps its old shape
+  const nothing = engine.renderReport(ladderAudit());
+  assert.doesNotMatch(nothing, /### Enforcement ladder/);
+  assert.match(nothing, /## Policy placement\n\nWhere each policy belongs/);
+});
+
+test("--verbose prints each mechanism's state chain and its coverage limits", () => {
+  const audit = ladderAudit({ ".claude/settings.json": LADDER_HOOKS });
+  const verbose = engine.renderReport(audit, { verbose: true });
+  assert.match(verbose, /- M001 `check-tests\.js` \(project\) — configured ✓ · enabled ✓ · trusted \? · applicable ✓ · verified ✗/);
+  assert.match(verbose, / {4}- the `Bash` matcher is the whole of this hook's reach/);
+  assert.match(verbose, / {4}- workspace trust is not introspectable from a static read/);
+  // the default report keeps the chain out and points at the flag
+  const plain = engine.renderReport(audit);
+  assert.doesNotMatch(plain, /verified ✗/);
+  assert.match(plain, /Rerun with `--verbose` for each mechanism's full state chain and coverage limits\./);
+});
+
+test("a skill defined in both project and user scope is flagged, and only then", () => {
+  const SKILL = (name) => "---\nname: " + name + "\ndescription: Deploys the app when the user says \"deploy\".\n---\n\nbody\n";
+  const clash = ladderAudit(
+    { ".claude/skills/deploy/SKILL.md": SKILL("deploy") },
+    { "skills/deploy/SKILL.md": SKILL("deploy") },
+  );
+  const hits = findingsOfType(clash, "mechanism-overlap");
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].severity, "low");
+  assert.equal(hits[0].evidence.level, "mechanical");
+  assert.match(hits[0].summary, /the project and user scopes both define skill `deploy`/);
+  assert.match(hits[0].evidence.limits, /names only/);
+  // 077 adds a finding, not a relationship kind
+  assert.deepEqual(relsOfKind(clash, "covers"), []);
+
+  const distinct = ladderAudit(
+    { ".claude/skills/deploy/SKILL.md": SKILL("deploy") },
+    { "skills/release/SKILL.md": SKILL("release") },
+  );
+  assert.deepEqual(findingsOfType(distinct, "mechanism-overlap"), []);
 });
 
 // ---------------------------------------------------------------------------

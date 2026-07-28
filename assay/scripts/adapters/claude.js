@@ -360,6 +360,64 @@ function discoverHooks(ctx) {
   });
 }
 
+// [Foreman: 077] Levels 4 and 5 of the enforcement ladder: checks the repository
+// runs, and gates a remote runs. The surfaces are host-agnostic — npm scripts and
+// CI workflows are not a Claude Code concept — but discovery stays adapter-owned
+// so a second host profile can name different ones.
+//
+// Conservative and mechanical throughout: a name in a manifest, a file that
+// exists. Nothing here is opened to decide whether it would pass, and every read
+// fails open — an unreadable file is skipped, an unreadable directory that exists
+// is reported as inaccessible rather than counted as empty.
+const REPO_SCRIPT_NAMES = ["check", "format", "lint", "test"];
+
+function discoverRepoChecks(ctx) {
+  const checks = [];
+  const inaccessible = [];
+  const root = ctx.projectRoot;
+
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"));
+    const scripts = pkg && typeof pkg.scripts === "object" && pkg.scripts ? pkg.scripts : {};
+    for (const name of REPO_SCRIPT_NAMES) {
+      if (typeof scripts[name] === "string" && scripts[name].trim()) {
+        checks.push({ type: "repo-check", name: "npm script: " + name, path: "package.json" });
+      }
+    }
+  } catch {
+    // absent or malformed — no manifest checks
+  }
+
+  for (const name of [".pre-commit-config.yaml", ".pre-commit-config.yml"]) {
+    if (exists(path.join(root, name))) checks.push({ type: "repo-check", name, path: name });
+  }
+
+  // Read textually, never through `git config`: no subprocess, and the same
+  // answer on every platform.
+  try {
+    const cfg = fs.readFileSync(path.join(root, ".git", "config"), "utf-8");
+    const m = cfg.match(/^\s*hooksPath\s*=\s*(.+?)\s*$/m);
+    if (m) checks.push({ type: "repo-check", name: "git hooks: " + m[1], path: ".git/config" });
+  } catch {
+    // no repo, or no readable config
+  }
+
+  const workflowDir = path.join(root, ".github", "workflows");
+  if (exists(workflowDir)) {
+    try {
+      for (const name of fs.readdirSync(workflowDir).sort()) {
+        if (/\.ya?ml$/.test(name)) {
+          checks.push({ type: "remote-gate", name, path: ".github/workflows/" + name });
+        }
+      }
+    } catch (err) {
+      inaccessible.push({ path: ".github/workflows", reason: err.code || err.message });
+    }
+  }
+
+  return { checks, inaccessible };
+}
+
 // ---------------------------------------------------------------------------
 // Budgets and provenance
 // ---------------------------------------------------------------------------
@@ -381,6 +439,7 @@ function docs() {
     { claim: "skill discovery and SKILL.md frontmatter", url: "https://code.claude.com/docs/en/skills.md", verified: "2026-07-28" },
     { claim: "hook configuration in settings files", url: "https://code.claude.com/docs/en/hooks.md", verified: "2026-07-28" },
     { claim: "subagent definitions in .claude/agents/", url: "https://code.claude.com/docs/en/sub-agents.md", verified: "2026-07-28" },
+    { claim: "hooks require a trusted workspace, which no static read can confirm", url: "https://code.claude.com/docs/en/hooks.md", verified: "2026-07-28" },
   ];
 }
 
@@ -393,6 +452,7 @@ module.exports = {
   discoverSkills,
   discoverAgents,
   discoverHooks,
+  discoverRepoChecks,
   budgets,
   docs,
   // exported for the engine's compatibility re-export and its own tests

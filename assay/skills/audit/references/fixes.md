@@ -141,6 +141,16 @@ Promotion never touches the source rule. It writes a new mechanism beside the
 rule, on approval, and leaves the prose active. For each candidate the user
 checked:
 
+Choose the target level before the primitive. A hook guards the agent's own
+lifecycle and covers exactly its matcher — a `Bash` hook sees no other tool, and
+nothing outside a Claude Code session reaches it at all. A policy that must be
+impossible to merge or deploy belongs in a repository or remote gate — a lint
+rule, a test, a pre-commit check, a CI job. This flow does not build those: it
+promotes to skills, subagents, and hooks only. When the report's ladder shows
+level 4 or 5 mechanisms in the project, say plainly that the stronger home
+exists and that the user would wire it themselves, rather than promoting to a
+hook and letting it read as the same guarantee.
+
 1. Fetch the primitive's doc pages from the table above with `WebFetch` —
    once per primitive per run, not once per candidate.
 2. Compose the artifact at project scope, exactly as the fetched page
