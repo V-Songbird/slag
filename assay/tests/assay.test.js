@@ -1713,6 +1713,120 @@ test("a discovered file that cannot be read is counted and named, not dropped si
   assert.match(report, /could not read `CLAUDE\.md`/);
 });
 
+// ---------------------------------------------------------------------------
+// Instruction System record — [Foreman: 072]
+// ---------------------------------------------------------------------------
+
+function readJson(root, name) {
+  return JSON.parse(fs.readFileSync(path.join(root, ".assay-tmp", name), "utf-8"));
+}
+
+// the pre-072 file shape: the payload with no envelope around it
+function stripEnvelope(record) {
+  const { schemaVersion, analyzer, parser, profile, context, ...payload } = record;
+  return payload;
+}
+
+test("validateRecord accepts a record and names what a broken one is missing", () => {
+  const root = cliFixture();
+  assert.equal(cli(root, "scan").code, 0);
+  const record = readJson(root, "scan.json");
+  assert.equal(engine.validateRecord(record, "scan"), null);
+
+  assert.match(engine.validateRecord(record, "inventory"), /unknown record kind: inventory/);
+  assert.equal(engine.validateRecord(null, "scan"), "not a JSON object");
+  assert.equal(engine.validateRecord(stripEnvelope(record), "scan"), "found schema pre-1");
+  assert.equal(engine.validateRecord({ ...record, schemaVersion: "1" }, "scan"), "found schema pre-1");
+  assert.equal(engine.validateRecord({ ...record, schemaVersion: 99 }, "scan"), "found schema 99");
+  assert.match(engine.validateRecord({ ...record, analyzer: undefined }, "scan"), /analyzer is missing/);
+  assert.match(engine.validateRecord({ ...record, coverage: null }, "scan"), /coverage is missing/);
+  assert.match(engine.validateRecord({ ...record, parser: { name: "x", version: "1" } }, "scan"), /parser is missing/);
+  assert.match(engine.validateRecord({ ...record, profile: { host: "claude-code" } }, "scan"), /profile is missing/);
+  assert.match(
+    engine.validateRecord({ ...record, context: { ...record.context, analysisTime: 0 } }, "scan"),
+    /context\.analysisTime is missing or not a string/
+  );
+  assert.match(engine.validateRecord({ ...record, rules: {} }, "scan"), /rules is missing or not an array/);
+});
+
+test("every artifact the CLI writes is a schema 1 record, and the report says so", () => {
+  const root = cliFixture();
+  judgeAll(root);
+  const reported = cli(root, "report");
+  assert.equal(reported.code, 0, reported.err);
+  assert.match(reported.out, /^assay \S+ · claude-code profile · schema 1$/m);
+
+  for (const [name, kind] of [["scan.json", "scan"], ["audit.json", "audit"]]) {
+    const record = readJson(root, name);
+    assert.equal(engine.validateRecord(record, kind), null, name);
+    assert.equal(record.schemaVersion, engine.SCHEMA_VERSION);
+    assert.deepEqual(record.analyzer, { name: "assay", version: engine.ANALYZER_VERSION });
+    assert.equal(record.profile.host, "claude-code");
+    assert.equal(record.context.startupDirectory, record.context.projectRoot);
+    assert.equal(path.basename(record.context.projectRoot), path.basename(root));
+    assert.ok(!Number.isNaN(Date.parse(record.context.analysisTime)));
+    // reserved fields are documented, not emitted
+    for (const key of engine.RECORD_SCHEMA.reserved) assert.equal(key in record, false, key);
+  }
+
+  assert.equal(cli(root, "artifact").code, 0);
+  const html = fs.readFileSync(path.join(root, ".assay-tmp", "report.html"), "utf-8");
+  assert.match(html, /claude-code profile · schema 1/);
+});
+
+test("report and artifact reject a pre-schema artifact and say to rerun scan", () => {
+  const root = cliFixture();
+  judgeAll(root);
+  assert.equal(cli(root, "report").code, 0);
+
+  const auditFile = path.join(root, ".assay-tmp", "audit.json");
+  fs.writeFileSync(auditFile, JSON.stringify(stripEnvelope(readJson(root, "audit.json"))));
+  const artifact = cli(root, "artifact");
+  assert.equal(artifact.code, 1);
+  assert.match(artifact.err, /audit\.json is not a schema 1 audit record \(found schema pre-1\) — rerun `scan`\./);
+
+  const scanFile = path.join(root, ".assay-tmp", "scan.json");
+  fs.writeFileSync(scanFile, JSON.stringify(stripEnvelope(readJson(root, "scan.json"))));
+  const stale = cli(root, "report");
+  assert.equal(stale.code, 1);
+  assert.match(stale.err, /scan\.json is not a schema 1 scan record \(found schema pre-1\) — rerun `scan`\./);
+
+  // a future schema is named by the version found, not silently misread
+  fs.writeFileSync(scanFile, JSON.stringify({ ...readJson(root, "scan.json"), schemaVersion: 2 }));
+  const future = cli(root, "report");
+  assert.equal(future.code, 1);
+  assert.match(future.err, /found schema 2/);
+});
+
+test("remeasure discards a prior audit from an older assay and still reports", () => {
+  const root = cliFixture();
+  judgeAll(root);
+  assert.equal(cli(root, "report").code, 0);
+  const auditFile = path.join(root, ".assay-tmp", "audit.json");
+  fs.writeFileSync(auditFile, JSON.stringify(stripEnvelope(readJson(root, "audit.json"))));
+
+  const { code, out, err } = cli(root, "remeasure");
+  assert.equal(code, 0, err);
+  assert.match(err, /Ignoring \.assay-tmp\/audit\.json from an older assay \(found schema pre-1\)/);
+  assert.match(err, /before\/after comparison is skipped/);
+  // the re-scan still ran and reported; only the comparison was dropped
+  assert.match(out, /## Coverage/);
+  assert.doesNotMatch(out, /## Since last audit/);
+  assert.equal(engine.validateRecord(readJson(root, "audit.json"), "audit"), null);
+});
+
+test("two scans of an unchanged project differ only in analysisTime", () => {
+  const root = cliFixture();
+  assert.equal(cli(root, "scan").code, 0);
+  const first = readJson(root, "scan.json");
+  assert.equal(cli(root, "scan").code, 0);
+  const second = readJson(root, "scan.json");
+  assert.ok(!Number.isNaN(Date.parse(first.context.analysisTime)));
+  delete first.context.analysisTime;
+  delete second.context.analysisTime;
+  assert.equal(JSON.stringify(first), JSON.stringify(second));
+});
+
 test("findRuleMarkdownFiles records a directory it cannot walk", () => {
   const root = tmpProject({ ".claude/rules": "not a directory\n" });
   const inaccessible = [];

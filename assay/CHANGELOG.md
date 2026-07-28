@@ -4,6 +4,16 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [Unreleased]
+
+### Added
+
+- The JSON assay writes is a versioned record: it names the analyzer and its version, the parser, the host profile, and the context the analysis ran in — project root, startup directory, and the time it ran. Everything in it but the timestamp is identical between two runs over an unchanged project
+
+### Changed
+
+- An audit file written by an older assay is rejected with the version it found and a note to rerun `scan`, instead of being read as if its fields still meant the same thing. `remeasure` is the exception: it drops the stale comparison, says so, and re-scans anyway
+
 ## [0.6.0-alpha] — 2026-07-28
 
 ### Added

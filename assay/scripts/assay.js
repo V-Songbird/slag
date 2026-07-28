@@ -29,6 +29,132 @@ const crypto = require("crypto");
 const TMP_DIR = ".assay-tmp";
 
 // ---------------------------------------------------------------------------
+// Instruction System record — the versioned shape of every JSON artifact
+// ---------------------------------------------------------------------------
+
+// [Foreman: 072]
+// scan.json and audit.json are not loose bags of fields: each is one versioned
+// record that names who analyzed the project, with which parser, under which
+// host profile, in which context. The analyzers keep their internal structures;
+// the envelope is added at the file boundary and validated on the way back in.
+//
+// Determinism: every field except `context.analysisTime` is a pure function of
+// the project state and the version consts below. Two scans of an unchanged
+// project are byte-identical once that field is dropped.
+//
+// A release cut keeps ANALYZER_VERSION in step with assay's version in
+// .claude-plugin/marketplace.json, which owns the published number.
+const SCHEMA_VERSION = 1;
+const ANALYZER_VERSION = "0.7.0-alpha";
+const PARSER_NAME = "assay-markdown";
+const PARSER_VERSION = 1;
+const PROFILE_HOST = "claude-code";
+const PROFILE_VERSION = 1;
+
+const RECORD_SCHEMA = {
+  version: SCHEMA_VERSION,
+  // Required at the top level of every record, whatever its kind.
+  envelope: ["schemaVersion", "analyzer", "parser", "profile", "context", "coverage"],
+  // Required inside `context`.
+  context: ["projectRoot", "startupDirectory", "analysisTime"],
+  // Required payload arrays, by record kind.
+  payload: {
+    scan: ["files", "rules", "skills", "hookInventory"],
+    audit: ["files", "rules", "skills", "hookInventory"],
+  },
+  // Reserved: the output contract promises these, nothing fills them yet, and
+  // they are allowed but never required at the top level. Later entries add
+  // them — do not invent content for one here.
+  reserved: [
+    "sources", "instructions", "mechanisms", "findings", "relationships",
+    "evidence", "semantic", "plans", "changes", "validation", "proofLinks",
+  ],
+};
+
+function isRecordObject(x) {
+  return Boolean(x) && typeof x === "object" && !Array.isArray(x);
+}
+
+// null when the record is a valid instance of `kind`; otherwise a short reason,
+// naming the schema version found so the caller can say what to rerun.
+function validateRecord(record, kind) {
+  const payload = RECORD_SCHEMA.payload[kind];
+  if (!payload) return "unknown record kind: " + kind;
+  if (!isRecordObject(record)) return "not a JSON object";
+  if (!Number.isInteger(record.schemaVersion)) return "found schema pre-1";
+  if (record.schemaVersion !== SCHEMA_VERSION) return "found schema " + record.schemaVersion;
+  for (const key of RECORD_SCHEMA.envelope) {
+    if (key === "schemaVersion") continue;
+    if (!isRecordObject(record[key])) return key + " is missing or not an object";
+  }
+  if (typeof record.analyzer.name !== "string" || typeof record.analyzer.version !== "string") {
+    return "analyzer is missing a name/version string";
+  }
+  if (typeof record.parser.name !== "string" || !Number.isInteger(record.parser.version)) {
+    return "parser is missing a name string or integer version";
+  }
+  if (typeof record.profile.host !== "string" || !Number.isInteger(record.profile.version)) {
+    return "profile is missing a host string or integer version";
+  }
+  for (const key of RECORD_SCHEMA.context) {
+    if (typeof record.context[key] !== "string") return "context." + key + " is missing or not a string";
+  }
+  for (const key of payload) {
+    if (!Array.isArray(record[key])) return key + " is missing or not an array";
+  }
+  return null;
+}
+
+function makeRecord(kind, payload, root) {
+  const { coverage = null, ...rest } = payload;
+  const projectRoot = path.resolve(root);
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    analyzer: { name: "assay", version: ANALYZER_VERSION },
+    parser: { name: PARSER_NAME, version: PARSER_VERSION },
+    profile: { host: PROFILE_HOST, version: PROFILE_VERSION },
+    context: {
+      projectRoot,
+      // razor: assay analyzes one root, so the startup directory is that root.
+      // A startup directory that differs from the project root arrives with the
+      // host-adapter work, which is what makes the distinction observable.
+      startupDirectory: projectRoot,
+      analysisTime: new Date().toISOString(),
+    },
+    coverage,
+    ...rest,
+  };
+}
+
+function writeRecord(file, kind, payload, root) {
+  fs.writeFileSync(file, JSON.stringify(makeRecord(kind, payload, root), null, 2));
+}
+
+// [Foreman: 072] Old artifacts get a clean break, never a migration: a record
+// this assay cannot read is rejected and rerun, because silently misreading a
+// field is worse than repeating a scan that costs seconds.
+function readRecord(file, kind) {
+  let record;
+  try {
+    record = JSON.parse(fs.readFileSync(file, "utf-8"));
+  } catch (err) {
+    return { problem: "not valid JSON: " + err.message };
+  }
+  const problem = validateRecord(record, kind);
+  return problem ? { problem } : { record };
+}
+
+// One provenance line for every renderer: who analyzed this, under which host
+// profile, against which record schema. Falls back to this process's own
+// versions when handed a bare composed audit rather than a record.
+function recordBanner(record) {
+  const analyzer = (record && record.analyzer) || { name: "assay", version: ANALYZER_VERSION };
+  const profile = (record && record.profile) || { host: PROFILE_HOST };
+  const version = record && Number.isInteger(record.schemaVersion) ? record.schemaVersion : SCHEMA_VERSION;
+  return `${analyzer.name} ${analyzer.version} · ${profile.host} profile · schema ${version}`;
+}
+
+// ---------------------------------------------------------------------------
 // Data tables
 // ---------------------------------------------------------------------------
 
@@ -1583,7 +1709,7 @@ function cmdScan(root) {
   const result = scan(root);
   const tmpDir = path.join(root, TMP_DIR);
   fs.mkdirSync(tmpDir, { recursive: true });
-  fs.writeFileSync(path.join(tmpDir, "scan.json"), JSON.stringify(result, null, 2));
+  writeRecord(path.join(tmpDir, "scan.json"), "scan", result, root);
 
   const summary = {
     ruleCount: result.rules.length,
@@ -1905,6 +2031,9 @@ function renderReport(audit, opts = {}) {
   });
   out.push("# Rule audit — " + path.basename(audit.root));
   out.push("");
+  // [Foreman: 072] Who produced this, under which host profile and schema.
+  out.push(recordBanner(audit));
+  out.push("");
   if (!rules.length) {
     out.push("No rules found in CLAUDE.md or .claude/rules/.");
     out.push("");
@@ -2163,12 +2292,14 @@ const ARTIFACT_SCRIPT = `<script>
   function badge(g) { return el("span", "badge g-" + g, g); }
 
   var h1 = el("h1", null, "Rule audit — " + data.root);
+  root.appendChild(h1);
+  if (data.banner) root.appendChild(el("p", "muted", data.banner));
   var sub = el("p", "sub");
   sub.textContent = data.corpusScore == null
     ? data.rules.length + " rules — no mandate rules to grade"
     : data.rules.length + " rules — corpus grade " + data.corpusGrade + " (" + data.corpusScore.toFixed(2) + ")"
       + (data.suppressedCount ? ", " + data.suppressedCount + " suppressed" : "");
-  root.appendChild(h1); root.appendChild(sub);
+  root.appendChild(sub);
 
   var cols = [
     { key: "id", label: "Rule", get: function (r) { return r.id; } },
@@ -2258,6 +2389,8 @@ const ARTIFACT_SCRIPT = `<script>
 function renderArtifact(audit) {
   const payload = {
     root: path.basename(audit.root),
+    // [Foreman: 072] the record's own provenance, so the page says what produced it
+    banner: recordBanner(audit),
     corpusScore: audit.corpusScore,
     corpusGrade: audit.corpusGrade,
     suppressedCount: audit.rules.filter((r) => r.suppressed).length,
@@ -2275,13 +2408,22 @@ function renderArtifact(audit) {
   ].join("\n");
 }
 
+// [Foreman: 072] The rejection message for a record this assay cannot read.
+function staleRecordError(label, kind, problem) {
+  return label + " is not a schema " + SCHEMA_VERSION + " " + kind + " record (" + problem + ") — rerun `scan`.";
+}
+
 function cmdArtifact(root) {
   const auditFile = path.join(root, TMP_DIR, "audit.json");
   if (!fs.existsSync(auditFile)) {
     process.stderr.write("No " + TMP_DIR + "/audit.json — run report first.\n");
     process.exit(1);
   }
-  const audit = JSON.parse(fs.readFileSync(auditFile, "utf-8"));
+  const { record: audit, problem } = readRecord(auditFile, "audit");
+  if (problem) {
+    process.stderr.write(staleRecordError(TMP_DIR + "/audit.json", "audit", problem) + "\n");
+    process.exit(1);
+  }
   const outFile = path.join(root, TMP_DIR, "report.html");
   fs.writeFileSync(outFile, renderArtifact(audit));
   process.stdout.write(TMP_DIR + "/report.html\n");
@@ -2293,13 +2435,17 @@ function cmdReport(root, opts) {
     process.stderr.write("No " + TMP_DIR + "/scan.json — run scan first.\n");
     process.exit(1);
   }
-  const scanData = JSON.parse(fs.readFileSync(scanFile, "utf-8"));
+  const { record: scanData, problem } = readRecord(scanFile, "scan");
+  if (problem) {
+    process.stderr.write(staleRecordError(TMP_DIR + "/scan.json", "scan", problem) + "\n");
+    process.exit(1);
+  }
   const { judgments, error } = loadJudgments(root, scanData.rules);
   if (error) {
     process.stderr.write(error + "\n");
     process.exit(1);
   }
-  const audit = composeAudit(scanData, judgments);
+  const audit = makeRecord("audit", composeAudit(scanData, judgments), root);
   fs.writeFileSync(path.join(root, TMP_DIR, "audit.json"), JSON.stringify(audit, null, 2));
   if (opts.json) process.stdout.write(JSON.stringify(audit, null, 2) + "\n");
   else process.stdout.write(renderReport(audit, opts) + "\n");
@@ -2318,11 +2464,23 @@ function cmdRemeasure(root, opts) {
     process.stderr.write("No " + TMP_DIR + "/judgments.json — run a full scan → judge → report before remeasuring.\n");
     process.exit(1);
   }
+  // [Foreman: 072] A prior audit this assay cannot read is discarded, not fatal:
+  // the re-scan is what the user asked for, and only the before/after comparison
+  // depends on the old file.
   const auditFile = path.join(tmp, "audit.json");
-  const prev = fs.existsSync(auditFile) ? JSON.parse(fs.readFileSync(auditFile, "utf-8")) : null;
+  let prev = null;
+  if (fs.existsSync(auditFile)) {
+    const prior = readRecord(auditFile, "audit");
+    if (prior.problem) {
+      process.stderr.write("Ignoring " + TMP_DIR + "/audit.json from an older assay (" + prior.problem +
+        ") — the before/after comparison is skipped this run.\n");
+    } else {
+      prev = prior.record;
+    }
+  }
 
   const scanData = scan(root);
-  fs.writeFileSync(path.join(tmp, "scan.json"), JSON.stringify(scanData, null, 2));
+  writeRecord(path.join(tmp, "scan.json"), "scan", scanData, root);
 
   let judgments;
   try {
@@ -2358,7 +2516,7 @@ function cmdRemeasure(root, opts) {
     process.stderr.write(error + "\n");
     process.exit(1);
   }
-  const audit = composeAudit(scanData, valid);
+  const audit = makeRecord("audit", composeAudit(scanData, valid), root);
   fs.writeFileSync(auditFile, JSON.stringify(audit, null, 2));
   if (opts.json) process.stdout.write(JSON.stringify({ ...audit, previous: prev }, null, 2) + "\n");
   else process.stdout.write(renderReport(audit, { ...opts, prev }) + "\n");
@@ -2412,6 +2570,8 @@ module.exports = {
   composeScore, grade, detectPlacement, scan, composeAudit, renderReport, loadJudgments,
   looksLikeStatement, hasImperativeVerb, checkSkillDescription, gradeSkill, findSkillFiles,
   renderArtifact, artifactRuleData,
+  // [Foreman: 072] the record contract
+  RECORD_SCHEMA, SCHEMA_VERSION, ANALYZER_VERSION, validateRecord, makeRecord,
 };
 
 if (require.main === module) main();
