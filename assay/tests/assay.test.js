@@ -1836,3 +1836,319 @@ test("findRuleMarkdownFiles records a directory it cannot walk", () => {
   assert.equal(inaccessible[0].path, ".");
   assert.ok(inaccessible[0].reason);
 });
+
+// ---------------------------------------------------------------------------
+// Parser and inventory — [Foreman: 073]
+// ---------------------------------------------------------------------------
+
+// One file carrying every construct the parser has to place: frontmatter in
+// four YAML shapes, ATX and setext headings, a paragraph, a nested list, a GFM
+// table with a non-Latin cell, a block quote, a bare link, a block comment, an
+// inline comment, three fence styles, an assay-ignore span and a tag body.
+const GOLDEN = [
+  /*  1 */ "---",
+  /*  2 */ "name: golden",
+  /*  3 */ "default-category: mandate",
+  /*  4 */ "paths: [\"docs/**/*.md\", 'src/**']",
+  /*  5 */ "tags:",
+  /*  6 */ "  - alpha",
+  /*  7 */ "  - beta",
+  /*  8 */ "summary: >-",
+  /*  9 */ "  A folded scalar that wraps",
+  /* 10 */ "  across two lines.",
+  /* 11 */ "---",
+  /* 12 */ "",
+  /* 13 */ "# Golden fixture",
+  /* 14 */ "",
+  /* 15 */ "Setext heading",
+  /* 16 */ "--------------",
+  /* 17 */ "",
+  /* 18 */ "This paragraph is background for the reader, not a rule.",
+  /* 19 */ "",
+  /* 20 */ "- Use `const` for local bindings.",
+  /* 21 */ "  - Never use `var` — use `let` instead.",
+  /* 22 */ "",
+  /* 23 */ "| Do | Don't |",
+  /* 24 */ "|---|---|",
+  /* 25 */ "| Run `npm test` before pushing | Никогда |",
+  /* 26 */ "",
+  /* 27 */ "> Quoted context, still inventoried.",
+  /* 28 */ "",
+  /* 29 */ "- [the style guide](./style.md)",
+  /* 30 */ "",
+  /* 31 */ "<!-- a block comment Claude never receives -->",
+  /* 32 */ "",
+  /* 33 */ "```js",
+  /* 34 */ "const x = 1;",
+  /* 35 */ "```",
+  /* 36 */ "",
+  /* 37 */ "~~~md",
+  /* 38 */ "- Always run `npm test`.",
+  /* 39 */ "~~~",
+  /* 40 */ "",
+  /* 41 */ "````md",
+  /* 42 */ "```",
+  /* 43 */ "- Never commit `secrets.env`.",
+  /* 44 */ "```",
+  /* 45 */ "````",
+  /* 46 */ "",
+  /* 47 */ "- Validate request bodies with Zod. <!-- inline note -->",
+  /* 48 */ "",
+  /* 49 */ "<!-- assay-ignore-start -->",
+  /* 50 */ "- We once shipped a stale lockfile.",
+  /* 51 */ "<!-- assay-ignore-end -->",
+  /* 52 */ "",
+  /* 53 */ "<example>",
+  /* 54 */ "1. Place the caret on MyHelper",
+  /* 55 */ "</example>",
+  /* 56 */ "",
+].join("\n");
+
+const MIXED_LANGUAGE = [
+  "# Правила",
+  "",
+  "- Перед commit запустите тесты.",
+  "- コードレビューを必ず実行する。",
+  "",
+  "| Правило | Заметка |",
+  "|---|---|",
+  "| Never коммитить `secrets.env` | 3 |",
+  "",
+].join("\n");
+
+// The governing invariant: every physical line of every parsed file is counted
+// exactly once, as instruction, content, ignored, excluded, or unsupported.
+function assertLossless(scanData) {
+  assert.equal(scanData.sources.length, scanData.files.length);
+  scanData.sources.forEach((source, i) => {
+    assert.equal(source.path, scanData.files[i].path);
+    assert.equal(source.lineCount, scanData.files[i].lineCount);
+    assert.match(source.sourceHash, /^[0-9a-f]{40}$/);
+    let total = 0;
+    for (const [cls, count] of Object.entries(source.spans)) {
+      assert.ok(Number.isInteger(count) && count >= 0, `${source.path}: ${cls} = ${count}`);
+      total += count;
+    }
+    assert.equal(total, source.lineCount, `${source.path}: spans sum to ${total}, file has ${source.lineCount} lines`);
+  });
+}
+
+test("the golden fixture is inventoried construct by construct", () => {
+  const root = tmpProject({ "CLAUDE.md": GOLDEN, "docs/style.md": "x\n", "src/app.ts": "export {};" });
+  const scanData = engine.scan(root);
+  assertLossless(scanData);
+
+  assert.deepEqual(scanData.sources[0].spans, {
+    instruction: 4, content: 45, ignored: 3, excluded: 4, unsupported: 0,
+  });
+  assert.deepEqual(scanData.sources[0].unsupported, []);
+
+  // the four graded rules: two list items, one table body cell, one line whose
+  // inline comment was stripped — nothing recovered from a fence or a tag body
+  assert.deepEqual(scanData.rules.map((r) => [r.lineStart, r.text]), [
+    [20, "Use `const` for local bindings."],
+    [21, "Never use `var` — use `let` instead."],
+    [25, "Run `npm test` before pushing"],
+    [47, "Validate request bodies with Zod."],
+  ]);
+
+  const classes = engine.stripMetadata(GOLDEN).classes;
+  const at = (line) => classes[line - 1];
+  assert.equal(at(31), "excluded", "a block comment");
+  assert.equal(at(49), "ignored", "the assay-ignore span opener");
+  assert.equal(at(50), "ignored", "narrative inside the span");
+  assert.equal(at(54), "excluded", "a tag body");
+  assert.equal(at(34), "content", "fenced code is content, never lost");
+  assert.equal(at(25), "content", "a table row is content until scan marks its rule");
+});
+
+test("a rule's source range slices the file back to its own text", () => {
+  const root = tmpProject({ "CLAUDE.md": GOLDEN, "docs/style.md": "x\n", "src/app.ts": "export {};" });
+  const rules = engine.scan(root).rules;
+  for (const r of rules) {
+    assert.equal(r.sourceRange.startLine, r.lineStart);
+    assert.equal(r.sourceRange.endLine, r.lineEnd);
+    assert.equal(GOLDEN.slice(r.sourceRange.startOffset, r.sourceRange.endOffset), r.text, r.id);
+  }
+  // three exact ranges, columns included
+  assert.deepEqual(rules[0].sourceRange, {
+    startLine: 20, startCol: 2, endLine: 20, endCol: 33, startOffset: 277, endOffset: 308,
+  });
+  assert.deepEqual(rules[2].sourceRange, {
+    startLine: 25, startCol: 2, endLine: 25, endCol: 31, startOffset: 378, endOffset: 407,
+  });
+  // the inline comment is gone from the text but the range still lands on the
+  // rule itself, not on the comment after it
+  assert.deepEqual(rules[3].sourceRange, {
+    startLine: 47, startCol: 2, endLine: 47, endCol: 35, startOffset: 653, endOffset: 686,
+  });
+
+  // a rule assembled from two lines spans both of them in full — its analysis
+  // text joins the lines with a space, so the slice is the source, bullet
+  // marker included, not that joined string
+  const multi = "- Use Vitest for all tests\n  placed next to the source file.\n";
+  const multiRoot = tmpProject({ "CLAUDE.md": multi });
+  const [joined] = engine.scan(multiRoot).rules;
+  assert.equal(joined.sourceRange.startLine, 1);
+  assert.equal(joined.sourceRange.endLine, 2);
+  assert.equal(multi.slice(joined.sourceRange.startOffset, joined.sourceRange.endOffset),
+    "- Use Vitest for all tests\n  placed next to the source file.");
+});
+
+test("real YAML reads every frontmatter form", () => {
+  const fm = engine.parseFrontmatter(GOLDEN);
+  assert.equal(fm.name, "golden");
+  assert.equal(fm["default-category"], "mandate");
+  assert.deepEqual(fm.paths, ["docs/**/*.md", "src/**"]);
+  assert.deepEqual(fm.tags, ["alpha", "beta"]);
+  assert.equal(fm.summary, "A folded scalar that wraps across two lines.");
+
+  // literal blocks, quoted scalars carrying colons, numbers and booleans
+  const block = engine.parseFrontmatter([
+    "---",
+    "description: \"Use when: the user asks, e.g. 'grade my rules'\"",
+    "notes: |-",
+    "  first line",
+    "  second line",
+    "disable-model-invocation: true",
+    "user-invocable: false",
+    "limit: 42",
+    "---",
+  ].join("\n"));
+  assert.equal(block.description, "Use when: the user asks, e.g. 'grade my rules'");
+  assert.equal(block.notes, "first line\nsecond line");
+  assert.equal(block["disable-model-invocation"], "true");
+  assert.equal(block["user-invocable"], "false");
+  assert.equal(block.limit, "42");
+
+  // a flow sequence wrapped across lines used to come back as the literal "[",
+  // which made every rule in the file score as a dead glob
+  const wrapped = engine.parseFrontmatter("---\npaths: [\n  \"src/**\",\n  \"test/**\"\n]\n---\n");
+  assert.deepEqual(wrapped.paths, ["src/**", "test/**"]);
+});
+
+test("malformed frontmatter is inventoried as unsupported, and the file is still graded", () => {
+  const broken = ["---", "description: Use when: the user asks", "---", "", "- Run the tests before every commit.", ""].join("\n");
+  const root = tmpProject({ "CLAUDE.md": broken });
+
+  // nothing throws, and the metadata is empty rather than guessed at
+  assert.deepEqual(engine.parseFrontmatter(broken), {});
+  const scanData = engine.scan(root);
+  assertLossless(scanData);
+  assert.equal(scanData.rules.length, 1);
+  assert.equal(scanData.rules[0].text, "Run the tests before every commit.");
+
+  const [source] = scanData.sources;
+  assert.equal(source.unsupported.length, 1);
+  assert.match(source.unsupported[0].reason, /^malformed frontmatter: /);
+  assert.deepEqual([source.unsupported[0].startLine, source.unsupported[0].endLine], [1, 3]);
+  assert.equal(source.spans.unsupported, 3);
+
+  const report = engine.renderReport(engine.composeAudit(scanData, {
+    [scanData.rules[0].key]: { F3: 0.7, F8: 0.9 },
+  }));
+  assert.match(report, /- 1 unsupported construct\(s\) — inventoried, not graded/);
+});
+
+test("an unclosed fence and an unclosed comment are named, not silently swallowed", () => {
+  const fence = engine.stripMetadata("- Run the tests.\n\n```js\nconst x = 1;\n");
+  assert.equal(fence.unsupported.length, 1);
+  assert.match(fence.unsupported[0].reason, /unclosed code fence/);
+  assert.deepEqual([fence.unsupported[0].startLine, fence.unsupported[0].endLine], [3, 4]);
+
+  const comment = engine.stripMetadata("- Run the tests.\n\n<!-- a note that never closes\nmore\n");
+  assert.equal(comment.unsupported.length, 1);
+  assert.match(comment.unsupported[0].reason, /unclosed HTML comment/);
+  assert.equal(comment.unsupported[0].startLine, 3);
+
+  // a nested map is metadata no analyzer reads — inventoried, never an error
+  const nested = engine.stripMetadata("---\nname: x\nhooks:\n  pre: run\n---\n\n- Run the tests.\n");
+  assert.equal(nested.unsupported.length, 1);
+  assert.match(nested.unsupported[0].reason, /`hooks` holds a nested map/);
+});
+
+test("every line of every fixture lands in exactly one class", () => {
+  const projects = [
+    { "CLAUDE.md": GOLDEN, "docs/style.md": "x\n", "src/app.ts": "export {};" },
+    { "CLAUDE.md": MIXED_LANGUAGE },
+    FIXTURE,
+    { "CLAUDE.md": FIXTURE_CLAUDE },
+    { "CLAUDE.md": "", ".claude/rules/empty.md": "" },
+    { "CLAUDE.md": "- Never commit a secret.\n\n<!-- assay-ignore-start -->\n- narrative\n" },
+  ];
+  for (const files of projects) {
+    assertLossless(engine.scan(tmpProject(files)));
+  }
+});
+
+// Deterministic mangling: a fixed seed sequence over a fixed transformation
+// table, so the same 50 broken files are produced on every run.
+function mangle(source, seed) {
+  let state = seed >>> 0 || 1;
+  const rand = () => {
+    state ^= state << 13; state ^= state >>> 17; state ^= state << 5;
+    return (state >>> 0) / 4294967296;
+  };
+  const kinds = [
+    (l) => l.slice(0, Math.floor(l.length / 2)),
+    (l) => l.replace(/-->/g, ""),
+    (l) => l.replace(/```/g, "``"),
+    (l) => l.replace(/~~~/g, "~"),
+    (l) => l.replace(/\|/g, ""),
+    (l) => l + " |",
+    (l) => "\t" + l,
+    (l) => l + " ",
+    (l) => l.replace(/:/g, ": : "),
+    () => "---",
+    () => "",
+    (l) => l.repeat(3),
+  ];
+  const lines = source.split("\n");
+  const edits = 1 + Math.floor(rand() * 4);
+  for (let n = 0; n < edits; n++) {
+    const line = Math.floor(rand() * lines.length);
+    lines[line] = kinds[Math.floor(rand() * kinds.length)](lines[line]);
+  }
+  return lines.join("\n");
+}
+
+test("a mangled fixture never throws and never loses a line", () => {
+  const root = tmpProject({ "CLAUDE.md": GOLDEN });
+  const target = path.join(root, "CLAUDE.md");
+  for (let seed = 1; seed <= 50; seed++) {
+    const broken = mangle(GOLDEN, seed);
+    fs.writeFileSync(target, broken);
+    let scanData;
+    assert.doesNotThrow(() => { scanData = engine.scan(root); }, "seed " + seed);
+    assertLossless(scanData);
+    assert.equal(scanData.sources[0].lineCount, broken.split("\n").length, "seed " + seed);
+  }
+});
+
+test("non-Latin rules stay inventoried and flagged, table cells included", () => {
+  const root = tmpProject({ "CLAUDE.md": MIXED_LANGUAGE });
+  const scanData = engine.scan(root);
+  assertLossless(scanData);
+
+  const texts = scanData.rules.map((r) => r.text);
+  // the Cyrillic bullet, the CJK bullet, and the mixed-script table cell
+  assert.ok(texts.includes("Перед commit запустите тесты."));
+  assert.ok(texts.includes("コードレビューを必ず実行する。"));
+  assert.ok(texts.includes("Never коммитить `secrets.env`"), "a non-Latin table cell vanished");
+  assert.ok(scanData.rules.every((r) => r.nonLatin));
+  // the letter-free cell is layout, not a lost rule
+  assert.ok(!texts.includes("3"));
+});
+
+test("setext headings and pipe-less tables are recognized", () => {
+  // [Foreman: 073] Both are CommonMark/GFM constructs the line scanner missed:
+  // a setext heading read as a paragraph plus a horizontal rule, and a table
+  // with no leading pipe read as three paragraphs.
+  const setext = engine.stripMetadata("Error handling\n==============\n\n- All API failures through `handleError`.\n");
+  const merged = engine.mergeClarifications(engine.identifyChunks(setext.lines));
+  assert.equal(merged.length, 1);
+  assert.match(merged[0][0].text, /^Error handling: /);
+
+  const table = engine.stripMetadata("Do | Don't\n--- | ---\nUse `const` | Never use `var`\n");
+  assert.deepEqual(table.lines.filter((l) => l.isContent).map((l) => l.text), ["Use `const`", "Never use `var`"]);
+});

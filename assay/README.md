@@ -42,7 +42,7 @@ Almost all of the scoring is a plain Node script — deterministic, the same inp
 
 Before the report, one more question gets asked of each doubtful entry: is this a rule at all? A file of notes or history would otherwise arrive graded as a page of mandates. The answer can only drop an entry from the report — nothing is ever rescored or reworded — and `--verbose` lists every drop with the reason. It costs one model call per audit; `--no-verify` skips it.
 
-Every report opens by saying what it actually looked at — and names any file it couldn't read. A number in the report never covers more than that.
+Every report opens by saying what it actually looked at — and names any file it couldn't read. Every line of every file it did read is accounted for: graded, set aside, ignored on purpose, or named as something assay couldn't parse. A number in the report never covers more than that.
 
 | Moment | What happens |
 | --- | --- |
@@ -76,7 +76,7 @@ Nothing to configure. Works at the next session.
 
 ## Under the hood
 
-One scoring script and three skills — the audit with its two rubrics, craft-skill with its trigger recipe, craft-rules with its rule recipe — all there to read in the plugin's files.
+One scoring script and three skills — the audit with its two rubrics, craft-skill with its trigger recipe, craft-rules with its rule recipe — all there to read in the plugin's files. It reads your Markdown and YAML with real parsers and ships them with it; there is still nothing to install.
 
 ## Good to know
 

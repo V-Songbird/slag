@@ -9,10 +9,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 ### Added
 
 - The JSON assay writes is a versioned record: it names the analyzer and its version, the parser, the host profile, and the context the analysis ran in — project root, startup directory, and the time it ran. Everything in it but the timestamp is identical between two runs over an unchanged project
+- assay reads your files with a real CommonMark parser and a real YAML parser, both bundled with the plugin — nothing to install. Setext headings, tables without leading pipes, indented code blocks, fences inside list items, and frontmatter arrays wrapped across lines are all read the way any other Markdown tool reads them
+- Frontmatter that isn't valid YAML is reported with the reason and the lines it covers, instead of being half-read into guesses
+- Every line of every instruction file is accounted for in the report's **Coverage** block: graded, set aside as content, explicitly ignored, excluded, or named as something assay could not read. An unclosed code fence or an unclosed HTML comment is counted there rather than silently swallowing the rest of the file
+- The JSON record carries a per-file inventory — content hash, line count, and the span counts those lines fall into — and every rule carries its exact source range, line and column and character offset
 
 ### Changed
 
 - An audit file written by an older assay is rejected with the version it found and a note to rerun `scan`, instead of being read as if its fields still meant the same thing. `remeasure` is the exception: it drops the stale comparison, says so, and re-scans anyway
+- A rule written in a non-Latin script inside a table cell is graded like any other cell. Those cells used to drop out of the table before anything looked at them
 
 ## [0.6.0-alpha] — 2026-07-28
 

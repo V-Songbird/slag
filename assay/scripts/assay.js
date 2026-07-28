@@ -26,6 +26,17 @@ const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 
+// [Foreman: 073] Real parsers, bundled rather than installed. Both are the
+// published single-file UMD dists, committed verbatim under scripts/vendor/ —
+// see vendor/VENDOR.md for versions, licenses and integrity hashes. The plugin
+// still has no package.json and nothing for a user to install.
+const MarkdownIt = require("./vendor/markdown-it.js");
+const yaml = require("./vendor/js-yaml.js");
+
+// CommonMark plus GFM tables (markdown-it's "default" preset), with raw HTML
+// recognized so comments and tag blocks arrive as their own tokens.
+const md = new MarkdownIt({ html: true });
+
 const TMP_DIR = ".assay-tmp";
 
 // ---------------------------------------------------------------------------
@@ -47,7 +58,10 @@ const TMP_DIR = ".assay-tmp";
 const SCHEMA_VERSION = 1;
 const ANALYZER_VERSION = "0.7.0-alpha";
 const PARSER_NAME = "assay-markdown";
-const PARSER_VERSION = 1;
+// [Foreman: 073] 2 = markdown-it 14.1.0 + js-yaml 4.1.0 behind assay's adapter.
+// 1 was the handwritten line scanner; a record naming version 1 was produced by
+// a different parser and its spans are not comparable.
+const PARSER_VERSION = 2;
 const PROFILE_HOST = "claude-code";
 const PROFILE_VERSION = 1;
 
@@ -58,15 +72,17 @@ const RECORD_SCHEMA = {
   // Required inside `context`.
   context: ["projectRoot", "startupDirectory", "analysisTime"],
   // Required payload arrays, by record kind.
+  // [Foreman: 073] `sources` is required, not reserved: it carries the lossless
+  // line inventory, and a record without it cannot show that nothing was lost.
   payload: {
-    scan: ["files", "rules", "skills", "hookInventory"],
-    audit: ["files", "rules", "skills", "hookInventory"],
+    scan: ["files", "sources", "rules", "skills", "hookInventory"],
+    audit: ["files", "sources", "rules", "skills", "hookInventory"],
   },
   // Reserved: the output contract promises these, nothing fills them yet, and
   // they are allowed but never required at the top level. Later entries add
   // them — do not invent content for one here.
   reserved: [
-    "sources", "instructions", "mechanisms", "findings", "relationships",
+    "instructions", "mechanisms", "findings", "relationships",
     "evidence", "semantic", "plans", "changes", "validation", "proofLinks",
   ],
 };
@@ -375,70 +391,73 @@ function grade(score) {
 // Discovery
 // ---------------------------------------------------------------------------
 
-// [Foreman: 069] An inline YAML flow array — paths: ["src/**/*.ts", 'test/**'] —
-// was kept as one literal string, so the whole file matched no files and every
-// rule in it scored as a dead glob. Elements split on commas outside quotes;
-// block-style "- item" lists are parsed separately, unchanged.
-// razor: single-line flow sequences only. An array wrapped across lines still
-// falls through to the literal-string path.
-function parseInlineArray(value) {
-  const items = [];
-  let buf = "", quote = null;
-  for (const ch of value.slice(1, -1)) {
-    if (quote) {
-      if (ch === quote) quote = null;
-      else buf += ch;
-    } else if (ch === '"' || ch === "'") quote = ch;
-    else if (ch === ",") { items.push(buf.trim()); buf = ""; }
-    else buf += ch;
+// ---------------------------------------------------------------------------
+// Frontmatter — parsed by js-yaml, normalized for the analyzers
+// ---------------------------------------------------------------------------
+
+// [Foreman: 073] Frontmatter used to be read by a line scanner that guessed at
+// flow arrays, block lists and folded scalars and silently mangled anything
+// else. It is real YAML, so a real YAML parser reads it: quoted strings,
+// anchors, nested maps, multi-line flow sequences and every scalar style come
+// out right, and a file whose frontmatter does not parse is reported instead of
+// half-read.
+//
+// The analyzers only ever read strings and arrays of strings, so every other
+// value is normalized down to one of those. A value with no faithful
+// string form — a nested map — is dropped from the returned metadata and named
+// as an unsupported construct rather than flattened into a fake string.
+function normalizeFrontmatterValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) {
+    return value.map(normalizeFrontmatterValue).filter((v) => typeof v === "string" && v !== "");
   }
-  items.push(buf.trim());
-  return items.filter(Boolean);
+  return null;
+}
+
+// The frontmatter block's line span, 0-based, with `end` the index of the
+// closing "---". null when the file opens with anything else.
+function frontmatterSpan(lines) {
+  if (!lines.length || lines[0].trim() !== "---") return null;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === "---") return { start: 0, end: i };
+  }
+  return null;
+}
+
+// { data, span, error, unreadKeys }. `error` is a message, never a throw: a
+// malformed block costs the file its metadata, never its rules.
+function parseFrontmatterBlock(content) {
+  const lines = content.split("\n");
+  const span = frontmatterSpan(lines);
+  const empty = { data: {}, span, error: null, unreadKeys: [] };
+  if (!span) return empty;
+
+  let loaded;
+  try {
+    loaded = yaml.load(lines.slice(1, span.end).join("\n"), { schema: yaml.DEFAULT_SCHEMA });
+  } catch (err) {
+    return { ...empty, error: err.reason || err.message };
+  }
+  if (loaded === null || loaded === undefined) return empty;
+  if (typeof loaded !== "object" || Array.isArray(loaded)) {
+    return { ...empty, error: "frontmatter is not a mapping" };
+  }
+
+  const data = {};
+  const unreadKeys = [];
+  for (const [key, value] of Object.entries(loaded)) {
+    const normalized = normalizeFrontmatterValue(value);
+    if (normalized === null) unreadKeys.push(key);
+    else data[key] = normalized;
+  }
+  return { data, span, error: null, unreadKeys };
 }
 
 function parseFrontmatter(content) {
-  const fm = {};
-  const lines = content.split("\n");
-  if (!lines.length || lines[0].trim() !== "---") return fm;
-  let end = -1;
-  for (let i = 1; i < lines.length; i++) {
-    if (lines[i].trim() === "---") { end = i; break; }
-  }
-  if (end === -1) return fm;
-  let i = 1;
-  while (i < end) {
-    const line = lines[i].trim();
-    if (!line || line.startsWith("#") || !line.includes(":")) { i++; continue; }
-    const sep = line.indexOf(":");
-    const key = line.slice(0, sep).trim();
-    const rawValue = line.slice(sep + 1).trim();
-    if (/^\[.*\]$/.test(rawValue)) { fm[key] = parseInlineArray(rawValue); i++; continue; }
-    let value = rawValue.replace(/^["']|["']$/g, "");
-    if (/^[>|][+-]?$/.test(value)) {
-      const parts = [];
-      i++;
-      while (i < end && (!lines[i].trim() || /^\s/.test(lines[i]))) {
-        parts.push(lines[i].trim());
-        i++;
-      }
-      fm[key] = parts.filter(Boolean).join(" ");
-      continue;
-    }
-    if (!value && i + 1 < end && lines[i + 1].trim().startsWith("- ")) {
-      const items = [];
-      i++;
-      while (i < end && lines[i].trim().startsWith("- ")) {
-        const item = lines[i].trim().slice(2).trim().replace(/^["']|["']$/g, "");
-        if (item) items.push(item);
-        i++;
-      }
-      fm[key] = items;
-      continue;
-    }
-    fm[key] = value;
-    i++;
-  }
-  return fm;
+  return parseFrontmatterBlock(content).data;
 }
 
 function countGlobMatches(globs, root) {
@@ -709,12 +728,113 @@ function hasConstraintKeyword(text) {
 }
 
 // A table body row's cells, left to right. The row's outer pipes go, escaped
-// pipes stay inside their cell, and a cell with no letters — a dash, a count, an
-// empty column — carries nothing to grade and drops out.
+// pipes stay inside their cell, and a cell with no letters in any script — a
+// dash, a count, an empty column — carries nothing to grade and drops out.
+// [Foreman: 073] The letter test is Unicode-wide: a Cyrillic or CJK cell used to
+// read as letter-free and vanish from the inventory entirely.
 function tableCells(row) {
   return row.trim().replace(/^\||\|$/g, "").split(/(?<!\\)\|/)
     .map((c) => c.replace(/\\\|/g, "|").trim())
-    .filter((c) => /[A-Za-z]/.test(c));
+    .filter((c) => /\p{L}/u.test(c));
+}
+
+// ---------------------------------------------------------------------------
+// Markdown adapter — markdown-it tokens in, assay's line model out
+// ---------------------------------------------------------------------------
+
+// [Foreman: 073]
+// Block structure used to be found by hand: a fence state machine, a
+// "starts with a pipe and the next line has dashes" table sniffer, a heading
+// regex. Each was approximately right and wrong at the edges — a fence indented
+// inside a list item, a table with no leading pipe, a setext heading, an
+// indented code block. markdown-it decides all of that now, and every token
+// carries `map` = [startLine, endLine) over the source, so the answer comes back
+// as line numbers into the file the caller already has.
+//
+// What stays assay's own, deliberately, because it is policy and not Markdown:
+// HTML-comment stripping, `<!-- assay-ignore -->` handling, `<!-- category: -->`
+// annotations and `<example>`-style tag bodies. Those live in stripMetadata.
+function addRange(set, map) {
+  if (!map) return;
+  for (let i = map[0]; i < map[1]; i++) set.add(i);
+}
+
+function markdownRegions(lines, frontmatterEnd) {
+  const fenceLines = new Set();     // fenced and indented code — never graded
+  const headings = new Set();       // first line of a heading, ATX or setext
+  const headingLines = new Set();   // every line a heading occupies
+  const hrLines = new Set();
+  const tableLines = new Set();
+  const tableBodyRows = new Set();
+  const unsupported = [];
+  const regions = { fenceLines, headings, headingLines, hrLines, tableLines, tableBodyRows, unsupported };
+
+  // The frontmatter is YAML, not Markdown: blank it out so its "---" markers
+  // cannot read as a thematic break or a setext underline. Blanking rather than
+  // slicing keeps every token line number an index into the original file.
+  const masked = lines.map((l, i) => (i < frontmatterEnd ? "" : l)).join("\n");
+
+  let tokens;
+  try {
+    tokens = md.parse(masked, {});
+  } catch (err) {
+    // A parser that gives up must not take the audit down and must not drop a
+    // line: the body becomes one unsupported construct, graded like a code
+    // fence — that is, not at all.
+    for (let i = frontmatterEnd; i < lines.length; i++) fenceLines.add(i);
+    unsupported.push({
+      reason: "markdown parse failed: " + (err && err.message ? err.message : String(err)),
+      startLine: frontmatterEnd + 1,
+      endLine: lines.length,
+    });
+    return regions;
+  }
+
+  let inTableBody = false;
+  for (const token of tokens) {
+    switch (token.type) {
+      case "fence": {
+        addRange(fenceLines, token.map);
+        // An unclosed fence swallows everything below it. That is what CommonMark
+        // says, and it is almost never what the author meant, so it is named.
+        const marker = token.markup ? token.markup[0] : "`";
+        const closer = new RegExp("^" + escapeRe(marker) + "{" + (token.markup || "```").length + ",}\\s*$");
+        if (token.map && !closer.test((lines[token.map[1] - 1] || "").trim())) {
+          unsupported.push({
+            reason: "unclosed code fence — every line below it is read as code",
+            startLine: token.map[0] + 1,
+            endLine: token.map[1],
+          });
+        }
+        break;
+      }
+      case "code_block":
+        addRange(fenceLines, token.map);
+        break;
+      case "heading_open":
+        addRange(headingLines, token.map);
+        if (token.map) headings.add(token.map[0]);
+        break;
+      case "hr":
+        addRange(hrLines, token.map);
+        break;
+      case "table_open":
+        addRange(tableLines, token.map);
+        break;
+      case "tbody_open":
+        inTableBody = true;
+        break;
+      case "tbody_close":
+        inTableBody = false;
+        break;
+      case "tr_open":
+        if (inTableBody) addRange(tableBodyRows, token.map);
+        break;
+      default:
+        break;
+    }
+  }
+  return regions;
 }
 
 function stripMetadata(content) {
@@ -722,40 +842,39 @@ function stripMetadata(content) {
   const result = [];
   const annotations = {}; // lineNum -> category
   const ignored = new Set(); // lineNums following an assay-ignore comment
+  const unsupported = []; // { reason, startLine, endLine } — 1-based, inclusive
 
-  let frontmatterEnd = 0;
-  if (lines.length && lines[0].trim() === "---") {
-    for (let i = 1; i < lines.length; i++) {
-      if (lines[i].trim() === "---") { frontmatterEnd = i + 1; break; }
-    }
+  // [Foreman: 073] Malformed frontmatter is inventoried, never guessed at and
+  // never thrown on: the block is named as unsupported and the rest of the file
+  // is still parsed for rules.
+  const fm = parseFrontmatterBlock(content);
+  const frontmatterEnd = fm.span ? fm.span.end + 1 : 0;
+  if (fm.error) {
+    unsupported.push({ reason: "malformed frontmatter: " + fm.error, startLine: 1, endLine: frontmatterEnd });
   }
+  for (const key of fm.unreadKeys) {
+    unsupported.push({
+      reason: "frontmatter key `" + key + "` holds a nested map — inventoried, not analyzed",
+      startLine: 1,
+      endLine: frontmatterEnd,
+    });
+  }
+
+  const regions = markdownRegions(lines, frontmatterEnd);
+  const fenceRegions = regions.fenceLines;
+  unsupported.push(...regions.unsupported);
 
   // Claude Code strips block-level HTML comments before injecting instructions.
   // Remove them here too, while retaining visible text around an inline comment.
-  // Fence and comment state are tracked together: a fence marker inside a
-  // comment is still a comment, and a comment marker inside a fence is code.
-  const fenceRegions = new Set();
+  // Code fences win: a comment marker inside a fence is code, so fenced lines
+  // never enter the comment state machine.
   const visibleLines = lines.slice();
   const htmlCommentOnly = new Set();
-  let fence = null;
   let inHtmlComment = false;
+  let commentOpenedAt = -1;
   for (let i = frontmatterEnd; i < lines.length; i++) {
+    if (fenceRegions.has(i)) continue;
     const raw = lines[i];
-    const trimmed = raw.trim();
-    if (fence) {
-      fenceRegions.add(i);
-      const closer = new RegExp("^" + escapeRe(fence.char) + "{" + fence.length + ",}\\s*$");
-      if (closer.test(trimmed)) fence = null;
-      continue;
-    }
-    if (!inHtmlComment) {
-      const opener = trimmed.match(/^(`{3,}|~{3,})/);
-      if (opener) {
-        fence = { char: opener[1][0], length: opener[1].length };
-        fenceRegions.add(i);
-        continue;
-      }
-    }
 
     let visible = "";
     let cursor = 0;
@@ -779,10 +898,18 @@ function stripMetadata(content) {
       visible += raw.slice(cursor, start);
       removedComment = true;
       inHtmlComment = true;
+      commentOpenedAt = i;
       cursor = start + 4;
     }
     visibleLines[i] = visible;
     if (!visible.trim() && (raw.trim() || removedComment)) htmlCommentOnly.add(i);
+  }
+  if (inHtmlComment) {
+    unsupported.push({
+      reason: "unclosed HTML comment — every line below it is stripped",
+      startLine: commentOpenedAt + 1,
+      endLine: lines.length,
+    });
   }
 
   // <example>…</example>-style tag blocks hold worked-example content, not
@@ -827,19 +954,10 @@ function stripMetadata(content) {
   // table is a rule like any other, and dropping the whole table dropped it from
   // grading entirely. Layout rows still leave the stream; body rows come back
   // cell by cell below, each keeping the row's own line number.
-  const tableRegions = new Set();
-  const tableBodyRows = new Set();
-  for (let i = frontmatterEnd; i < lines.length; i++) {
-    if (tableRegions.has(i) || fenceRegions.has(i) || tagRegions.has(i) || ignoreRegions.has(i)) continue;
-    if (lines[i].trim().startsWith("|") && i + 1 < lines.length && /^\|[\s:]*-/.test(lines[i + 1].trim())) {
-      let j = i;
-      while (j < lines.length && lines[j].trim().startsWith("|")) {
-        tableRegions.add(j);
-        if (j > i + 1) tableBodyRows.add(j);
-        j++;
-      }
-    }
-  }
+  // [Foreman: 073] Which rows are body rows is markdown-it's answer now, so a
+  // GFM table with no leading pipe or an alignment row is recognized too.
+  const tableRegions = regions.tableLines;
+  const tableBodyRows = regions.tableBodyRows;
 
   for (let i = frontmatterEnd; i < lines.length; i++) {
     const lineNum = i + 1;
@@ -860,11 +978,15 @@ function stripMetadata(content) {
     if (catMatch) { annotations[lineNum] = catMatch[1]; continue; }
     if (/^<!--\s*assay-ignore\s*-->$/.test(control)) { ignored.add(lineNum); continue; }
 
-    if (/^#{1,6}\s/.test(stripped)) {
+    if (regions.headings.has(i)) {
+      // The visible line minus its markers is the heading text: an ATX line
+      // still carries its "#"s for identifyChunks to shave, a setext line is
+      // already bare, and either way an inline comment is gone.
       result.push({ lineNum, text: "", isContent: false, isBlank: false, isHeading: true, raw: stripped });
       continue;
     }
-    if (/^(?:---+|___+|\*\*\*+)\s*$/.test(stripped)) continue;
+    if (regions.headingLines.has(i)) continue; // a setext underline
+    if (regions.hrLines.has(i)) continue;
     if (!stripped) {
       result.push({ lineNum, text: "", isContent: false, isBlank: true, isHeading: false, raw: "" });
       continue;
@@ -881,7 +1003,21 @@ function stripMetadata(content) {
   for (const i of tagRegions) excluded.add(i + 1);
   for (const i of htmlCommentOnly) excluded.add(i + 1);
 
-  return { lines: result, annotations, ignored, excluded };
+  // [Foreman: 073] The inventory invariant: every physical line of the file
+  // lands in exactly one class. `instruction` is filled in by scan() once it
+  // knows which lines became graded rules; everything the parser can already
+  // decide is decided here. Precedence runs unsupported > ignored > excluded >
+  // content, so a line the adapter could not map is never counted as understood.
+  const classes = new Array(lines.length).fill("content");
+  for (const i of tagRegions) classes[i] = "excluded";
+  for (const i of htmlCommentOnly) classes[i] = "excluded";
+  for (const i of ignoreRegions) classes[i] = "ignored";
+  for (const n of ignored) classes[n - 1] = "ignored";
+  for (const u of unsupported) {
+    for (let n = Math.max(1, u.startLine); n <= Math.min(lines.length, u.endLine); n++) classes[n - 1] = "unsupported";
+  }
+
+  return { lines: result, annotations, ignored, excluded, classes, unsupported };
 }
 
 function identifyChunks(lines) {
@@ -1603,18 +1739,58 @@ function ruleKey(file, text) {
   return crypto.createHash("sha1").update(file + "\0" + normalized).digest("hex").slice(0, 12);
 }
 
+// [Foreman: 073]
+// Exact positions, carried beside the line numbers rather than instead of them.
+// Offsets are character indexes into the file as read, so
+// `content.slice(startOffset, endOffset)` returns the rule's own source text
+// whenever that text survives verbatim on one line; a rule assembled from
+// several lines spans from its first non-blank column to the end of its last
+// line. Columns are 0-based within their line, lines are 1-based to match
+// lineStart / lineEnd.
+// razor: character offsets, not byte offsets. Every file is read as UTF-8 and
+// the two agree for ASCII; a byte-true range under another encoding waits for
+// the file to be read as a Buffer, which nothing needs yet.
+function lineOffsets(lines) {
+  const offsets = new Array(lines.length);
+  let at = 0;
+  for (let i = 0; i < lines.length; i++) {
+    offsets[i] = at;
+    at += lines[i].length + 1;
+  }
+  return offsets;
+}
+
+function sourceRange(lines, offsets, startLine, endLine, text) {
+  const first = lines[startLine - 1] || "";
+  const last = lines[endLine - 1] || "";
+  let startCol = first.length - first.trimStart().length;
+  let endCol = last.length;
+  if (startLine === endLine) {
+    const at = first.indexOf(text);
+    if (at !== -1) { startCol = at; endCol = at + text.length; }
+  }
+  return {
+    startLine, startCol, endLine, endCol,
+    startOffset: (offsets[startLine - 1] || 0) + startCol,
+    endOffset: (offsets[endLine - 1] || 0) + endCol,
+  };
+}
+
 function scan(root) {
   const inaccessible = [];
   const files = findInstructionFiles(root, inaccessible);
   const rules = [];
+  const sources = [];
   let counter = 0;
   let proseChunks = 0, excludedLines = 0;
   const findMoved = makeBasenameResolver(root);
 
   files.forEach((file, fileIndex) => {
-    const { lines, annotations, ignored, excluded } = stripMetadata(file.content);
+    const { lines, annotations, ignored, excluded, classes, unsupported } = stripMetadata(file.content);
     const chunks = identifyChunks(lines);
     const merged = mergeClarifications(chunks);
+    const rawLines = file.content.split("\n");
+    const offsets = lineOffsets(rawLines);
 
     // [Foreman: 062] Narrative share = the fraction of graded content that reads
     // as prose rather than a rule. A file that is mostly motivating narrative is
@@ -1661,6 +1837,13 @@ function scan(root) {
         const sourceText = part.sourceText || effectiveText;
         const staleness = checkStaleness(effectiveText, root, findMoved, file.path);
         const f1 = scoreF1(effectiveText);
+        const lineEnd = part.sourceLineEnd || part.lineEnd;
+        // [Foreman: 073] Every line this rule occupies leaves the `content`
+        // class for `instruction` — that reclassification is what makes the
+        // inventory's span counts add up to the file.
+        for (let n = part.lineStart; n <= lineEnd; n++) {
+          if (classes[n - 1] === "content") classes[n - 1] = "instruction";
+        }
         const rule = {
           id: "R" + String(counter).padStart(3, "0"),
           key: ruleKey(file.path, effectiveText),
@@ -1669,7 +1852,8 @@ function scan(root) {
           text: sourceText,
           contextText: effectiveText,
           lineStart: part.lineStart,
-          lineEnd: part.sourceLineEnd || part.lineEnd,
+          lineEnd,
+          sourceRange: sourceRange(rawLines, offsets, part.lineStart, lineEnd, sourceText),
           category,
           invalidCategory,
           staleness,
@@ -1685,11 +1869,26 @@ function scan(root) {
         rules.push(rule);
       }
     }
+
+    // [Foreman: 073] The lossless inventory: one entry per parsed file, whose
+    // span counts sum to its line count by construction. Nothing the parser saw
+    // is missing from it — a line is instruction, ordinary content, explicitly
+    // ignored, excluded from grading, or named as unsupported.
+    const spans = { instruction: 0, content: 0, ignored: 0, excluded: 0, unsupported: 0 };
+    for (const cls of classes) spans[cls]++;
+    sources.push({
+      path: file.path,
+      sourceHash: crypto.createHash("sha1").update(file.content).digest("hex"),
+      lineCount: file.lineCount,
+      spans,
+      unsupported,
+    });
   });
 
   return {
     root: path.resolve(root),
     files: files.map(({ content, absPath, ...rest }) => rest),
+    sources,
     rules,
     skills: findSkillFiles(root),
     hookInventory: collectHooks(root),
@@ -1828,6 +2027,8 @@ function composeAudit(scanData, judgments) {
   return {
     root: scanData.root, files, rules, skills: scanData.skills || [],
     hookInventory: scanData.hookInventory || [],
+    // [Foreman: 073] the inventory travels with the audit, unchanged
+    sources: scanData.sources || [],
     coverage: scanData.coverage || null,
     corpusScore: corpus, corpusGrade: corpus === null ? null : grade(corpus),
   };
@@ -2005,6 +2206,11 @@ function pushCoverageSection(out, audit, rules, suppressed) {
   }
   const badCategories = rules.filter((r) => r.invalidCategory).length;
   if (badCategories) out.push(`- ${badCategories} unknown category annotation(s) — listed below`);
+  // [Foreman: 073] A construct the parser could not map faithfully is named
+  // here rather than quietly read as prose. It lowers coverage; it never
+  // becomes an inferred non-rule.
+  const unsupported = (audit.sources || []).reduce((n, s) => n + (s.unsupported || []).length, 0);
+  if (unsupported) out.push(`- ${unsupported} unsupported construct(s) — inventoried, not graded`);
   for (const s of cov.inaccessible || []) {
     out.push(`- could not read \`${s.path}\` (${s.reason}) — nothing in it was graded`);
   }
@@ -2565,7 +2771,8 @@ function main() {
 }
 
 module.exports = {
-  parseFrontmatter, findRuleMarkdownFiles, findInstructionFiles, stripMetadata, identifyChunks, classifyChunk,
+  parseFrontmatter, parseFrontmatterBlock, lineOffsets, sourceRange,
+  findRuleMarkdownFiles, findInstructionFiles, stripMetadata, identifyChunks, classifyChunk,
   mergeClarifications, splitCompound, checkStaleness, scoreF1, scoreF2, scoreF4, scoreF5, scoreF7,
   composeScore, grade, detectPlacement, scan, composeAudit, renderReport, loadJudgments,
   looksLikeStatement, hasImperativeVerb, checkSkillDescription, gradeSkill, findSkillFiles,
