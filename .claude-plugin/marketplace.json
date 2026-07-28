@@ -11,7 +11,7 @@
       "name": "assay",
       "source": "./assay",
       "description": "Analyzes the instruction files Claude Code or Codex loads — CLAUDE.md, .claude/rules/, AGENTS.md, skills and hooks — grading structural hygiene without predicting compliance. Flags stale references and rules better served by a mechanism, rewrites the weak ones, and authors new rules and skills.",
-      "version": "0.8.0-alpha",
+      "version": "0.9.0-alpha",
       "license": "MIT",
       "author": {
         "name": "Victor Villegas",

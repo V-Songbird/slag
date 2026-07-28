@@ -1,6 +1,6 @@
 {
   "name": "assay",
-  "version": "0.8.0-alpha",
+  "version": "0.9.0-alpha",
   "description": "Analyzes the instruction files an agent loads for a project — the AGENTS.md chain, skills, and hooks — and reports what is shadowed, past the byte cap, stale, contradictory, or better served by a mechanism than by prose.",
   "author": {
     "name": "Victor Villegas",
@@ -9,7 +9,15 @@
   "homepage": "https://github.com/V-Songbird/slag/tree/main/assay",
   "repository": "https://github.com/V-Songbird/slag",
   "license": "MIT",
-  "keywords": ["rules", "AGENTS.md", "audit", "instructions", "static-analysis", "hooks", "skills"],
+  "keywords": [
+    "rules",
+    "AGENTS.md",
+    "audit",
+    "instructions",
+    "static-analysis",
+    "hooks",
+    "skills"
+  ],
   "skills": "./skills/",
   "interface": {
     "displayName": "assay",
