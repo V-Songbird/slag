@@ -14,9 +14,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - Every line of every instruction file is accounted for in the report's **Coverage** block: graded, set aside as content, explicitly ignored, excluded, or named as something assay could not read. An unclosed code fence or an unclosed HTML comment is counted there rather than silently swallowing the rest of the file
 - The JSON record carries a per-file inventory — content hash, line count, and the span counts those lines fall into — and every rule carries its exact source range, line and column and character offset
 - The audit now sees the whole documented Claude surface for a project: `CLAUDE.local.md`, your user-level `CLAUDE.md` — graded under its own section, never moving the project grade — and a count of the user skills and subagents that exist alongside them. `--project-only` keeps the audit inside the repo
+- The report now leads with findings: **Hard gates** for rules the host cannot apply, **Operational findings** for the ones it loads but that carry a risk, and **Policy placement** for the ones another mechanism should own. Every finding names its exact source line and is labelled with the kind of evidence behind it — mechanical, heuristic, model-inferred, or measured
+- The report opens with a count of what was found by kind, and `remeasure` shows those counts before and after your fixes
 
 ### Changed
 
+- The corpus grade is now a secondary **Structural hygiene** summary at the bottom of the report. It is a summary of how rules are written, scoped, and placed — never a compliance prediction — and it never overrides a hard gate
+- A rule the host can't apply — a scoped file whose patterns match nothing, a rule requiring a path that doesn't exist — is reported as that state instead of as a letter grade
+- Hedged wording is scored by its weakest hedge. "Always try to use functional components" no longer reads as an unconditional mandate because of the "always"
 - An audit file written by an older assay is rejected with the version it found and a note to rerun `scan`, instead of being read as if its fields still meant the same thing. `remeasure` is the exception: it drops the stale comparison, says so, and re-scans anyway
 - A rule written in a non-Latin script inside a table cell is graded like any other cell. Those cells used to drop out of the table before anything looked at them
 

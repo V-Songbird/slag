@@ -119,16 +119,29 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" report
 ```
 
 Add `--verbose` or `--json` if the user asked. The command prints the finished
-markdown report — corpus grade, per-file grades, weak rules with suggested
-fixes, stall risks, buried rules, stale references, hook opportunities,
-placement candidates, weak skill descriptions. It opens with a **Coverage**
-block — what was parsed, graded, set aside, excluded, suppressed, or unreadable —
-so a drop is never silent and you never have to restate those counts yourself.
-A **User scope** section appears when the user's own `CLAUDE.md` was graded; its
-rules are fixed in the user's setup, not in this repo, and they never move the
-project grade — do not fold them into the project's numbers when you summarize.
-With `--verbose` it also lists everything step 2b suppressed, each with its
-reason quoted.
+markdown report, findings first, in this order:
+
+- a **Coverage** block — what was parsed, graded, set aside, excluded,
+  suppressed, or unreadable — so a drop is never silent and you never have to
+  restate those counts yourself;
+- a headline counting the findings by kind, which is the report's verdict;
+- **Hard gates** — rules the host cannot apply at all;
+- **Operational findings** — loaded rules that carry a risk: weak rules with
+  suggested fixes, stall risks, buried rules, stale references, unknown category
+  annotations;
+- **Policy placement** — hook opportunities, placement candidates, restructure
+  candidates, and the count of rules that appropriately stay prose;
+- **Structural hygiene (secondary)** — the corpus grade, the per-file grades,
+  and **User scope** when the user's own `CLAUDE.md` was graded. Those user rules
+  are fixed in the user's setup, not in this repo, and they never move the
+  project grade — do not fold them into the project's numbers when you
+  summarize;
+- **Weak skill descriptions**.
+
+Every finding line carries a bracketed evidence tag — `[mechanical]`,
+`[heuristic]`, `[model-inferred]`, `[experiment-supported: …]`. Keep them: they
+are what stops a heuristic from reading as a fact. With `--verbose` the report
+also lists everything step 2b suppressed, each with its reason quoted.
 
 The report is this skill's deliverable and the user must have read it before
 the step 4 menu asks them to choose anything. Length limits from an output
@@ -179,9 +192,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" artifact
 ```
 
 It writes `.assay-tmp/report.html` — a self-contained page (no external assets,
-the audit data embedded as inline JSON) with a sortable rule table where clicking
-a row expands that rule's full untruncated text, every factor score, its grade,
-and the suggested fix. Publish it with the `Artifact` tool, passing that file's
+the audit data embedded as inline JSON) with a sortable rule table — hard gates
+first, then worst score — carrying each rule's state and evidence tag, where
+clicking a row expands that rule's full untruncated text, every factor score,
+its grade, and the suggested fix. Publish it with the `Artifact` tool, passing that file's
 path: the file is already page content only, so the Artifact skeleton wraps it
 unchanged. Give the reader the returned URL.
 
@@ -231,8 +245,9 @@ worklist and a `pending` count instead of a report. When that happens, judge
 only the listed rules exactly as in step 2 (and step 2b if not `--no-verify`),
 **merge** them into `.assay-tmp/judgments.json` without disturbing the existing
 entries, and run `remeasure` once more. The second run finds every hash known and
-prints the report, which now leads with a **Since last audit** section: corpus
-grade before → after, and each file's before/after.
+prints the report, which now leads with a **Since last audit** section: the
+finding counts before → after, then corpus grade before → after, then each
+file's before/after.
 
 Run `remeasure` at most twice — once to surface the reworded rules, once to
 report. Do not loop further: one rewrite-and-remeasure, then done. Show the

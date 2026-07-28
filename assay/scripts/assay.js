@@ -93,8 +93,12 @@ const RECORD_SCHEMA = {
   // Reserved: the output contract promises these, nothing fills them yet, and
   // they are allowed but never required at the top level. Later entries add
   // them — do not invent content for one here.
+  // [Foreman: 075] `findings` left this list: an audit record emits it. It is
+  // still not required, so a prior audit written before 075 stays readable and
+  // only loses its finding deltas. A scan record carries no findings — nothing
+  // is derived before the model judgments land.
   reserved: [
-    "instructions", "mechanisms", "findings", "relationships",
+    "instructions", "mechanisms", "relationships",
     "evidence", "semantic", "plans", "changes", "validation", "proofLinks",
   ],
 };
@@ -1287,18 +1291,22 @@ function scoreF1(text) {
   if (looksLikeStatement(lower) && bestScore <= 0.85) {
     return { value: IMPLICIT_VERB_DEFAULT, method: "implicit_imperative_default", matchedVerb: null };
   }
+  // [Foreman: 075] A hedge governs the force of the whole sentence, downward,
+  // however firm the rest of it sounds. "Always try to use functional components"
+  // used to score 1.00: the always+imperative upgrade beat a weakest-hedge branch
+  // that only ran on two hedges or more. One hedge is a hedge, so the weakest one
+  // wins outright and no upgrade can climb back over it.
   const hedgingLabels = new Set(["hedged", "suggestion", "weak_suggestion", "preference"]);
   const hedges = matches.filter((m) => hedgingLabels.has(m.label));
-  let best;
-  if (hedges.length >= 2) {
-    best = hedges.reduce((a, b) => (a.score <= b.score ? a : b));
-  } else {
-    best = matches.reduce((a, b) => (a.score >= b.score ? a : b));
+  if (hedges.length) {
+    const weakest = hedges.reduce((a, b) => (a.score <= b.score ? a : b));
+    return { value: weakest.score, method: "lookup", matchedVerb: weakest.verb, hedged: true };
   }
   if (matches.some((m) => m.verb === "always")) {
     const imperative = matches.find((m) => m.verb !== "always" && m.label === "bare_imperative");
     if (imperative) return { value: 1.0, method: "lookup", matchedVerb: "always + " + imperative.verb };
   }
+  const best = matches.reduce((a, b) => (a.score >= b.score ? a : b));
   return { value: best.score, method: "lookup", matchedVerb: best.verb };
 }
 
@@ -1969,7 +1977,7 @@ function composeAudit(scanData, judgments) {
   const mandates = counted.filter((r) => r.category === "mandate" && (files[r.fileIndex] || {}).scope !== "user");
   const corpus = mandates.length ? round3(mandates.reduce((s, r) => s + r.score, 0) / mandates.length) : null;
 
-  return {
+  const audit = {
     root: scanData.root, context: scanData.context || null,
     files, rules, skills: scanData.skills || [],
     hookInventory: scanData.hookInventory || [],
@@ -1978,6 +1986,268 @@ function composeAudit(scanData, judgments) {
     coverage: scanData.coverage || null,
     corpusScore: corpus, corpusGrade: corpus === null ? null : grade(corpus),
   };
+  // [Foreman: 075] Findings are the product's primary output, so they are part
+  // of the composed audit, not something a renderer invents on the way out.
+  audit.findings = deriveFindings(audit);
+  return audit;
+}
+
+// ---------------------------------------------------------------------------
+// Findings — the primary output
+// ---------------------------------------------------------------------------
+
+// [Foreman: 075]
+// Every loaded rule gets exactly ONE primary state, derived from signals the
+// analyzers already produce, at the precedence below: a rule the host never
+// loads is not also "at risk", it is simply not there. `shadowed` and
+// `conflicting` are named because the finding contract names them; nothing
+// derives them until corpus analysis lands.
+//
+// "healthy" means no static issue was found within analyzer coverage. It never
+// means the agent will comply — no static check can say that.
+const FINDING_STATES = [
+  "inactive", "shadowed", "blocked", "conflicting",
+  "ambiguous", "at-risk", "mechanical-candidate", "advisory", "healthy",
+];
+const STATE_RANK = new Map(FINDING_STATES.map((s, i) => [s, i]));
+const HARD_GATE_STATES = new Set(["inactive", "shadowed", "blocked"]);
+const OPERATIONAL_STATES = new Set(["ambiguous", "conflicting", "at-risk"]);
+// F3 at or below this: the moment the rule fires has more than one reading.
+const AMBIGUOUS_F3_THRESHOLD = 0.35;
+// F8 at or above this is the rubric's judgment-only ceiling — prose is the
+// right home for the policy, not a weaker place to have left it.
+const ADVISORY_F8_THRESHOLD = 0.9;
+
+// An experiment-supported finding must disclose the tier it was measured on and
+// what that does not cover: a Claude-profile signal, never a cross-agent law.
+const WORDING_STUDY_EVIDENCE = {
+  level: "experiment-supported",
+  tier: "small-model tier",
+  basis: "local wording studies (small-model tier, anti-default fixtures)",
+  limits: "measured on one host profile against fixtures built to defeat the model's defaults; it does not carry to other agents",
+};
+const MODEL_JUDGMENT_LIMITS = "one model pass in this audit session; another session may judge it differently";
+
+// The tag every finding line carries. The interface must not let a heuristic
+// read as a mechanical fact — this tag is that distinction, so it stays plain.
+function evidenceTag(evidence) {
+  if (!evidence) return "";
+  return "[" + evidence.level + (evidence.tier ? ": " + evidence.tier : "") + "]";
+}
+
+function stateWord(state, n) {
+  if (state !== "mechanical-candidate") return state;
+  return n === 1 ? "mechanical candidate" : "mechanical candidates";
+}
+
+function ruleSpan(rule) {
+  return [{ path: rule.file, lineStart: rule.lineStart, lineEnd: rule.lineEnd || rule.lineStart }];
+}
+
+function fileSpan(file) {
+  return [{ path: file.path, lineStart: 1, lineEnd: file.lineCount || 1 }];
+}
+
+// One primary state for one rule, first match wins.
+function deriveRuleState(rule, file) {
+  const factors = rule.factors || {};
+  const values = rule.factorValues || {};
+  const globs = (file && file.globs) || [];
+
+  if (globs.length && file.globMatchCount === 0) {
+    return {
+      state: "inactive", severity: "high", analyzer: "glob-resolution",
+      summary: "`" + rule.file + "` is scoped to globs that match no file, so the host never loads it",
+      explanation: "The host loads a scoped rules file only for paths matching its `paths:` frontmatter, and nothing in the project matches. No wording change reaches this rule while the glob stays dead.",
+      evidence: { level: "mechanical", basis: "dead-glob resolution against the project tree" },
+      safeActions: ["repair the glob", "move the rule to an always-loaded file", "retire the rule"],
+    };
+  }
+  if (rule.staleness && rule.staleness.gated) {
+    const dead = rule.staleness.missing.filter((m) => !(m.moved || []).length).map((m) => "`" + m.ref + "`");
+    return {
+      state: "blocked", severity: "high", analyzer: "reference-resolution",
+      summary: "it requires " + dead.join(", ") + ", which the project does not contain",
+      explanation: "The rule loads, but a path it depends on does not resolve, so following it means re-discovering the target or giving up.",
+      evidence: { level: "mechanical", basis: "reference resolution against the working tree" },
+      safeActions: ["repair reference", "drop the reference"],
+    };
+  }
+  if (factors.F1 && factors.F1.method === "extraction_failed") {
+    return {
+      state: "ambiguous", severity: "medium", analyzer: "verb-strength",
+      summary: "no directive verb could be read out of it — the action is not stated plainly",
+      explanation: "The wording carries no recognizable action, so what the rule asks for is left to the reader.",
+      evidence: {
+        level: "heuristic", basis: "verb-table extraction",
+        limits: "English-only wording table; a rule in another language reads as unextractable whatever it says",
+      },
+      safeActions: ["rewrite with a leading action verb"],
+    };
+  }
+  if (values.F3 != null && values.F3 <= AMBIGUOUS_F3_THRESHOLD) {
+    return {
+      state: "ambiguous", severity: "medium", analyzer: "trigger-distance",
+      summary: "the moment it fires has more than one reading",
+      explanation: "The rule never names the situation it applies to, so recognizing that moment is left to inference.",
+      evidence: { level: "model-inferred", basis: "audit-session model judgment (trigger distance)", limits: MODEL_JUDGMENT_LIMITS },
+      safeActions: ["name the trigger", "rewrite"],
+    };
+  }
+  if (rule.stallRisk) {
+    return {
+      state: "at-risk", severity: "high", analyzer: "framing-polarity",
+      summary: "a bare prohibition — nothing is named to do instead, so a task needing the banned thing can stall",
+      explanation: "A ban with no replacement and no escape hatch converts a blocked task into a stopped one.",
+      evidence: WORDING_STUDY_EVIDENCE,
+      safeActions: ["name the alternative", "add an escape hatch"],
+    };
+  }
+  if (factors.F1 && factors.F1.hedged) {
+    return {
+      state: "at-risk", severity: "medium", analyzer: "verb-strength",
+      summary: "hedged force — `" + factors.F1.matchedVerb + "` governs the directive",
+      explanation: "A hedge sets the whole sentence's force, however firm the rest of it sounds, so the rule reads as optional.",
+      evidence: { level: "heuristic", basis: "hedge-marker lookup" },
+      safeActions: ["rewrite with a firm verb", "restate it as a preference on purpose"],
+    };
+  }
+  if (values.F5 != null && values.F5 <= BURIED_F5_THRESHOLD) {
+    return {
+      state: "at-risk", severity: "low", analyzer: "position",
+      summary: "buried in the bottom half of a long file, where rules lose force",
+      explanation: "Position within a long file is the part of loading the author controls; the bottom of one is the weakest place to put a rule.",
+      evidence: { level: "heuristic", basis: "position within the file's graded content" },
+      safeActions: ["move to the top quarter", "split the file"],
+    };
+  }
+  if (rule.placement) {
+    return {
+      state: "mechanical-candidate", severity: "low", analyzer: "placement-detection",
+      summary: "a " + rule.placement.bestFit + " could own this policy more reliably than prose",
+      explanation: "The rule's job matches a deterministic or delegated mechanism; prose is the least reliable place to keep it.",
+      evidence: { level: "heuristic", basis: "placement signal patterns" },
+      safeActions: ["promote to " + rule.placement.bestFit, "park the promotion plan"],
+    };
+  }
+  if (rule.hookOpportunity) {
+    return {
+      state: "mechanical-candidate", severity: "low", analyzer: "enforceability",
+      summary: "a hook or script could enforce this mechanically, on every run",
+      explanation: "Nothing here needs judgment, so leaving it to prose spends attention on something an exit code settles.",
+      evidence: { level: "model-inferred", basis: "audit-session model judgment (enforceability)", limits: MODEL_JUDGMENT_LIMITS },
+      safeActions: ["promote to hook", "park the promotion plan"],
+    };
+  }
+  if (rule.category === "preference") {
+    return {
+      state: "advisory", severity: "info", analyzer: "category",
+      summary: "annotated a preference — judgment that appropriately stays prose",
+      explanation: "The rule is declared a preference, so it is held to a preference's floor and not to a mandate's.",
+      evidence: { level: "mechanical", basis: "category annotation" },
+      safeActions: [],
+    };
+  }
+  if (rule.f8 != null && rule.f8 >= ADVISORY_F8_THRESHOLD) {
+    return {
+      state: "advisory", severity: "info", analyzer: "enforceability",
+      summary: "needs judgment no mechanism can supply — it appropriately stays prose",
+      explanation: "No hook or linter can decide this, so prose is the right home for it rather than a weaker place to have left it.",
+      evidence: { level: "model-inferred", basis: "audit-session model judgment (enforceability)", limits: MODEL_JUDGMENT_LIMITS },
+      safeActions: [],
+    };
+  }
+  return {
+    state: "healthy", severity: "info", analyzer: "state-derivation",
+    summary: "no static issue found within analyzer coverage",
+    explanation: "Nothing the analyzers check fired on this rule. That is not a prediction that the agent will follow it.",
+    evidence: {
+      level: "mechanical", basis: "no finding at material severity across the checks this analyzer runs",
+      limits: "absence of a finding is bounded by analyzer coverage; it is never a compliance prediction",
+    },
+    safeActions: [],
+  };
+}
+
+// Every finding in the audit, rule states first, then the findings that belong
+// to a file, an annotation, or the corpus rather than to one rule. Pure: two
+// derivations over the same audit produce the same list in the same order.
+function deriveFindings(audit) {
+  const findings = [];
+  const push = (finding) => findings.push({ id: "F" + String(findings.length + 1).padStart(3, "0"), ...finding });
+  const all = audit.rules || [];
+  const rules = all.filter((r) => !r.suppressed);
+  const files = audit.files || [];
+
+  for (const rule of rules) {
+    push({ ...deriveRuleState(rule, files[rule.fileIndex]), rule: rule.id, sources: ruleSpan(rule) });
+  }
+  for (const rule of rules.filter((r) => r.nonLatin)) {
+    push({
+      type: "unsupported-language", severity: "low", analyzer: "language-script", rule: rule.id,
+      summary: "written in a non-Latin script — English-only scoring never applied to it",
+      explanation: "Wording checks are English-only, so this rule's factor scores measure nothing. Read them as unreliable, not as low.",
+      evidence: {
+        level: "heuristic", basis: "non-Latin script detection",
+        limits: "script detection, not language detection — Latin-script non-English is not covered",
+      },
+      sources: ruleSpan(rule), safeActions: ["translate the rule", "exclude the file from grading"],
+    });
+  }
+  for (const rule of rules.filter((r) => r.invalidCategory)) {
+    const line = rule.invalidCategory.line;
+    push({
+      type: "unknown-category", severity: "low", analyzer: "category", rule: rule.id,
+      summary: "`<!-- category: " + rule.invalidCategory.value + " -->` names no known category",
+      explanation: "The annotation was not recognized, so the rule was graded under its file's default category and holds the wrong pass mark.",
+      evidence: { level: "mechanical", basis: "category annotation vocabulary" },
+      sources: [{ path: rule.file, lineStart: line, lineEnd: line }],
+      safeActions: ["fix the spelling", "drop the annotation"],
+    });
+  }
+  const byPath = new Map(files.map((f) => [f.path, f]));
+  for (const candidate of restructureCandidates(audit)) {
+    push({
+      type: "file-shape", severity: "medium", analyzer: "file-shape",
+      summary: "the file's shape holds its rules back: " + candidate.reasons.join(", "),
+      explanation: "This is a property of the file, not of any one rule in it, so no per-rule rewrite reaches it.",
+      evidence: { level: "heuristic", basis: "narrative share, rule position, and file length thresholds" },
+      sources: fileSpan(byPath.get(candidate.path) || { path: candidate.path }),
+      safeActions: candidate.restructures,
+    });
+  }
+  for (const source of audit.sources || []) {
+    for (const construct of source.unsupported || []) {
+      push({
+        type: "unsupported-construct", severity: "low", analyzer: "parser",
+        summary: construct.reason,
+        explanation: "The parser could not map this span faithfully, so it was inventoried rather than graded. It lowers coverage; it never becomes an inferred non-rule.",
+        evidence: { level: "mechanical", basis: "parser coverage" },
+        sources: [{ path: source.path, lineStart: construct.startLine, lineEnd: construct.endLine }],
+        safeActions: ["repair the construct"],
+      });
+    }
+  }
+  for (const source of ((audit.coverage || {}).inaccessible) || []) {
+    push({
+      type: "inaccessible-source", severity: "medium", analyzer: "discovery",
+      summary: "could not be read (" + source.reason + ") — nothing in it was graded",
+      explanation: "The host loads this file but the audit could not open it, so every count in this report excludes whatever it contains.",
+      evidence: { level: "mechanical", basis: "filesystem read" },
+      sources: [{ path: source.path, lineStart: 1, lineEnd: 1 }],
+      safeActions: ["fix the permissions", "rerun the audit"],
+    });
+  }
+  for (const rule of all.filter((r) => r.suppressed)) {
+    push({
+      type: "suppressed-entry", severity: "info", analyzer: "verification-pass", rule: rule.id,
+      summary: "dropped from every count — judged prose rather than an instruction: " + rule.suppressedReason,
+      explanation: "The verification pass may only drop an entry; its score and factor values are unchanged.",
+      evidence: { level: "model-inferred", basis: "audit-session verification pass", limits: MODEL_JUDGMENT_LIMITS },
+      sources: ruleSpan(rule), safeActions: [],
+    });
+  }
+  return findings;
 }
 
 function fmt(x) {
@@ -1988,6 +2258,8 @@ function pushWeakSkillSection(out, weakSkills) {
   out.push(`## Weak skill descriptions (${weakSkills.length} to fix)`);
   out.push("");
   out.push("A skill's frontmatter description is how Claude decides to invoke it, and its `description` plus `when_to_use` share one listing entry capped at 1,536 characters — past that the tail is silently truncated. Model-invocable skills are graded on the trigger recipe folded into `description` alone; a lingering `when_to_use` field is flagged to fold in and delete, not a place to stash overflow. A `disable-model-invocation` skill is graded as a plain user-facing summary instead, and a skill neither side can invoke is flagged for removal. assay can rewrite each one for you from the fix menu (dead skills are flagged, not rewritten).");
+  out.push("");
+  out.push("Every check below is read out of the frontmatter, not judged. [mechanical]");
   out.push("");
   out.push("| Skill | Where | Chars | Issue |");
   out.push("|---|---|---|---|");
@@ -2060,9 +2332,35 @@ function gradeCell(score, gradeVal) {
   return score === null || score === undefined ? "—" : `${gradeVal} (${fmt(score)})`;
 }
 
-function pushProgressSection(out, audit, prev) {
+function stateCounts(findings) {
+  const counts = new Map();
+  for (const f of findings || []) {
+    if (f.state) counts.set(f.state, (counts.get(f.state) || 0) + 1);
+  }
+  return counts;
+}
+
+function pushProgressSection(out, audit, prev, findings) {
   out.push("## Since last audit");
   out.push("");
+  // [Foreman: 075] Findings move first, because they are what the report is
+  // about; the grade follows as the hygiene summary it now is.
+  const before = stateCounts(prev.findings);
+  const after = stateCounts(findings);
+  // A prior audit written before findings existed has nothing to diff — the
+  // grade comparison still runs.
+  if (prev.findings) {
+    const states = FINDING_STATES.filter((s) => before.get(s) || after.get(s));
+    if (states.length) {
+      out.push("| Finding | Before | After |");
+      out.push("|---|---|---|");
+      for (const s of states) {
+        const n = after.get(s) || 0;
+        out.push(`| ${stateWord(s, n)} | ${before.get(s) || 0} | ${n} |`);
+      }
+      out.push("");
+    }
+  }
   out.push(`Corpus grade ${gradeCell(prev.corpusScore, prev.corpusGrade)} → ${gradeCell(audit.corpusScore, audit.corpusGrade)}.`);
   out.push("");
   const prevByPath = new Map((prev.files || []).map((f) => [f.path, f]));
@@ -2117,9 +2415,9 @@ function restructureCandidates(audit) {
 }
 
 function pushRestructureSection(out, candidates) {
-  out.push("## Restructure candidates");
+  out.push("### Restructure candidates");
   out.push("");
-  out.push("These files score low because of their shape, not their wording — a per-rule rewrite can't reach the problem. Reshape the file itself:");
+  out.push("These files score low because of their shape, not their wording — a per-rule rewrite can't reach the problem. Reshape the file itself: [heuristic]");
   out.push("");
   for (const c of candidates) {
     out.push(`- [${c.path}](${c.path}) — ${c.reasons.join(", ")}`);
@@ -2135,7 +2433,7 @@ function pushRestructureSection(out, candidates) {
 function pushUserScopeSection(out, files) {
   const userFiles = files.filter((f) => f.scope === "user");
   if (!userFiles.length) return;
-  out.push("## User scope");
+  out.push("### User scope");
   out.push("");
   out.push("These load for every project on this machine. They are graded here but left out of the project grade — fix them in your own setup, or rerun with `--project-only` to leave them out entirely.");
   out.push("");
@@ -2188,11 +2486,25 @@ function pushCoverageSection(out, audit, rules, suppressed) {
   out.push("");
 }
 
+// [Foreman: 075]
+// The report leads with findings and ends with the hygiene grade. Four sections
+// carry the whole diagnosis — hard gates, operational findings, policy
+// placement, structural hygiene — and every detail table the report used to
+// print at the top level still prints, one level down, inside the section it
+// belongs to. Every finding line carries a bracketed evidence tag, because the
+// one thing the interface must never do is let a heuristic read as a fact.
 function renderReport(audit, opts = {}) {
   const out = [];
   const { files } = audit;
   const rules = audit.rules.filter((r) => !r.suppressed);
   const suppressed = audit.rules.filter((r) => r.suppressed);
+  // A hand-built audit (a test fixture, an older record) still renders: the
+  // derivation is a pure function of the audit either way.
+  const findings = audit.findings || deriveFindings(audit);
+  const findingByRule = new Map(findings.filter((f) => f.state).map((f) => [f.rule, f]));
+  const rulesById = new Map(rules.map((r) => [r.id, r]));
+  const stateOf = (r) => findingByRule.get(r.id) || null;
+  const tagOf = (r) => { const f = stateOf(r); return f ? evidenceTag(f.evidence) : ""; };
   // file:line as a markdown link — Claude Code renders it clickable, opening
   // the rule at its exact line
   const loc = (r) => `[${r.file}:${r.lineStart}](${r.file}:${r.lineStart})`;
@@ -2224,55 +2536,74 @@ function renderReport(audit, opts = {}) {
     }
     return out.join("\n");
   }
-  const corpusBit = audit.corpusScore === null
-    ? "no mandate rules left to grade"
-    : `corpus grade **${audit.corpusGrade} (${fmt(audit.corpusScore)})**, mandate rules only`;
-  out.push(`**${rules.length} rules across ${files.filter((f) => f.ruleCount > 0).length} file(s)** — ${corpusBit}.`);
-  out.push("");
-  // [Foreman: 074] Said once, where the number is, so nobody reads the grade as
-  // covering files that live outside the repo.
-  if (files.some((f) => f.scope === "user")) {
-    out.push("User-scope files are graded under their own section and never move the project grade.");
-    out.push("");
-  }
-  out.push("Grades measure structural hygiene — how a rule is written, scoped, and placed — not whether Claude will comply. They assume the least forgiving reader: small models, subagents, headless runs. If only large models in interactive sessions read this corpus, treat severity one notch softer.");
-  out.push("");
   pushCoverageSection(out, audit, rules, suppressed);
 
-  if (opts.prev) pushProgressSection(out, audit, opts.prev);
-
-  out.push("## Files");
+  // 2. Headline — the risk topology, not a mean.
+  const counts = stateCounts(findings);
+  const topology = FINDING_STATES.filter((s) => counts.get(s))
+    .map((s) => `${counts.get(s)} ${stateWord(s, counts.get(s))}`);
+  out.push(`**${topology.join(", ")}** across ${files.filter((f) => f.ruleCount > 0).length} file(s).`);
   out.push("");
-  out.push("| File | Rules | Grade | Loading |");
-  out.push("|---|---|---|---|");
-  for (const f of files.filter((x) => x.scope !== "user")) {
-    const loading = f.globs && f.globs.length ? "scoped: " + f.globs.join(", ") : "always loaded";
-    const g = f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`;
-    out.push(`| ${f.path} | ${f.ruleCount} | ${g} | ${loading} |`);
-  }
+  out.push("Findings are this report's primary output. The structural-hygiene grade at the bottom is a secondary summary — it never overrides a hard gate, and it never predicts compliance.");
   out.push("");
-  pushUserScopeSection(out, files);
 
-  const weak = rules.filter((r) => r.weak).sort((a, b) => a.score - b.score);
-  if (weak.length) {
-    out.push(`## Weak rules (${weak.length} below their category floor)`);
+  if (opts.prev) pushProgressSection(out, audit, opts.prev, findings);
+
+  // 3. Hard gates — the host cannot apply these at all.
+  const gates = findings.filter((f) => HARD_GATE_STATES.has(f.state));
+  const gated = new Set(gates.map((f) => f.rule));
+  out.push("## Hard gates");
+  out.push("");
+  if (!gates.length) {
+    out.push("None — every rule the audit found can load in this context.");
     out.push("");
-    out.push("Click a rule to open it at its line.");
+  } else {
+    out.push("The host cannot apply these as written. No wording fix reaches them, and no hygiene score overrides one.");
     out.push("");
-    out.push("| Rule | Score | Main issue | Suggested fix |");
-    out.push("|---|---|---|---|");
-    for (const r of weak) {
-      const names = rowWeaknesses(r);
-      out.push(`| ${ruleLink(r, 60)} | ${r.grade} (${fmt(r.score)}) | ${names.map((n) => FACTOR_LABELS[n] || n).join(", ")} | ${names.map((n) => FRIENDLY_FIXES[n]).filter(Boolean).join("; ")} |`);
+    for (const f of gates) {
+      const r = rulesById.get(f.rule);
+      out.push(`- ${ruleLink(r, 60)} — **${f.state}**: ${f.summary} ${evidenceTag(f.evidence)}`);
     }
     out.push("");
   }
 
+  // 4. Operational findings — loaded, but risky.
+  // A hard-gated rule is named above with its state, never here with a grade:
+  // a rule the host never loads has no operational behavior to be weak at.
+  const weak = rules.filter((r) => r.weak && !gated.has(r.id)).sort((a, b) => a.score - b.score);
   const stalls = rules.filter((r) => r.stallRisk);
-  if (stalls.length) {
-    out.push("## Stall risks (bare prohibitions)");
+  const buried = rules.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD);
+  const stale = rules.filter((r) => r.staleness && r.staleness.missing.length);
+  const badCategories = rules.filter((r) => r.invalidCategory);
+  out.push("## Operational findings");
+  out.push("");
+  if (!weak.length && !stalls.length && !buried.length && !stale.length && !badCategories.length) {
+    out.push("None — no loaded rule carries a risk the analyzers can see.");
     out.push("");
-    out.push('A prohibition with no named alternative can stall a run outright when the task needs the banned thing. Pair it with the replacement — "Never X — do Y instead" — or with the escape hatch ("stop and ask").');
+  } else {
+    out.push("Rules the host loads that carry a risk to how reliably they act. Each line names the kind of evidence behind it.");
+    out.push("");
+  }
+
+  if (weak.length) {
+    out.push(`### Weak rules (${weak.length} below their category floor)`);
+    out.push("");
+    out.push("Click a rule to open it at its line.");
+    out.push("");
+    out.push("| Rule | State | Evidence | Score | Main issue | Suggested fix |");
+    out.push("|---|---|---|---|---|---|");
+    for (const r of weak) {
+      const names = rowWeaknesses(r);
+      const f = stateOf(r);
+      out.push(`| ${ruleLink(r, 60)} | ${f ? f.state : "—"} | ${tagOf(r)} | ${r.grade} (${fmt(r.score)}) | ${names.map((n) => FACTOR_LABELS[n] || n).join(", ")} | ${names.map((n) => FRIENDLY_FIXES[n]).filter(Boolean).join("; ")} |`);
+    }
+    out.push("");
+  }
+
+  if (stalls.length) {
+    out.push("### Stall risks (bare prohibitions)");
+    out.push("");
+    out.push(`A prohibition with no named alternative can stall a run outright when the task needs the banned thing. Pair it with the replacement — "Never X — do Y instead" — or with the escape hatch ("stop and ask"). ${evidenceTag(WORDING_STUDY_EVIDENCE)} — ${WORDING_STUDY_EVIDENCE.limits}.`);
     out.push("");
     for (const r of stalls) {
       out.push(`- ${r.id} (${loc(r)}) "${truncate(r.text, 80)}"`);
@@ -2280,11 +2611,10 @@ function renderReport(audit, opts = {}) {
     out.push("");
   }
 
-  const buried = rules.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD);
   if (buried.length) {
-    out.push("## Buried rules");
+    out.push("### Buried rules");
     out.push("");
-    out.push("These sit in the bottom half of a long file, where rules lose force. Move load-bearing rules into the top quarter, or split the file into scoped rule files.");
+    out.push("These sit in the bottom half of a long file, where rules lose force. Move load-bearing rules into the top quarter, or split the file into scoped rule files. [heuristic]");
     out.push("");
     for (const r of buried) {
       const total = files[r.fileIndex] ? files[r.fileIndex].lineCount : "?";
@@ -2293,14 +2623,10 @@ function renderReport(audit, opts = {}) {
     out.push("");
   }
 
-  const restructure = restructureCandidates(audit);
-  if (restructure.length) pushRestructureSection(out, restructure);
-
-  const stale = rules.filter((r) => r.staleness.missing.length);
   if (stale.length) {
-    out.push("## Stale references");
+    out.push("### Stale references");
     out.push("");
-    out.push("A rule pointing at a path that no longer resolves makes Claude re-discover it or give up. Fix the path or drop the reference.");
+    out.push("A rule pointing at a path that no longer resolves makes Claude re-discover it or give up. Fix the path or drop the reference. [mechanical]");
     out.push("");
     for (const r of stale) {
       for (const m of r.staleness.missing) {
@@ -2315,11 +2641,10 @@ function renderReport(audit, opts = {}) {
     out.push("");
   }
 
-  const badCategories = rules.filter((r) => r.invalidCategory);
   if (badCategories.length) {
-    out.push("## Unknown category annotations");
+    out.push("### Unknown category annotations");
     out.push("");
-    out.push(`A \`<!-- category: … -->\` annotation only recognizes ${Object.keys(CATEGORY_FLOORS).join(", ")}. These name something else, so the rule was graded under its file's default category — fix the spelling or it keeps the wrong pass mark.`);
+    out.push(`A \`<!-- category: … -->\` annotation only recognizes ${Object.keys(CATEGORY_FLOORS).join(", ")}. These name something else, so the rule was graded under its file's default category — fix the spelling or it keeps the wrong pass mark. [mechanical]`);
     out.push("");
     for (const r of badCategories) {
       const line = r.invalidCategory.line;
@@ -2328,11 +2653,36 @@ function renderReport(audit, opts = {}) {
     out.push("");
   }
 
+  // 5. Policy placement — advisory and mechanical candidates.
   const hooks = rules.filter((r) => r.hookOpportunity);
-  if (hooks.length) {
-    out.push("## Better enforced by a hook");
+  const placed = rules.filter((r) => r.placement);
+  const restructure = restructureCandidates(audit);
+  const advisory = findings.filter((f) => f.state === "advisory");
+  const advisoryByCategory = advisory.filter((f) => f.evidence.level === "mechanical").length;
+  const advisoryByModel = advisory.length - advisoryByCategory;
+  out.push("## Policy placement");
+  out.push("");
+  if (!hooks.length && !placed.length && !restructure.length && !advisory.length) {
+    out.push("None — nothing here is better owned by another mechanism.");
     out.push("");
-    out.push("A hook or script could enforce these mechanically, on every run, instead of relying on Claude to read and remember them:");
+  } else {
+    out.push("Where each policy belongs: a mechanism that enforces it, or prose that asks for judgment.");
+    out.push("");
+    // Advisory rules are counted, not enumerated: nothing about them needs
+    // doing, and a list of every judgment call would bury the candidates.
+    if (advisoryByCategory) {
+      out.push(`- ${advisoryByCategory} rule(s) annotated \`preference\` — judgment that appropriately stays prose [mechanical]`);
+    }
+    if (advisoryByModel) {
+      out.push(`- ${advisoryByModel} rule(s) need judgment no mechanism can supply — they appropriately stay prose [model-inferred]`);
+    }
+    if (advisory.length) out.push("");
+  }
+
+  if (hooks.length) {
+    out.push("### Better enforced by a hook");
+    out.push("");
+    out.push("A hook or script could enforce these mechanically, on every run, instead of relying on Claude to read and remember them: [model-inferred]");
     out.push("");
     for (const r of hooks) {
       out.push(`- ${r.id} (${loc(r)}) "${truncate(r.text, 80)}"`);
@@ -2344,11 +2694,10 @@ function renderReport(audit, opts = {}) {
     // scan summary and in audit.json instead.
   }
 
-  const placed = rules.filter((r) => r.placement);
   if (placed.length) {
-    out.push("## Placement candidates");
+    out.push("### Placement candidates");
     out.push("");
-    out.push("Rules whose job fits a Claude Code primitive better than rule prose:");
+    out.push("Rules whose job fits a Claude Code primitive better than rule prose: [heuristic]");
     out.push("");
     for (const r of placed) {
       const det = Object.entries(r.placement.detections)
@@ -2359,6 +2708,38 @@ function renderReport(audit, opts = {}) {
     }
     out.push("");
   }
+
+  if (restructure.length) pushRestructureSection(out, restructure);
+
+  // 6. Structural hygiene — the score, demoted to what it is.
+  const corpusBit = audit.corpusScore === null
+    ? "no mandate rules left to grade"
+    : `corpus grade **${audit.corpusGrade} (${fmt(audit.corpusScore)})**, mandate rules only`;
+  out.push("## Structural hygiene (secondary)");
+  out.push("");
+  out.push("A summary of how rules are written, scoped, and placed — never a prediction that Claude will comply, and never a reason to discount a hard gate above. A rule the host cannot apply shows that state whatever it scores here.");
+  out.push("");
+  out.push(`**${rules.length} rules across ${files.filter((f) => f.ruleCount > 0).length} file(s)** — ${corpusBit}.`);
+  out.push("");
+  // [Foreman: 074] Said once, where the number is, so nobody reads the grade as
+  // covering files that live outside the repo.
+  if (files.some((f) => f.scope === "user")) {
+    out.push("User-scope files are graded under their own section and never move the project grade.");
+    out.push("");
+  }
+  out.push("Grades assume the least forgiving reader: small models, subagents, headless runs. If only large models in interactive sessions read this corpus, treat severity one notch softer.");
+  out.push("");
+  out.push("### Files");
+  out.push("");
+  out.push("| File | Rules | Grade | Loading |");
+  out.push("|---|---|---|---|");
+  for (const f of files.filter((x) => x.scope !== "user")) {
+    const loading = f.globs && f.globs.length ? "scoped: " + f.globs.join(", ") : "always loaded";
+    const g = f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`;
+    out.push(`| ${f.path} | ${f.ruleCount} | ${g} | ${loading} |`);
+  }
+  out.push("");
+  pushUserScopeSection(out, files);
 
   if (weakSkills.length) pushWeakSkillSection(out, weakSkills);
 
@@ -2406,11 +2787,22 @@ function truncate(text, n) {
 // client-side, never innerHTML — a rule that contains markup or a URL is shown
 // literally, never loaded or executed.
 function artifactRuleData(audit) {
+  // [Foreman: 075] The page carries each rule's primary state and the kind of
+  // evidence behind it, and sorts hard gates to the top before it sorts by
+  // score — the same demotion the markdown report makes.
+  const findings = audit.findings || deriveFindings(audit);
+  const byRule = new Map(findings.filter((f) => f.state).map((f) => [f.rule, f]));
   return audit.rules.filter((r) => !r.suppressed).map((r) => {
     const names = rowWeaknesses(r);
+    const f = byRule.get(r.id);
     return {
       id: r.id, file: r.file, line: r.lineStart, text: r.text,
       category: r.category, score: r.score, grade: r.grade, weak: r.weak,
+      state: f ? f.state : "healthy",
+      stateRank: f ? STATE_RANK.get(f.state) : STATE_RANK.get("healthy"),
+      severity: f ? f.severity : "info",
+      evidence: f ? evidenceTag(f.evidence) : "",
+      why: f ? f.summary : "",
       stallRisk: r.stallRisk, hookOpportunity: r.hookOpportunity,
       placement: r.placement ? r.placement.bestFit : null,
       factors: r.factorValues, f8: r.f8,
@@ -2488,6 +2880,9 @@ const ARTIFACT_SCRIPT = `<script>
   var cols = [
     { key: "id", label: "Rule", get: function (r) { return r.id; } },
     { key: "file", label: "File", get: function (r) { return r.file + ":" + r.line; } },
+    { key: "state", label: "State", get: function (r) { return r.stateRank; }, num: true,
+      text: function (r) { return r.state; } },
+    { key: "evidence", label: "Evidence", get: function (r) { return r.evidence; } },
     { key: "category", label: "Cat", get: function (r) { return r.category; } },
     { key: "issues", label: "Main issue", get: function (r) { return r.issues.join(", "); } },
     { key: "score", label: "Score", get: function (r) { return r.score.toFixed(2); }, num: true },
@@ -2509,6 +2904,7 @@ const ARTIFACT_SCRIPT = `<script>
     var tr = el("tr", "detail"), td = el("td");
     td.colSpan = cols.length;
     var pre = el("pre", null, r.text); td.appendChild(pre);
+    if (r.why) td.appendChild(el("p", "muted", r.state + " — " + r.why + " " + r.evidence));
     var fx = el("div", "factors");
     data.factorColumns.forEach(function (fc) {
       var k = fc[0], v = k === "F8" ? r.f8 : r.factors[k];
@@ -2539,7 +2935,7 @@ const ARTIFACT_SCRIPT = `<script>
       cols.forEach(function (c) {
         var td = el("td");
         if (c.key === "grade") td.appendChild(badge(r.grade));
-        else td.textContent = c.get(r);
+        else td.textContent = c.text ? c.text(r) : c.get(r);
         tr.appendChild(td);
       });
       var detail = null;
@@ -2566,7 +2962,15 @@ const ARTIFACT_SCRIPT = `<script>
     });
     render();
   }
-  sortBy(4); // default: worst score first (ascending)
+  function defaultSort() {
+    sortCol = -1; sortDesc = false;
+    rows.sort(function (a, b) {
+      if (a.stateRank !== b.stateRank) return a.stateRank - b.stateRank;
+      return a.score - b.score;
+    });
+    render();
+  }
+  defaultSort(); // hard gates first, then worst score
 })();
 </script>`;
 
@@ -2762,6 +3166,8 @@ module.exports = {
   findInstructionFiles, stripMetadata, identifyChunks, classifyChunk,
   mergeClarifications, splitCompound, checkStaleness, scoreF1, scoreF2, scoreF4, scoreF5, scoreF7,
   composeScore, grade, detectPlacement, scan, composeAudit, renderReport, loadJudgments,
+  // [Foreman: 075] the finding contract
+  deriveFindings, evidenceTag, FINDING_STATES,
   looksLikeStatement, hasImperativeVerb, checkSkillDescription, gradeSkill, findSkillFiles,
   renderArtifact, artifactRuleData,
   // [Foreman: 072] the record contract

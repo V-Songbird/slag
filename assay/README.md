@@ -9,7 +9,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
 
-> **TL;DR** — assay analyzes the instruction files Claude Code loads for your project: what's vague, what's stale, what's buried, what belongs in a hook instead of a paragraph. It grades structural hygiene — how a rule is written and placed, never whether the model will comply — and offers rewrites for the weak ones. The grading is almost entirely a script; a re-run gives the same numbers.
+> **TL;DR** — assay analyzes the instruction files Claude Code loads for your project: what's vague, what's stale, what's buried, what belongs in a hook instead of a paragraph. Each finding lands at its exact line, labelled with the kind of evidence behind it, and the weak rules get offered rewrites. A structural-hygiene grade follows as a secondary summary, never a prediction that the model will comply.
 
 ---
 
@@ -28,7 +28,7 @@ Rules get the same treatment: `/assay:craft-rules` grills you — when should it
 
 ## Why you'd want it
 
-- **You stop guessing which rules are weak.** Every rule gets a grade for how it's written and placed, plus the one factor most worth fixing — not vibes.
+- **You stop guessing which rules are weak.** Every rule gets one finding at its exact line, with the kind of evidence behind it stated plainly — and a hygiene grade that never overrules a rule the host can't apply.
 - **Prohibitions that dead-end get flagged.** "Never X" with no alternative can stall a session mid-task, so it grades F until it names the replacement.
 - **The weak ones get rewritten, not lectured about.** One menu, your approval, then in-place edits you review with `git diff`.
 - **Wishes get unmasked as hooks.** Rules a script could enforce with an exit code are flagged, with the evidence, instead of burning goodwill as text. assay reads the hooks already wired for the project — from its settings, yours, and installed plugins — so a candidate that's already enforced gets marked covered, not proposed again.
@@ -49,7 +49,7 @@ Your user-level `CLAUDE.md` loads for this project too, so it gets graded — bu
 | Moment | What happens |
 | --- | --- |
 | You run the audit | Every rule is extracted, scored, and graded |
-| The report lands | Weakest rules first, each with its suggested fix — every rule is a clickable link that opens it at its line |
+| The report lands | Findings first — what can't load, what's risky, what belongs in another mechanism — each a clickable link that opens the rule at its line; the hygiene grade follows at the bottom |
 | You check what to apply | Rewrites happen in place; placement candidates get previewed and built on your say-so, or parked with promotion notes |
 | You're done | Temp files are cleaned up; `git diff` shows exactly what changed |
 
@@ -83,7 +83,7 @@ One scoring script and three skills — the audit with its two rubrics, craft-sk
 
 ## Good to know
 
-- The grade measures **structural hygiene** — whether a rule is parseable, triggerable, specific, and placed where it will be seen. It is not a prediction that Claude will comply; a perfectly clear rule can still lose to the model's habits. Structure is the part you control.
+- The grade is a **secondary** summary of structural hygiene, printed under the findings. It is not a prediction that Claude will comply; a perfectly clear rule can still lose to the model's habits. Structure is the part you control.
 - Scoring is English-only. Rules in other languages will grade wrong; the report counts the ones in a non-Latin script so their numbers aren't mistaken for real grades.
 - Promotions are built at project scope, straight from the current official docs — fetched at promotion time, so the formats are never stale. You see each one before it's written, and nothing else gets installed.
 - Nothing assay does takes a rule away from you. A promotion adds the mechanism and leaves the prose active; parking only writes down the plan. The duty is then stated twice on purpose — assay says so rather than quietly deleting one copy. A new file is configured, not proven: retiring the prose is your call, later, once you've watched the mechanism work.

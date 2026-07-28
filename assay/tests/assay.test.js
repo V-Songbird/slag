@@ -276,6 +276,25 @@ test("F1 compound hedging takes the lowest hedge", () => {
   assert.equal(engine.scoreF1("Try to prefer functional components where possible.").value, 0.2);
 });
 
+// [Foreman: 075] One hedge governs the force of the sentence, downward, and no
+// upgrade climbs back over it. This used to score 1.00: the always+imperative
+// upgrade beat a weakest-hedge branch that needed two hedges to fire.
+test("F1 scores a hedged sentence by its weakest hedge, upgrades included", () => {
+  const hedged = engine.scoreF1("Always try to use functional components.");
+  assert.equal(hedged.value, 0.2);
+  assert.equal(hedged.matchedVerb, "try to");
+  assert.equal(hedged.hedged, true);
+  // a single hedge beside a bare imperative governs too
+  assert.equal(engine.scoreF1("Where possible, use `pnpm`.").value, 0.2);
+  // a genuine strong imperative is untouched and carries no hedge flag
+  const strong = engine.scoreF1("You must validate inputs.");
+  assert.equal(strong.value, 1.0);
+  assert.equal(strong.hedged, undefined);
+  assert.equal(engine.scoreF1("Always use functional components.").hedged, undefined);
+  // and the two-hedge case still resolves to the weakest of them
+  assert.equal(engine.scoreF1("Try to prefer functional components where possible.").hedged, true);
+});
+
 test("F1 treats statement forms as implicit imperatives", () => {
   const r = engine.scoreF1("Test files mirror source paths.");
   assert.equal(r.value, 0.7);
@@ -620,10 +639,11 @@ test("a prose-heavy corpus gets per-rule advice, not one fix repeated down the t
 
   const rows = report.split("\n").filter((l) => /^\| \[R\d+/.test(l));
   assert.equal(rows.length, 4);
-  const fixes = new Set(rows.map((l) => l.split("|")[4].trim()));
+  // [Foreman: 075] columns are Rule | State | Evidence | Score | Main issue | Fix
+  const fixes = new Set(rows.map((l) => l.split("|")[6].trim()));
   assert.ok(fixes.size > 1, "every weak row carried the same fix: " + [...fixes][0]);
   // the dominant weakness still leads each diagnosis — the secondary one follows
-  assert.ok(rows.every((l) => l.split("|")[3].trim().startsWith("too vague, ")));
+  assert.ok(rows.every((l) => l.split("|")[5].trim().startsWith("too vague, ")));
 });
 
 test("weak skill descriptions land in the report as a rewritable fix", () => {
@@ -1321,6 +1341,227 @@ test("an all-English corpus carries no non-Latin notice", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Findings — the primary output — [Foreman: 075]
+// ---------------------------------------------------------------------------
+
+// One audit over a fixture project, with a judgment per rule. `judge` receives
+// the scanned rule so a fixture can aim F3/F8 at the state it is checking.
+function auditOf(files, judge = () => ({ F3: 0.7, F8: 0.7 })) {
+  const scanData = engine.scan(tmpProject(files), { projectOnly: true });
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.key] = judge(r);
+  return engine.composeAudit(scanData, judgments);
+}
+
+// The primary state of the audit's first (or named) rule.
+function primaryState(audit, id = "R001") {
+  return audit.findings.find((f) => f.rule === id && f.state);
+}
+
+const FILLER = Array.from({ length: 60 }, () => "").join("\n");
+
+test("every derivation row produces its state, severity, and evidence level", () => {
+  const cases = [
+    ["inactive", "high", "mechanical", {
+      ".claude/rules/dead.md": '---\npaths: ["nope/**/*.ts"]\n---\n\n- Return typed errors from every handler.\n',
+    }, () => ({ F3: 0.7, F8: 0.7 })],
+
+    ["blocked", "high", "mechanical", {
+      "CLAUDE.md": "- Follow [the guide](docs/missing-guide.md) when editing handlers.\n",
+    }, () => ({ F3: 0.7, F8: 0.7 })],
+
+    // F1 could not read an action out of the wording — a deterministic
+    // approximation, so heuristic
+    ["ambiguous", "medium", "heuristic", {
+      "CLAUDE.md": "Only `.ts` here.\n",
+    }, () => ({ F3: 0.7, F8: 0.7 })],
+
+    // the trigger has more than one reading — the model said so, so model-inferred
+    ["ambiguous", "medium", "model-inferred", {
+      "CLAUDE.md": "- Validate every request body at the handler boundary.\n",
+    }, () => ({ F3: 0.2, F8: 0.7 })],
+
+    ["at-risk", "high", "experiment-supported", {
+      "CLAUDE.md": "- Never use `var`.\n",
+    }, () => ({ F3: 0.7, F8: 0.7 })],
+
+    ["at-risk", "medium", "heuristic", {
+      "CLAUDE.md": "- Always try to use functional components.\n",
+    }, () => ({ F3: 0.7, F8: 0.7 })],
+
+    ["at-risk", "low", "heuristic", {
+      "CLAUDE.md": "# Rules\n" + FILLER + "\n- Validate every request body at the handler boundary.\n",
+    }, () => ({ F3: 0.7, F8: 0.7 })],
+
+    ["mechanical-candidate", "low", "heuristic", {
+      "CLAUDE.md": "- Record every release in `docs/releases.md` before publishing.\n",
+      "docs/releases.md": "# Releases\n",
+    }, () => ({ F3: 0.7, F8: 0.7 })],
+
+    ["mechanical-candidate", "low", "model-inferred", {
+      "CLAUDE.md": "- Keep every line under 100 characters.\n",
+    }, () => ({ F3: 0.7, F8: 0.15 })],
+
+    ["advisory", "info", "mechanical", {
+      "CLAUDE.md": "<!-- category: preference -->\n- Use named exports for shared modules.\n",
+    }, () => ({ F3: 0.7, F8: 0.7 })],
+
+    ["advisory", "info", "model-inferred", {
+      "CLAUDE.md": "- Validate every request body at the handler boundary.\n",
+    }, () => ({ F3: 0.7, F8: 0.95 })],
+
+    ["healthy", "info", "mechanical", {
+      "CLAUDE.md": "- Validate every request body at the handler boundary.\n",
+    }, () => ({ F3: 0.7, F8: 0.7 })],
+  ];
+
+  for (const [state, severity, level, files, judge] of cases) {
+    const label = state + "/" + level;
+    const audit = auditOf(files, judge);
+    const finding = primaryState(audit);
+    assert.ok(finding, label + ": no primary state emitted");
+    assert.equal(finding.state, state, label);
+    assert.equal(finding.severity, severity, label);
+    assert.equal(finding.evidence.level, level, label);
+    assert.ok(finding.analyzer, label + ": no analyzer named");
+    assert.ok(finding.evidence.basis, label + ": no evidence basis");
+  }
+});
+
+// An experiment-supported finding must say what it was measured on, and that it
+// does not carry beyond that — a Claude-profile signal, never a cross-agent law.
+test("the experiment-supported finding discloses its tier and its limits", () => {
+  const audit = auditOf({ "CLAUDE.md": "- Never use `var`.\n" });
+  const finding = primaryState(audit);
+  assert.equal(finding.evidence.level, "experiment-supported");
+  assert.equal(finding.evidence.tier, "small-model tier");
+  assert.match(finding.evidence.limits, /does not carry to other agents/);
+  assert.equal(engine.evidenceTag(finding.evidence), "[experiment-supported: small-model tier]");
+  assert.equal(engine.evidenceTag({ level: "heuristic" }), "[heuristic]");
+});
+
+test("a rule with two problems takes the higher-precedence state", () => {
+  // dead glob AND a dead reference: the host never loads it at all, so being
+  // blocked on a missing target is not the finding to lead with
+  const audit = auditOf({
+    ".claude/rules/dead.md": '---\npaths: ["nope/**/*.ts"]\n---\n\n- Follow [the guide](docs/missing-guide.md) when editing handlers.\n',
+  });
+  const rule = audit.rules[0];
+  assert.equal(rule.staleness.gated, true, "fixture lost its stale reference");
+  assert.equal(primaryState(audit).state, "inactive");
+  // and precedence is the declared order, not incidental
+  assert.deepEqual(engine.FINDING_STATES.slice(0, 4), ["inactive", "shadowed", "blocked", "conflicting"]);
+});
+
+test("a hard gate is reported as its state, never softened into a grade", () => {
+  const audit = auditOf({
+    ".claude/rules/dead.md": '---\npaths: ["nope/**/*.ts"]\n---\n\n- Never use `var` in `src/api/handler.ts` — use `const` instead.\n',
+  });
+  const finding = primaryState(audit);
+  assert.equal(finding.state, "inactive");
+  assert.equal(finding.severity, "high");
+  // the wording is strong — F1, F2 and F7 are all high — and it changes nothing
+  assert.equal(audit.rules[0].factorValues.F1, 0.95);
+  assert.equal(audit.rules[0].factorValues.F2, 0.95);
+
+  const report = engine.renderReport(audit);
+  const gates = report.slice(report.indexOf("## Hard gates"), report.indexOf("## Operational findings"));
+  assert.match(gates, /\*\*inactive\*\*/);
+  assert.match(gates, /\[mechanical\]/);
+  // its score lives in the hygiene section, never beside the gate
+  assert.doesNotMatch(gates, /\b[A-F] \(0\.\d\d\)/);
+  assert.match(report, /## Structural hygiene \(secondary\)/);
+});
+
+test("every finding is schema-valid and source-linked to a path in the record", () => {
+  const audit = auditOf({
+    "CLAUDE.md": [
+      "# Rules",
+      "",
+      "<!-- category: preferance -->",
+      "- Prefer named exports.",
+      "",
+      "- Перед commit запустите тесты.",
+      "",
+      "```js",
+      "const unclosed = true;",
+    ].join("\n") + "\n",
+    ".claude/rules/dead.md": '---\npaths: ["nope/**/*.ts"]\n---\n\n- Return typed errors from every handler.\n',
+  });
+  const severities = new Set(["info", "low", "medium", "high"]);
+  const levels = new Set(["mechanical", "documented", "experiment-supported", "heuristic", "model-inferred", "behavior-observed"]);
+  const known = new Set([
+    ...audit.files.map((f) => f.path),
+    ...(audit.sources || []).map((s) => s.path),
+    ...((audit.coverage || {}).inaccessible || []).map((s) => s.path),
+  ]);
+
+  assert.ok(audit.findings.length >= 4, "fixture produced too few findings");
+  const types = new Set(audit.findings.map((f) => f.type).filter(Boolean));
+  assert.ok(types.has("unknown-category"), "no unknown-category finding");
+  assert.ok(types.has("unsupported-language"), "no unsupported-language finding");
+  assert.ok(types.has("unsupported-construct"), "no unsupported-construct finding");
+
+  const ids = new Set();
+  for (const f of audit.findings) {
+    const label = f.id + " " + (f.state || f.type);
+    assert.match(f.id, /^F\d{3}$/, label);
+    assert.equal(ids.has(f.id), false, "duplicate finding id " + f.id);
+    ids.add(f.id);
+    assert.ok(Boolean(f.state) !== Boolean(f.type), label + " must carry exactly one of state/type");
+    assert.ok(severities.has(f.severity), label + " severity: " + f.severity);
+    assert.ok(f.summary && f.explanation, label + " is missing prose");
+    assert.ok(levels.has(f.evidence.level), label + " evidence: " + f.evidence.level);
+    assert.ok(f.evidence.basis, label + " has no evidence basis");
+    assert.ok(Array.isArray(f.safeActions), label + " has no safeActions array");
+    assert.ok(typeof f.analyzer === "string" && f.analyzer, label + " names no analyzer");
+    assert.ok(Array.isArray(f.sources) && f.sources.length, label + " is not source-linked");
+    for (const s of f.sources) {
+      assert.ok(known.has(s.path), label + " cites a path outside the record: " + s.path);
+      assert.ok(Number.isInteger(s.lineStart) && s.lineStart >= 1, label + " has no start line");
+      assert.ok(Number.isInteger(s.lineEnd) && s.lineEnd >= s.lineStart, label + " has no end line");
+    }
+  }
+});
+
+test("a suppressed entry becomes a finding of its own, and loses its state", () => {
+  const scanData = engine.scan(tmpProject({
+    "CLAUDE.md": "- Never use `var` — use `const` instead.\n\n- Keep it clean.\n",
+  }), { projectOnly: true });
+  const [r1, r2] = scanData.rules;
+  const audit = engine.composeAudit(scanData, {
+    [r1.key]: { F3: 0.7, F8: 0.7 },
+    [r2.key]: { F3: 0.7, F8: 0.7, notRule: "Reads as a note to self." },
+  });
+  assert.equal(primaryState(audit, "R002"), undefined);
+  const dropped = audit.findings.find((f) => f.type === "suppressed-entry");
+  assert.equal(dropped.rule, "R002");
+  assert.equal(dropped.evidence.level, "model-inferred");
+  assert.match(dropped.summary, /Reads as a note to self\./);
+});
+
+test("the report leads with the risk topology and carries an evidence tag on every finding line", () => {
+  const audit = auditOf({
+    "CLAUDE.md": "- Never use `var`.\n\n- Validate every request body at the handler boundary.\n",
+  });
+  const report = engine.renderReport(audit);
+  assert.match(report, /\*\*1 at-risk, 1 healthy\*\* across 1 file\(s\)\./);
+  // the four findings-first sections, in order
+  const order = ["## Hard gates", "## Operational findings", "## Policy placement", "## Structural hygiene (secondary)"];
+  let at = -1;
+  for (const header of order) {
+    const next = report.indexOf(header);
+    assert.ok(next > at, header + " is missing or out of order");
+    at = next;
+  }
+  // Coverage still opens the report, and the grade is now below the findings
+  assert.ok(report.indexOf("## Coverage") < report.indexOf("## Hard gates"));
+  assert.ok(report.indexOf("corpus grade") > report.indexOf("## Policy placement"));
+  assert.match(report, /None — every rule the audit found can load in this context\./);
+  assert.match(report, /\[experiment-supported: small-model tier\]/);
+});
+
+// ---------------------------------------------------------------------------
 // artifact — self-contained interactive HTML report
 // ---------------------------------------------------------------------------
 
@@ -1365,7 +1606,8 @@ test("renderArtifact emits self-contained page content with no external assets",
   // page content only — the Artifact tool supplies the document skeleton
   assert.doesNotMatch(html, /<!doctype|<html\b|<head\b|<body\b/i);
   assert.match(html, /id="assay-data"/);
-  assert.match(html, /sortCol = -1[\s\S]*sortBy\(4\); \/\/ default: worst score first/);
+  // [Foreman: 075] hard gates sort to the top before score is considered
+  assert.match(html, /sortCol = -1[\s\S]*defaultSort\(\); \/\/ hard gates first, then worst score/);
 });
 
 test("renderArtifact escapes < so embedded rule text can't break out of the script block", () => {
@@ -1400,6 +1642,29 @@ test("artifactRuleData carries full untruncated text, factor scores, and fixes",
   assert.equal(r.f8, 0.3);
   assert.ok(Array.isArray(r.issues) && r.issues.length);
   assert.ok(Array.isArray(r.fixes) && r.fixes.length);
+});
+
+// [Foreman: 075]
+test("the artifact carries State and Evidence columns and sorts hard gates first", () => {
+  const audit = auditOf({
+    ".claude/rules/dead.md": '---\npaths: ["nope/**/*.ts"]\n---\n\n- Return typed errors from every handler.\n',
+    "CLAUDE.md": "- Validate every request body at the handler boundary.\n",
+  });
+  const html = engine.renderArtifact(audit);
+  assert.match(html, /label: "State"/);
+  assert.match(html, /label: "Evidence"/);
+  // default order is state precedence first, score only as the tiebreak
+  assert.match(html, /a\.stateRank !== b\.stateRank/);
+  assert.match(html, /defaultSort\(\); \/\/ hard gates first, then worst score/);
+
+  const rows = engine.artifactRuleData(audit);
+  const gate = rows.find((r) => r.state === "inactive");
+  assert.ok(gate, "no hard-gated row in the payload");
+  assert.equal(gate.stateRank, 0);
+  assert.equal(gate.evidence, "[mechanical]");
+  assert.ok(gate.why);
+  // and every other row ranks below it
+  assert.ok(rows.filter((r) => r.id !== gate.id).every((r) => r.stateRank > 0));
 });
 
 test("renderArtifact round-trips a real audit built from the scoring pipeline", () => {
@@ -1511,6 +1776,52 @@ test("report exits 0 and prints the header and the Coverage block", () => {
   assert.match(out, /1 of 1 instruction file\(s\) parsed, 2 rule\(s\) graded, 1 prose chunk\(s\) set aside/);
   assert.match(out, /0 line\(s\) excluded from grading/);
   assert.ok(fs.existsSync(path.join(root, ".assay-tmp", "audit.json")));
+});
+
+// [Foreman: 075]
+test("the report prints the four findings-first sections and the headline counts", () => {
+  const root = cliFixture();
+  judgeAll(root);
+  const { code, out } = cli(root, "report");
+  assert.equal(code, 0);
+  for (const header of ["## Hard gates", "## Operational findings", "## Policy placement", "## Structural hygiene (secondary)"]) {
+    assert.ok(out.includes(header), "missing " + header);
+  }
+  // the headline is a count by state, not a mean
+  assert.match(out, /^\*\*\d+ [a-z-]+(?:, \d+ [a-z- ]+)*\*\* across \d+ file\(s\)\.$/m);
+  assert.match(out, /Findings are this report's primary output/);
+  // the audit record emits its findings; the scan record has none to emit yet
+  const audit = readJson(root, "audit.json");
+  assert.ok(Array.isArray(audit.findings) && audit.findings.length);
+  assert.equal("findings" in readJson(root, "scan.json"), false);
+});
+
+// [Foreman: 075]
+test("remeasure prints finding deltas beside the grade movement", () => {
+  const root = cliFixture();
+  judgeAll(root);
+  assert.equal(cli(root, "report").code, 0);
+
+  // the rewrite trades an advisory rule for a bare prohibition, so a state
+  // count moves in both directions
+  fs.writeFileSync(
+    path.join(root, "CLAUDE.md"),
+    FIXTURE_CLAUDE.replace("Write clean, maintainable code.", "Never skip the tests.")
+  );
+  const pending = JSON.parse(cli(root, "remeasure").out);
+  const judgeFile = path.join(root, ".assay-tmp", "judgments.json");
+  const judgments = JSON.parse(fs.readFileSync(judgeFile, "utf-8"));
+  for (const j of pending.judge) judgments[j.key] = { F3: 0.7, F8: 0.9 };
+  fs.writeFileSync(judgeFile, JSON.stringify(judgments));
+
+  const { code, out } = cli(root, "remeasure");
+  assert.equal(code, 0);
+  assert.match(out, /## Since last audit/);
+  assert.match(out, /\| Finding \| Before \| After \|/);
+  assert.match(out, /\| at-risk \| 0 \| 1 \|/);
+  assert.match(out, /\| advisory \| 2 \| 1 \|/);
+  // the grade comparison still follows the findings
+  assert.ok(out.indexOf("| Finding | Before | After |") < out.indexOf("Corpus grade"));
 });
 
 test("the Coverage block counts suppressed entries even though the rows stay verbose-only", () => {
