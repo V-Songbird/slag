@@ -71,8 +71,7 @@ Inside Claude Code, run:
 Nothing to configure. Works at the next session.
 
 assay installs on Codex too — point your Codex plugin install at this
-repository's `assay/` directory. The engine and the Codex profile are there;
-the guided workflows assume Claude Code.
+repository's `assay/` directory. See below for what that gets you.
 
 ## Codex
 
@@ -103,7 +102,7 @@ preview.
 | Open the whole report as HTML, with search and filters | `/assay:audit --artifact` |
 | Grade the repo's files only, not your own | `/assay:audit --project-only` |
 | Audit what Codex loads instead | `/assay:audit --host codex` |
-| Audit a Codex session started in a subdirectory | `/assay:audit --host codex --startup <dir>` |
+| Audit a Codex session started in a subdirectory | `/assay:audit --host codex --startup <path>` |
 | Build a skill that reliably triggers | `/assay:craft-skill` |
 | Fix a skill Claude keeps ignoring | `/assay:craft-skill <skill name>` |
 | Write a new rule that sticks | `/assay:craft-rules` |
