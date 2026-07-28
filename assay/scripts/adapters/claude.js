@@ -16,6 +16,9 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { spawnSync } = require("child_process");
+// [Foreman: 080] The one require in an adapter: repository-level enforcement is
+// not host knowledge, so both profiles read it out of the same file.
+const { discoverRepoChecks: sharedRepoChecks } = require("./repo-checks.js");
 
 const NAME = "claude-code";
 // 2 = the whole documented project surface plus user-scope memory. 1 saw only
@@ -361,61 +364,13 @@ function discoverHooks(ctx) {
 }
 
 // [Foreman: 077] Levels 4 and 5 of the enforcement ladder: checks the repository
-// runs, and gates a remote runs. The surfaces are host-agnostic — npm scripts and
-// CI workflows are not a Claude Code concept — but discovery stays adapter-owned
-// so a second host profile can name different ones.
-//
-// Conservative and mechanical throughout: a name in a manifest, a file that
-// exists. Nothing here is opened to decide whether it would pass, and every read
-// fails open — an unreadable file is skipped, an unreadable directory that exists
-// is reported as inaccessible rather than counted as empty.
-const REPO_SCRIPT_NAMES = ["check", "format", "lint", "test"];
-
+// runs, and gates a remote runs.
+// [Foreman: 080] The surfaces are host-agnostic — npm scripts and CI workflows
+// are not a Claude Code concept — and now that a second profile has rungs at
+// these levels the detection lives in ./repo-checks.js and both adapters call
+// it. This profile adds nothing host-flavored on top, so it delegates whole.
 function discoverRepoChecks(ctx) {
-  const checks = [];
-  const inaccessible = [];
-  const root = ctx.projectRoot;
-
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"));
-    const scripts = pkg && typeof pkg.scripts === "object" && pkg.scripts ? pkg.scripts : {};
-    for (const name of REPO_SCRIPT_NAMES) {
-      if (typeof scripts[name] === "string" && scripts[name].trim()) {
-        checks.push({ type: "repo-check", name: "npm script: " + name, path: "package.json" });
-      }
-    }
-  } catch {
-    // absent or malformed — no manifest checks
-  }
-
-  for (const name of [".pre-commit-config.yaml", ".pre-commit-config.yml"]) {
-    if (exists(path.join(root, name))) checks.push({ type: "repo-check", name, path: name });
-  }
-
-  // Read textually, never through `git config`: no subprocess, and the same
-  // answer on every platform.
-  try {
-    const cfg = fs.readFileSync(path.join(root, ".git", "config"), "utf-8");
-    const m = cfg.match(/^\s*hooksPath\s*=\s*(.+?)\s*$/m);
-    if (m) checks.push({ type: "repo-check", name: "git hooks: " + m[1], path: ".git/config" });
-  } catch {
-    // no repo, or no readable config
-  }
-
-  const workflowDir = path.join(root, ".github", "workflows");
-  if (exists(workflowDir)) {
-    try {
-      for (const name of fs.readdirSync(workflowDir).sort()) {
-        if (/\.ya?ml$/.test(name)) {
-          checks.push({ type: "remote-gate", name, path: ".github/workflows/" + name });
-        }
-      }
-    } catch (err) {
-      inaccessible.push({ path: ".github/workflows", reason: err.code || err.message });
-    }
-  }
-
-  return { checks, inaccessible };
+  return sharedRepoChecks(ctx.projectRoot);
 }
 
 // ---------------------------------------------------------------------------

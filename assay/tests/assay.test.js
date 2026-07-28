@@ -3958,8 +3958,9 @@ test("the cap defaults to 32768 with no config, and a malformed config falls bac
   assert.equal(scanData.coverage.inaccessible.length, 1);
   assert.match(engine.renderReport(engine.composeAudit(scanData, null)), /could not read `.*config\.toml`/);
 
-  // a table header ends the top-level read; nothing under [hooks] is a root key
-  assert.deepEqual(codex.parseTopLevelToml('a = 1\n[hooks]\nproject_doc_max_bytes = 9\n'), { a: 1 });
+  // [Foreman: 080] the reader is a real TOML parser now, so a table header no
+  // longer ends the read — and a root key is still a root key
+  assert.deepEqual(codex.parseToml('a = 1\n[hooks]\nb = 9\n'), { a: 1, hooks: { b: 9 } });
 });
 
 test("--host names the profile discovery runs under, and an unknown one is a usage error", () => {
@@ -3975,10 +3976,15 @@ test("--host names the profile discovery runs under, and an unknown one is a usa
   assert.equal(scanned.code, 0, scanned.err);
   const record = readJson(root, "scan.json");
   assert.equal(engine.validateRecord(record, "scan"), null);
-  assert.deepEqual(record.profile, { host: "codex", version: 1, policy: { wordingRubric: false } });
+  assert.deepEqual(record.profile, {
+    host: "codex", version: 2,
+    policy: { wordingRubric: false, skillRecipe: false },
+    nouns: { primitive: "Codex primitive", scopedRules: "narrower `AGENTS.md` files further down the chain" },
+  });
   assert.deepEqual(record.files.map((f) => f.path), ["AGENTS.md"]);
   assert.equal(record.coverage.budget.amount, 32768);
-  assert.match(record.coverage.profileNotes[0], /^codex profile v1: instruction chain only/);
+  assert.equal(record.coverage.skillBudget.amount, 8000);
+  assert.ok(record.coverage.profileNotes.some((n) => /no live Codex host was probed/.test(n)));
 
   const reported = cli(root, "report", "--host", "codex");
   assert.equal(reported.code, 0, reported.err);
@@ -4113,11 +4119,497 @@ test("the Codex adapter reports the documented cap and cites a source for every 
     assert.equal(d.verified, "2026-07-28");
   }
   // the profile declares what it does not cover, and the report prints it
-  assert.ok(codex.coverageNotes().some((n) => /skills, hooks, and packaging land with entry 080/.test(n)));
   assert.ok(codex.coverageNotes().some((n) => /no live Codex host was probed/.test(n)));
   // and it never probes the host unless asked
   assert.equal(codexContext(tmpProject({})).hostVersion, null);
-  assert.deepEqual(codex.discoverSkills(), { project: [], user: [] });
-  assert.deepEqual(codex.discoverHooks(), []);
-  assert.deepEqual(codex.discoverRepoChecks(), { checks: [], inaccessible: [] });
+  // an empty project has nothing at any rung, and says so with the right shapes
+  const bare = codexContext(tmpProject({}));
+  assert.deepEqual(codex.discoverSkills(bare), { project: [], user: [] });
+  assert.deepEqual(codex.discoverHooks(bare), { hooks: [], inaccessible: [] });
+  assert.deepEqual(codex.discoverAgents(bare), []);
+});
+
+// ---------------------------------------------------------------------------
+// Codex skills, hooks, trust, and packaging — [Foreman: 080]
+// ---------------------------------------------------------------------------
+
+// The documented skill shape: a directory holding a SKILL.md whose frontmatter
+// carries the two required fields.
+function skillMd(name, description) {
+  return "---\n" +
+    (name === null ? "" : `name: ${name}\n`) +
+    (description === null ? "" : `description: ${description}\n`) +
+    "---\n\nSteps for " + (name || "this skill") + ".\n";
+}
+
+test("`.agents/skills` is scanned along the chain, and one name at two levels stays two skills", () => {
+  const root = tmpProject({
+    "AGENTS.md": AGENTS_ROOT,
+    ".agents/skills/deploy/SKILL.md": skillMd("deploy", "Ships the service. Use when the user asks to deploy."),
+    ".agents/skills/lint/SKILL.md": skillMd("lint", "Runs the linters. Use when the user asks to lint."),
+    "svc/AGENTS.md": "# Service\n\n- Return typed errors from every handler.\n",
+    "svc/.agents/skills/deploy/SKILL.md": skillMd("deploy", "Ships this one service instead."),
+    "other/.agents/skills/nope/SKILL.md": skillMd("nope", "Off the chain entirely."),
+  });
+  const startup = path.join(root, "svc");
+  const found = codex.discoverSkills(codexContext(root, { startup }));
+
+  // root-first along the chain, and a directory beside the chain is not scanned
+  assert.deepEqual(found.project.map((s) => s.path), [
+    ".agents/skills/deploy/SKILL.md",
+    ".agents/skills/lint/SKILL.md",
+    "svc/.agents/skills/deploy/SKILL.md",
+  ]);
+  assert.deepEqual(found.user, [], "--project-only leaves the machine-wide scopes alone");
+
+  // the duplicate is a fact, not a merge: the doc says both stay listed
+  const audit = engine.composeAudit(engine.scan(root, { adapter: codex, projectOnly: true, startup }), null);
+  const collision = audit.findings.find((f) => f.type === "skill-name-collision");
+  assert.match(collision.summary, /2 skills are named `deploy`/);
+  assert.match(collision.summary, /`\.agents\/skills\/deploy\/SKILL\.md`, `svc\/\.agents\/skills\/deploy\/SKILL\.md`/);
+  assert.equal(collision.evidence.level, "documented");
+  assert.match(collision.explanation, /does not merge two skills that share a name/);
+  assert.equal(collision.sources.length, 2);
+  // and every discovered skill is a level-2 rung on the ladder
+  assert.equal(audit.mechanisms.filter((m) => m.type === "skill").length, 3);
+});
+
+test("a Codex skill missing a required field is a finding; the Claude recipe never grades it", () => {
+  const root = tmpProject({
+    "AGENTS.md": AGENTS_ROOT,
+    // no description at all
+    ".agents/skills/bare/SKILL.md": skillMd("bare", null),
+    // a description written as documentation, which the trigger recipe would
+    // fail on three counts and this profile has nothing to say about
+    ".agents/skills/plain/SKILL.md": skillMd("plain", "Handles the release paperwork."),
+  });
+  const scanData = engine.scan(root, { adapter: codex, projectOnly: true });
+  assert.deepEqual(scanData.skills.map((s) => s.checks.mode), ["required-metadata", "required-metadata"]);
+  assert.deepEqual(scanData.skills[0].checks.missing, ["description"]);
+  assert.deepEqual(scanData.skills[1].checks.missing, []);
+
+  const audit = engine.composeAudit(scanData, null);
+  const missing = audit.findings.filter((f) => f.type === "skill-metadata");
+  assert.equal(missing.length, 1);
+  assert.match(missing[0].summary, /`\.agents\/skills\/bare\/SKILL\.md` declares no description — the host documents it as required/);
+  assert.equal(missing[0].evidence.level, "documented");
+  assert.equal(missing[0].severity, "high");
+  assert.deepEqual(missing[0].sources, [{ path: ".agents/skills/bare/SKILL.md", lineStart: 1, lineEnd: 1 }]);
+
+  const report = engine.renderReport(audit, { verbose: true });
+  assert.match(report, /### Skills/);
+  assert.match(report, /declares no description/);
+  // none of the recipe's verdicts appears anywhere: no cap, no weak-skill table
+  assert.doesNotMatch(report, /Weak skill descriptions/);
+  assert.doesNotMatch(report, /\/1536/);
+  assert.doesNotMatch(report, /trigger recipe/);
+  for (const s of scanData.skills) {
+    assert.equal("overCap" in s.checks, false, "no per-description cap is applied to a Codex skill");
+    assert.equal("quotedPhrases" in s.checks, false);
+    assert.equal("redundant" in s.checks, false);
+  }
+  // and the same description under the Claude profile IS recipe-graded, so the
+  // difference above is the policy flag and not an empty corpus
+  const claudeRoot = tmpProject({
+    "CLAUDE.md": FIXTURE_CLAUDE,
+    ".claude/skills/plain/SKILL.md": skillMd("plain", "Handles the release paperwork."),
+  });
+  const claude = engine.scan(claudeRoot, { projectOnly: true });
+  assert.equal(claude.skills[0].checks.mode, "model");
+  assert.ok(claude.skills[0].checks.missing.includes("trigger"));
+});
+
+test("agents/openai.yaml reaches the record, and a malformed one is reported rather than thrown", () => {
+  const root = tmpProject({
+    "AGENTS.md": AGENTS_ROOT,
+    ".agents/skills/quiet/SKILL.md": skillMd("quiet", "Only ever run when named."),
+    ".agents/skills/quiet/agents/openai.yaml": [
+      "interface:",
+      '  display_name: "Quiet Runner"',
+      '  short_description: "Never routes itself"',
+      "policy:",
+      "  allow_implicit_invocation: false",
+      "dependencies:",
+      "  tools:",
+      '    - type: "mcp"',
+      '      value: "serverName"',
+      "",
+    ].join("\n"),
+    ".agents/skills/broken/SKILL.md": skillMd("broken", "Has a sidecar that will not parse."),
+    ".agents/skills/broken/agents/openai.yaml": 'interface:\n  display_name: "unterminated\n',
+  });
+  const scanData = engine.scan(root, { adapter: codex, projectOnly: true });
+  const [broken, quiet] = scanData.skills;
+
+  assert.equal(quiet.metadataPath, ".agents/skills/quiet/agents/openai.yaml");
+  assert.deepEqual(quiet.metadata, {
+    displayName: "Quiet Runner",
+    shortDescription: "Never routes itself",
+    allowImplicitInvocation: false,
+    toolDependencies: [{ type: "mcp", value: "serverName" }],
+  });
+  // the sidecar that will not parse is named, never thrown, and the skill keeps
+  // the documented default — implicit routing stays on
+  assert.equal(broken.metadata, undefined);
+  assert.ok(broken.metadataIssue);
+
+  const audit = engine.composeAudit(scanData, null);
+  const unreadable = audit.findings.find((f) => f.type === "skill-metadata-unreadable");
+  assert.match(unreadable.summary, /`\.agents\/skills\/broken\/agents\/openai\.yaml` could not be parsed/);
+  assert.equal(unreadable.evidence.level, "mechanical");
+
+  // explicit invocation and implicit routing are told apart wherever the report
+  // says how a skill fires
+  const report = engine.renderReport(audit, { verbose: true });
+  assert.match(report, /1 skill\(s\) set `allow_implicit_invocation: false` — `quiet`/);
+  assert.match(report, /a session reaches them by naming them/);
+  const quietMech = audit.mechanisms.find((m) => m.name === "quiet");
+  assert.ok(quietMech.coverage.limits.some((l) => /implicit routing is switched off/.test(l)));
+  const brokenMech = audit.mechanisms.find((m) => m.name === "broken");
+  assert.ok(brokenMech.coverage.limits.some((l) => /invocation is probabilistic/.test(l)));
+  // a sidecar assay can read is still not a sidecar assay ran
+  assert.equal(quietMech.states.verified, false);
+});
+
+test("the collective skill listing budget is reported, and no Claude per-description cap is", () => {
+  const files = { "AGENTS.md": AGENTS_ROOT };
+  // eight skills, each with a description long enough that the list overruns the
+  // documented 8,000-character budget together and none of them does alone
+  for (let i = 0; i < 8; i++) {
+    files[`.agents/skills/step-${i}/SKILL.md`] = skillMd(`step-${i}`, ">-\n  " + `Runs step ${i} of the release. `.repeat(45));
+  }
+  const root = tmpProject(files);
+  const audit = engine.composeAudit(engine.scan(root, { adapter: codex, projectOnly: true }), null);
+
+  const budget = audit.findings.find((f) => f.type === "skill-listing-budget");
+  assert.match(budget.summary, /8 skills list for about \d+ characters against a documented 8000-character budget/);
+  assert.match(budget.summary, /largest: `step-\d` \(\d+\)/);
+  assert.match(budget.explanation, /descriptions are shortened first and skills can be dropped/);
+  assert.equal(budget.evidence.level, "heuristic");
+  assert.match(budget.evidence.limits, /the exact listing serialization is not/);
+  // one finding for the whole list: the budget is one pool
+  assert.equal(audit.findings.filter((f) => f.type === "skill-listing-budget").length, 1);
+  // and every skill is under the Claude cap individually, so nothing here is
+  // that cap firing under another name
+  for (const s of audit.skills) assert.ok(s.listingChars < 1536, s.name);
+
+  const report = engine.renderReport(audit);
+  assert.match(report, /against a documented 8000-character budget/);
+  assert.doesNotMatch(report, /Weak skill descriptions/);
+  assert.doesNotMatch(engine.renderArtifact(audit), /id="assay-other"/);
+});
+
+// Every documented hook surface at once: a project hooks.json, an inline
+// config.toml table in the same layer, a user-scope hooks.json, an enterprise
+// requirements.toml, and a plugin bundle.
+function hooksFixture(extra) {
+  const home = tmpCodexHome({
+    "hooks.json": JSON.stringify({
+      hooks: { SessionStart: [{ matcher: "startup|resume", hooks: [{ type: "command", command: "python3 ~/.codex/hooks/session_start.py" }] }] },
+    }),
+    ...(extra || {}),
+  });
+  const root = tmpProject({
+    "AGENTS.md": AGENTS_ROOT,
+    ".codex/hooks.json": JSON.stringify({
+      description: "Optional lifecycle hooks for this workspace.",
+      hooks: { PostToolUse: [{ matcher: "Edit|Write", hooks: [{ type: "command", command: "python3 .codex/hooks/format.py", timeout: 30 }] }] },
+    }),
+    ".codex/config.toml": [
+      "[[hooks.PreToolUse]]",
+      'matcher = "^Bash$"',
+      "",
+      "[[hooks.PreToolUse.hooks]]",
+      'type = "command"',
+      "command = '/usr/bin/python3 .codex/hooks/pre_tool_use_policy.py'",
+      "timeout = 30",
+      'statusMessage = "Checking Bash command"',
+      "",
+    ].join("\n"),
+    ".codex-plugin/plugin.json": JSON.stringify({ name: "repo-policy", version: "1.0.0", description: "x", hooks: "./hooks/hooks.json" }),
+    "hooks/hooks.json": JSON.stringify({
+      hooks: { PreCompact: [{ matcher: "auto", hooks: [{ type: "command", command: "node hooks/save_notes.js" }] }] },
+    }),
+  });
+  return { root, home };
+}
+
+test("every hook source is retained side by side — no layer replaces another", () => {
+  const { root, home } = hooksFixture({
+    "requirements.toml": [
+      "[features]",
+      "hooks = true",
+      "",
+      "[[hooks.PreToolUse]]",
+      'matcher = "^Bash$"',
+      "",
+      "[[hooks.PreToolUse.hooks]]",
+      'type = "command"',
+      'command = "python3 /enterprise/hooks/pre_tool_use_policy.py"',
+      "timeout = 30",
+      "",
+    ].join("\n"),
+  });
+  const { hooks, inaccessible } = codex.discoverHooks(codexContext(root, { codexHome: home }));
+  assert.deepEqual(inaccessible, []);
+
+  // one entry per definition, from all five surfaces, in documented load order
+  assert.deepEqual(hooks.map((h) => [h.source, h.event, h.command]), [
+    ["user", "SessionStart", "session_start.py"],
+    ["project", "PostToolUse", "format.py"],
+    ["project", "PreToolUse", "pre_tool_use_policy.py"],
+    ["managed", "PreToolUse", "pre_tool_use_policy.py"],
+    ["plugin: repo-policy", "PreCompact", "save_notes.js"],
+  ]);
+  // the project layer configures hooks in BOTH representations, which the host
+  // merges and warns about — retained, not collapsed
+  assert.equal(hooks.filter((h) => h.source === "project").length, 2);
+  assert.ok(hooks.filter((h) => h.source === "project").every((h) => h.limitKeys.includes("mergedRepresentations")));
+  // the same command from two layers is two hooks, not one
+  const policy = hooks.filter((h) => h.command === "pre_tool_use_policy.py");
+  assert.deepEqual(policy.map((h) => h.scope), ["project", "managed"]);
+
+  // matchers, events and the field each event filters on all reach the ladder
+  const audit = engine.composeAudit(engine.scan(root, { adapter: codex, projectOnly: true, userDir: home }), null);
+  const mechs = audit.mechanisms.filter((m) => m.type === "hook");
+  assert.deepEqual(mechs.map((m) => m.coverage.events[0]).sort(),
+    ["PostToolUse", "PreCompact", "PreToolUse", "PreToolUse", "SessionStart"]);
+  const sessionStart = mechs.find((m) => m.coverage.events[0] === "SessionStart");
+  assert.ok(sessionStart.coverage.limits.some((l) => /matches on `source`/.test(l)),
+    "a SessionStart matcher filters the session source, not a tool name");
+  const preTool = mechs.find((m) => m.coverage.events[0] === "PreToolUse");
+  assert.ok(preTool.coverage.limits.some((l) => /matches on `tool_name`/.test(l)));
+  assert.match(engine.renderReport(audit, { verbose: true }), /Level 3 — agent lifecycle guardrails\*\*: 5 hooks/);
+});
+
+test("Codex trust: nothing beyond configured is assumed, and a managed-only policy disables the rest", () => {
+  const { root, home } = hooksFixture();
+  const open = codex.discoverHooks(codexContext(root, { codexHome: home })).hooks;
+  const byScope = (list, scope) => list.find((h) => h.scope === scope);
+
+  // a user or plugin hook loads; whether its DEFINITION is trusted is a hash in
+  // the host's own store, which no file read reaches
+  assert.deepEqual(byScope(open, "user").states, { configured: true, enabled: true, trusted: "unknown", applicable: "unknown" });
+  assert.deepEqual(byScope(open, "plugin").states, { configured: true, enabled: true, trusted: "unknown", applicable: "unknown" });
+  // a project hook has a SECOND unconfirmed axis: the project `.codex/` layer's
+  // own trust decides whether the layer loads at all
+  assert.deepEqual(byScope(open, "project").states, { configured: true, enabled: "unknown", trusted: "unknown", applicable: "unknown" });
+  assert.ok(byScope(open, "project").limitKeys.includes("projectTrust"));
+  assert.ok(byScope(open, "user").limitKeys.includes("hookHashTrust"));
+
+  const audit = engine.composeAudit(engine.scan(root, { adapter: codex, projectOnly: true, userDir: home }), null);
+  const report = engine.renderReport(audit, { verbose: true });
+  assert.match(report, /configured ✓ · enabled \? · trusted \? · applicable \? · verified ✗/);
+  assert.match(report, /trust is recorded against this definition's hash — editing the command marks it for review again/);
+  assert.match(report, /project-local hooks load only when the project `\.codex\/` layer is trusted/);
+  // verified is never true anywhere, on any mechanism, under any source
+  assert.deepEqual([...new Set(audit.mechanisms.map((m) => m.states.verified))], [false]);
+
+  // and with the policy in force, every non-managed source is off
+  const locked = hooksFixture({
+    "requirements.toml": [
+      "allow_managed_hooks_only = true",
+      "",
+      "[[hooks.PreToolUse]]",
+      'matcher = "^Bash$"',
+      "",
+      "[[hooks.PreToolUse.hooks]]",
+      'type = "command"',
+      'command = "python3 /enterprise/hooks/policy.py"',
+      "",
+    ].join("\n"),
+  });
+  const managedOnly = codex.discoverHooks(codexContext(locked.root, { codexHome: locked.home })).hooks;
+  for (const h of managedOnly) {
+    if (h.scope === "managed") {
+      assert.deepEqual(h.states, { configured: true, enabled: true, trusted: true, applicable: true }, h.command);
+      assert.ok(h.limitKeys.includes("managedTrust"));
+    } else {
+      assert.deepEqual(h.states, { configured: true, enabled: false, trusted: "unknown", applicable: false }, h.command);
+      assert.ok(h.limitKeys.includes("managedOnly"));
+    }
+  }
+  const lockedReport = engine.renderReport(
+    engine.composeAudit(engine.scan(locked.root, { adapter: codex, projectOnly: true, userDir: locked.home }), null),
+    { verbose: true });
+  assert.match(lockedReport, /an `allow_managed_hooks_only` policy is in force, so this source is skipped whatever it says/);
+  assert.match(lockedReport, /configured ✓ · enabled ✗ · trusted \? · applicable ✗ · verified ✗/);
+  // managed by policy is trusted by policy — and still never observed
+  assert.match(lockedReport, /trusted without review and not disableable from the hook browser — assay still never saw it run/);
+});
+
+test("a hook layer that will not parse is a hole in the ladder, not a silent zero", () => {
+  const home = tmpCodexHome({ "hooks.json": "{ not json" });
+  const root = tmpProject({ "AGENTS.md": AGENTS_ROOT, ".codex/config.toml": "[unterminated\n" });
+  const { hooks, inaccessible } = codex.discoverHooks(codexContext(root, { codexHome: home }));
+  assert.deepEqual(hooks, []);
+  assert.equal(inaccessible.length, 2, JSON.stringify(inaccessible));
+  assert.ok(inaccessible.every((i) => /unreadable hook configuration/.test(i.reason)), JSON.stringify(inaccessible));
+
+  const report = engine.renderReport(
+    engine.composeAudit(engine.scan(root, { adapter: codex, projectOnly: true, userDir: home }), null), {});
+  assert.match(report, /could not read `[^`]*config\.toml` \(unreadable hook configuration[^)]*\) — any gate there is missing from this ladder/);
+});
+
+test("a hook a policy switched off never marks a rule already covered", () => {
+  const rule = "# Rules\n\n- Always run the full test suite before committing.\n";
+  const wired = JSON.stringify({
+    hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "python3 .codex/hooks/gate.py" }] }] },
+  });
+  // the hook-placement signal is model-judged, so the coverage check only has
+  // something to suppress once a judgment exists — same setup the Claude test uses
+  const auditWith = (home) => {
+    const root = tmpProject({ "AGENTS.md": rule, ".codex/hooks.json": wired });
+    const scanData = engine.scan(root, { adapter: codex, projectOnly: true, ...(home ? { userDir: home } : {}) });
+    const judgments = {};
+    for (const r of scanData.rules) judgments[r.key] = { F3: 0.7, F8: 0.15 };
+    return engine.composeAudit(scanData, judgments);
+  };
+
+  const live = auditWith(null);
+  assert.equal(live.findings.filter((f) => f.type === "redundant-enforcement").length, 1);
+  assert.match(live.findings.find((f) => f.type === "redundant-enforcement").summary, /`gate\.py`, project/);
+
+  const home = tmpCodexHome({ "requirements.toml": "allow_managed_hooks_only = true\n" });
+  const off = auditWith(home);
+  assert.equal(off.hookInventory.length, 1, "the hook is still inventoried — it is disabled, not invisible");
+  assert.equal(off.hookInventory[0].states.enabled, false);
+  assert.deepEqual(off.findings.filter((f) => f.type === "redundant-enforcement"), [],
+    "a hook the host skips covers nothing");
+});
+
+test("the vendored TOML parser reads the documented [[hooks.Event]] shape", () => {
+  const doc = codex.parseToml([
+    "allow_managed_hooks_only = true",
+    "",
+    "[hooks]",
+    'managed_dir = "/enterprise/hooks"',
+    "",
+    "[[hooks.PreToolUse]]",
+    'matcher = "^Bash$"',
+    "",
+    "[[hooks.PreToolUse.hooks]]",
+    'type = "command"',
+    'command = "python3 /enterprise/hooks/pre_tool_use_policy.py"',
+    "timeout = 30",
+    'statusMessage = "Checking managed Bash command"',
+    "",
+  ].join("\n"));
+
+  assert.equal(doc.allow_managed_hooks_only, true);
+  assert.equal(doc.hooks.managed_dir, "/enterprise/hooks");
+  assert.equal(doc.hooks.PreToolUse[0].matcher, "^Bash$");
+  assert.deepEqual(doc.hooks.PreToolUse[0].hooks, [{
+    type: "command",
+    command: "python3 /enterprise/hooks/pre_tool_use_policy.py",
+    timeout: 30,
+    statusMessage: "Checking managed Bash command",
+  }]);
+  // the 079 keys the subset reader used to serve still read the same
+  const config = codex.parseToml('project_doc_max_bytes = 400\nproject_doc_fallback_filenames = ["TEAM_GUIDE.md", ".agents.md"]\n');
+  assert.equal(config.project_doc_max_bytes, 400);
+  assert.deepEqual(config.project_doc_fallback_filenames, ["TEAM_GUIDE.md", ".agents.md"]);
+  // and a document it cannot read throws where the callers catch it
+  assert.throws(() => codex.parseToml("[unterminated\n"));
+});
+
+test("assay's own .codex-plugin/plugin.json carries every documented required field", () => {
+  const pluginRoot = path.join(__dirname, "..");
+  const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, ".codex-plugin", "plugin.json"), "utf-8"));
+
+  // required by the documented schema
+  assert.match(manifest.name, /^[a-z0-9]+(-[a-z0-9]+)*$/, "name must be kebab-case");
+  assert.match(manifest.version, /^\d+\.\d+\.\d+(-[\w.]+)?$/);
+  assert.ok(manifest.description && manifest.description.length > 0);
+
+  // every component path resolves relative to the plugin root, starts with "./",
+  // stays inside that root, and points at something that exists
+  for (const key of ["skills", "hooks", "mcpServers", "apps"]) {
+    if (manifest[key] === undefined) continue;
+    assert.match(manifest[key], /^\.\//, `${key} must be a "./" path`);
+    const abs = path.resolve(pluginRoot, manifest[key]);
+    assert.equal(path.relative(pluginRoot, abs).startsWith(".."), false, `${key} escapes the plugin root`);
+    assert.ok(fs.existsSync(abs), `${key} points at ${manifest[key]}, which does not exist`);
+  }
+  for (const key of ["composerIcon", "logo"]) {
+    const asset = (manifest.interface || {})[key];
+    if (asset === undefined) continue;
+    assert.match(asset, /^\.\//);
+    assert.ok(fs.existsSync(path.resolve(pluginRoot, asset)), `${key} points at ${asset}, which does not exist`);
+  }
+  // the audit workflow is what the packaging exists to carry, and it is the same
+  // skill directory the Claude packaging uses rather than a second copy
+  assert.equal(manifest.skills, "./skills/");
+  assert.ok(fs.existsSync(path.join(pluginRoot, "skills", "audit", "SKILL.md")));
+  // the Claude manifest still owns no version — the marketplace does
+  assert.equal(JSON.parse(fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf-8")).version, undefined);
+
+  // and a plugin manifest is a discovery surface too: pointed at this directory,
+  // the adapter finds the packaged skills through it
+  const found = codex.discoverSkills(codexContext(pluginRoot));
+  assert.ok(found.project.some((s) => s.scope === "plugin" && s.path === "skills/audit/SKILL.md"),
+    JSON.stringify(found.project.map((s) => s.path)));
+});
+
+test("repository checks come from one place, and both profiles return what they returned", () => {
+  const root = tmpProject({
+    "CLAUDE.md": FIXTURE_CLAUDE,
+    "AGENTS.md": AGENTS_ROOT,
+    "package.json": JSON.stringify({ name: "x", scripts: { test: "node --test", lint: "eslint .", build: "tsc" } }),
+    ".pre-commit-config.yaml": "repos: []\n",
+    ".git/config": "[core]\n\thooksPath = scripts/git-hooks\n",
+    ".github/workflows/ci.yml": "on: push\n",
+    ".github/workflows/release.yaml": "on: release\n",
+  });
+  const expected = [
+    { type: "repo-check", name: "npm script: lint", path: "package.json" },
+    { type: "repo-check", name: "npm script: test", path: "package.json" },
+    { type: "repo-check", name: ".pre-commit-config.yaml", path: ".pre-commit-config.yaml" },
+    { type: "repo-check", name: "git hooks: scripts/git-hooks", path: ".git/config" },
+    { type: "remote-gate", name: "ci.yml", path: ".github/workflows/ci.yml" },
+    { type: "remote-gate", name: "release.yaml", path: ".github/workflows/release.yaml" },
+  ];
+  const claudeAdapter = engine.ADAPTERS["claude-code"];
+  assert.deepEqual(claudeAdapter.discoverRepoChecks(claudeAdapter.detectContext({ root, projectOnly: true })),
+    { checks: expected, inaccessible: [] });
+  // the second profile gets the identical rungs from the identical code
+  assert.deepEqual(codex.discoverRepoChecks(codexContext(root)), { checks: expected, inaccessible: [] });
+  // "build" is not one of the four names either profile looks for
+  assert.equal(expected.some((c) => c.name.includes("build")), false);
+});
+
+test("mechanism nouns follow the profile, and the Claude report keeps the words it had", () => {
+  const long = ["# House rules", ""]
+    .concat(Array.from({ length: 240 }, (_, i) => `- Always run step ${i} of the release checklist before committing.`))
+    .concat([""]).join("\n");
+
+  const claudeAudit = engine.composeAudit(engine.scan(tmpProject({ "CLAUDE.md": long }), { projectOnly: true }), null);
+  const claudeReport = engine.renderReport(claudeAudit, { verbose: true });
+  assert.match(claudeReport, /Split into scoped `\.claude\/rules\/` files by topic\./);
+  assert.deepEqual(engine.profileNouns(claudeAudit), engine.DEFAULT_NOUNS);
+  assert.equal("nouns" in claudeAudit.profile, false, "the Claude profile declares none, so its record grows no key");
+
+  const codexAudit = engine.composeAudit(
+    engine.scan(tmpProject({ "AGENTS.md": long }), { adapter: codex, projectOnly: true }), null);
+  const codexReport = engine.renderReport(codexAudit, { verbose: true });
+  assert.match(codexReport, /Split into narrower `AGENTS\.md` files further down the chain by topic\./);
+  assert.doesNotMatch(codexReport, /\.claude\/rules\//);
+  assert.doesNotMatch(codexReport, /Claude Code primitive/);
+  assert.doesNotMatch(engine.renderArtifact(codexAudit), /Claude Code primitive/);
+  assert.doesNotMatch(engine.renderArtifact(codexAudit), /\.claude\/rules\//);
+});
+
+test("two scans of one Codex project with skills and hooks differ only in analysisTime", () => {
+  const { root, home } = hooksFixture({ "requirements.toml": "allow_managed_hooks_only = false\n" });
+  fs.mkdirSync(path.join(root, ".agents", "skills", "deploy", "agents"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".agents", "skills", "deploy", "SKILL.md"), skillMd("deploy", "Ships the service."));
+  fs.writeFileSync(path.join(root, ".agents", "skills", "deploy", "agents", "openai.yaml"),
+    "policy:\n  allow_implicit_invocation: false\n");
+
+  const opts = { adapter: codex, projectOnly: true, userDir: home };
+  const once = engine.makeRecord("scan", engine.scan(root, opts), root);
+  const twice = engine.makeRecord("scan", engine.scan(root, opts), root);
+  for (const r of [once, twice]) delete r.context.analysisTime;
+  assert.equal(JSON.stringify(once), JSON.stringify(twice));
+  assert.ok(once.skills.length && once.hookInventory.length, "the fixture has to have both to prove anything");
 });

@@ -10,6 +10,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 - assay can audit a second host. `--host codex` discovers the `AGENTS.md` instruction chain Codex reads — `AGENTS.override.md` over `AGENTS.md` over configured fallback names, in every directory from the project root down to where the session starts — and the report shows the resolved chain: read order, running byte total, and the host's documented combined byte cap applied where the host applies it
 - A Codex report is findings-first and grade-free: shadowed files, files past the byte cap, stale references, conflicts, duplicates, and bare prohibitions all land as findings, while the structural-hygiene grade stays off — that rubric was measured on the Claude Code profile and is not carried to a host without evidence for it
+- `--host codex` now finds the skills Codex loads: every `.agents/skills` directory along the chain, plus the ones a plugin bundles. A skill missing the `name` or `description` the host requires is flagged, its `agents/openai.yaml` is read for whether it routes itself or waits to be named, and one name defined at two levels is reported as two skills rather than a merge
+- The report models the character budget Codex holds its initial skill list to, and names the longest descriptions when the list overruns it — past that budget a skill can exist, read well, and never be offered
+- Codex hooks are inventoried from every configured source at once — `hooks.json`, inline `[hooks]` config tables, enterprise-managed policy, and plugin bundles — with none of them collapsing another. Each says what it is: configured, with trust unconfirmed, because the trust record is a hash the host keeps and no file read reaches. An `allow_managed_hooks_only` policy shows the sources it switches off, and a hook it switches off no longer marks a rule already covered
+- A hook configuration file that exists and cannot be parsed is reported as a hole in the enforcement ladder instead of counting as nothing configured
+- assay ships Codex packaging: a `.codex-plugin/plugin.json` over the same skill directory the Claude packaging uses, so the audit workflow installs on either host
+- Advice now names the host's own mechanisms — a Codex report suggests narrower `AGENTS.md` files where a Claude report suggests scoped `.claude/rules/` files
 
 ## [0.7.0-alpha] — 2026-07-28
 

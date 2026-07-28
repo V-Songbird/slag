@@ -13,7 +13,7 @@ description: >-
   files", "which rules are weak or vague", "audit my rules", "which rules should
   be hooks" — or invokes /assay:audit with any flags. Do NOT use to review code,
   PRs, or non-Claude config like eslint.
-argument-hint: "[--fix] [--verbose] [--json] [--no-verify] [--deterministic] [--semantic] [--artifact] [--project-only]"
+argument-hint: "[--fix] [--verbose] [--json] [--no-verify] [--deterministic] [--semantic] [--artifact] [--project-only] [--host codex]"
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent, Artifact
 ---
 
@@ -26,11 +26,14 @@ table), `--json` (machine-readable report), `--no-verify` (skip step 2b, which
 otherwise runs), `--deterministic` (skip every model step — steps 2 and 2b — and
 report what the script alone can see), `--semantic` (while judging, also propose
 paraphrased duplicates and indirect conflicts the script cannot see),
-`--project-only` (skip the user's own instruction files).
+`--project-only` (skip the user's own instruction files), `--host codex` (audit
+the Codex instruction system — the `AGENTS.md` chain, `.agents/skills`, and
+`.codex` hooks — instead of the Claude Code one).
 
 ## 1. Scan
 
-From the project root — pass `--project-only` through if `$ARGUMENTS` has it:
+From the project root — pass `--project-only` and `--host <name>` through if
+`$ARGUMENTS` has them, to this step and to every later `assay.js` call:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" scan
@@ -40,7 +43,10 @@ If `node` is not on PATH (fnm/nvm setups), register it the way the project's
 CLAUDE.md says to, then rerun. The output JSON has a `judge` list — every rule
 needing your judgment — and writes full data to `.assay-tmp/scan.json`. The
 scan also grades every `.claude/skills/*/SKILL.md` frontmatter description
-against the trigger recipe; those need no judgment.
+against the trigger recipe; those need no judgment. Under `--host codex` there
+is no grade and no trigger recipe: the report is findings only, and skills are
+validated against the metadata that host documents as required rather than
+scored.
 
 If `ruleCount` and `skillCount` are both 0, tell the user nothing was found and
 stop. If only `ruleCount` is 0, write `{}` to `.assay-tmp/judgments.json`, skip

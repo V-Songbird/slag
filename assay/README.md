@@ -67,6 +67,32 @@ Inside Claude Code, run:
 
 Nothing to configure. Works at the next session.
 
+For Codex, assay ships a `.codex-plugin/plugin.json` beside the Claude one, over
+the same skill directory — install the plugin from this repository's `assay/`
+directory the way your Codex setup installs plugins, and the audit is available
+there too.
+
+## Codex
+
+`/assay:audit --host codex` reads the instruction system Codex loads instead of
+the Claude Code one: the `AGENTS.md` chain from the project root down to where
+the session started, `AGENTS.override.md` and configured fallback names resolved
+per directory, and the combined byte cap applied where the host applies it — so
+a file past the cap is reported as never read rather than graded as live policy.
+It inventories `.agents/skills` along that same chain, validates the metadata
+Codex documents as required, reads each `agents/openai.yaml` for whether a skill
+routes itself or waits to be named, and models the character budget the initial
+skill list is held to. It inventories hooks from every configured source at
+once — `hooks.json`, inline `[hooks]` tables, enterprise-managed policy, plugin
+bundles — and states each one's trust as what it is: configured, with every
+state past that unconfirmed, because the trust store is not a file anything can
+read. A Codex report is findings only. There is no grade, because the hygiene
+rubric was measured on the Claude Code profile and carries no evidence here.
+
+> [!NOTE]
+> The Codex profile is encoded from the official Codex documentation and
+> exercised against fixtures. No live Codex host has verified it end to end.
+
 ## What you can do
 
 | You want to… | Command |
@@ -76,6 +102,7 @@ Nothing to configure. Works at the next session.
 | See every factor score per rule | `/assay:audit --verbose` |
 | Open the whole report as HTML, with search and filters | `/assay:audit --artifact` |
 | Grade the repo's files only, not your own | `/assay:audit --project-only` |
+| Audit what Codex loads instead | `/assay:audit --host codex` |
 | Build a skill that reliably triggers | `/assay:craft-skill` |
 | Fix a skill Claude keeps ignoring | `/assay:craft-skill <skill name>` |
 | Write a new rule that sticks | `/assay:craft-rules` |

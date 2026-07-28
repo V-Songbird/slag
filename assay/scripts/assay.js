@@ -207,6 +207,15 @@ const MECHANISM_LIMITS = {
   trust: "workspace trust is not introspectable from a static read",
   repo: "presence in the repository — assay does not check that any gate actually runs it",
   remote: "the workflow file exists — assay does not read its triggers, its jobs, or the branch policy",
+  // [Foreman: 080] The Codex trust vocabulary. The adapter names which of these
+  // apply to each hook by key — it declares the facts, this file owns the words,
+  // and a reader still learns one sentence per idea rather than one per host.
+  hookHashTrust: "trust is recorded against this definition's hash — editing the command marks it for review again, and it is skipped until re-trusted",
+  projectTrust: "project-local hooks load only when the project `.codex/` layer is trusted, which is not a fact on disk",
+  managedTrust: "managed by policy: trusted without review and not disableable from the hook browser — assay still never saw it run",
+  managedOnly: "an `allow_managed_hooks_only` policy is in force, so this source is skipped whatever it says",
+  mergedRepresentations: "this layer configures hooks in both `hooks.json` and inline `[hooks]`; the host merges them and warns at startup",
+  explicitOnly: "implicit routing is switched off for this skill — it is reached only when a session names it explicitly",
 };
 
 // [Foreman: 079]
@@ -223,11 +232,33 @@ const MECHANISM_LIMITS = {
 //     were measured. A profile that sets it false still gets every host-neutral
 //     analysis: availability gates, staleness, conflicts, duplicates, missing
 //     escape hatches, and the lossless inventory.
-const DEFAULT_POLICY = { wordingRubric: true };
+//   skillRecipe — may the Claude-measured skill trigger recipe (quoted trigger
+//     phrases, an exclusion clause, the per-description listing cap) grade this
+//     profile's skills? Default true. A profile that sets it false still gets
+//     mechanical validation of whatever metadata its own host documents as
+//     required, plus any listing budget that host publishes — see readSkills.
+const DEFAULT_POLICY = { wordingRubric: true, skillRecipe: true };
 
 function profilePolicy(record) {
   const declared = record && record.profile && record.profile.policy;
   return isRecordObject(declared) ? { ...DEFAULT_POLICY, ...declared } : DEFAULT_POLICY;
+}
+
+// [Foreman: 080] The mechanism nouns a report uses for the profile that produced
+// it. Advice that names a `.claude/rules/` file or a Claude Code primitive is
+// wrong under a Codex record and right under a Claude one, and no renderer may
+// learn a host name to tell them apart — so the words ride on the record beside
+// the policy. The defaults are the Claude profile's, which is what keeps its
+// output identical to the byte: that adapter declares no nouns and this object
+// is what it always printed.
+const DEFAULT_NOUNS = {
+  primitive: "Claude Code primitive",
+  scopedRules: "scoped `.claude/rules/` files",
+};
+
+function profileNouns(record) {
+  const declared = record && record.profile && record.profile.nouns;
+  return isRecordObject(declared) ? { ...DEFAULT_NOUNS, ...declared } : DEFAULT_NOUNS;
 }
 
 function isRecordObject(x) {
@@ -797,9 +828,57 @@ function gradeSkill(router, whenToUse, modelInvocable, userInvocable) {
   return { mode: "user-only", missing: [], redundant: false, overCap: length > DESCRIPTION_CAP, length, overSpecified, empty: length === 0 };
 }
 
+// [Foreman: 080] The `agents/openai.yaml` sidecar, read with the same vendored
+// YAML parser the frontmatter uses. Parsing lives here, discovery lives in the
+// adapter — the same split SKILL.md has had since 074.
+//
+// A sidecar that will not parse is REPORTED, never thrown and never guessed at:
+// the skill keeps its documented defaults and the file is named as unreadable,
+// exactly like malformed frontmatter.
+function readSkillMetadata(absPath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(absPath, "utf-8");
+  } catch (err) {
+    return { metadata: null, issue: err.code || err.message };
+  }
+  let doc;
+  try {
+    doc = yaml.load(raw);
+  } catch (err) {
+    return { metadata: null, issue: String(err.message).split("\n")[0].trim() };
+  }
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+    return { metadata: null, issue: "not a YAML mapping" };
+  }
+  const iface = doc.interface && typeof doc.interface === "object" ? doc.interface : {};
+  const policy = doc.policy && typeof doc.policy === "object" ? doc.policy : {};
+  const deps = doc.dependencies && typeof doc.dependencies === "object" ? doc.dependencies : {};
+  const tools = Array.isArray(deps.tools) ? deps.tools : [];
+  return {
+    metadata: {
+      displayName: typeof iface.display_name === "string" ? iface.display_name : null,
+      shortDescription: typeof iface.short_description === "string" ? iface.short_description : null,
+      // Documented default: implicit invocation is on unless a sidecar says
+      // otherwise. `false` is the only value that turns it off.
+      allowImplicitInvocation: policy.allow_implicit_invocation !== false,
+      toolDependencies: tools
+        .filter((t) => t && typeof t === "object")
+        .map((t) => ({
+          type: typeof t.type === "string" ? t.type : null,
+          value: typeof t.value === "string" ? t.value : null,
+        })),
+    },
+    issue: null,
+  };
+}
+
 // [Foreman: 074] Skill locations come from the adapter; reading the frontmatter
 // and grading it stays here.
-function readSkills(found) {
+// [Foreman: 080] `policy` decides which grading applies. Under a profile that
+// withholds the trigger recipe, a skill still gets everything its own host
+// documents as required — see gradeSkill's validation mode.
+function readSkills(found, policy = DEFAULT_POLICY) {
   const skills = [];
   for (const s of found) {
     let raw;
@@ -809,6 +888,31 @@ function readSkills(found) {
       continue;
     }
     const fm = parseFrontmatter(raw);
+    if (policy.skillRecipe === false) {
+      const meta = s.metadataAbsPath ? readSkillMetadata(s.metadataAbsPath) : { metadata: null, issue: null };
+      const name = typeof fm.name === "string" ? fm.name.trim() : "";
+      const descText = typeof fm.description === "string" ? fm.description.trim() : "";
+      skills.push({
+        path: s.path,
+        name: name || s.name,
+        description: descText,
+        scope: s.scope,
+        source: s.source,
+        // The two fields the host documents as required, checked mechanically.
+        checks: {
+          mode: "required-metadata",
+          missing: [...(name ? [] : ["name"]), ...(descText ? [] : ["description"])],
+          length: descText.length,
+        },
+        // The listing entry this skill costs: its name and its description are
+        // what the host lists before any of them is selected.
+        listingChars: (name || s.name).length + descText.length,
+        ...(s.metadataPath ? { metadataPath: s.metadataPath } : {}),
+        ...(meta.metadata ? { metadata: meta.metadata } : {}),
+        ...(meta.issue ? { metadataIssue: meta.issue } : {}),
+      });
+      continue;
+    }
     const descText = typeof fm.description === "string" ? fm.description : "";
     const whenToUse = typeof fm.when_to_use === "string" ? fm.when_to_use : "";
     // when_to_use carries trigger text in some skills; the router reads both
@@ -2032,17 +2136,44 @@ function scan(root, options = {}) {
     }
   }
 
-  const userSkills = (skillsFound.user || []).map((s) => ({
-    name: s.name,
-    hasDescription: hasSkillDescription(s.absPath),
-  }));
-
   // [Foreman: 079] What the host documents as a hard limit on how much of this
   // it will read, and what the profile must disclose about its own coverage.
   // Both are emitted only when the adapter supplies them, so a profile that
   // documents neither produces exactly the record it produced before.
   const budget = adapter.budgets ? (adapter.budgets(context) || {}).documented : null;
+  // [Foreman: 080] The host's second documented budget, if it publishes one: what
+  // the initial skill LIST costs before any skill is selected. Separate from the
+  // instruction cap because it is a different pool spent on different content.
+  const skillBudget = adapter.budgets ? (adapter.budgets(context) || {}).skillListing : null;
   const profileNotes = adapter.coverageNotes ? adapter.coverageNotes() : [];
+
+  // [Foreman: 080] An adapter may return its hooks bare, or paired with the hook
+  // configuration it found and could not read. The second form exists because a
+  // hook layer that exists and will not parse is a hole in the ladder, and the
+  // ladder already has one place that names holes — the repository checks'
+  // `inaccessible` list, which prints "any gate there is missing from this
+  // ladder". Nothing changes for an adapter that returns the bare array.
+  const hooksFound = adapter.discoverHooks(context);
+  const hookInventory = Array.isArray(hooksFound) ? hooksFound : hooksFound.hooks || [];
+  const hookIssues = Array.isArray(hooksFound) ? [] : hooksFound.inaccessible || [];
+  const repoChecks = adapter.discoverRepoChecks ? adapter.discoverRepoChecks(context) : { checks: [], inaccessible: [] };
+  if (hookIssues.length) {
+    repoChecks.inaccessible = [...(repoChecks.inaccessible || []), ...hookIssues];
+  }
+
+  const policy = adapter.policy ? { ...DEFAULT_POLICY, ...adapter.policy } : DEFAULT_POLICY;
+
+  // [Foreman: 080] A user-scope skill is counted and named, never graded — but
+  // where the host publishes a collective listing budget it still SPENDS from
+  // it, so its listing cost travels with it. No budget, no extra keys.
+  const userSkills = (skillsFound.user || []).map((s) => {
+    const facts = skillFacts(s.absPath, s.name);
+    return {
+      name: s.name,
+      hasDescription: facts.hasDescription,
+      ...(skillBudget ? { scope: s.scope, listingChars: facts.listingChars } : {}),
+    };
+  });
 
   return {
     root: context.projectRoot,
@@ -2053,16 +2184,19 @@ function scan(root, options = {}) {
       host: adapter.name,
       version: adapter.profileVersion,
       ...(adapter.policy ? { policy: adapter.policy } : {}),
+      // [Foreman: 080] The mechanism nouns this profile's advice uses, when it
+      // declares any. A profile that declares none keeps the record it had.
+      ...(adapter.nouns ? { nouns: adapter.nouns } : {}),
     },
     files: files.map(({ content, absPath, globMatched, ...rest }) => rest),
     sources,
     scopeOverlaps,
     rules,
-    skills: readSkills(skillsFound.project || []),
-    hookInventory: adapter.discoverHooks(context),
+    skills: readSkills(skillsFound.project || [], policy),
+    hookInventory,
     // [Foreman: 077] Levels 4 and 5 of the ladder, as the adapter found them.
     // Raw discovery, like hookInventory: `mechanisms` is derived from it.
-    repoChecks: adapter.discoverRepoChecks ? adapter.discoverRepoChecks(context) : { checks: [], inaccessible: [] },
+    repoChecks,
     // [Foreman: 070] What the audit did and did not look at. The report prints
     // this so a number is never read as covering more than it measured.
     coverage: {
@@ -2078,19 +2212,23 @@ function scan(root, options = {}) {
       userSkills,
       agents: adapter.discoverAgents(context),
       ...(budget ? { budget } : {}),
+      ...(skillBudget ? { skillBudget } : {}),
       ...(profileNotes.length ? { profileNotes } : {}),
     },
   };
 }
 
-// Inventory-grade check: does this skill declare a description at all? User
-// skills are counted and named, never scored — see the adapter.
-function hasSkillDescription(absPath) {
+// Inventory-grade facts about a skill nobody grades: does it declare a
+// description at all, and what does its listing entry cost. One read for both.
+// User skills are counted and named, never scored — see the adapter.
+function skillFacts(absPath, fallbackName) {
   try {
     const fm = parseFrontmatter(fs.readFileSync(absPath, "utf-8"));
-    return typeof fm.description === "string" && fm.description.trim().length > 0;
+    const name = typeof fm.name === "string" && fm.name.trim() ? fm.name.trim() : fallbackName || "";
+    const description = typeof fm.description === "string" ? fm.description.trim() : "";
+    return { hasDescription: description.length > 0, listingChars: name.length + description.length };
   } catch {
-    return false;
+    return { hasDescription: false, listingChars: 0 };
   }
 }
 
@@ -2804,7 +2942,11 @@ function matcherCovers(wiredMatcher, impliedMatcher) {
 }
 
 function hookCoverage(audit) {
-  const wired = audit.hookInventory || [];
+  // [Foreman: 080] A hook a policy switches off covers nothing. Where an adapter
+  // declares `enabled: false` — an `allow_managed_hooks_only` layer, say — the
+  // rule it would have covered is still uncovered, and the report must not mark
+  // it handled.
+  const wired = (audit.hookInventory || []).filter((h) => !h.states || h.states.enabled !== false);
   const covered = [];
   for (const rule of comparableRules(audit)) {
     const inferred = (rule.placement || {}).hookEvent;
@@ -2842,7 +2984,13 @@ function deriveMechanisms(audit) {
   const skillStates = { configured: true, enabled: true, trusted: true, applicable: "unknown" };
   const skillLimits = [MECHANISM_LIMITS.routing, MECHANISM_LIMITS.notExecuted];
   for (const skill of audit.skills || []) {
-    add("skill", skill.name, skill.path || ".claude/skills/", skillStates, skillLimits);
+    // [Foreman: 080] How a skill fires is not one story. A host that documents a
+    // per-skill implicit-routing switch has skills the description never routes:
+    // those are reached by naming them, and saying "a description routes it"
+    // about one would be the wrong limit on the wrong mechanism.
+    const explicitOnly = skill.metadata ? skill.metadata.allowImplicitInvocation === false : false;
+    add("skill", skill.name, skill.path || ".claude/skills/", skillStates,
+      explicitOnly ? [MECHANISM_LIMITS.explicitOnly, MECHANISM_LIMITS.notExecuted] : skillLimits);
   }
   for (const skill of ((audit.coverage || {}).userSkills) || []) {
     add("skill", skill.name, "user scope", skillStates, skillLimits);
@@ -2853,16 +3001,29 @@ function deriveMechanisms(audit) {
   for (const hook of audit.hookInventory || []) {
     const matcher = hook.matcher || "*";
     const restricts = matcher !== "*" && matcher !== "";
-    const limits = [MECHANISM_LIMITS.trust, MECHANISM_LIMITS.notExecuted];
+    // [Foreman: 080] The adapter may declare the hook's state chain and which
+    // limits apply, by key into the vocabulary above. It knows what its host
+    // documents about trust; this file knows how to say it. An adapter that
+    // declares neither keeps the states and limits it always had.
+    const limits = Array.isArray(hook.limitKeys)
+      ? hook.limitKeys.map((k) => MECHANISM_LIMITS[k]).filter(Boolean)
+      : [MECHANISM_LIMITS.trust, MECHANISM_LIMITS.notExecuted];
     if (restricts) {
-      limits.unshift(`the \`${matcher}\` matcher is the whole of this hook's reach — it raises no event for any other tool`);
+      // Which field the matcher filters on is the host's business: an event that
+      // filters on a trigger or a session source restricts something other than
+      // a tool, and the limit has to say which.
+      const filters = hook.matcherFilters ? `\`${hook.matcherFilters}\`` : "the event's own matcher field";
+      limits.unshift(hook.matcherFilters
+        ? `the \`${matcher}\` matcher is the whole of this hook's reach — it matches on ${filters} and raises no event for anything else`
+        : `the \`${matcher}\` matcher is the whole of this hook's reach — it raises no event for any other tool`);
     }
-    add("hook", hook.command, hook.source, {
-      // A hook wired in project or user settings, or shipped by an installed
-      // plugin, loads when it is present. Whether the workspace is trusted is
-      // the axis a static read cannot settle.
-      configured: true, enabled: true, trusted: "unknown", applicable: true,
-    }, limits, restricts
+    // A hook wired in project or user settings, or shipped by an installed
+    // plugin, loads when it is present. Whether the workspace is trusted is
+    // the axis a static read cannot settle.
+    const states = isRecordObject(hook.states)
+      ? hook.states
+      : { configured: true, enabled: true, trusted: "unknown", applicable: true };
+    add("hook", hook.command, hook.source, states, limits, restricts
       ? { events: [hook.event], matchers: [matcher], tools: matcher.split("|") }
       : { events: [hook.event], matchers: [matcher] });
   }
@@ -3002,6 +3163,84 @@ function deriveFindings(audit) {
       },
       sources: [], safeActions: ["rename one of the two skills", "retire the copy that no longer applies"],
     });
+  }
+  // [Foreman: 080] Skill findings for a profile that withholds the trigger
+  // recipe. Nothing here is a wording judgment: a required field is present or
+  // it is not, a sidecar parses or it does not, two names match or they do not,
+  // and a documented budget is spent or it is not.
+  const skillAt = (s) => [{ path: s.path, lineStart: 1, lineEnd: 1 }];
+  if (policy.skillRecipe === false) {
+    for (const skill of (audit.skills || []).filter((s) => (s.checks || {}).mode === "required-metadata")) {
+      if (skill.checks.missing.length) {
+        push({
+          type: "skill-metadata", severity: "high", analyzer: "skill-metadata",
+          summary: `\`${skill.path}\` declares no ${skill.checks.missing.join(" and no ")} — the host documents ${skill.checks.missing.length === 1 ? "it" : "both"} as required`,
+          explanation: "The host requires these fields in a skill's frontmatter. A skill missing one is not a skill written badly — it is a skill the host has nothing to list or route on.",
+          evidence: {
+            level: "documented", basis: "SKILL.md frontmatter requires `name` and `description`",
+            limits: "the field is read out of the file; assay has not watched this host reject the skill",
+          },
+          sources: skillAt(skill),
+          safeActions: skill.checks.missing.map((k) => `add a \`${k}\` to the frontmatter`),
+        });
+      }
+      if (skill.metadataIssue) {
+        push({
+          type: "skill-metadata-unreadable", severity: "medium", analyzer: "skill-metadata",
+          summary: `\`${skill.metadataPath}\` could not be parsed (${skill.metadataIssue}) — its interface metadata, invocation policy and tool dependencies were not read`,
+          explanation: "The sidecar is optional, so a skill without one is normal; one that exists and will not parse is different. assay reports it rather than guessing at its contents, and the skill keeps the documented defaults — which includes implicit routing staying on.",
+          evidence: { level: "mechanical", basis: "YAML parse of the skill's metadata sidecar" },
+          sources: skillAt(skill), safeActions: ["repair the YAML", "delete the sidecar if it is unused"],
+        });
+      }
+    }
+    // "If two skills share the same `name`, Codex doesn't merge them; both can
+    // appear in skill selectors." There is no winner to report, which is the
+    // finding: two entries, one name, and no documented resolution.
+    const byName = new Map();
+    for (const skill of (audit.skills || []).filter((s) => (s.checks || {}).mode === "required-metadata")) {
+      if (!byName.has(skill.name)) byName.set(skill.name, []);
+      byName.get(skill.name).push(skill);
+    }
+    for (const [name, group] of byName) {
+      if (group.length < 2) continue;
+      push({
+        type: "skill-name-collision", severity: "medium", analyzer: "skill-discovery",
+        summary: `${group.length} skills are named \`${name}\` — ${group.map((s) => "`" + s.path + "`").join(", ")}`,
+        explanation: "The host does not merge two skills that share a name; both stay listed, and which one a session reaches is not documented. assay names every copy and picks no winner, because the documentation defines none.",
+        evidence: {
+          level: "documented", basis: "two skills sharing a name are not merged — both can appear in skill selectors",
+          limits: "names matched, nothing else — the copies may do entirely different things",
+        },
+        sources: group.flatMap(skillAt),
+        safeActions: ["rename all but one", "remove the copy that no longer applies"],
+      });
+    }
+  }
+  // The collective listing budget: what every discovered skill costs before any
+  // of them is selected. One finding for the whole list, because the budget is
+  // one pool and no single skill overruns it alone.
+  const skillBudget = (audit.coverage || {}).skillBudget;
+  if (skillBudget) {
+    const listed = [
+      ...(audit.skills || []).map((s) => ({ name: s.name, chars: s.listingChars || 0, path: s.path })),
+      ...(((audit.coverage || {}).userSkills) || []).map((s) => ({ name: s.name, chars: s.listingChars || 0, path: null })),
+    ];
+    const total = listed.reduce((n, s) => n + s.chars, 0);
+    if (total > skillBudget.amount) {
+      const largest = [...listed].sort((a, b) => b.chars - a.chars).slice(0, 3);
+      push({
+        type: "skill-listing-budget", severity: "medium", analyzer: "skill-listing-budget",
+        summary: `${listed.length} skills list for about ${total} characters against a documented ${skillBudget.amount}-character budget — largest: ${largest.map((s) => "`" + s.name + "` (" + s.chars + ")").join(", ")}`,
+        explanation: "The host builds one list of every skill at session start and holds it to a budget. Past it, descriptions are shortened first and skills can be dropped from the list entirely — so a skill can exist, be well written, and never be offered. Shortening the longest descriptions is what buys the list back.",
+        evidence: {
+          level: "heuristic", basis: skillBudget.claim,
+          limits: "the budget is documented; the exact listing serialization is not, so this total counts each skill's name and description and is a floor rather than the host's own arithmetic",
+        },
+        sources: largest.filter((s) => s.path).map((s) => ({ path: s.path, lineStart: 1, lineEnd: 1 })),
+        safeActions: ["shorten the longest descriptions", "remove skills this project no longer uses"],
+      });
+    }
   }
   // [Foreman: 079] The host's own documented budget, spent. The adapter decided
   // where the limit lands and marked each source; this loop only reports what it
@@ -3244,6 +3483,24 @@ function fmt(x) {
   return x == null ? "—" : x.toFixed(2);
 }
 
+// [Foreman: 080] The trigger recipe's own verdict, and only it. A skill graded
+// under a profile that withholds the recipe carries the `required-metadata`
+// check instead, and its problems are findings — this table has nothing to say
+// about it and must not print an empty verdict against it.
+// [Foreman: 080] The findings a profile makes about its skills instead of
+// grading them. One set, read by both renderers, so neither can orphan one.
+const SKILL_FINDING_TYPES = new Set([
+  "skill-metadata", "skill-metadata-unreadable", "skill-name-collision", "skill-listing-budget",
+]);
+
+function isWeakSkill(s) {
+  const c = s.checks || {};
+  if (c.mode === "required-metadata") return false;
+  if (c.mode === "dead") return true;
+  if (c.mode === "user-only") return c.overSpecified || c.overCap || c.empty;
+  return c.missing.length || c.overCap || c.redundant || c.hasWhenToUse;
+}
+
 function pushWeakSkillSection(out, weakSkills) {
   out.push(`## Weak skill descriptions (${weakSkills.length} to fix)`);
   out.push("");
@@ -3378,6 +3635,10 @@ function pushProgressSection(out, audit, prev, findings) {
 // guard is the ceiling here — detection now, safe rewriting later.
 function restructureCandidates(audit) {
   const candidates = [];
+  // [Foreman: 080] "Split into scoped `.claude/rules/` files" is advice about a
+  // mechanism one host has. The noun comes off the record's profile so the same
+  // detection gives the right instruction under either one.
+  const scopedRules = profileNouns(audit).scopedRules;
   audit.files.forEach((f, i) => {
     const own = audit.rules.filter((r) => !r.suppressed && r.fileIndex === i);
     const belowMid = own.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD);
@@ -3393,11 +3654,11 @@ function restructureCandidates(audit) {
     // needs two or more rules for a "share" to exist at all.
     if (own.length >= 2 && f.lineCount > LONG_FILE_LINES && belowShare >= RESTRUCTURE_BELOW_MIDPOINT) {
       reasons.push(`${belowMid.length} of ${own.length} rules below the midpoint`);
-      restructures.push("Move the load-bearing rules into the top quarter, or split into scoped `.claude/rules/` files.");
+      restructures.push(`Move the load-bearing rules into the top quarter, or split into ${scopedRules}.`);
     }
     if (f.lineCount > RESTRUCTURE_LONG_FILE_LINES) {
       reasons.push(`${f.lineCount} lines`);
-      restructures.push("Split into scoped `.claude/rules/` files by topic.");
+      restructures.push(`Split into ${scopedRules} by topic.`);
     }
     if (reasons.length) candidates.push({ path: f.path, reasons, restructures });
   });
@@ -3705,12 +3966,7 @@ function renderReport(audit, opts = {}) {
   // a reader, so the rule id + text opens the file at its line. Brackets in the
   // label would break the markdown link, so drop them.
   const ruleLink = (r, n) => `[${r.id} "${truncate(r.text, n).replace(/[[\]]/g, "")}"](${r.file}:${r.lineStart})`;
-  const weakSkills = (audit.skills || []).filter((s) => {
-    const c = s.checks;
-    if (c.mode === "dead") return true;
-    if (c.mode === "user-only") return c.overSpecified || c.overCap || c.empty;
-    return c.missing.length || c.overCap || c.redundant || c.hasWhenToUse;
-  });
+  const weakSkills = (audit.skills || []).filter(isWeakSkill);
   // [Foreman: 071] No `semantic` block means no model judged anything in this
   // audit. Every renderer says so rather than letting a renormalized score read
   // as the same measurement a model-judged one is.
@@ -3801,10 +4057,13 @@ function renderReport(audit, opts = {}) {
   const conflicts = findings.filter((f) => f.type === "conflict");
   const overlaps = findings.filter((f) => f.type === "scope-overlap");
   const proposals = ((audit.semantic || {}).candidates) || [];
+  // [Foreman: 080] The skill findings a profile without the trigger recipe
+  // produces. Empty under a profile that grades skills instead.
+  const skillFindings = findings.filter((f) => SKILL_FINDING_TYPES.has(f.type));
   out.push("## Operational findings");
   out.push("");
   if (!weak.length && !stalls.length && !buried.length && !stale.length && !badCategories.length &&
-      !duplicates.length && !conflicts.length && !overlaps.length && !proposals.length) {
+      !duplicates.length && !conflicts.length && !overlaps.length && !proposals.length && !skillFindings.length) {
     out.push("None — no loaded rule carries a risk the analyzers can see.");
     out.push("");
   } else {
@@ -3824,6 +4083,27 @@ function renderReport(audit, opts = {}) {
       const [a, b] = f.sources;
       out.push(`- [${a.path}:${a.lineStart}](${a.path}:${a.lineStart}) ↔ [${b.path}:${b.lineStart}](${b.path}:${b.lineStart}) — ${f.summary}`);
       out.push(`  - ${f.explanation}`);
+    }
+    out.push("");
+  }
+
+  // [Foreman: 080] Skills, where the profile validates them instead of grading
+  // them. Every line is mechanical or documented; none is a wording verdict, and
+  // each says how the skill would have to be reached.
+  if (skillFindings.length) {
+    out.push("### Skills");
+    out.push("");
+    out.push("The host requires some skill metadata and publishes a budget for the list it builds at session start. These are read out of the files, never judged.");
+    out.push("");
+    for (const f of skillFindings) {
+      out.push(`- ${redactSecrets(f.summary)} ${evidenceTag(f.evidence)}`);
+      out.push(`  - ${f.explanation}`);
+    }
+    // Explicit invocation and implicit routing are two different ways in, and a
+    // skill with routing switched off is reachable only by being named.
+    const explicit = (audit.skills || []).filter((s) => s.metadata && s.metadata.allowImplicitInvocation === false);
+    if (explicit.length) {
+      out.push(`- ${explicit.length} skill(s) set \`allow_implicit_invocation: false\` — ${explicit.map((s) => "`" + s.name + "`").join(", ")}. Nothing routes to them from a description; a session reaches them by naming them.`);
     }
     out.push("");
   }
@@ -3989,7 +4269,12 @@ function renderReport(audit, opts = {}) {
     if (advisory.length) out.push("");
   }
 
-  if (mechanisms.length) pushLadderSection(out, audit, mechanisms, activeRules, opts, findings);
+  // [Foreman: 080] Also when the ladder is empty ONLY because a surface could not
+  // be read: a project whose one hook file will not parse has no mechanisms, and
+  // suppressing the section there would hide the hole instead of naming it.
+  if (mechanisms.length || (((audit.repoChecks || {}).inaccessible) || []).length) {
+    pushLadderSection(out, audit, mechanisms, activeRules, opts, findings);
+  }
 
   // [Foreman: 076] A rule whose moment a wired hook already fires on. The hook
   // is read out of the settings files, never watched — so this says "already
@@ -4031,7 +4316,8 @@ function renderReport(audit, opts = {}) {
     const higher = mechanisms.some((m) => m.level >= 4)
       ? " Repository and remote gates exist in this project; a policy that must be impossible to merge belongs there, not in a hook."
       : "";
-    out.push("Rules whose job fits a Claude Code primitive better than rule prose:" + higher + " [heuristic]");
+    // [Foreman: 080] The primitive's name is the host's, off the record.
+    out.push(`Rules whose job fits a ${profileNouns(audit).primitive} better than rule prose:` + higher + " [heuristic]");
     out.push("");
     for (const r of placed) {
       const det = Object.entries(r.placement.detections)
@@ -4585,6 +4871,12 @@ function renderArtifact(audit) {
   operational.push(artifactSection("categories", 3, "Unknown category annotations",
     "The annotation was not recognized, so the rule was graded under its file's default category.",
     byType("unknown-category").map((f) => item(f, `${ruleAt(f.rule)} — ${f.summary}`))));
+  // [Foreman: 080] The same skill findings the markdown report lists, so neither
+  // renderer leaves one for the orphan section at the bottom.
+  operational.push(artifactSection("skillmeta", 3, "Skills",
+    "The host requires some skill metadata and publishes a budget for the list it builds at session start. Read out of the files, never judged.",
+    findings.filter((f) => SKILL_FINDING_TYPES.has(f.type)).map((f) =>
+      item(f, redactSecrets(f.summary) + " " + evidenceTag(f.evidence), [f.explanation]))));
   operational.push(artifactSection("nonlatin", 3, "Non-Latin script",
     "Wording checks are English-only, so these factor scores measure nothing. Read them as unreliable, not as low.",
     byType("unsupported-language").map((f) => item(f, `${ruleAt(f.rule)} — ${f.summary}`))));
@@ -4617,7 +4909,7 @@ function renderArtifact(audit) {
     rules.filter((r) => r.hookOpportunity).map((r) =>
       artifactItem(null, `${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}"`))));
   placement.push(artifactSection("candidates", 3, "Placement candidates",
-    "Rules whose job fits a Claude Code primitive better than rule prose. [heuristic]",
+    `Rules whose job fits a ${profileNouns(audit).primitive} better than rule prose. [heuristic]`,
     rules.filter((r) => r.placement).map((r) => artifactItem(null,
       `${r.id} (${r.file}:${r.lineStart}) → ${r.placement.bestFit} — "${truncate(r.text, 70)}"`,
       [Object.entries(r.placement.detections).map(([p, d]) => `${p} ${fmt(d.confidence)} [${d.evidence.join(", ")}]`).join("; ")]))));
@@ -4909,7 +5201,7 @@ module.exports = {
   RECORD_SCHEMA, SCHEMA_VERSION, ANALYZER_VERSION, validateRecord, makeRecord,
   // [Foreman: 079] the host-profile contract: the registry `--host` selects
   // from, and the policy every analyzer consults instead of a host name
-  ADAPTERS, DEFAULT_POLICY, profilePolicy,
+  ADAPTERS, DEFAULT_POLICY, profilePolicy, DEFAULT_NOUNS, profileNouns, readSkillMetadata,
   // [Foreman: 071] the semantic contract: rubric axis + the candidate kinds a
   // later entry's semantic pass may propose
   RUBRIC_VERSION, SEMANTIC_CANDIDATE_KINDS,
