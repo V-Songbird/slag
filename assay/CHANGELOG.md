@@ -11,6 +11,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - The docs, the plugin description, and the report itself now say plainly what a grade measures: how a rule is written, scoped, and placed — structural hygiene, not a prediction that Claude will follow it
 - Promoting or parking a placement candidate no longer removes the rule. A promotion shows you the hook, skill, or subagent before writing it, installs it only if you approve, and leaves the prose active; parking just records the plan. Retiring the now-duplicated rule is a separate decision you make once you've seen the new mechanism working
 
+### Fixed
+
+- Rules written inside a Markdown table are graded like any other rule. A directive in a table cell used to vanish from the audit entirely; header and separator rows still don't count as rules
+- A rule file whose `paths:` frontmatter is written inline — `paths: ["src/**/*.ts", "test/**"]` — is now scoped by each pattern. It was read as one literal that matched nothing, which scored every rule in the file as a dead glob
+- Two directives written as two sentences in one paragraph are graded as two rules, so a weak one can no longer hide behind a strong one. A prohibition and the sentence naming its replacement still count as one rule
+- An unrelated instruction standing next to a prohibition no longer counts as its alternative. The replacement has to be about the thing being banned, or the prohibition is still bare
+- A single generic word in backticks — `` `code` ``, `` `it` `` — no longer passes as concrete on its own. Paths, commands, flags, multi-word spans and real identifiers still do
+- A rule that says "TypeScript files" inside a file scoped to `**/*.ts` is no longer scored as a scope mismatch. Common language names now match their file extensions
+- A misspelled `<!-- category: … -->` annotation is named in the report with its file and line. It used to pass silently and take the rule out of the corpus grade with it
+
 ## [0.5.9-alpha] — 2026-07-24
 
 ### Added

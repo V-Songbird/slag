@@ -249,6 +249,27 @@ function grade(score) {
 // Discovery
 // ---------------------------------------------------------------------------
 
+// [Foreman: 069] An inline YAML flow array — paths: ["src/**/*.ts", 'test/**'] —
+// was kept as one literal string, so the whole file matched no files and every
+// rule in it scored as a dead glob. Elements split on commas outside quotes;
+// block-style "- item" lists are parsed separately, unchanged.
+// razor: single-line flow sequences only. An array wrapped across lines still
+// falls through to the literal-string path.
+function parseInlineArray(value) {
+  const items = [];
+  let buf = "", quote = null;
+  for (const ch of value.slice(1, -1)) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else buf += ch;
+    } else if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === ",") { items.push(buf.trim()); buf = ""; }
+    else buf += ch;
+  }
+  items.push(buf.trim());
+  return items.filter(Boolean);
+}
+
 function parseFrontmatter(content) {
   const fm = {};
   const lines = content.split("\n");
@@ -264,7 +285,9 @@ function parseFrontmatter(content) {
     if (!line || line.startsWith("#") || !line.includes(":")) { i++; continue; }
     const sep = line.indexOf(":");
     const key = line.slice(0, sep).trim();
-    let value = line.slice(sep + 1).trim().replace(/^["']|["']$/g, "");
+    const rawValue = line.slice(sep + 1).trim();
+    if (/^\[.*\]$/.test(rawValue)) { fm[key] = parseInlineArray(rawValue); i++; continue; }
+    let value = rawValue.replace(/^["']|["']$/g, "");
     if (/^[>|][+-]?$/.test(value)) {
       const parts = [];
       i++;
@@ -535,6 +558,15 @@ function hasConstraintKeyword(text) {
   return CONSTRAINT_KEYWORDS.some((p) => p.test(lower));
 }
 
+// A table body row's cells, left to right. The row's outer pipes go, escaped
+// pipes stay inside their cell, and a cell with no letters — a dash, a count, an
+// empty column — carries nothing to grade and drops out.
+function tableCells(row) {
+  return row.trim().replace(/^\||\|$/g, "").split(/(?<!\\)\|/)
+    .map((c) => c.replace(/\\\|/g, "|").trim())
+    .filter((c) => /[A-Za-z]/.test(c));
+}
+
 function stripMetadata(content) {
   const lines = content.split("\n");
   const result = [];
@@ -640,13 +672,20 @@ function stripMetadata(content) {
     }
   }
 
+  // [Foreman: 069] A table's header row and its separator are layout, but its
+  // body cells carry real directives — "Never commit secrets" in a Do/Don't
+  // table is a rule like any other, and dropping the whole table dropped it from
+  // grading entirely. Layout rows still leave the stream; body rows come back
+  // cell by cell below, each keeping the row's own line number.
   const tableRegions = new Set();
+  const tableBodyRows = new Set();
   for (let i = frontmatterEnd; i < lines.length; i++) {
     if (tableRegions.has(i) || fenceRegions.has(i) || tagRegions.has(i) || ignoreRegions.has(i)) continue;
     if (lines[i].trim().startsWith("|") && i + 1 < lines.length && /^\|[\s:]*-/.test(lines[i + 1].trim())) {
       let j = i;
       while (j < lines.length && lines[j].trim().startsWith("|")) {
         tableRegions.add(j);
+        if (j > i + 1) tableBodyRows.add(j);
         j++;
       }
     }
@@ -654,7 +693,15 @@ function stripMetadata(content) {
 
   for (let i = frontmatterEnd; i < lines.length; i++) {
     const lineNum = i + 1;
-    if (fenceRegions.has(i) || tableRegions.has(i) || tagRegions.has(i) || ignoreRegions.has(i)) continue;
+    if (fenceRegions.has(i) || tagRegions.has(i) || ignoreRegions.has(i)) continue;
+    if (tableRegions.has(i)) {
+      if (tableBodyRows.has(i)) {
+        for (const cell of tableCells(visibleLines[i])) {
+          result.push({ lineNum, text: cell, isContent: true, isBlank: false, isHeading: false, isTableCell: true, raw: cell });
+        }
+      }
+      continue;
+    }
     const control = lines[i].trim();
     const raw = visibleLines[i];
     const stripped = raw.trim();
@@ -700,6 +747,17 @@ function identifyChunks(lines) {
         if (text) { heading = text; headingLine = line.lineNum; }
       }
       if (line.isBlank && current) { chunks.push(current); current = null; }
+      continue;
+    }
+    // [Foreman: 069] A recovered table cell is a chunk of its own: it neither
+    // continues the paragraph above it nor merges with the cell beside it, and a
+    // non-directive cell has to stay free to classify as prose on its own.
+    if (line.isTableCell) {
+      if (current) { chunks.push(current); current = null; }
+      chunks.push({
+        lineStart: line.lineNum, lineEnd: line.lineNum,
+        text: line.text, isBullet: false, heading, headingLine,
+      });
       continue;
     }
     const isBullet = /^(?:[-*]|\d+\.)\s/.test(line.text);
@@ -796,14 +854,18 @@ function mergeClarifications(chunks) {
 // `hasImperativeVerb` matches a verb anywhere in the text, and the bare
 // imperative tier holds ordinary words (save, keep, cut, drop, report), so a
 // trailing subordinate clause qualified and got graded as a rule of its own.
-function leadsWithImperativeVerb(text) {
+function leadingVerb(text) {
   const lower = text.toLowerCase().replace(/^[^a-z]+/, "");
   for (const t of VERB_TIERS) {
     if (!lower.startsWith(t.verb)) continue;
     const rest = lower.slice(t.verb.length);
-    if (rest === "" || /^[\s,;.)!?]/.test(rest)) return true;
+    if (rest === "" || /^[\s,;.)!?]/.test(rest)) return t.verb;
   }
-  return false;
+  return null;
+}
+
+function leadsWithImperativeVerb(text) {
+  return leadingVerb(text) !== null;
 }
 
 function splitCompound(chunk) {
@@ -817,6 +879,18 @@ function splitCompound(chunk) {
   if (text.includes(";")) {
     const parts = text.split(";").map((p) => p.trim()).filter(Boolean);
     if (parts.length >= 2 && parts.every(leadsWithImperativeVerb)) return parts.map(sub);
+  }
+
+  // [Foreman: 069] Two directive sentences in one paragraph are two policies,
+  // and one grade covering both hides the weaker of them. Split only when every
+  // sentence leads with an imperative verb — a clarification ("This means …")
+  // stays attached to the rule it explains — and never when F2 reads the pair as
+  // a prohibition beside the alternative that rescues it: that is one policy
+  // said in two sentences, and splitting it would grade the ban as bare.
+  const sentences = text.split(SENTENCE_SPLIT).map((s) => s.trim()).filter(Boolean);
+  if (sentences.length >= 2 && sentences.every(leadsWithImperativeVerb) &&
+      scoreF2(text).category !== "prohibition_with_alternative") {
+    return sentences.map(sub);
   }
   return [chunk];
 }
@@ -1000,19 +1074,64 @@ function hasContrastNot(text) {
   return /,\s+not\s+\w+/i.test(text);
 }
 
-function scoreF2(text) {
+// Sentence boundary: a terminator, whitespace, then something that can open a
+// new sentence (a capital, a code span, bold, or a quote).
+const SENTENCE_SPLIT = /(?<=[.!?])\s+(?=[A-Z`*_"'])/;
+const CLAUSE_SPLIT = /(?<=[.!?])\s+(?=[A-Z`*_"'])|[;—–]\s*|,\s+/;
+
+function isProhibitionText(text) {
   const lower = text.toLowerCase();
   // "must not" is deontic — it never appears in a factual negation — so it
   // counts as a prohibition anywhere, even after a subject ("tests must not X").
-  const isProhibition = PROHIBITION_CLAUSE_RE.test(lower) || lower.includes("must not ");
+  return PROHIBITION_CLAUSE_RE.test(lower) || lower.includes("must not ");
+}
+
+// [Foreman: 069]
+// Content words of a clause, for deciding whether one clause is about the same
+// thing as another: case-folded, plural/participle endings shaved off, and the
+// words that carry no topic — stopwords and the imperative verb vocabulary —
+// dropped. Deliberately crude; it only ever answers "same subject matter?".
+function contentTokens(text) {
+  const tokens = new Set();
+  for (const w of text.toLowerCase().match(/[a-z][a-z0-9_-]*/g) || []) {
+    if (w.length < 2 || RULE_KEYWORD_STOPWORDS.has(w) || ALL_VERBS.has(w)) continue;
+    tokens.add(w.replace(/(?:ies|es|s)$/, "").replace(/(?:ing|ed)$/, ""));
+  }
+  return tokens;
+}
+
+// [Foreman: 069]
+// A prohibition is only rescued by an alternative that plausibly replaces the
+// banned thing. Three deterministic signals: the alternative points back at the
+// ban ("instead", "rather than"), it names something the ban named, or it
+// performs the very action the ban forbade on a different object ("Never use
+// `var`." / "Use `const` for locals."). An unrelated directive standing next to
+// a prohibition leaves it exactly as bare as no directive at all.
+function resolvesProhibition(banned, alternative) {
+  const alt = alternative.toLowerCase();
+  if (ALTERNATIVE_MARKERS.some((m) => alt.includes(m.trim()))) return true;
+  const bannedLower = banned.toLowerCase();
+  const bannedTokens = contentTokens(bannedLower);
+  for (const t of contentTokens(alt)) {
+    if (bannedTokens.has(t)) return true;
+  }
+  const verb = leadingVerb(alternative);
+  return verb !== null && new RegExp("\\b" + escapeRe(verb) + "\\b").test(bannedLower);
+}
+
+function scoreF2(text) {
+  const lower = text.toLowerCase();
+  const isProhibition = isProhibitionText(text);
   const isHedged = HEDGED_MARKERS.some((p) => lower.includes(p));
   const hasAlternative = ALTERNATIVE_MARKERS.some((p) => lower.includes(p)) || hasContrastNot(text);
 
   if (isProhibition) {
     // Prohibition + named alternative is the strongest framing; a prohibition
     // without one converts blocked tasks into stalls, not compliance.
-    const sentences = text.split(/(?<=[.!?])\s+(?=[A-Z])|[;—–]\s*/);
-    if (hasAlternative || (sentences.length >= 2 && sentences.some(hasPositiveImperative))) {
+    const clauses = text.split(CLAUSE_SPLIT).map((c) => c.trim()).filter(Boolean);
+    const banned = clauses.find(isProhibitionText) || text;
+    const rescued = clauses.some((c) => c !== banned && hasPositiveImperative(c) && resolvesProhibition(banned, c));
+    if (hasAlternative || rescued) {
       return { value: 0.95, category: "prohibition_with_alternative" };
     }
     return { value: 0.2, category: "bare_prohibition", stallRisk: true };
@@ -1048,6 +1167,37 @@ function extractGlobKeywords(globs) {
   return keywords;
 }
 
+// [Foreman: 069] "TypeScript files" and paths: ["**/*.ts", "**/*.tsx"] scope the
+// same rule, but F4 compared the two spellings and called it a mismatch. Both
+// directions of this table are folded into the glob keywords before comparing —
+// nothing fuzzier: a language not listed here still has to match literally.
+const LANGUAGE_EXTENSIONS = {
+  typescript: ["ts", "tsx"],
+  javascript: ["js", "jsx", "mjs", "cjs"],
+  python: ["py"],
+  ruby: ["rb"],
+  rust: ["rs"],
+  golang: ["go"],
+  java: ["java"],
+  kotlin: ["kt", "kts"],
+  markdown: ["md"],
+  shell: ["sh", "bash"],
+};
+const EXTENSION_LANGUAGES = new Map();
+for (const [lang, exts] of Object.entries(LANGUAGE_EXTENSIONS)) {
+  for (const ext of exts) EXTENSION_LANGUAGES.set(ext, lang);
+}
+
+function expandLanguageTerms(terms) {
+  const out = new Set(terms);
+  for (const t of terms) {
+    for (const ext of LANGUAGE_EXTENSIONS[t] || []) out.add(ext);
+    const lang = EXTENSION_LANGUAGES.get(t);
+    if (lang) out.add(lang);
+  }
+  return out;
+}
+
 const RULE_KEYWORD_STOPWORDS = new Set([
   "the", "and", "for", "all", "new", "with", "not", "use", "when", "this", "that", "from",
   "into", "over", "than", "must", "should", "always", "never", "before", "after", "each",
@@ -1066,7 +1216,7 @@ function scoreF4(rule, file) {
   }
   if (globs.length) {
     const triggers = extractTriggerScope(lower);
-    const globKeywords = extractGlobKeywords(globs);
+    const globKeywords = expandLanguageTerms(extractGlobKeywords(globs));
     if (triggers.size) {
       const overlap = [...triggers].some((t) => globKeywords.has(t));
       return overlap ? { value: 0.95, method: "glob_match" } : { value: 0.25, method: "wrong_scope" };
@@ -1089,9 +1239,32 @@ function scoreF5(lineStart, file) {
   return { value: 0.4, method: "bottom" };
 }
 
+// [Foreman: 069] Backticks alone are not specificity. `src/api/handler.ts`,
+// `npm test`, `CreateUserSchema` and `--force` each name something a reader can
+// check; `code`, `it` and `file` name nothing, so a lone generic word in
+// backticks no longer clears the concreteness bar by itself. Anything carrying a
+// non-letter (path, command, flag, extension, digit) or an uppercase letter
+// (camelCase, PascalCase) still counts, as do all the other concrete signals.
+const GENERIC_BACKTICK_WORDS = new Set([
+  "code", "it", "them", "here", "there", "thing", "things", "stuff", "file",
+  "files", "folder", "folders", "name", "names", "value", "values", "data",
+  "text", "item", "items", "one", "good", "bad", "ok", "yes", "etc",
+]);
+
+function isConcreteBacktick(span) {
+  const s = span.trim();
+  if (!s) return false;
+  if (/[^A-Za-z]/.test(s)) return true;
+  if (/[A-Z]/.test(s)) return true;
+  const lower = s.toLowerCase();
+  return !GENERIC_BACKTICK_WORDS.has(lower) && !RULE_KEYWORD_STOPWORDS.has(lower);
+}
+
 function scoreF7(text) {
   const markers = [];
-  for (const m of text.matchAll(/`([^`]+)`/g)) markers.push(m[1]);
+  for (const m of text.matchAll(/`([^`]+)`/g)) {
+    if (isConcreteBacktick(m[1])) markers.push(m[1]);
+  }
   const stripped = text.replace(/`[^`]+`/g, "");
   for (const pattern of CONCRETE_REGEX.slice(1)) {
     for (const m of stripped.matchAll(pattern)) {
@@ -1318,8 +1491,18 @@ function scan(root) {
         if (ignored.has(part.lineStart - 1) || ignored.has(part.lineStart - 2)) continue;
         counter++;
         let category = file.defaultCategory;
+        let categoryLine = null;
         for (let ln = part.lineStart - 2; ln < part.lineStart; ln++) {
-          if (annotations[ln]) category = annotations[ln];
+          if (annotations[ln]) { category = annotations[ln]; categoryLine = ln; }
+        }
+        // [Foreman: 069] A misspelled category annotation used to pass silently
+        // and take the rule out of every category-keyed count with it — the
+        // corpus grade averages mandates only. The rule stays graded under its
+        // file's default; the bad annotation is reported instead of swallowed.
+        let invalidCategory = null;
+        if (!(category in CATEGORY_FLOORS)) {
+          invalidCategory = { value: category, line: categoryLine || part.lineStart };
+          category = file.defaultCategory in CATEGORY_FLOORS ? file.defaultCategory : "mandate";
         }
         const effectiveText = part.text;
         const sourceText = part.sourceText || effectiveText;
@@ -1335,6 +1518,7 @@ function scan(root) {
           lineStart: part.lineStart,
           lineEnd: part.sourceLineEnd || part.lineEnd,
           category,
+          invalidCategory,
           staleness,
           nonLatin: NON_LATIN_SCRIPT.test(effectiveText),
           factors: {
@@ -1750,6 +1934,19 @@ function renderReport(audit, opts = {}) {
         else hint = " → no file by that name in the repo";
         out.push(`- ${r.id} (${loc(r)}) cites \`${m.ref}\`${hint}`);
       }
+    }
+    out.push("");
+  }
+
+  const badCategories = rules.filter((r) => r.invalidCategory);
+  if (badCategories.length) {
+    out.push("## Unknown category annotations");
+    out.push("");
+    out.push(`A \`<!-- category: … -->\` annotation only recognizes ${Object.keys(CATEGORY_FLOORS).join(", ")}. These name something else, so the rule was graded under its file's default category — fix the spelling or it keeps the wrong pass mark.`);
+    out.push("");
+    for (const r of badCategories) {
+      const line = r.invalidCategory.line;
+      out.push(`- ${r.id} ([${r.file}:${line}](${r.file}:${line})) — \`<!-- category: ${r.invalidCategory.value} -->\``);
     }
     out.push("");
   }

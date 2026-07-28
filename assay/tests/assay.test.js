@@ -22,6 +22,46 @@ function tmpProject(files) {
 // Extraction
 // ---------------------------------------------------------------------------
 
+// [Foreman: 069]
+test("an inline YAML array in frontmatter yields its elements", () => {
+  const inline = engine.parseFrontmatter(["---", "paths: [\"src/**/*.ts\", 'test/**', lib/**]", "---"].join("\n"));
+  assert.deepEqual(inline.paths, ["src/**/*.ts", "test/**", "lib/**"]);
+  // block-style lists keep working
+  const block = engine.parseFrontmatter(["---", "paths:", '  - "src/**"', "  - test/**", "---"].join("\n"));
+  assert.deepEqual(block.paths, ["src/**", "test/**"]);
+  // and the scan sees separate patterns, not one literal that matches nothing
+  const root = tmpProject({
+    "CLAUDE.md": "# Project rules\n",
+    ".claude/rules/ts.md": '---\npaths: ["src/**/*.ts", "test/**"]\n---\n\n- Return typed errors from every handler.\n',
+    "src/api/handler.ts": "export {};",
+  });
+  const scanData = engine.scan(root);
+  assert.deepEqual(scanData.files[1].globs, ["src/**/*.ts", "test/**"]);
+  assert.notEqual(scanData.rules[0].factors.F4.method, "dead_glob");
+});
+
+// [Foreman: 069]
+test("directives in table body cells are graded, header and separator rows are not", () => {
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "# Conventions",
+      "",
+      "| Do | Don't |",
+      "|---|---|",
+      "| Use `const` for locals | Never use `var` |",
+      "| `src/api/` | the handler layer |",
+      "",
+    ].join("\n"),
+  });
+  const rules = engine.scan(root).rules;
+  // one graded rule per directive cell, at the row's own line
+  assert.deepEqual(rules.map((r) => r.text), ["Use `const` for locals", "Never use `var`"]);
+  assert.deepEqual(rules.map((r) => r.lineStart), [5, 5]);
+  // the "Don't" header cell reads as a directive but is layout, and neither
+  // non-directive cell of the second row becomes a rule
+  assert.equal(rules.length, 2);
+});
+
 test("stripMetadata removes frontmatter, fences, tables, and bare links", () => {
   const content = [
     "---", "paths:", '  - "src/**"', "---",
@@ -173,6 +213,26 @@ test("splitCompound keeps a trailing subordinate clause with its sentence", () =
   assert.equal(engine.splitCompound(midClause).length, 1);
 });
 
+// [Foreman: 069]
+test("two directive sentences in one paragraph are two rules", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "Run the tests before every commit. Update the changelog with every user-facing change.\n",
+  });
+  const rules = engine.scan(root).rules;
+  assert.deepEqual(rules.map((r) => r.text), [
+    "Run the tests before every commit.",
+    "Update the changelog with every user-facing change.",
+  ]);
+});
+
+// [Foreman: 069]
+test("a prohibition and its alternative, and a directive and its clarification, stay one rule", () => {
+  const pair = { text: "Never commit secrets. Use the vault instead.", lineStart: 1, lineEnd: 1 };
+  assert.equal(engine.splitCompound(pair).length, 1);
+  const clarified = { text: "Never use `var`. This means `let` or `const` everywhere.", lineStart: 1, lineEnd: 1 };
+  assert.equal(engine.splitCompound(clarified).length, 1);
+});
+
 test("verbless bullets retain exact source text and carry heading context separately", () => {
   const content = "## Error handling\n\n- All API failures through `handleError`.\n- Validation failures: status `400`.\n";
   const { lines } = engine.stripMetadata(content);
@@ -254,6 +314,17 @@ test("F2 clause-leading prohibition with a named action is still the strongest f
   assert.equal(r.stallRisk, undefined);
 });
 
+// [Foreman: 069]
+test("an unrelated neighbouring directive no longer excuses a bare prohibition", () => {
+  const unrelated = engine.scoreF2("Never commit secrets to the repository. Run the formatter before pushing.");
+  assert.equal(unrelated.value, 0.2);
+  assert.equal(unrelated.stallRisk, true);
+  // a same-topic replacement is still the escape hatch
+  const genuine = engine.scoreF2("Never store tokens in the repository. Store tokens in the secrets manager.");
+  assert.equal(genuine.value, 0.95);
+  assert.equal(genuine.stallRisk, undefined);
+});
+
 test("F2 backtick contrast counts as an alternative, predicate negation does not", () => {
   assert.equal(engine.scoreF2("Use `getProjectCommands(project)` not `database.commands` here.").value, 0.95);
   assert.equal(engine.scoreF2("Write tests first, this is not optional.").value, 0.85);
@@ -289,6 +360,20 @@ test("F4 lean scoped rule with no trigger text trusts the frontmatter", () => {
   assert.equal(r.value, 0.85);
 });
 
+// [Foreman: 069]
+test("a language name matches its extension globs", () => {
+  const tsFile = { alwaysLoaded: false, globs: ["**/*.ts", "**/*.tsx"], globMatchCount: 4 };
+  const match = engine.scoreF4({ text: "When editing typescript files, enable strict mode.", staleness: noStale }, tsFile);
+  assert.equal(match.value, 0.95);
+  // a different language is still a mismatch — the table is the whole of it
+  const wrong = engine.scoreF4({ text: "When editing python files, pin the version.", staleness: noStale }, tsFile);
+  assert.equal(wrong.value, 0.25);
+  // the keyword branch reads the language name too
+  const pyFile = { alwaysLoaded: false, globs: ["**/*.py"], globMatchCount: 2 };
+  const keyword = engine.scoreF4({ text: "Type every python helper with annotations.", staleness: noStale }, pyFile);
+  assert.equal(keyword.value, 0.9);
+});
+
 test("F4 dead glob and staleness kill the score", () => {
   const dead = engine.scoreF4({ text: "Use Zod.", staleness: noStale }, { alwaysLoaded: false, globs: ["src/nope/**"], globMatchCount: 0 });
   assert.equal(dead.value, 0.05);
@@ -309,6 +394,22 @@ test("F7 numeric thresholds count as concrete markers", () => {
   const r = engine.scoreF7("Keep functions under 40 lines.");
   assert.ok(r.concrete.some((m) => /40\s*lines/.test(m)));
   assert.ok(r.value >= 0.8);
+});
+
+// [Foreman: 069]
+test("a lone generic backticked word is not concreteness on its own", () => {
+  assert.deepEqual(engine.scoreF7("Keep the `code` tidy.").concrete, []);
+  assert.deepEqual(engine.scoreF7("Keep `it` short.").concrete, []);
+  // paths, commands, flags, casing and real identifiers still count
+  for (const t of [
+    "Put helpers in `src/utils/format.ts`.",
+    "Run `npm test` first.",
+    "Wrap it in `CreateUserSchema`.",
+    "Pass `--force` only on a rerun.",
+    "Use `const` for locals.",
+  ]) {
+    assert.equal(engine.scoreF7(t).concrete.length, 1, t);
+  }
 });
 
 test("F7 all-abstract scores near zero", () => {
@@ -1154,6 +1255,34 @@ test("assay-ignore comment and category annotation are honored", () => {
   const result = engine.scan(root);
   assert.equal(result.rules.length, 1);
   assert.equal(result.rules[0].category, "preference");
+});
+
+// [Foreman: 069]
+test("a misspelled category annotation is reported, not silently accepted", () => {
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "<!-- category: preferance -->",
+      "- Prefer named exports.",
+      "",
+      "<!-- category: preference -->",
+      "- Prefer arrow functions.",
+      "",
+    ].join("\n"),
+  });
+  const scanData = engine.scan(root);
+  const [typo, good] = scanData.rules;
+  // still graded, and under a category the corpus actually counts
+  assert.equal(typo.category, "mandate");
+  assert.deepEqual(typo.invalidCategory, { value: "preferance", line: 1 });
+  assert.equal(good.category, "preference");
+  assert.equal(good.invalidCategory, null);
+
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /## Unknown category annotations/);
+  assert.match(report, /category: preferance/);
+  assert.match(report, /\(\[CLAUDE\.md:1\]\(CLAUDE\.md:1\)\)/);
 });
 
 test("a non-Latin-script rule is flagged and the report says the grade is unreliable", () => {
