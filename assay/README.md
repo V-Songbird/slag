@@ -67,27 +67,18 @@ Inside Claude Code, run:
 
 Nothing to configure. Works at the next session.
 
-For Codex, assay ships a `.codex-plugin/plugin.json` beside the Claude one, over
-the same skill directory — install the plugin from this repository's `assay/`
-directory the way your Codex setup installs plugins, and the audit is available
-there too.
+assay installs on Codex too — point your Codex plugin install at this
+repository's `assay/` directory and the same audit is there.
 
 ## Codex
 
-`/assay:audit --host codex` reads the instruction system Codex loads instead of
-the Claude Code one: the `AGENTS.md` chain from the project root down to where
-the session started, `AGENTS.override.md` and configured fallback names resolved
-per directory, and the combined byte cap applied where the host applies it — so
-a file past the cap is reported as never read rather than graded as live policy.
-It inventories `.agents/skills` along that same chain, validates the metadata
-Codex documents as required, reads each `agents/openai.yaml` for whether a skill
-routes itself or waits to be named, and models the character budget the initial
-skill list is held to. It inventories hooks from every configured source at
-once — `hooks.json`, inline `[hooks]` tables, enterprise-managed policy, plugin
-bundles — and states each one's trust as what it is: configured, with every
-state past that unconfirmed, because the trust store is not a file anything can
-read. A Codex report is findings only. There is no grade, because the hygiene
-rubric was measured on the Claude Code profile and carries no evidence here.
+`/assay:audit --host codex` audits the instruction system Codex loads instead of
+the Claude Code one: the `AGENTS.md` files it actually reads, the skills it
+lists, and the hooks wired around them. The findings say what never takes effect
+and why — a file the host stops reading at its size limit, a skill description
+too long to survive the initial listing, a hook configured but not yet trusted.
+A Codex report is findings only; the hygiene grade stays off, because that
+rubric carries no evidence for this host.
 
 > [!NOTE]
 > The Codex profile is encoded from the official Codex documentation and
