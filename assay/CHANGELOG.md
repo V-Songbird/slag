@@ -16,6 +16,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - The audit now sees the whole documented Claude surface for a project: `CLAUDE.local.md`, your user-level `CLAUDE.md` — graded under its own section, never moving the project grade — and a count of the user skills and subagents that exist alongside them. `--project-only` keeps the audit inside the repo
 - The report now leads with findings: **Hard gates** for rules the host cannot apply, **Operational findings** for the ones it loads but that carry a risk, and **Policy placement** for the ones another mechanism should own. Every finding names its exact source line and is labelled with the kind of evidence behind it — mechanical, heuristic, model-inferred, or measured
 - The report opens with a count of what was found by kind, and `remeasure` shows those counts before and after your fixes
+- The audit runs fully offline. With no model judgments present the report still lands — labelled `deterministic only`, with the model-judged checks named in **Coverage** as not run, and each score computed over the factors that were actually measured. `/assay:audit --deterministic` is the flag that asks for it
+- Judgments now record their provenance — which model made them, under which rubric version, and when — and the report says so when the rubric has changed since they were made
 
 ### Changed
 

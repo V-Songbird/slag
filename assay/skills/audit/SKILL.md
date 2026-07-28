@@ -13,7 +13,7 @@ description: >-
   files", "which rules are weak or vague", "audit my rules", "which rules should
   be hooks" — or invokes /assay:audit with any flags. Do NOT use to review code,
   PRs, or non-Claude config like eslint.
-argument-hint: "[--fix] [--verbose] [--json] [--no-verify] [--artifact] [--project-only]"
+argument-hint: "[--fix] [--verbose] [--json] [--no-verify] [--deterministic] [--artifact] [--project-only]"
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent, Artifact
 ---
 
@@ -23,7 +23,9 @@ The script measures everything mechanical; you judge two factors and present the
 result. Never re-derive by hand what the script already computed. Flags in
 `$ARGUMENTS`: `--fix` (apply rewrites without the menu), `--verbose` (full factor
 table), `--json` (machine-readable report), `--no-verify` (skip step 2b, which
-otherwise runs), `--project-only` (skip the user's own instruction files).
+otherwise runs), `--deterministic` (skip every model step — steps 2 and 2b — and
+report what the script alone can see), `--project-only` (skip the user's own
+instruction files).
 
 ## 1. Scan
 
@@ -42,6 +44,12 @@ against the trigger recipe; those need no judgment.
 If `ruleCount` and `skillCount` are both 0, tell the user nothing was found and
 stop. If only `ruleCount` is 0, write `{}` to `.assay-tmp/judgments.json`, skip
 step 2, and continue.
+
+If `$ARGUMENTS` contains `--deterministic`, go straight to step 3 from here:
+write no judgments file at all and skip steps 2 and 2b. The engine has no such
+flag and never needs one — the absence of `.assay-tmp/judgments.json` *is* the
+mode. The report lands complete, labelled `deterministic only`, with the
+model-judged checks named in the Coverage block as not run.
 
 A `judge` entry can include `context` when a heading or following clarification
 is needed to interpret the rule. Judge the rule with that context, but keep
@@ -71,10 +79,32 @@ only a new or reworded rule needs a fresh one.
 { "a1b2c3d4e5f6": { "F3": 0.75, "F8": 0.9 }, "9f8e7d6c5b4a": { "F3": 0.45, "F8": 0.15, "F1": 0.7 } }
 ```
 
+Then add one more top-level key, `_provenance`, recording who judged and under
+what. It sits beside the rule keys and is never one of them:
+
+```json
+{ "_provenance": { "model": "claude-sonnet-4-5", "promptVersion": "2", "judgedAt": "2026-07-28T09:41:00Z", "pass": "F3/F8" } }
+```
+
+- `model` — the model you are running as. Use its id if you know it plainly
+  (`claude-sonnet-4-5` style); otherwise a plain name is fine. Never guess a
+  version number you are unsure of.
+- `promptVersion` — the number on the `Rubric version:` line at the top of
+  [references/rubrics.md](references/rubrics.md), as a string.
+- `judgedAt` — the current time, ISO 8601.
+- `pass` — which judgments this file holds: `"F3/F8"` now, `"F3/F8+verify"`
+  once step 2b has run.
+
+A judgment survives an edit elsewhere in the file because its key is a content
+hash; the rubric is the axis a hash cannot see, so the report prints a one-line
+warning when these judgments were made under an older rubric than the engine
+ships.
+
 ## 2b. Verify
 
-Run this step by default. Skip it only when `$ARGUMENTS` contains `--no-verify`.
-A measured run earned it the default slot — see the model note below.
+Run this step by default. Skip it when `$ARGUMENTS` contains `--no-verify` or
+`--deterministic`. A measured run earned it the default slot — see the model
+note below.
 
 Extraction cannot tell a directive from a retrospective, so a lessons file can
 arrive graded as a page of mandates. This step asks one question about those
@@ -106,11 +136,14 @@ holding the returned reason verbatim:
 { "a1b2c3d4e5f6": { "F3": 0.75, "F8": 0.9 }, "9f8e7d6c5b4a": { "F3": 0.45, "F8": 0.15, "notRule": "Records what the team decided last quarter; it asks for nothing." } }
 ```
 
-Change nothing else. The pass may drop an entry and that is all it may do —
+Change nothing else, with one exception: set `_provenance.pass` to
+`"F3/F8+verify"`, so the drops recorded here travel under the same provenance as
+the scores above them. The pass may drop an entry and that is all it may do —
 never edit an `F3` or `F8` you already wrote, never reword a rule, never add
 `notRule` on your own judgment instead of the subagent's. An entry with
 `notRule` leaves the counts, the file grades, and the corpus grade; it does not
-get rescored.
+get rescored, and it never leaves the inventory — the report regroups it, the
+line count and span classification of its file are unchanged.
 
 ## 3. Report
 

@@ -1841,12 +1841,29 @@ test("the Coverage block counts suppressed entries even though the rows stay ver
   assert.match(verbose.out, /asks for nothing/);
 });
 
-test("report without a judgments file exits 1 and names the missing file", () => {
+// [Foreman: 071]
+test("report without a judgments file lands a deterministic-only audit", () => {
   const root = cliFixture();
   assert.equal(cli(root, "scan").code, 0);
-  const { code, err } = cli(root, "report");
-  assert.equal(code, 1);
-  assert.match(err, /Missing \.assay-tmp\/judgments\.json/);
+  const { code, out } = cli(root, "report");
+  assert.equal(code, 0);
+  // the banner, the coverage gap, and the score's evidence mix all say it
+  assert.match(out, /· deterministic only$/m);
+  assert.match(out, /- model-judged checks did not run \(trigger clarity, enforceability, rule-verification\); deterministic findings only/);
+  assert.match(out, /Evidence mix: deterministic factors only/);
+  // it is a real report, not a stub: the findings-first sections all print
+  for (const header of ["## Coverage", "## Hard gates", "## Operational findings", "## Policy placement", "## Structural hygiene (secondary)"]) {
+    assert.ok(out.includes(header), "missing " + header);
+  }
+  // and the record claims no semantic pass it never had
+  const audit = readJson(root, "audit.json");
+  assert.equal("semantic" in audit, false);
+  assert.equal(engine.validateRecord(audit, "audit"), null);
+  assert.ok(audit.rules.every((r) => r.factorValues.F3 === null && r.f8 === null));
+  // --verbose prints the unjudged columns as dashes, never as invented numbers
+  const verbose = cli(root, "report", "--verbose");
+  assert.equal(verbose.code, 0);
+  assert.match(verbose.out, /^\| \[R001[^|]*\| mandate \| [\d.]+ \| [\d.]+ \| — \| [\d.]+ \| [\d.]+ \| [\d.]+ \| — \|/m);
 });
 
 test("report on malformed judgments exits 1 and names the problem", () => {
@@ -1927,11 +1944,216 @@ test("remeasure lists reworded rules first, then composes a before/after report"
   assert.match(composed.out, /## Coverage/);
 });
 
-test("remeasure without judgments exits 1 and says to run a full audit first", () => {
+// [Foreman: 071]
+test("remeasure without judgments stays deterministic instead of demanding a model pass", () => {
   const root = cliFixture();
-  const { code, err } = cli(root, "remeasure");
-  assert.equal(code, 1);
-  assert.match(err, /No \.assay-tmp\/judgments\.json/);
+  assert.equal(cli(root, "scan").code, 0);
+  const first = cli(root, "report");
+  assert.equal(first.code, 0);
+
+  fs.writeFileSync(
+    path.join(root, "CLAUDE.md"),
+    FIXTURE_CLAUDE.replace("Write clean, maintainable code.", "Write typed handlers in `src/api/handler.ts`.")
+  );
+  // no judgments file means nothing to re-judge: no worklist, straight to the
+  // report, with the before/after the prior audit makes possible
+  const { code, out } = cli(root, "remeasure");
+  assert.equal(code, 0);
+  assert.doesNotMatch(out, /"remeasure": true/);
+  assert.match(out, /· deterministic only$/m);
+  assert.match(out, /## Since last audit/);
+  assert.equal("semantic" in readJson(root, "audit.json"), false);
+});
+
+// [Foreman: 071]
+// The renormalization contract: a factor nobody measured leaves the numerator
+// AND the denominator, so the composite stays a weighted mean over the factors
+// that have evidence. A default value would be a number assay invented.
+test("an unjudged factor drops its weight from the score instead of taking a default", () => {
+  const root = tmpProject({ "CLAUDE.md": "- Never use `var` — use `const` instead.\n" });
+  const scanData = engine.scan(root);
+  const key = scanData.rules[0].key;
+  const compose = (j) => engine.composeAudit(scanData, j).rules[0];
+
+  const WEIGHTS = { F1: 1.5, F2: 1.0, F3: 1.3, F4: 1.0, F5: 1.5, F7: 2.0 };
+  const formula = (values) => {
+    let num = 0, den = 0;
+    for (const [name, weight] of Object.entries(WEIGHTS)) {
+      if (values[name] == null) continue;
+      num += weight * values[name];
+      den += weight;
+    }
+    return Math.round((num / den) * 1000) / 1000;
+  };
+
+  const bare = compose(null);
+  assert.equal(bare.factorValues.F3, null, "F3 must stay unmeasured, not defaulted");
+  assert.equal(bare.f8, null);
+  assert.equal(bare.preFloor, formula(bare.factorValues));
+  // the denominator really shrank by F3's weight: 8.3 → 7.0
+  const deterministicMean = bare.preFloor;
+
+  const judged = compose({ [key]: { F3: 0.75, F8: 0.7 } });
+  assert.equal(judged.preFloor, formula(judged.factorValues));
+
+  // the giveaway that the weight was dropped and not defaulted: judging F3 at
+  // exactly the deterministic mean moves the score nowhere at all, while judging
+  // it above or below moves it in that direction
+  assert.equal(compose({ [key]: { F3: deterministicMean, F8: 0.7 } }).preFloor, deterministicMean);
+  assert.ok(compose({ [key]: { F3: 1, F8: 0.7 } }).preFloor > deterministicMean);
+  assert.ok(compose({ [key]: { F3: 0, F8: 0.7 } }).preFloor < deterministicMean);
+  // and an unmeasured factor can never be the dominant weakness
+  assert.notEqual(bare.dominantWeakness, "F3");
+});
+
+// [Foreman: 071]
+test("judgments carry provenance, which the record embeds and per-key validation ignores", () => {
+  const root = cliFixture();
+  const summary = judgeAll(root);
+  const judgeFile = path.join(root, ".assay-tmp", "judgments.json");
+  const judgments = JSON.parse(fs.readFileSync(judgeFile, "utf-8"));
+  const provenance = {
+    model: "claude-sonnet-4-5",
+    promptVersion: engine.RUBRIC_VERSION,
+    judgedAt: "2026-07-28T10:00:00.000Z",
+    pass: "F3/F8+verify",
+  };
+  fs.writeFileSync(judgeFile, JSON.stringify({ _provenance: provenance, ...judgments }));
+
+  // _provenance is not a rule key, so per-key validation never trips on it
+  const scanData = engine.scan(root);
+  assert.equal(engine.loadJudgments(root, scanData.rules).error, undefined);
+
+  const { code, out } = cli(root, "report");
+  assert.equal(code, 0);
+  const audit = readJson(root, "audit.json");
+  assert.deepEqual(audit.semantic, {
+    provenance,
+    judged: summary.judge.length,
+    suppressed: 0,
+  });
+  // a model-judged run is never labelled deterministic
+  assert.doesNotMatch(out, /deterministic only/);
+  assert.doesNotMatch(out, /model-judged checks did not run/);
+  // matching rubric versions print no warning
+  assert.doesNotMatch(out, /rerun step 2 to refresh/);
+
+  // judgments with no provenance still compose; the field is simply null
+  fs.writeFileSync(judgeFile, JSON.stringify(judgments));
+  assert.equal(cli(root, "report").code, 0);
+  assert.equal(readJson(root, "audit.json").semantic.provenance, null);
+
+  // a provenance of the wrong shape is a malformed file, which stays fatal
+  fs.writeFileSync(judgeFile, JSON.stringify({ _provenance: { model: 7 }, ...judgments }));
+  const bad = cli(root, "report");
+  assert.equal(bad.code, 1);
+  assert.match(bad.err, /_provenance\.model/);
+});
+
+// [Foreman: 071]
+// The judgment cache invalidates structurally on an edited rule — the key is a
+// content hash — but a rewritten rubric is the axis a hash cannot see.
+test("the report warns when the judgments predate the engine's rubric version", () => {
+  const root = cliFixture();
+  judgeAll(root);
+  const judgeFile = path.join(root, ".assay-tmp", "judgments.json");
+  const judgments = JSON.parse(fs.readFileSync(judgeFile, "utf-8"));
+  fs.writeFileSync(judgeFile, JSON.stringify({ _provenance: { promptVersion: "1" }, ...judgments }));
+
+  const { code, out } = cli(root, "report");
+  assert.equal(code, 0);
+  assert.match(out, new RegExp(`Judgments were made under rubric v1; this engine ships rubric v${engine.RUBRIC_VERSION} — rerun step 2 to refresh\\.`));
+  // it is a warning, not a gate: the report is complete underneath it
+  assert.match(out, /## Structural hygiene \(secondary\)/);
+
+  // the rubric file's own header is what the skill copies into promptVersion —
+  // the two must not drift apart
+  const rubrics = fs.readFileSync(path.join(__dirname, "..", "skills", "audit", "references", "rubrics.md"), "utf-8");
+  assert.equal(rubrics.split("\n")[0], "Rubric version: " + engine.RUBRIC_VERSION);
+});
+
+// [Foreman: 071]
+// Additivity, invariant 1: a model may regroup the report and may never remove a
+// source span. A suppressed entry leaves the counts the report averages over —
+// and nothing else.
+test("suppressing an entry regroups the report without touching the inventory", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "- Never use `var` — use `const` instead.\n\n- The team migrated to pnpm last quarter.\n",
+  });
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.7, F8: 0.7 };
+  const kept = engine.composeAudit(scanData, JSON.parse(JSON.stringify(judgments)));
+  judgments[scanData.rules[1].key].notRule = "Records what the team did; it asks for nothing.";
+  const dropped = engine.composeAudit(scanData, judgments);
+
+  // the line inventory is byte-identical: same span classes, same counts
+  assert.deepEqual(dropped.sources, kept.sources);
+  assert.equal(dropped.sources[0].spans.instruction, kept.sources[0].spans.instruction);
+  // the entry is still in the record, still scored, only regrouped
+  assert.equal(dropped.rules.length, kept.rules.length);
+  assert.equal(dropped.rules[1].score, kept.rules[1].score);
+  assert.deepEqual(dropped.rules[1].factorValues, kept.rules[1].factorValues);
+  assert.equal(dropped.rules[1].suppressed, true);
+  // what changed is membership in the counts, and the finding it now carries
+  assert.equal(dropped.files[0].ruleCount, kept.files[0].ruleCount - 1);
+  assert.equal(dropped.findings.filter((f) => f.type === "suppressed-entry").length, 1);
+  assert.equal(dropped.semantic.suppressed, 1);
+});
+
+// [Foreman: 071]
+// Additivity, invariant 2: the semantic pass adds findings; it never alters one
+// the deterministic layer already produced. Judged at values that derive no
+// model-inferred state, the two runs must agree finding for finding.
+test("deterministic findings are identical with and without judgments", () => {
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "# Project rules",
+      "",
+      "- Never use `var` — use `const` instead.",
+      "- Write clean, maintainable code.",
+      "- Always read `docs/missing-guide.md` before editing the parser.",
+      "",
+    ].join("\n"),
+  });
+  const scanData = engine.scan(root);
+  const judgments = {};
+  // F3 above the ambiguity threshold, F8 between the hook and advisory ones, so
+  // no rule takes a model-inferred state and only deterministic signals speak
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.7, F8: 0.7 };
+
+  const judged = engine.composeAudit(scanData, judgments);
+  const bare = engine.composeAudit(scanData, null);
+  assert.deepEqual(bare.findings, judged.findings);
+  assert.ok(judged.findings.some((f) => f.state === "blocked"), "fixture lost its hard gate");
+
+  // the model layer is what is absent, not the analysis: the deterministic
+  // report still names the same gate at the same line
+  const report = engine.renderReport(bare);
+  assert.match(report, /## Hard gates/);
+  assert.match(report, /docs\/missing-guide\.md/);
+});
+
+// [Foreman: 071]
+test("semantic is optional payload: an audit without it stays schema-valid", () => {
+  const root = cliFixture();
+  assert.equal(cli(root, "scan").code, 0);
+  assert.equal(cli(root, "report").code, 0);
+  const deterministic = readJson(root, "audit.json");
+  assert.equal("semantic" in deterministic, false);
+  assert.equal(engine.validateRecord(deterministic, "audit"), null);
+  // adding it keeps the record valid, and it is not a reserved field any more
+  assert.equal(engine.RECORD_SCHEMA.reserved.includes("semantic"), false);
+  assert.equal(engine.RECORD_SCHEMA.payload.audit.includes("semantic"), false);
+  assert.equal(
+    engine.validateRecord({ ...deterministic, semantic: { provenance: null, judged: 0, suppressed: 0 } }, "audit"),
+    null
+  );
+  // the candidate kinds are a contract only — nothing emits one yet
+  assert.deepEqual(engine.SEMANTIC_CANDIDATE_KINDS, [
+    "paraphrase-duplicate", "indirect-conflict", "ambiguous-meaning", "placement", "rewrite",
+  ]);
+  assert.equal(deterministic.rules.some((r) => r.candidates), false);
 });
 
 test("clean removes .assay-tmp and exits 0", () => {

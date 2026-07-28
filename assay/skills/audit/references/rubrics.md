@@ -1,3 +1,5 @@
+Rubric version: 2
+
 # Judgment rubrics — F3 and F8
 
 Score each rule independently against these level boundaries. Pick a level

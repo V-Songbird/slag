@@ -10,9 +10,11 @@
 //                                        writes .assay-tmp/scan.json, prints a
 //                                        JSON summary with the judgment worklist
 //   node assay.js report [--verbose] [--json] [--root <path>]
-//                                        merges .assay-tmp/judgments.json, computes
-//                                        composite scores + placement candidates,
-//                                        prints the finished markdown report
+//                                        merges .assay-tmp/judgments.json when it
+//                                        exists, computes composite scores +
+//                                        placement candidates, prints the finished
+//                                        markdown report. With no judgments file
+//                                        the report is deterministic-only and says so
 //   node assay.js remeasure [--verbose] [--json] [--root <path>] [--project-only]
 //                                        re-scans after fixes, reuses cached
 //                                        judgments (re-judging only reworded
@@ -24,6 +26,14 @@
 //
 // Everything mechanical happens here; the only model-judged inputs are F3
 // (trigger-action distance) and F8 (enforceability), supplied via judgments.json.
+//
+// [Foreman: 071] Deterministic analysis is the default and needs no model at all:
+// judgments.json is optional. Absent, the audit composes without F3/F8, the score
+// renormalizes over the factors that were measured, findings that depend on a
+// model judgment simply do not derive, and every renderer labels the run
+// deterministic-only. Present, the model layer is purely additive — it can add
+// findings and regroup the report, never delete inventory or alter a
+// deterministic finding.
 
 const fs = require("fs");
 const path = require("path");
@@ -76,6 +86,13 @@ const PARSER_VERSION = 2;
 // record always names the profile that actually produced it.
 const PROFILE_HOST = claudeAdapter.name;
 const PROFILE_VERSION = claudeAdapter.profileVersion;
+// [Foreman: 071] The semantic pass's other cache axis. Judgment keys are content
+// hashes, so an edited rule re-judges by construction; a changed RUBRIC is what
+// that cannot see. The number here is the one printed at the top of
+// skills/audit/references/rubrics.md, and the two move together — bump both or
+// neither. A judgments file recorded under a different one still composes; the
+// report says the judgments predate the current rubric.
+const RUBRIC_VERSION = "2";
 
 const RECORD_SCHEMA = {
   version: SCHEMA_VERSION,
@@ -97,11 +114,45 @@ const RECORD_SCHEMA = {
   // still not required, so a prior audit written before 075 stays readable and
   // only loses its finding deltas. A scan record carries no findings — nothing
   // is derived before the model judgments land.
+  // [Foreman: 071] `semantic` left it too — see the block below.
   reserved: [
     "instructions", "mechanisms", "relationships",
-    "evidence", "semantic", "plans", "changes", "validation", "proofLinks",
+    "evidence", "plans", "changes", "validation", "proofLinks",
   ],
 };
+
+// [Foreman: 071]
+// `semantic` — optional audit payload, never required, never on a scan record.
+// Absent means the audit ran deterministically: no model judged anything, and
+// every renderer says so. Present, it is the provenance of the semantic pass
+// that fed this audit:
+//
+//   semantic: {
+//     provenance: { model, promptVersion, judgedAt, pass } | null,
+//     judged:     <number of rules a judgment was found for>,
+//     suppressed: <number of entries the verification pass dropped>,
+//     candidates: [ … ]   // reserved, see below
+//   }
+//
+// `provenance` is copied verbatim from judgments.json's optional top-level
+// `_provenance`, which the audit skill writes after judging. Null means the
+// judgments carried none — an older file, or a hand-written one.
+//
+// `candidates[]` is the contract the semantic half of a later entry fills; the
+// engine defines the shape and emits nothing:
+//
+//   { kind: "paraphrase-duplicate" | "indirect-conflict" | "ambiguous-meaning"
+//         | "placement" | "rewrite",
+//     sources: [{ path, lineStart, lineEnd }],
+//     summary: <one line, the model's own words>,
+//     accepted: true | false | null,   // null = not yet reviewed
+//     reason:  <why the model proposed it> }
+//
+// Every candidate stays a proposal: accepting one may regroup the report, and
+// may never remove a source span or overwrite a deterministic finding.
+const SEMANTIC_CANDIDATE_KINDS = [
+  "paraphrase-duplicate", "indirect-conflict", "ambiguous-meaning", "placement", "rewrite",
+];
 
 function isRecordObject(x) {
   return Boolean(x) && typeof x === "object" && !Array.isArray(x);
@@ -307,7 +358,6 @@ const CONCRETE_TERMS = [
 
 // Composite weights and floors — the quality-heuristic contract.
 const WEIGHTS = { F1: 1.5, F2: 1.0, F3: 1.3, F4: 1.0, F5: 1.5, F7: 2.0 };
-const WEIGHTS_TOTAL = 8.3;
 const SOFT_FLOOR_THRESHOLD = 0.2; // applied to F4 and F7
 const STALENESS_MULTIPLIER = 0.05;
 // A bare prohibition can stall a headless run outright when the task needs the
@@ -1572,14 +1622,32 @@ function composeScore(factors, stale) {
   const values = { ...factors };
   if (values.F1 == null) values.F1 = 0.5;
   if (values.F5 == null) values.F5 = 0.95;
-  let linear = 0;
-  for (const [name, weight] of Object.entries(WEIGHTS)) linear += weight * values[name];
-  linear /= WEIGHTS_TOTAL;
+  // [Foreman: 071] Renormalization. A factor nobody measured — F3 on a
+  // deterministic-only run, where no model judged the trigger — drops out of the
+  // numerator AND the denominator, so the composite stays a weighted mean over
+  // the factors that actually have evidence:
+  //
+  //     score = ( Σ wᵢ·vᵢ  over present i ) / ( Σ wᵢ  over present i ) × floor
+  //
+  // With every factor present the denominator is the full weight sum (8.3) and
+  // the number is what it always was. Dropping the weight rather than substituting
+  // a default is what keeps the missing factor honest: a default would be a
+  // score assay invented, and the whole point of the mode is that it invents
+  // nothing. Consequence, accepted: a deterministic-only score is NOT comparable
+  // to a model-judged one — it is a mean over a different factor set.
+  let linear = 0, weighted = 0;
+  for (const [name, weight] of Object.entries(WEIGHTS)) {
+    if (values[name] == null) continue;
+    linear += weight * values[name];
+    weighted += weight;
+  }
+  linear = weighted ? linear / weighted : 0;
   const floor = Math.min(softFloor(values.F7), softFloor(values.F4), stale ? STALENESS_MULTIPLIER : 1);
   const score = linear * floor;
 
   let dominant = null, dominantGap = -1;
   for (const [name, weight] of Object.entries(WEIGHTS)) {
+    if (values[name] == null) continue;
     const gap = weight * (1 - values[name]);
     if (gap > dominantGap) { dominantGap = gap; dominant = name; }
   }
@@ -1883,11 +1951,14 @@ function cmdScan(root, opts = {}) {
 // report
 // ---------------------------------------------------------------------------
 
+// [Foreman: 071]
+// { judgments } when the file is there and valid, { judgments: null } when there
+// is no file at all — the deterministic default, not a failure — and { error }
+// when a file that DOES exist cannot be trusted. The third case stays fatal:
+// running without judgments is a mode, running with broken ones is a mistake.
 function loadJudgments(root, rules) {
   const file = path.join(root, TMP_DIR, "judgments.json");
-  if (!fs.existsSync(file)) {
-    return { error: "Missing " + TMP_DIR + "/judgments.json — write it before running report." };
-  }
+  if (!fs.existsSync(file)) return { judgments: null };
   let judgments;
   try {
     judgments = JSON.parse(fs.readFileSync(file, "utf-8"));
@@ -1895,6 +1966,19 @@ function loadJudgments(root, rules) {
     return { error: TMP_DIR + "/judgments.json is not valid JSON: " + err.message };
   }
   const problems = [];
+  // [Foreman: 071] `_provenance` is the one top-level key that is not a rule
+  // judgment. Per-key validation iterates the RULES, so it never reaches this
+  // key by construction; its own shape is checked loosely here — every field is
+  // optional, and only a wrong type is an error.
+  const prov = judgments._provenance;
+  if (prov !== undefined) {
+    if (!isRecordObject(prov)) problems.push("_provenance (not an object)");
+    else {
+      for (const k of ["model", "promptVersion", "judgedAt", "pass"]) {
+        if (prov[k] !== undefined && typeof prov[k] !== "string") problems.push("_provenance." + k);
+      }
+    }
+  }
   for (const rule of rules) {
     // [Foreman: 059] keyed by the stable content hash, not the R### display id
     const label = rule.id + "=" + rule.key;
@@ -1921,35 +2005,46 @@ function loadJudgments(root, rules) {
   return { judgments };
 }
 
+// [Foreman: 071] `judgments` null (or simply missing this rule's key) is the
+// deterministic mode, not an error: F3 and F8 stay null, the score renormalizes
+// over the factors that were measured, and every derivation that reads a model
+// judgment declines to fire. The model layer is additive on top of this, never a
+// precondition for it.
 function composeAudit(scanData, judgments) {
+  const deterministic = judgments == null;
+  let judged = 0;
   const rules = scanData.rules.map((r) => {
     // [Foreman: 059] keyed by the stable content hash; r.key falls back to r.id
     // so a hand-written scanData without keys still composes
-    const j = judgments[r.key || r.id];
+    const j = (judgments && judgments[r.key || r.id]) || {};
+    if (typeof j.F3 === "number") judged++;
     const factors = {
       // F1 extraction can fail (value null); fall back to the same 0.5 the
       // composer uses, so the stored value is never null for the report to render
       F1: j.F1 !== undefined ? j.F1 : (r.factors.F1.value != null ? r.factors.F1.value : 0.5),
       F2: r.factors.F2.value,
-      F3: j.F3,
+      // The two model-judged factors. Null when nothing judged them — the
+      // composer drops their weight rather than inventing a value.
+      F3: j.F3 !== undefined ? j.F3 : null,
       F4: r.factors.F4.value,
       F5: r.factors.F5 ? r.factors.F5.value : 0.95,
       F7: r.factors.F7.value,
     };
+    const f8 = j.F8 !== undefined ? j.F8 : null;
     const composed = composeScore(factors, r.staleness.gated);
     const stallRisk = r.factors.F2.stallRisk === true;
     const score = stallRisk ? Math.min(composed.score, STALL_RISK_CAP) : composed.score;
-    const placement = detectPlacement(r.contextText || r.text, j.F8);
+    const placement = detectPlacement(r.contextText || r.text, f8);
     const notRule = typeof j.notRule === "string" && j.notRule.trim() ? j.notRule.trim() : null;
     return {
       ...r,
       factorValues: factors,
-      f8: j.F8,
+      f8,
       ...composed,
       score,
       grade: grade(score),
       stallRisk,
-      hookOpportunity: j.F8 < F8_HOOK_THRESHOLD,
+      hookOpportunity: f8 != null && f8 < F8_HOOK_THRESHOLD,
       placement,
       weak: score < (CATEGORY_FLOORS[r.category] ?? CATEGORY_FLOORS.mandate),
       suppressed: notRule !== null,
@@ -1986,6 +2081,15 @@ function composeAudit(scanData, judgments) {
     coverage: scanData.coverage || null,
     corpusScore: corpus, corpusGrade: corpus === null ? null : grade(corpus),
   };
+  // [Foreman: 071] What the model contributed, if anything. Absent on a
+  // deterministic run — the audit does not claim a semantic pass it never had.
+  if (!deterministic) {
+    audit.semantic = {
+      provenance: isRecordObject(judgments._provenance) ? judgments._provenance : null,
+      judged,
+      suppressed: rules.filter((r) => r.suppressed).length,
+    };
+  }
   // [Foreman: 075] Findings are the product's primary output, so they are part
   // of the composed audit, not something a renderer invents on the way out.
   audit.findings = deriveFindings(audit);
@@ -2461,6 +2565,11 @@ function pushCoverageSection(out, audit, rules, suppressed) {
   out.push("");
   out.push(`- ${parsed} of ${discovered} instruction file(s) parsed, ${rules.length} rule(s) graded, ${cov.proseChunks || 0} prose chunk(s) set aside`);
   out.push(`- ${cov.excludedLines || 0} line(s) excluded from grading (assay-ignore spans, tag bodies, comment-only lines)`);
+  // [Foreman: 071] The coverage gap the deterministic default opens, named where
+  // every other gap is named. What did not run is part of what the audit covered.
+  if (!audit.semantic) {
+    out.push("- model-judged checks did not run (trigger clarity, enforceability, rule-verification); deterministic findings only");
+  }
   if (suppressed.length) {
     out.push(`- ${suppressed.length} entr${suppressed.length === 1 ? "y" : "ies"} suppressed by the verification pass as not rules — rerun with \`--verbose\` to see each one with its reason`);
   }
@@ -2518,11 +2627,22 @@ function renderReport(audit, opts = {}) {
     if (c.mode === "user-only") return c.overSpecified || c.overCap || c.empty;
     return c.missing.length || c.overCap || c.redundant || c.hasWhenToUse;
   });
+  // [Foreman: 071] No `semantic` block means no model judged anything in this
+  // audit. Every renderer says so rather than letting a renormalized score read
+  // as the same measurement a model-judged one is.
+  const deterministicOnly = !audit.semantic;
   out.push("# Rule audit — " + path.basename(audit.root));
   out.push("");
   // [Foreman: 072] Who produced this, under which host profile and schema.
-  out.push(recordBanner(audit));
+  out.push(recordBanner(audit) + (deterministicOnly ? " · deterministic only" : ""));
   out.push("");
+  // [Foreman: 071] The judgment cache invalidates structurally on an edited rule
+  // (the key is a content hash); a changed rubric is the axis a hash cannot see.
+  const judgedUnder = ((audit.semantic || {}).provenance || {}).promptVersion;
+  if (judgedUnder && judgedUnder !== RUBRIC_VERSION) {
+    out.push(`Judgments were made under rubric v${judgedUnder}; this engine ships rubric v${RUBRIC_VERSION} — rerun step 2 to refresh.`);
+    out.push("");
+  }
   if (!rules.length) {
     out.push("No rules found in CLAUDE.md or .claude/rules/.");
     out.push("");
@@ -2721,6 +2841,13 @@ function renderReport(audit, opts = {}) {
   out.push("");
   out.push(`**${rules.length} rules across ${files.filter((f) => f.ruleCount > 0).length} file(s)** — ${corpusBit}.`);
   out.push("");
+  // [Foreman: 071] The scoring contract requires a hygiene score to state its
+  // evidence mix. A renormalized score is a mean over a smaller factor set, so
+  // it is not comparable to a model-judged one and does not pretend to be.
+  if (deterministicOnly) {
+    out.push("Evidence mix: deterministic factors only — no model judgment entered these scores, and each is renormalized over the factors that were measured.");
+    out.push("");
+  }
   // [Foreman: 074] Said once, where the number is, so nobody reads the grade as
   // covering files that live outside the repo.
   if (files.some((f) => f.scope === "user")) {
@@ -2752,7 +2879,12 @@ function renderReport(audit, opts = {}) {
     out.push("|---|---|" + FACTOR_COLUMNS.map(() => "---").join("|") + "|---|---|");
     for (const r of rules) {
       const v = r.factorValues;
-      const cells = FACTOR_COLUMNS.map(([f]) => fmt(f === "F8" ? r.f8 : v[f])).join(" | ");
+      // [Foreman: 071] An unjudged factor prints as a dash, never as a number
+      // nobody measured.
+      const cells = FACTOR_COLUMNS.map(([f]) => {
+        const x = f === "F8" ? r.f8 : v[f];
+        return x == null ? "—" : fmt(x);
+      }).join(" | ");
       out.push(`| ${ruleLink(r, 40)} | ${r.category} | ${cells} | ${fmt(r.score)} | ${r.grade} |`);
     }
     out.push("");
@@ -3028,6 +3160,8 @@ function cmdReport(root, opts) {
     process.stderr.write(staleRecordError(TMP_DIR + "/scan.json", "scan", problem) + "\n");
     process.exit(1);
   }
+  // [Foreman: 071] No judgments file is the deterministic default, not an error.
+  // A file that exists but does not validate is still fatal.
   const { judgments, error } = loadJudgments(root, scanData.rules);
   if (error) {
     process.stderr.write(error + "\n");
@@ -3048,10 +3182,9 @@ function cmdReport(root, opts) {
 function cmdRemeasure(root, opts) {
   const tmp = path.join(root, TMP_DIR);
   const judgeFile = path.join(tmp, "judgments.json");
-  if (!fs.existsSync(judgeFile)) {
-    process.stderr.write("No " + TMP_DIR + "/judgments.json — run a full scan → judge → report before remeasuring.\n");
-    process.exit(1);
-  }
+  // [Foreman: 071] With no judgments to reuse there is nothing to re-judge:
+  // remeasure stays deterministic end to end and goes straight to the report.
+  const cached = fs.existsSync(judgeFile);
   // [Foreman: 072] A prior audit this assay cannot read is discarded, not fatal:
   // the re-scan is what the user asked for, and only the before/after comparison
   // depends on the old file.
@@ -3070,15 +3203,17 @@ function cmdRemeasure(root, opts) {
   const scanData = scan(root, { projectOnly: opts.projectOnly, probeHost: true });
   writeRecord(path.join(tmp, "scan.json"), "scan", scanData, root);
 
-  let judgments;
-  try {
-    judgments = JSON.parse(fs.readFileSync(judgeFile, "utf-8"));
-  } catch (err) {
-    process.stderr.write(TMP_DIR + "/judgments.json is not valid JSON: " + err.message + "\n");
-    process.exit(1);
+  let judgments = null;
+  if (cached) {
+    try {
+      judgments = JSON.parse(fs.readFileSync(judgeFile, "utf-8"));
+    } catch (err) {
+      process.stderr.write(TMP_DIR + "/judgments.json is not valid JSON: " + err.message + "\n");
+      process.exit(1);
+    }
   }
 
-  const unknown = scanData.rules.filter((r) => !judgments[r.key]);
+  const unknown = cached ? scanData.rules.filter((r) => !judgments[r.key]) : [];
   if (unknown.length) {
     // The fixes reworded these, so their hash is new and their old judgment is
     // gone. Emit them as a worklist and stop — the skill judges only these,
@@ -3172,6 +3307,9 @@ module.exports = {
   renderArtifact, artifactRuleData,
   // [Foreman: 072] the record contract
   RECORD_SCHEMA, SCHEMA_VERSION, ANALYZER_VERSION, validateRecord, makeRecord,
+  // [Foreman: 071] the semantic contract: rubric axis + the candidate kinds a
+  // later entry's semantic pass may propose
+  RUBRIC_VERSION, SEMANTIC_CANDIDATE_KINDS,
 };
 
 if (require.main === module) main();

@@ -40,6 +40,8 @@ Rules get the same treatment: `/assay:craft-rules` grills you — when should it
 
 Almost all of the scoring is a plain Node script — deterministic, the same input scoring to the same grades. The model judges what a script can't: whether a rule's trigger moment is recognizable, whether a tool could enforce it better, and whether an extracted chunk is a rule at all. Then the script composes the report.
 
+The model steps are optional. `--deterministic` runs the audit offline: the full report still lands, labelled as such, with the checks that need a model named as not run and each score computed over the factors that were measured. When the model does judge, the audit records which model, which rubric version, and when.
+
 Before the report, one more question gets asked of each doubtful entry: is this a rule at all? A file of notes or history would otherwise arrive graded as a page of mandates. The answer can only drop an entry from the report — nothing is ever rescored or reworded — and `--verbose` lists every drop with the reason. It costs one model call per audit; `--no-verify` skips it.
 
 Every report opens by saying what it actually looked at — and names any file it couldn't read. Every line of every file it did read is accounted for: graded, set aside, ignored on purpose, or named as something assay couldn't parse. A number in the report never covers more than that.
