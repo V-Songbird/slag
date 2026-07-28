@@ -6102,3 +6102,168 @@ test("ci never runs a model step and never reads a judgments file", () => {
   const without = cli(root, "ci", "--json");
   assert.equal(withJudgments.out, without.out);
 });
+
+// ---------------------------------------------------------------------------
+// Transaction hardening — the reproduced 1.0.0 holes stay closed
+// ---------------------------------------------------------------------------
+
+test("a failed validation run blocks retire and clean, whatever its passing rows say", () => {
+  const root = txProject();
+  // The mechanism names a skill the patch does NOT create, so host-discovery
+  // fails while reparse and static-reanalysis both record `pass`.
+  planDraft(root, {
+    changes: [{
+      ...PROMOTE_CHANGE,
+      mechanism: { type: "skill", name: "ghost" },
+    }],
+  });
+  assert.equal(cli(root, "apply", "--change", "c-skill").code, 0);
+  const validated = cli(root, "validate", "--change", "c-skill");
+  assert.equal(validated.code, 1);
+  assert.match(validated.err, /host-discovery/);
+
+  const retired = cli(root, "retire", "--change", "c-skill");
+  assert.equal(retired.code, 1);
+  assert.match(retired.err, /the latest validation run failed \(host-discovery\)/);
+  // the prose is untouched
+  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE);
+
+  // the same definition of "closed" guards the journal: clean refuses too
+  const cleaned = cli(root, "clean");
+  assert.equal(cleaned.code, 1);
+  assert.match(cleaned.err, /1 open change\(s\) — c-skill/);
+  assert.ok(fs.existsSync(path.join(root, ".assay", "journal.jsonl")));
+
+  // rollback resolves it, and clean then lets go
+  assert.equal(cli(root, "rollback", "--change", "c-skill").code, 0);
+  assert.equal(cli(root, "clean").code, 0);
+});
+
+test("a plan edited after approval stops resolving: content id first, containment always", () => {
+  const root = txProject();
+  const { summary } = planDraft(root, { changes: [REWRITE_CHANGE] });
+  const planFile = path.join(root, ".assay", "plan-" + summary.planId + ".json");
+
+  // 1. an edit without recomputing the id is caught by the id itself
+  const record = JSON.parse(fs.readFileSync(planFile, "utf-8"));
+  record.changes[0].patches[0].new = "- Something else entirely.";
+  fs.writeFileSync(planFile, JSON.stringify(record, null, 2));
+  const tampered = cli(root, "apply", "--change", "c-rewrite");
+  assert.equal(tampered.code, 1);
+  assert.match(tampered.err, /does not match the plan's content/);
+
+  // 2. an attacker recomputing the id still cannot aim outside the root
+  record.changes[0].patches[0] = { path: "../escaped.md", sourceHash: null, old: null, new: "x" };
+  record.changes[0].files = ["../escaped.md"];
+  record.planId = engine.hashContent(JSON.stringify({ changes: record.changes, batches: record.batches })).slice(0, 12);
+  fs.writeFileSync(planFile, JSON.stringify(record, null, 2));
+  const escaping = cli(root, "apply", "--change", "c-rewrite");
+  assert.equal(escaping.code, 1);
+  assert.match(escaping.err, /escapes the project root/);
+  assert.equal(fs.existsSync(path.join(root, "..", "escaped.md")), false);
+});
+
+test("two patches on one file in one change are rejected at plan time", () => {
+  const root = txProject();
+  const { code, err } = planDraft(root, {
+    changes: [{
+      id: "c1", kind: "rule-rewrite", rationale: "two edits",
+      patches: [
+        { path: "CLAUDE.md", old: "- Run prettier before committing.", new: "- A." },
+        { path: "CLAUDE.md", old: "- Never use `var` — use `const` instead.", new: "- B." },
+      ],
+    }],
+  });
+  assert.equal(code, 1);
+  assert.match(err, /two patches touch CLAUDE\.md — fold them into one patch/);
+});
+
+test("rollback refuses a file that changed after apply, and --force restores the pre-image", () => {
+  const root = txProject();
+  planDraft(root, { changes: [REWRITE_CHANGE] });
+  assert.equal(cli(root, "apply", "--change", "c-rewrite").code, 0);
+  const handEdit = fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8") + "\n- My later hand edit.\n";
+  fs.writeFileSync(path.join(root, "CLAUDE.md"), handEdit);
+
+  const refused = cli(root, "rollback", "--change", "c-rewrite");
+  assert.equal(refused.code, 1);
+  assert.match(refused.err, /CLAUDE\.md changed after assay wrote it/);
+  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), handEdit, "the later edit survives the refusal");
+
+  assert.equal(cli(root, "rollback", "--change", "c-rewrite", "--force").code, 0);
+  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE);
+});
+
+test("a failed batch names the changes already applied and left in place", () => {
+  const root = txProject({ "a.md": "rule A original\n" });
+  planDraft(root, {
+    changes: [
+      { id: "aaa-good", kind: "rule-rewrite", rationale: "ok",
+        patches: [{ path: "a.md", old: "rule A original", new: "rule A changed" }] },
+      { id: "zzz-bad", kind: "rule-rewrite", rationale: "writes unparseable JSON",
+        patches: [{ path: "broken.json", old: null, new: "{ not json" }] },
+    ],
+    batches: { all: ["aaa-good", "zzz-bad"] },
+  });
+  const { code, err } = cli(root, "apply", "--batch", "all");
+  assert.equal(code, 1);
+  assert.match(err, /Change zzz-bad was restored/);
+  assert.match(err, /Applied before it and still in place: aaa-good \(a\.md\)/);
+  assert.equal(fs.readFileSync(path.join(root, "a.md"), "utf-8"), "rule A changed\n");
+  assert.equal(fs.existsSync(path.join(root, "broken.json")), false);
+});
+
+// ---------------------------------------------------------------------------
+// Analyzer honesty — tag blocks disclosed, illustrative tokens skipped
+// ---------------------------------------------------------------------------
+
+test("a non-example tag block is excluded AND disclosed as an unsupported construct", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n- Always validate input.\n\n<critical>\n- Never commit secrets.\n</critical>\n",
+  });
+  const scanData = engine.scan(root, { projectOnly: true });
+  // the body stays out of extraction, exactly as before
+  assert.ok(!scanData.rules.some((r) => /commit secrets/.test(r.text)));
+  // but the region is disclosed now, with the tag named
+  const source = scanData.sources.find((s) => s.path === "CLAUDE.md");
+  assert.ok(source.unsupported.some((u) => /<critical> tag block/.test(u.reason)));
+  // an <example> block keeps its silence — it is the documented convention
+  const exampleRoot = tmpProject({ "CLAUDE.md": "# Rules\n\n<example>\nnot a rule\n</example>\n" });
+  const exampleScan = engine.scan(exampleRoot, { projectOnly: true });
+  const exampleSource = exampleScan.sources.find((s) => s.path === "CLAUDE.md");
+  assert.ok(!(exampleSource.unsupported || []).some((u) => /tag block/.test(u.reason)));
+});
+
+test("staleness skips quoted tokens and bare directory names, and still gates real dead paths", () => {
+  const root = tmpProject({ "CLAUDE.md": "x\n" });
+  const quoted = engine.checkStaleness('The entry\'s source is a relative `"./plugin-name"` path.', root);
+  assert.equal(quoted.missing.length, 0, "a quoted token is an illustration, not a reference");
+  const bareDir = engine.checkStaleness("An edit lands in its `scripts/` or `hooks/`.", root);
+  assert.equal(bareDir.missing.length, 0, "a bare single-segment directory names a shape");
+  const dead = engine.checkStaleness("See `docs/missing-guide.md` for the contract.", root);
+  assert.equal(dead.gated, true, "a two-segment concrete path still gates when absent");
+});
+
+// ---------------------------------------------------------------------------
+// --startup — the Codex chain gains its CLI input
+// ---------------------------------------------------------------------------
+
+test("--startup reaches the codex chain, and a profile that ignores it is a usage error", () => {
+  const root = tmpProject({
+    "AGENTS.md": "root guidance\n",
+    "sub/AGENTS.md": "nested guidance\n",
+  });
+  const ok = cli(root, "scan", "--host", "codex", "--project-only", "--startup", "sub");
+  assert.equal(ok.code, 0);
+  const record = JSON.parse(fs.readFileSync(path.join(root, ".assay-tmp", "scan.json"), "utf-8"));
+  assert.equal(path.basename(record.context.startupDirectory), "sub");
+  assert.deepEqual(record.sources.map((s) => s.path), ["AGENTS.md", "sub/AGENTS.md"]);
+
+  const refused = cli(root, "scan", "--project-only", "--startup", "sub");
+  assert.equal(refused.code, 1);
+  assert.match(refused.err, /--startup is not supported by the claude-code profile/);
+
+  const outside = cli(root, "scan", "--host", "codex", "--project-only", "--startup", "..");
+  assert.equal(outside.code, 1);
+  assert.match(outside.err, /--startup must name the root or a directory inside it/);
+});

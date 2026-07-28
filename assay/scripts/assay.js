@@ -129,7 +129,7 @@ const TMP_DIR = ".assay-tmp";
 // A release cut keeps ANALYZER_VERSION in step with assay's version in
 // .claude-plugin/marketplace.json, which owns the published number.
 const SCHEMA_VERSION = 1;
-const ANALYZER_VERSION = "1.0.0";
+const ANALYZER_VERSION = "1.1.0";
 const PARSER_NAME = "assay-markdown";
 // [Foreman: 073] 2 = markdown-it 14.1.0 + js-yaml 4.1.0 behind assay's adapter.
 // 1 was the handwritten line scanner; a record naming version 1 was produced by
@@ -357,7 +357,19 @@ function validateRecord(record, kind) {
   // its payload is checked at the read boundary too, not only when it is built.
   // A hand-edited plan missing a fingerprint or a patch is rejected here rather
   // than discovered halfway through an apply.
-  if (kind === "plan") return validatePlanChanges(record.changes, record.batches);
+  if (kind === "plan") {
+    const problem = validatePlanChanges(record.changes, record.batches);
+    if (problem) return problem;
+    // The id IS the content. Recomputing it here makes an approved plan
+    // tamper-evident: an edited patch, path or batch changes the hash, and the
+    // plan stops resolving instead of quietly authorizing different writes.
+    const expectedId = hashContent(JSON.stringify({ changes: record.changes, batches: record.batches })).slice(0, 12);
+    if (record.planId !== expectedId) {
+      return "planId " + record.planId + " does not match the plan's content (now " + expectedId +
+        ") — the file was edited after `plan` wrote it; re-plan from a draft";
+    }
+    return null;
+  }
   return null;
 }
 
@@ -1351,6 +1363,12 @@ function stripMetadata(content) {
   // <example>…</example>-style tag blocks hold worked-example content, not
   // rules — treat them like code fences. Only a tag alone on its line opens a
   // region, and an unclosed tag strips nothing.
+  //
+  // Any OTHER tag name gets the same exclusion — the host reads tag bodies as
+  // plain text, so the rules inside a <critical> wrapper are live policy assay
+  // is not grading — and that is exactly why it cannot happen silently: every
+  // non-example block is disclosed as an unsupported construct, so the report
+  // and CI say what was set aside instead of a clean audit hiding it.
   const tagRegions = new Set();
   let openTag = null, tagStart = 0;
   for (let i = frontmatterEnd; i < lines.length; i++) {
@@ -1361,6 +1379,14 @@ function stripMetadata(content) {
       if (m) { openTag = m[1]; tagStart = i; }
     } else if (t === "</" + openTag + ">") {
       for (let j = tagStart; j <= i; j++) tagRegions.add(j);
+      if (!/^examples?$/i.test(openTag)) {
+        unsupported.push({
+          reason: "<" + openTag + "> tag block — its body is set aside from rule extraction; " +
+            "unwrap the rules, or fence the block with assay-ignore markers if that is meant",
+          startLine: tagStart + 1,
+          endLine: i + 1,
+        });
+      }
       openTag = null;
     }
   }
@@ -1668,6 +1694,14 @@ function backtickToPath(name) {
   if (!name.includes("/")) return null;
   if (/[<>{}*$\s]|:\/\//.test(name)) return null;
   if (name.startsWith("/") || name.startsWith("~") || /^[A-Za-z]:/.test(name)) return null;
+  // A quoted token is an illustration of a value, not a reference to a file —
+  // `"./plugin-name"` in prose about manifests names a shape, and flagging it
+  // as missing gates a build on an example.
+  if (/["']/.test(name)) return null;
+  // Same for a bare single-segment directory: `hooks/` says "the hooks folder"
+  // wherever that lives, and only a path with at least two segments commits to
+  // a checkable location.
+  if (name.replace(/\/+$/, "").split("/").filter(Boolean).length < 2) return null;
   return name;
 }
 
@@ -2434,12 +2468,13 @@ function skillFacts(absPath, fallbackName) {
 }
 
 function cmdScan(root, opts = {}) {
-  // razor: startup directory = project root at the CLI. The Codex profile reads
-  // a chain from the root down to wherever the session started, and the adapter
-  // honors a startup directory that differs — but assay has no flag for one yet,
-  // because a report about a directory the user did not name would be a report
-  // about the wrong session. `--startup <path>` is the upgrade path.
-  const result = scan(root, { projectOnly: opts.projectOnly, probeHost: true, adapter: opts.adapter });
+  // `--startup` names the directory the session is modeled as beginning in. The
+  // Codex profile reads a chain from the root down to it; the default stays the
+  // root, so an invocation without the flag is unchanged.
+  const result = scan(root, {
+    projectOnly: opts.projectOnly, probeHost: true, adapter: opts.adapter, startup: opts.startup,
+  });
+  requireStartupHonored(opts, result.context);
   const tmpDir = path.join(root, TMP_DIR);
   fs.mkdirSync(tmpDir, { recursive: true });
   writeRecord(path.join(tmpDir, "scan.json"), "scan", result, root);
@@ -5414,7 +5449,10 @@ function cmdRemeasure(root, opts) {
     }
   }
 
-  const scanData = scan(root, { projectOnly: opts.projectOnly, probeHost: true, adapter: opts.adapter });
+  const scanData = scan(root, {
+    projectOnly: opts.projectOnly, probeHost: true, adapter: opts.adapter, startup: opts.startup,
+  });
+  requireStartupHonored(opts, scanData.context);
   writeRecord(path.join(tmp, "scan.json"), "scan", scanData, root);
 
   let judgments = null;
@@ -5515,6 +5553,32 @@ function resolvePlanPath(root, rel) {
   return full === base || full.startsWith(base + path.sep) ? full : null;
 }
 
+// The write-time half of that boundary. resolvePlanPath screens the DRAFT; a
+// plan artifact or journal row is a file on disk that may have been edited
+// since, so every actual write re-checks its destination here — lexically
+// first, then through the real path of the nearest existing ancestor, because a
+// symlinked or junctioned directory inside the project that points outside IS
+// outside, and a lexical prefix check cannot see that.
+function resolveWritePath(root, rel) {
+  const lexical = resolvePlanPath(root, typeof rel === "string" ? rel : "");
+  if (!lexical) return null;
+  let probe = path.dirname(lexical);
+  while (!fs.existsSync(probe)) {
+    const up = path.dirname(probe);
+    if (up === probe) break;
+    probe = up;
+  }
+  let realBase, realRoot;
+  try {
+    realBase = fs.realpathSync(probe);
+    realRoot = fs.realpathSync(path.resolve(root));
+  } catch {
+    return null; // a boundary that cannot be resolved is not one to write past
+  }
+  const from = path.relative(realRoot, realBase);
+  return from === "" || (!from.startsWith("..") && !path.isAbsolute(from)) ? lexical : null;
+}
+
 function countOccurrences(haystack, needle) {
   let n = 0;
   for (let i = haystack.indexOf(needle); i !== -1; i = haystack.indexOf(needle, i + needle.length)) n++;
@@ -5545,6 +5609,18 @@ function validatePlanChanges(changes, batches) {
       if (c.patches.length) return "change " + c.id + ": a park carries no patch — it records a deferral";
     } else if (!c.patches.length) {
       return "change " + c.id + ": no patch — a change that writes nothing is a park";
+    }
+    // One patch per file per change: the journal replays writes keyed by stage
+    // and path, so a second patch on the same file would shadow the first
+    // pre-image and a rollback would restore the file half-changed.
+    const touched = new Set();
+    for (const p of c.patches) {
+      if (!isRecordObject(p) || typeof p.path !== "string") continue;
+      if (touched.has(p.path)) {
+        return "change " + c.id + ": two patches touch " + p.path +
+          " — fold them into one patch whose `old` spans both edits";
+      }
+      touched.add(p.path);
     }
     for (const p of [...c.patches, ...(c.retire ? [c.retire] : [])]) {
       const problem = validatePlanPatch(c.id, p);
@@ -5586,6 +5662,13 @@ function validatePlanPatch(changeId, p) {
   const where = "change " + changeId + ": patch";
   if (!isRecordObject(p)) return where + " is not an object";
   if (typeof p.path !== "string" || !p.path) return where + " is missing a path";
+  // Containment is re-checked at this read boundary: a plan artifact is JSON on
+  // disk and may have been edited since `plan` wrote it. No root is in scope
+  // here, so the check is lexical; the write itself re-checks with real paths.
+  const norm = path.posix.normalize(p.path.replace(/\\/g, "/"));
+  if (path.isAbsolute(p.path) || /^[A-Za-z]:/.test(p.path) || norm === ".." || norm.startsWith("../")) {
+    return where + " on " + p.path + " escapes the project root";
+  }
   if (typeof p.new !== "string") return where + " on " + p.path + " is missing a `new` string";
   // The fingerprint is the staleness check's whole basis, so its absence is a
   // rejection rather than a re-derivation: a plan that cannot say what the file
@@ -5773,8 +5856,28 @@ function changeWrites(state, stage) {
   return [...state.writes.values()].filter((w) => (stage ? w.stage === stage : true));
 }
 
+// The evidence rows of a change's LATEST validation run. Rows carry the `run`
+// marker cmdValidate stamps per invocation; rows written before the marker
+// existed group as one legacy run, which errs toward blocking — an old fail
+// keeps blocking until a fresh validate passes clean.
+function latestValidationEvidence(state) {
+  const rows = state ? state.evidence : [];
+  if (!rows.length) return [];
+  const key = rows[rows.length - 1].run;
+  return rows.filter((e) => e.run === key);
+}
+
+// A validation resolves a change only when its latest run passed IN FULL. One
+// step recording `pass` beside another recording `fail` is a failed run — the
+// static-reanalysis step always records `pass` because it is a recording, and
+// that row alone must never read as success.
+function latestRunClean(state) {
+  const latest = latestValidationEvidence(state);
+  return latest.some((e) => e.result === "pass") && !latest.some((e) => e.result === "fail");
+}
+
 // Open = written (or interrupted mid-write) and not yet resolved. The three
-// resolutions are a passing validation, a rollback, and a retirement.
+// resolutions are a clean validation run, a rollback, and a retirement.
 function openChangeIds(rows) {
   const open = [];
   for (const c of replayJournal(rows).values()) {
@@ -5782,7 +5885,7 @@ function openChangeIds(rows) {
     if (!live.length) continue;
     if (changeWrites(c, "retire").some((w) => w.written)) continue;
     const interrupted = live.some((w) => !w.written);
-    if (!interrupted && c.evidence.some((e) => e.result === "pass")) continue;
+    if (!interrupted && latestRunClean(c)) continue;
     open.push(c.id);
   }
   return open;
@@ -5857,7 +5960,12 @@ function writePatch(root, patch) {
 // write and the disk, which loses the last row rather than lying about it. An
 // fsync per row is the upgrade path if that ever matters.
 function journalledWrite(root, ctx, patch, stage) {
-  const full = path.join(root, patch.path);
+  const full = resolveWritePath(root, patch.path);
+  if (!full) {
+    throw expected("Refusing to write " + patch.path + " for change " + ctx.change +
+      ": the path resolves outside the project root. The plan was edited after it was written," +
+      " or a directory on the path is a link that leaves the project. Nothing was written.");
+  }
   const preImage = readIfExists(full);
   appendJournal(root, {
     event: "intent", stage, transaction: ctx.transaction, plan: ctx.plan, change: ctx.change,
@@ -5874,7 +5982,12 @@ function journalledWrite(root, ctx, patch, stage) {
 // Put one journalled write back the way it was. `preImage === null` means the
 // write created the file, so undoing it is removing the file again.
 function restoreWrite(root, ctx, write, cause) {
-  const full = path.join(root, write.path);
+  // The journal is a file too, and a restore is a write: same boundary.
+  const full = resolveWritePath(root, write.path);
+  if (!full) {
+    throw expected("Refusing to restore " + write.path + " for change " + ctx.change +
+      ": the path resolves outside the project root. Nothing was restored for it.");
+  }
   if (write.preImage === null) {
     // The write created the file, so undoing it removes the file — and the
     // directories the write had to create along with it, or a rolled-back skill
@@ -6044,8 +6157,16 @@ function cmdApply(root, opts) {
       for (const w of changeWrites(state, "apply").filter((w) => w.written).sort((a, b) => b.order - a.order)) {
         restoreWrite(root, ctx, w, "post-write-validation");
       }
+      // The batch is not atomic across changes, so the honest failure names the
+      // part that DID land: earlier changes stay applied, journalled, and
+      // reversible — but only if the reader knows they are there.
+      const landed = applied.map((a) => a.id + " (" + a.files.join(", ") + ")");
       fail("Change " + change.id + " was restored: what it wrote does not parse.\n  " + problems.join("\n  ") +
-        "\n  Both the write and the restore are in " + STATE_DIR + "/" + JOURNAL_FILE + ".");
+        "\n  Both the write and the restore are in " + STATE_DIR + "/" + JOURNAL_FILE + "." +
+        (landed.length
+          ? "\n  Applied before it and still in place: " + landed.join("; ") +
+            ". Undo them with `assay.js rollback --change <id>`."
+          : ""));
     }
     applied.push({ id: change.id, transaction: ctx.transaction, files: change.patches.map((p) => p.path) });
   }
@@ -6164,15 +6285,19 @@ function cmdValidate(root, opts) {
   const id = opts.changes[0];
   const found = findChange(root, id);
   if (found.problem) fail(found.problem);
-  const state = replayJournal(readJournal(root)).get(id);
+  const journalRows = readJournal(root);
+  const state = replayJournal(journalRows).get(id);
   const live = state ? changeWrites(state, "apply").filter((w) => w.written) : [];
   if (!live.length) {
     fail("Change " + id + " has not been applied (nothing in the journal to validate). " +
       "Apply it first: `assay.js apply --change " + id + "`.");
   }
   const ctx = { transaction: state.transaction, plan: found.plan.planId, change: id };
+  // One marker per invocation, so the retirement gate can tell THIS run's rows
+  // from an earlier run's. The journal only grows, so its length is unique here.
+  const run = "v" + journalRows.length;
   const rows = validationEvidence(root, opts, found.change);
-  for (const row of rows) appendJournal(root, { event: "evidence", ...ctx, ...row });
+  for (const row of rows) appendJournal(root, { event: "evidence", run, ...ctx, ...row });
   const failed = rows.filter((r) => r.result === "fail");
   if (failed.length) {
     fail("Validation failed for change " + id + ":\n  " +
@@ -6217,6 +6342,28 @@ function cmdRollback(root, opts) {
       if (later) {
         fail("Cannot roll back change " + c.id + ": change " + other.id + " wrote " + w.path +
           " afterwards and is still applied. Roll that one back first.");
+      }
+    }
+  }
+
+  // A file that changed after assay wrote it is somebody's later work, and a
+  // restore would overwrite it silently. Only the LATEST live write per path is
+  // compared: an earlier stage's hashAfter is legitimately superseded by a later
+  // write inside the same rollback set.
+  if (!opts.force) {
+    const latestByPath = new Map();
+    for (const { c, w } of pending) {
+      const prev = latestByPath.get(w.path);
+      if (!prev || w.order > prev.w.order) latestByPath.set(w.path, { c, w });
+    }
+    for (const { c, w } of latestByPath.values()) {
+      if (!w.written || typeof w.hashAfter !== "string") continue;
+      const current = readIfExists(path.join(root, w.path));
+      const currentHash = current === null ? null : hashContent(current);
+      if (currentHash !== w.hashAfter) {
+        fail("Cannot roll back change " + c.id + ": " + w.path + " changed after assay wrote it.\n" +
+          "  A restore would silently discard that later edit. Nothing was restored.\n" +
+          "  Re-run with --force to discard the later edit and restore the journalled pre-image.");
       }
     }
   }
@@ -6278,8 +6425,18 @@ function cmdRetire(root, opts) {
   const missing = [];
   const applied = state ? changeWrites(state, "apply").filter((w) => w.written) : [];
   if (!applied.length) missing.push("the change has not been applied (no write in the journal)");
-  if (!state || !state.evidence.some((e) => e.result === "pass")) {
+  const latest = latestValidationEvidence(state);
+  if (!latest.some((e) => e.result === "pass")) {
     missing.push("the journal holds no validation evidence marking success for this change");
+  }
+  // The gate reads the WHOLE latest run: a run with any failing step is a
+  // failed validation, whatever its other rows say. assay reproduced its own
+  // worst case here — a failed host-discovery beside an always-pass
+  // static-reanalysis row must not open retirement.
+  const failedRows = latest.filter((e) => e.result === "fail");
+  if (failedRows.length) {
+    missing.push("the latest validation run failed (" + failedRows.map((e) => e.kind).join(", ") +
+      ") — a run must pass in full before retirement");
   }
   if (missing.length) {
     fail("Refusing to retire change " + id + ":\n  " + missing.join("\n  ") +
@@ -6984,9 +7141,11 @@ function parseFailOn(raw) {
 // need, and no gate reads the answer.
 function cmdCi(root, opts) {
   const gates = opts.failOn ? parseFailOn(opts.failOn) : CI_DEFAULT_GATES;
-  const audit = composeAudit(scan(root, {
-    projectOnly: opts.projectOnly, probeHost: false, adapter: opts.adapter,
-  }), null);
+  const scanData = scan(root, {
+    projectOnly: opts.projectOnly, probeHost: false, adapter: opts.adapter, startup: opts.startup,
+  });
+  requireStartupHonored(opts, scanData.context);
+  const audit = composeAudit(scanData, null);
   const result = ciEvaluate(audit, gates);
   if (opts.json) {
     process.stdout.write(JSON.stringify({
@@ -7021,12 +7180,16 @@ function cmdCi(root, opts) {
 // the closed set is still 1 — that is a usage error, not a finding.
 const COMMANDS = ["scan", "report", "remeasure", "artifact", "clean",
   "plan", "apply", "validate", "rollback", "retire", "link", "ci"];
-const FLAGS = new Set(["--verbose", "--json", "--project-only", "--list"]);
+const FLAGS = new Set(["--verbose", "--json", "--project-only", "--list", "--force"]);
 // [Foreman: 079] Flags that take a value, mapped to what that value is, so the
 // parser skips the argument instead of rejecting it as an unknown flag and the
 // error says what was missing.
 const VALUE_FLAGS = new Map([
   ["--root", "path"], ["--host", "profile name"],
+  // The startup directory a session is modeled as beginning in. Only a profile
+  // whose host reads a root-to-startup chain consumes it; the engine refuses it
+  // for any profile that ignores it, so the flag can never silently do nothing.
+  ["--startup", "startup directory (inside the root)"],
   // [Foreman: 081] The transaction's arguments. `--change` repeats, and that
   // repetition IS the approval boundary — every id written out by hand.
   ["--from", "draft plan path"], ["--change", "change id"], ["--batch", "batch id"],
@@ -7038,21 +7201,32 @@ const VALUE_FLAGS = new Map([
 ]);
 const USAGE = [
   "Usage: assay.js <" + COMMANDS.join("|") + "> [--root <path>]",
-  "  scan|remeasure  [--host <" + Object.keys(ADAPTERS).join("|") + ">] [--project-only] [--verbose] [--json]",
+  "  scan|remeasure  [--host <" + Object.keys(ADAPTERS).join("|") + ">] [--startup <dir>] [--project-only] [--verbose] [--json]",
   "  report          [--verbose] [--json]",
   "  artifact | clean",
   "  plan            --from <draft.json>",
   "  apply           --change <id> [--change <id> …] | --batch <id>",
   "  validate        --change <id> [--external \"<kind>: <result>\"] [--proof <pointer>]",
-  "  rollback        --change <id> [--change <id> …] | --transaction <id>",
+  "  rollback        --change <id> [--change <id> …] | --transaction <id>  [--force]",
   "  retire          --change <id>",
   "  link            --proof <pointer> --rule <key> | --skill <name> | --finding <ref> | --change <id>",
   "  link            --list",
-  "  ci              [--host <" + Object.keys(ADAPTERS).join("|") + ">] [--project-only] [--fail-on <gate>[,<gate>…]] [--json]",
+  "  ci              [--host <" + Object.keys(ADAPTERS).join("|") + ">] [--startup <dir>] [--project-only] [--fail-on <gate>[,<gate>…]] [--json]",
   "                  deterministic, writes nothing; exit 0 clean, 2 a gate failed, 1 usage error",
   "                  gates (closed set): " + CI_GATE_NAMES.join(", "),
   "                  default: " + CI_DEFAULT_GATES.join(", "),
 ].join("\n");
+
+// A named startup directory the profile then ignored would be a report about
+// the wrong session wearing the right label — the refusal keeps the flag honest
+// without the engine ever asking which host it is running.
+function requireStartupHonored(opts, context) {
+  if (!opts.startup) return;
+  if (path.resolve(context.startupDirectory) !== path.resolve(opts.startup)) {
+    usageError("--startup is not supported by the " + (opts.adapter ? opts.adapter.name : "selected") +
+      " profile: it models the startup directory as the project root.");
+  }
+}
 
 // Every occurrence of a repeatable value flag, in the order they were given.
 function valuesOf(args, flag) {
@@ -7093,12 +7267,29 @@ function main() {
   if (!ADAPTERS[host]) {
     usageError("Unknown host: " + host + " — valid hosts are " + Object.keys(ADAPTERS).join(", ") + ".");
   }
+  // The startup directory, when given, must be the root or inside it — a chain
+  // to a directory outside the project is not a chain assay can describe.
+  const startupIdx = args.indexOf("--startup");
+  // Relative to the root, not the shell's cwd: the flag names a place in the
+  // project being audited, wherever assay is invoked from.
+  const startup = startupIdx !== -1 ? path.resolve(root, args[startupIdx + 1]) : null;
+  if (startup) {
+    const fromRoot = path.relative(path.resolve(root), startup);
+    if (fromRoot.startsWith("..") || path.isAbsolute(fromRoot)) {
+      usageError("--startup must name the root or a directory inside it.");
+    }
+    if (!fs.existsSync(startup) || !fs.statSync(startup).isDirectory()) {
+      usageError("--startup: " + args[startupIdx + 1] + " is not a directory.");
+    }
+  }
   const opts = {
     verbose: args.includes("--verbose"),
     json: args.includes("--json"),
     // [Foreman: 074] Keep the audit inside the repo: no user-scope discovery.
     projectOnly: args.includes("--project-only"),
     adapter: ADAPTERS[host],
+    startup,
+    force: args.includes("--force"),
     // [Foreman: 081] the transaction's arguments
     from: args.includes("--from") ? args[args.indexOf("--from") + 1] : null,
     changes: valuesOf(args, "--change"),
