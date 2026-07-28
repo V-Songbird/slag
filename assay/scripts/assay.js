@@ -129,7 +129,7 @@ const TMP_DIR = ".assay-tmp";
 // A release cut keeps ANALYZER_VERSION in step with assay's version in
 // .claude-plugin/marketplace.json, which owns the published number.
 const SCHEMA_VERSION = 1;
-const ANALYZER_VERSION = "0.9.0-alpha";
+const ANALYZER_VERSION = "1.0.0";
 const PARSER_NAME = "assay-markdown";
 // [Foreman: 073] 2 = markdown-it 14.1.0 + js-yaml 4.1.0 behind assay's adapter.
 // 1 was the handwritten line scanner; a record naming version 1 was produced by
@@ -6563,7 +6563,7 @@ function resolveProofLinks(root, audit) {
   // Grouped by anchor, then date-ordered inside it — the drift story reads
   // oldest first. A record with no date falls back to when the link was made,
   // and the pointer breaks any remaining tie so two runs order identically.
-  const at = (l) => (l.key.date || l.linkedAt || "") + " " + l.pointer;
+  const at = (l) => (l.key.date || l.linkedAt || "") + "\u0000" + l.pointer;
   const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
   return rows.sort((a, b) => cmp(anchorId(a.anchor), anchorId(b.anchor)) || cmp(at(a), at(b)));
 }

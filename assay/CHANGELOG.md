@@ -4,7 +4,7 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
-## [Unreleased]
+## [1.0.0] — 2026-07-28
 
 ### Added
 
@@ -20,13 +20,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - A new `assay.js ci` command for build pipelines: it scans, evaluates, prints a summary, and writes nothing at all — no records, no state, no temp files. Exit 0 when nothing gated fires, 2 when a gate fails, 1 on a usage error
 - `--fail-on` picks which gates may fail a build from a closed set: availability, schema, stale-targets, conflicts, duplicates, malformed-config. Omitted, the first four apply. Anything else is refused with the list, and only findings computed from files, paths, and configuration can ever fail a build — heuristic and model-judged findings stay advisory with no way to opt in
 - `assay.js ci --json` emits a stable, sorted, timestamp-free summary, so two runs over an unchanged project produce identical output
-- The promises assay makes about itself — that an analysis writes nothing, that the three report formats agree, that nothing is retired before it is checked, that no wording fix outranks a rule the host can't load — now run as their own checks before a release, and each one that a machine cannot answer says so instead of being left out
-- The official host documentation assay's behavior is read from is checked against the live pages before a release. If a page stops stating something assay relies on, the affected host is named and held back until the profile is corrected or that capability is switched off
-
 ### Changed
 
-- A rule in a script assay can't read no longer carries a grade at all. It used to be scored and flagged as unreliable; now the score is withheld and the reason is stated beside the rule
-- A very large corpus no longer crashes the report. Past 500 rules the report says plainly that duplicate and conflict detection did not run — pairing every rule with every other one grows too fast to finish honestly at that size — and every other check still applies. It is stated as coverage, so it never fails a build
+- A rule in a script assay can't read carries no grade at all — the score is withheld and the reason is stated beside the rule
+- A very large corpus no longer crashes the report. Past 500 rules the report says plainly that duplicate and conflict detection did not run, and every other check still applies. It is stated as coverage, so it never fails a build
 - A change record damaged anywhere but its last line is now refused, naming the file and the line. A half-written final line is still treated as an interrupted write and resolved as before — but a record damaged further up holds the only copy of your files as they were, and it is no longer read past in silence
 
 ## [0.9.0-alpha] — 2026-07-28
