@@ -13,7 +13,7 @@ description: >-
   files", "which rules are weak or vague", "audit my rules", "which rules should
   be hooks" — or invokes /assay:audit with any flags. Do NOT use to review code,
   PRs, or non-Claude config like eslint.
-argument-hint: "[--fix] [--verbose] [--json] [--no-verify] [--deterministic] [--semantic] [--artifact] [--project-only] [--host codex]"
+argument-hint: "[--fix] [--verbose] [--json] [--no-verify] [--deterministic] [--semantic] [--artifact] [--project-only] [--host codex] [--startup <path>]"
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent, Artifact
 ---
 
@@ -28,12 +28,15 @@ report what the script alone can see), `--semantic` (while judging, also propose
 paraphrased duplicates and indirect conflicts the script cannot see),
 `--project-only` (skip the user's own instruction files), `--host codex` (audit
 the Codex instruction system — the `AGENTS.md` chain, `.agents/skills`, and
-`.codex` hooks — instead of the Claude Code one).
+`.codex` hooks — instead of the Claude Code one). `--startup <path>` (with
+`--host codex`) audits the chain for a session started in that subdirectory;
+pass it through to every `assay.js` call like the other flags.
 
 ## 1. Scan
 
-From the project root — pass `--project-only` and `--host <name>` through if
-`$ARGUMENTS` has them, to this step and to every later `assay.js` call:
+From the project root — pass `--project-only`, `--host <name>`, and
+`--startup <path>` through if `$ARGUMENTS` has them, to this step and to every
+later `assay.js` call:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" scan

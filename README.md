@@ -39,7 +39,7 @@ The first command registers this collection (once); the second installs whicheve
 
 ## The plugins
 
-### [assay](./assay) — Find out which of your rules Claude can actually follow
+### [assay](./assay) — Find the rules that can't work as written: vague, never loaded, or better as a hook
 
 You wrote rules for Claude; it keeps ignoring some. assay grades every rule in your `CLAUDE.md` and `.claude/rules/` on whether Claude can tell when it fires and what to do, offers to rewrite the weak ones, and flags the rules that were never meant to be prose — the ones a hook, skill, or subagent would enforce better. Almost all of the grading is a deterministic script, so a re-run gives the same numbers.
 

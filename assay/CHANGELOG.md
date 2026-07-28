@@ -4,6 +4,27 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.1.0] — 2026-07-28
+
+### Added
+
+- A `--startup <path>` flag on `scan`, `remeasure`, and `ci` audits the Codex instruction chain for a session started in a subdirectory of the project root. Only profiles that model a startup directory accept it — today, that is `codex`
+
+### Changed
+
+- The Codex profile is now an adapter preview: on Codex the supported surface is the engine CLI — `scan`, `report --json`, `ci`, and the transaction commands — and the packaged skills and workflows assume Claude Code's tooling
+- When one change in a batch fails and is restored, the error now names the changes already applied and left in place
+
+### Fixed
+
+- Retiring a rule now requires the change's latest validation run to have passed in full. A failed validation blocks `retire`, and blocks `clean` from deleting the change journal
+- Every write and restore refuses a path that resolves outside the project root, including through symlinks and junctions — even if a plan file was edited after approval
+- A plan file whose content no longer matches its content-derived id is rejected when read
+- A plan carrying two patches to the same file in one change is rejected
+- `rollback` refuses when a file changed after assay wrote it, so later edits are never discarded silently; `--force` overrides and discards them
+- `<tag>`-wrapped blocks other than `<example>` are disclosed in coverage as set-aside regions instead of being skipped without a mention
+- Stale-reference checking no longer flags quoted tokens used as illustrative examples, or bare single-segment directory names like `hooks/`
+
 ## [1.0.0] — 2026-07-28
 
 ### Added
