@@ -24,6 +24,13 @@
 // --project-only skips user-scope discovery; ASSAY_USER_DIR overrides where the
 // user's own instruction files are looked for (default ~/.claude).
 //
+// [Foreman: 079] --host <claude-code|codex> selects the host profile discovery
+// runs under, defaulting to claude-code. It is the adapter that changes, not the
+// analyzers: a profile declares where its host loads instructions from and which
+// analyses apply to it, and everything below reads that declaration. `report` and
+// `artifact` take the profile from the record they read, so the flag matters on
+// the commands that discover — scan and remeasure.
+//
 // Everything mechanical happens here; the only model-judged inputs are F3
 // (trigger-action distance) and F8 (enforceability), supplied via judgments.json.
 //
@@ -52,6 +59,17 @@ const yaml = require("./vendor/js-yaml.js");
 // reads what the adapter returned. Swapping this require is what a second host
 // profile costs.
 const claudeAdapter = require("./adapters/claude.js");
+
+// [Foreman: 079] The second host profile, and with it the registry `--host`
+// selects from. Adding one is adding a line here plus an adapter file; nothing
+// in the analyzers below branches on which one is active. A profile's own
+// `policy` is how it withdraws an analysis it has no evidence for — see
+// PROFILE_POLICY.
+const ADAPTERS = {
+  "claude-code": claudeAdapter,
+  codex: require("./adapters/codex.js"),
+};
+const DEFAULT_HOST = claudeAdapter.name;
 
 // CommonMark plus GFM tables (markdown-it's "default" preset), with raw HTML
 // recognized so comments and tag blocks arrive as their own tokens.
@@ -191,6 +209,27 @@ const MECHANISM_LIMITS = {
   remote: "the workflow file exists — assay does not read its triggers, its jobs, or the branch policy",
 };
 
+// [Foreman: 079]
+// What a host profile permits the shared analyzers to apply to its sources. The
+// profile declares it, the record carries it, and every consumer reads it from
+// there — no analyzer, renderer or derivation asks which host it is looking at.
+// That is the 074 seam extended one step: 074 stopped shared code inferring
+// LOADING from a filename, and this stops it inferring ANALYSIS from a host name.
+//
+//   wordingRubric — may the Claude-measured wording levers (explicit trigger,
+//     must/always force, negative grammar, line position, task distance, worked
+//     examples) score this profile's sources, and may the hygiene grade those
+//     factors sum to be shown? Default true; the Claude profile is where they
+//     were measured. A profile that sets it false still gets every host-neutral
+//     analysis: availability gates, staleness, conflicts, duplicates, missing
+//     escape hatches, and the lossless inventory.
+const DEFAULT_POLICY = { wordingRubric: true };
+
+function profilePolicy(record) {
+  const declared = record && record.profile && record.profile.policy;
+  return isRecordObject(declared) ? { ...DEFAULT_POLICY, ...declared } : DEFAULT_POLICY;
+}
+
 function isRecordObject(x) {
   return Boolean(x) && typeof x === "object" && !Array.isArray(x);
 }
@@ -226,18 +265,28 @@ function validateRecord(record, kind) {
 }
 
 function makeRecord(kind, payload, root) {
-  const { coverage = null, context = null, ...rest } = payload;
+  const { coverage = null, context = null, profile = null, ...rest } = payload;
   const projectRoot = path.resolve(root);
   return {
     schemaVersion: SCHEMA_VERSION,
     analyzer: { name: "assay", version: ANALYZER_VERSION },
     parser: { name: PARSER_NAME, version: PARSER_VERSION },
-    profile: { host: PROFILE_HOST, version: PROFILE_VERSION },
+    // [Foreman: 079] The profile the analysis actually ran under, carried from
+    // the payload so a record always names the adapter that produced it. The
+    // shape is unchanged — host and version, plus whatever policy that profile
+    // declares. The consts remain the fallback for a hand-built payload.
+    profile: profile || { host: PROFILE_HOST, version: PROFILE_VERSION },
     // [Foreman: 074] The context the adapter fixed for this analysis, carried
     // through unchanged. `userDir` null means user scope was off; `hostVersion`
     // null means the host was not probed or did not answer. Both are additive:
     // an older reader ignores them, and neither is required by the schema.
+    // [Foreman: 079] The spread carries whatever else the adapter fixed — the
+    // Codex profile's effective config.toml values, for one — so a reader can
+    // see which cap was applied and whether it was configured or the default.
+    // The Claude context has exactly the four keys below, so its record is
+    // unchanged.
     context: {
+      ...(context || {}),
       projectRoot: (context && context.projectRoot) || projectRoot,
       startupDirectory: (context && context.startupDirectory) || projectRoot,
       userDir: context ? context.userDir : null,
@@ -633,6 +682,16 @@ function readSources(sources, root, inaccessible = [], adapter = claudeAdapter) 
     f.defaultCategory = fm["default-category"] || "mandate";
     f.lineCount = content.split("\n").length;
     f.alwaysLoaded = adapter.loadsAlways(source, globs);
+    // [Foreman: 079] A source whose host budget runs out partway through it
+    // arrives carrying the byte offset where that happens. Turning the offset
+    // into a line is shared arithmetic over an adapter-declared fact: the
+    // engine never decides WHERE a budget lands, only which rules fall past it.
+    // Counted over BYTES, not characters: the budget is a byte budget, so a
+    // multi-byte character before the boundary must not shift the line.
+    if (Number.isInteger(source.truncatedAtByte)) {
+      const upTo = Buffer.from(content, "utf-8").subarray(0, source.truncatedAtByte).toString("utf-8");
+      f.truncatedAtLine = upTo.split("\n").length;
+    }
     parsed.push(f);
   }
   return parsed;
@@ -1827,6 +1886,10 @@ function scan(root, options = {}) {
   const context = adapter.detectContext({
     root,
     userDir: options.userDir,
+    // [Foreman: 079] Passed through untouched: whether the startup directory can
+    // differ from the project root at all is the adapter's question, and the
+    // Codex profile is the one that answers yes.
+    startup: options.startup,
     projectOnly: options.projectOnly === true,
     probeHost: options.probeHost === true,
   });
@@ -1974,9 +2037,23 @@ function scan(root, options = {}) {
     hasDescription: hasSkillDescription(s.absPath),
   }));
 
+  // [Foreman: 079] What the host documents as a hard limit on how much of this
+  // it will read, and what the profile must disclose about its own coverage.
+  // Both are emitted only when the adapter supplies them, so a profile that
+  // documents neither produces exactly the record it produced before.
+  const budget = adapter.budgets ? (adapter.budgets(context) || {}).documented : null;
+  const profileNotes = adapter.coverageNotes ? adapter.coverageNotes() : [];
+
   return {
     root: context.projectRoot,
     context,
+    // [Foreman: 079] The profile that produced this record, including the
+    // analyses it declares out of scope for itself.
+    profile: {
+      host: adapter.name,
+      version: adapter.profileVersion,
+      ...(adapter.policy ? { policy: adapter.policy } : {}),
+    },
     files: files.map(({ content, absPath, globMatched, ...rest }) => rest),
     sources,
     scopeOverlaps,
@@ -2000,6 +2077,8 @@ function scan(root, options = {}) {
       userFilesIncluded: files.some((f) => f.scope === "user"),
       userSkills,
       agents: adapter.discoverAgents(context),
+      ...(budget ? { budget } : {}),
+      ...(profileNotes.length ? { profileNotes } : {}),
     },
   };
 }
@@ -2016,7 +2095,12 @@ function hasSkillDescription(absPath) {
 }
 
 function cmdScan(root, opts = {}) {
-  const result = scan(root, { projectOnly: opts.projectOnly, probeHost: true });
+  // razor: startup directory = project root at the CLI. The Codex profile reads
+  // a chain from the root down to wherever the session started, and the adapter
+  // honors a startup directory that differs — but assay has no flag for one yet,
+  // because a report about a directory the user did not name would be a report
+  // about the wrong session. `--startup <path>` is the upgrade path.
+  const result = scan(root, { projectOnly: opts.projectOnly, probeHost: true, adapter: opts.adapter });
   const tmpDir = path.join(root, TMP_DIR);
   fs.mkdirSync(tmpDir, { recursive: true });
   writeRecord(path.join(tmpDir, "scan.json"), "scan", result, root);
@@ -2127,6 +2211,14 @@ function loadJudgments(root, rules) {
 // precondition for it.
 function composeAudit(scanData, judgments) {
   const deterministic = judgments == null;
+  // [Foreman: 079] A profile that declines the wording rubric declines the score
+  // it sums to. The factor VALUES are still measured and still travel in the
+  // record — they are inventory, and F1's extraction and F2's stall risk feed
+  // host-neutral findings — but nothing composed from their weights is presented
+  // as a judgment about this profile's sources. SCOPE.md: a hygiene score is
+  // retained "for one host profile", never inherited by a second without its own
+  // evidence.
+  const graded = profilePolicy(scanData).wordingRubric;
   let judged = 0;
   const rules = scanData.rules.map((r) => {
     // [Foreman: 059] keyed by the stable content hash; r.key falls back to r.id
@@ -2156,12 +2248,12 @@ function composeAudit(scanData, judgments) {
       factorValues: factors,
       f8,
       ...composed,
-      score,
-      grade: grade(score),
+      score: graded ? score : null,
+      grade: graded ? grade(score) : null,
       stallRisk,
       hookOpportunity: f8 != null && f8 < F8_HOOK_THRESHOLD,
       placement,
-      weak: score < (CATEGORY_FLOORS[r.category] ?? CATEGORY_FLOORS.mandate),
+      weak: graded && score < (CATEGORY_FLOORS[r.category] ?? CATEGORY_FLOORS.mandate),
       suppressed: notRule !== null,
       suppressedReason: notRule,
     };
@@ -2177,7 +2269,7 @@ function composeAudit(scanData, judgments) {
 
   const files = scanData.files.map((f, i) => {
     const own = counted.filter((r) => r.fileIndex === i);
-    const mean = own.length ? own.reduce((s, r) => s + r.score, 0) / own.length : null;
+    const mean = graded && own.length ? own.reduce((s, r) => s + r.score, 0) / own.length : null;
     return { ...f, ruleCount: own.length, score: mean === null ? null : round3(mean), grade: mean === null ? null : grade(mean) };
   });
 
@@ -2186,12 +2278,15 @@ function composeAudit(scanData, judgments) {
   // would move a number the project's own authors cannot fix.
   // [Foreman: 076] A shadowed file's rules never take effect, so grading the
   // project on them would score policy the host never reads.
-  const mandates = counted.filter((r) => r.category === "mandate" &&
+  const mandates = !graded ? [] : counted.filter((r) => r.category === "mandate" &&
     (files[r.fileIndex] || {}).scope !== "user" && (files[r.fileIndex] || {}).selected !== false);
   const corpus = mandates.length ? round3(mandates.reduce((s, r) => s + r.score, 0) / mandates.length) : null;
 
   const audit = {
     root: scanData.root, context: scanData.context || null,
+    // [Foreman: 079] carried forward so every consumer reads the profile — and
+    // the analyses it declares out of scope — off the record it was handed
+    profile: scanData.profile || null,
     files, rules, skills: scanData.skills || [],
     hookInventory: scanData.hookInventory || [],
     // [Foreman: 077] raw level-4/5 discovery, carried so the derivation below
@@ -2262,6 +2357,15 @@ const WORDING_STUDY_EVIDENCE = {
   basis: "local wording studies (small-model tier, anti-default fixtures)",
   limits: "measured on one host profile against fixtures built to defeat the model's defaults; it does not carry to other agents",
 };
+// [Foreman: 079] The same finding, for a profile the study never covered. A
+// prohibition with nothing named to do instead is a structural fact about the
+// rule and every profile is checked for it; the measured effect is what does not
+// travel, so the evidence level drops rather than the finding disappearing.
+const STALL_STRUCTURE_EVIDENCE = {
+  level: "heuristic",
+  basis: "a prohibition with no named alternative and no escape hatch",
+  limits: "the experiment behind this pattern was run on another host profile; here it is a structural observation, not a measured effect",
+};
 const MODEL_JUDGMENT_LIMITS = "one model pass in this audit session; another session may judge it differently";
 
 // The tag every finding line carries. The interface must not let a heuristic
@@ -2312,9 +2416,27 @@ function jaccard(a, b) {
 // host actually applies. A suppressed entry was judged not to be a rule, and a
 // shadowed one sits in a file the host never selected — pairing either with a
 // live rule would report a relationship that does not exist in the session.
+// [Foreman: 079] Is this rule certainly part of what the host receives? Three
+// adapter-declared facts, no filename: the file lost its selection, the file
+// falls past a declared byte budget, or the rule sits below where that budget
+// lands inside the file.
+//
+// The third case is the asymmetric one, and deliberately so. Its state is
+// `at-risk`, not `inactive`, because calling it unread would be a positive
+// non-delivery claim the documentation does not support — but pairing it with a
+// live rule as a duplicate or a conflict would be the opposite positive claim,
+// that both are active together. Under a documented ambiguity assay makes
+// neither: the rule is named as at risk, and it is left out of the relationship
+// graph until a live host settles the question.
+function hostReceives(rule, file) {
+  const f = file || {};
+  if (f.selected === false || f.loaded === false) return false;
+  return !(Number.isInteger(f.truncatedAtLine) && rule.lineStart > f.truncatedAtLine);
+}
+
 function comparableRules(audit) {
   const files = audit.files || [];
-  return (audit.rules || []).filter((r) => !r.suppressed && (files[r.fileIndex] || {}).selected !== false);
+  return (audit.rules || []).filter((r) => !r.suppressed && hostReceives(r, files[r.fileIndex]));
 }
 
 function byPairPosition(p, q) {
@@ -2462,11 +2584,27 @@ function keepSuggestion(pair, files) {
 
 // One primary state for one rule, first match wins.
 // [Foreman: 076] `conflicted` maps a rule id to the rule it contradicts.
-function deriveRuleState(rule, file, conflicted = new Map()) {
+// [Foreman: 079] `policy` is the profile's own declaration of which analyses
+// apply to it. Six rows below are the Claude wording rubric and are skipped when
+// a profile declines it; every other row is host-neutral and always runs.
+function deriveRuleState(rule, file, conflicted = new Map(), policy = DEFAULT_POLICY) {
   const factors = rule.factors || {};
   const values = rule.factorValues || {};
   const globs = (file && file.globs) || [];
+  const rubric = policy.wordingRubric !== false;
 
+  // [Foreman: 079] The host's own documented budget ran out before this file.
+  // The instruction exists, reads like live policy, and the session never
+  // receives it — which is `inactive` exactly as the finding contract defines it.
+  if (file && file.loaded === false) {
+    return {
+      state: "inactive", severity: "high", analyzer: "byte-budget",
+      summary: "`" + rule.file + "` begins at byte " + file.startsAtByte + " of the instruction chain, past the host's cap — it is never read",
+      explanation: "The host reads its instruction sources in order until a documented byte limit is reached and stops adding files. Everything in this one falls after that point, so no wording change reaches this rule while the files ahead of it stay this large.",
+      evidence: { level: "documented", basis: "the host's documented combined instruction byte limit, applied over the discovered read order" },
+      safeActions: ["raise the configured limit", "shorten a source read earlier in the chain", "move the rule into a file the host reaches"],
+    };
+  }
   if (globs.length && file.globMatchCount === 0) {
     return {
       state: "inactive", severity: "high", analyzer: "glob-resolution",
@@ -2507,7 +2645,10 @@ function deriveRuleState(rule, file, conflicted = new Map()) {
       safeActions: ["repair reference", "drop the reference"],
     };
   }
-  if (factors.F1 && factors.F1.method === "extraction_failed") {
+  // [Foreman: 079] Rubric row: without a wording rubric an unextractable action
+  // is a maintainability observation, not a reliability failure — deriveFindings
+  // emits it as one.
+  if (rubric && factors.F1 && factors.F1.method === "extraction_failed") {
     return {
       state: "ambiguous", severity: "medium", analyzer: "verb-strength",
       summary: "no directive verb could be read out of it — the action is not stated plainly",
@@ -2519,7 +2660,8 @@ function deriveRuleState(rule, file, conflicted = new Map()) {
       safeActions: ["rewrite with a leading action verb"],
     };
   }
-  if (values.F3 != null && values.F3 <= AMBIGUOUS_F3_THRESHOLD) {
+  // Rubric row: the explicit-trigger requirement.
+  if (rubric && values.F3 != null && values.F3 <= AMBIGUOUS_F3_THRESHOLD) {
     return {
       state: "ambiguous", severity: "medium", analyzer: "trigger-distance",
       summary: "the moment it fires has more than one reading",
@@ -2528,16 +2670,42 @@ function deriveRuleState(rule, file, conflicted = new Map()) {
       safeActions: ["name the trigger", "rewrite"],
     };
   }
+  // [Foreman: 079] The documented cap lands inside this file, above this rule.
+  // Not `inactive`: the doc says the host "stops adding files" once the combined
+  // size reaches the limit, which is file-granular — whether the crossing file
+  // arrives whole or cut at the boundary is exactly what it does not say. assay
+  // has no live-host evidence to settle it, so this states the risk and declines
+  // the claim. It sits here because `at-risk` is where an unsettled risk belongs
+  // on the state ladder, and above stallRisk because the budget fact is the more
+  // specific of the two.
+  if (file && Number.isInteger(file.truncatedAtLine) && rule.lineStart > file.truncatedAtLine) {
+    return {
+      state: "at-risk", severity: "high", analyzer: "byte-budget",
+      summary: "the host's documented cap lands at line " + file.truncatedAtLine + " of `" + rule.file + "`, above this rule",
+      explanation: "The combined instruction chain reaches the host's documented limit partway through this file, at byte " + file.truncatedAtByte + " of it. The documentation says the host stops adding files at that point; it does not say whether this file arrives whole or is cut at the boundary. Either this rule is delivered or it is not, and no static read settles which.",
+      evidence: {
+        level: "documented", basis: "the host's documented combined instruction byte limit, applied over the discovered read order",
+        limits: "the limit and the read order are documented; the fate of the crossing file's remainder is not, and assay has not watched this host apply it",
+      },
+      safeActions: ["raise the configured limit", "move the rule above the boundary", "shorten a source read earlier in the chain"],
+    };
+  }
+  // Not a rubric row: a prohibition with no alternative is a missing escape
+  // hatch, which every profile is checked for. Only the EVIDENCE is
+  // profile-bound — the study behind it measured one host, so a profile the
+  // study never covered gets the same finding at the honest evidence level
+  // rather than a borrowed experimental claim.
   if (rule.stallRisk) {
     return {
       state: "at-risk", severity: "high", analyzer: "framing-polarity",
       summary: "a bare prohibition — nothing is named to do instead, so a task needing the banned thing can stall",
       explanation: "A ban with no replacement and no escape hatch converts a blocked task into a stopped one.",
-      evidence: WORDING_STUDY_EVIDENCE,
+      evidence: rubric ? WORDING_STUDY_EVIDENCE : STALL_STRUCTURE_EVIDENCE,
       safeActions: ["name the alternative", "add an escape hatch"],
     };
   }
-  if (factors.F1 && factors.F1.hedged) {
+  // Rubric row: the must/always force lever.
+  if (rubric && factors.F1 && factors.F1.hedged) {
     return {
       state: "at-risk", severity: "medium", analyzer: "verb-strength",
       summary: "hedged force — `" + factors.F1.matchedVerb + "` governs the directive",
@@ -2546,7 +2714,8 @@ function deriveRuleState(rule, file, conflicted = new Map()) {
       safeActions: ["rewrite with a firm verb", "restate it as a preference on purpose"],
     };
   }
-  if (values.F5 != null && values.F5 <= BURIED_F5_THRESHOLD) {
+  // Rubric row: the line-position lever.
+  if (rubric && values.F5 != null && values.F5 <= BURIED_F5_THRESHOLD) {
     return {
       state: "at-risk", severity: "low", analyzer: "position",
       summary: "buried in the bottom half of a long file, where rules lose force",
@@ -2718,6 +2887,7 @@ function deriveFindings(audit) {
   const all = audit.rules || [];
   const rules = all.filter((r) => !r.suppressed);
   const files = audit.files || [];
+  const policy = profilePolicy(audit);
 
   // [Foreman: 076] Both sides of a conflict take the state; the pair itself is
   // named once, below, with both spans.
@@ -2730,7 +2900,25 @@ function deriveFindings(audit) {
   }
 
   for (const rule of rules) {
-    push({ ...deriveRuleState(rule, files[rule.fileIndex], conflicted), rule: rule.id, sources: ruleSpan(rule) });
+    push({ ...deriveRuleState(rule, files[rule.fileIndex], conflicted, policy), rule: rule.id, sources: ruleSpan(rule) });
+  }
+  // [Foreman: 079] Without a wording rubric, a rule whose action cannot be read
+  // out of it is a maintainability item: worth tidying, not a claim that the
+  // host will fail on it. Under a rubric this is the `ambiguous` state instead,
+  // and this loop is silent.
+  if (policy.wordingRubric === false) {
+    for (const rule of rules.filter((r) => (r.factors || {}).F1 && r.factors.F1.method === "extraction_failed")) {
+      push({
+        type: "action-clarity", severity: "low", analyzer: "verb-strength", rule: rule.id, tier: "maintainability",
+        summary: "no directive verb could be read out of it — whatever it asks for is left to the reader",
+        explanation: "assay could not extract a commanded action from this line. That is an observation about how it reads, not a measured reliability risk on this host: no experiment covers this profile's wording.",
+        evidence: {
+          level: "heuristic", basis: "verb-table extraction",
+          limits: "English-only wording table; a rule in another language reads as unextractable whatever it says",
+        },
+        sources: ruleSpan(rule), safeActions: ["rewrite with a leading action verb", "leave it as prose on purpose"],
+      });
+    }
   }
   for (const rule of rules.filter((r) => r.nonLatin)) {
     push({
@@ -2815,10 +3003,48 @@ function deriveFindings(audit) {
       sources: [], safeActions: ["rename one of the two skills", "retire the copy that no longer applies"],
     });
   }
+  // [Foreman: 079] The host's own documented budget, spent. The adapter decided
+  // where the limit lands and marked each source; this loop only reports what it
+  // marked, with the arithmetic a reader needs to check it. One finding per
+  // source, so a chain that overruns by three files says so three times rather
+  // than hiding two of them behind a total.
+  const budget = (audit.coverage || {}).budget;
+  if (budget) {
+    const inChain = files.filter((f) => Number.isInteger(f.startsAtByte));
+    const chainBytes = inChain.reduce((n, f) => n + (f.bytes || 0), 0);
+    const arithmetic = `the chain is ${chainBytes} bytes, the cap is ${budget.amount} (${budget.source})`;
+    for (const file of inChain) {
+      if (file.loaded === false) {
+        push({
+          type: "budget-exceeded", severity: "high", analyzer: "byte-budget",
+          summary: `\`${file.path}\` starts at byte ${file.startsAtByte} of the instruction chain and is never read — ${arithmetic}`,
+          explanation: "The host stops adding instruction sources once the combined size reaches its documented limit. Everything in this file is past that point, so none of it reaches a session started here.",
+          evidence: { level: "documented", basis: budget.claim, limits: "the limit and the read order are documented; assay has not watched this host apply them" },
+          sources: fileSpan(file),
+          safeActions: ["raise the configured limit", "shorten a source read earlier in the chain", "move this file earlier in the chain"],
+        });
+      } else if (file.truncated) {
+        push({
+          type: "budget-truncation", severity: "high", analyzer: "byte-budget",
+          summary: `the cap lands inside \`${file.path}\`, at byte ${file.truncatedAtByte} of it${Number.isInteger(file.truncatedAtLine) ? ` (line ${file.truncatedAtLine})` : ""} — ${arithmetic}`,
+          explanation: "This file begins below the host's documented limit and crosses it. The documentation says where the limit lands, not whether the remainder of a crossing file is delivered — so every rule below that line is reported at-risk rather than called unread.",
+          evidence: {
+            level: "documented", basis: budget.claim,
+            limits: "the limit and the read order are documented; the fate of the crossing file's remainder is not, and assay has not watched this host apply either",
+          },
+          sources: fileSpan(file),
+          safeActions: ["raise the configured limit", "move the rules below the boundary higher in the file", "shorten a source read earlier in the chain"],
+        });
+      }
+    }
+  }
   // [Foreman: 076] The window cost of everything loaded before the session
   // starts. The line always prints; only real heft becomes a finding.
+  // [Foreman: 079] Skipped where the host documents a cap of its own: this
+  // threshold exists because Claude Code documents none, and a profile with a
+  // real limit is measured against that limit instead of against assay's line.
   const pressure = alwaysLoadedBytes(audit);
-  if (pressure.total > CONTEXT_PRESSURE_BYTES) {
+  if (!budget && pressure.total > CONTEXT_PRESSURE_BYTES) {
     push({
       type: "context-pressure", severity: "low", analyzer: "context-pressure",
       summary: `${pressure.total} bytes of instructions load before every session — largest: ${pressure.largest.map((s) => "`" + s.path + "` (" + s.bytes + ")").join(", ")}`,
@@ -3012,8 +3238,10 @@ function redactRecord(value) {
   return value;
 }
 
+// [Foreman: 079] A profile with no hygiene rubric carries no score to print, and
+// an em dash is what "not measured" looks like everywhere else in these reports.
 function fmt(x) {
-  return x.toFixed(2);
+  return x == null ? "—" : x.toFixed(2);
 }
 
 function pushWeakSkillSection(out, weakSkills) {
@@ -3226,6 +3454,61 @@ function pushUserScopeSection(out, files) {
   out.push("");
 }
 
+// [Foreman: 079]
+// The resolved instruction chain: every directory the host reads, what was
+// selected there and why, what lost the selection, the merge order, and the
+// running byte total against the documented cap. Built entirely from the source
+// facts the adapter declared — the renderer resolves nothing.
+//
+// It renders for any profile whose sources carry a read-order offset, which is
+// the mechanical signal that the host reads its sources as an ordered chain
+// under a budget. A profile without one (Claude Code today) never reaches it.
+function chainRows(files) {
+  return (files || []).filter((f) => Number.isInteger(f.startsAtByte) || f.shadowedBy);
+}
+
+// The Files table's Loading cell, shared by both renderers. Every branch reads a
+// fact the adapter declared — a file the host never opens must never read as
+// "always loaded" because it happens to carry no scope declaration.
+function loadingCell(f) {
+  if (f.selected === false) return "not loaded — shadowed";
+  if (f.loaded === false) return "not loaded — past the host's byte cap";
+  if (f.truncated) return "crosses the host's byte cap at byte " + f.truncatedAtByte;
+  if (f.globs && f.globs.length) return "scoped: " + f.globs.join(", ");
+  return "always loaded";
+}
+
+function chainStatus(file) {
+  if (file.selected === false) return "shadowed by `" + file.shadowedBy + "`";
+  if (file.loaded === false) return "**not read** — begins past the cap";
+  if (file.truncated) {
+    return `**crosses the cap** at byte ${file.truncatedAtByte}` +
+      (Number.isInteger(file.truncatedAtLine) ? ` (line ${file.truncatedAtLine})` : "");
+  }
+  return "read in full";
+}
+
+function pushChainSection(out, files, budget) {
+  const rows = chainRows(files);
+  if (!rows.length) return;
+  out.push("## Instruction chain");
+  out.push("");
+  out.push("The order the host reads these in, and where its budget runs out. A file lower in the table is the later word; a file the host never opens takes no effect whatever it says. [mechanical]");
+  out.push("");
+  out.push("| # | Source | Bytes | From | Status | Why |");
+  out.push("|---|---|---|---|---|---|");
+  for (const f of rows) {
+    const from = Number.isInteger(f.startsAtByte) ? String(f.startsAtByte) : "—";
+    out.push(`| ${f.precedence} | [${f.path}](${f.path}) | ${f.bytes == null ? "—" : f.bytes} | ${from} | ${chainStatus(f)} | ${f.selectionReason || ""} |`);
+  }
+  out.push("");
+  if (budget) {
+    const total = rows.filter((f) => Number.isInteger(f.startsAtByte)).reduce((n, f) => n + (f.bytes || 0), 0);
+    out.push(`Chain total ${total} bytes against a documented ${budget.amount}-byte cap (${budget.source}) — ${budget.scope}.`);
+    out.push("");
+  }
+}
+
 // [Foreman: 070]
 // Every count above is over what the audit actually parsed, and until this block
 // existed nothing said what that excluded. It prints on every report, not just
@@ -3247,9 +3530,24 @@ function coverageLines(audit, rules, suppressed, findings) {
   // [Foreman: 076] What every session pays before it reads anything. The count
   // always prints; it only becomes a finding above assay's own threshold, and
   // the finding says the host documents no cap of its own.
-  add(`${alwaysLoadedBytes(audit).total} bytes of always-loaded instructions (user + project memory, unscoped rules)`);
+  // [Foreman: 079] Where the host documents a cap, the bytes are reported
+  // against it — the number a reader needs is how much of the budget is spent,
+  // not an abstract total.
+  const budget = cov.budget;
+  if (budget) {
+    const inChain = (audit.files || []).filter((f) => Number.isInteger(f.startsAtByte));
+    const chainBytes = inChain.reduce((n, f) => n + (f.bytes || 0), 0);
+    add(`${chainBytes} bytes of instructions across ${inChain.length} source(s), against a documented ${budget.amount}-byte cap (${budget.source}, ${budget.scope})`);
+  } else {
+    add(`${alwaysLoadedBytes(audit).total} bytes of always-loaded instructions (user + project memory, unscoped rules)`);
+  }
   const pressure = (findings || []).find((f) => f.type === "context-pressure");
   if (pressure) add(`${pressure.summary} ${evidenceTag(pressure.evidence)} — ${pressure.evidence.limits}`, pressure, 1);
+  // [Foreman: 079] What this profile does not cover, in the profile's own words.
+  // Coverage is a promise about what was looked at; a profile that analyzes one
+  // surface of a host says so here rather than letting an empty section imply
+  // there was nothing to find.
+  for (const note of cov.profileNotes || []) add(note);
   // [Foreman: 071] The coverage gap the deterministic default opens, named where
   // every other gap is named. What did not run is part of what the audit covered.
   if (!audit.semantic) {
@@ -3389,6 +3687,10 @@ function renderReport(audit, opts = {}) {
   // `findings` renders an empty report rather than a second, differently-timed
   // analysis. What the reader sees is what the record says.
   const findings = audit.findings || [];
+  // [Foreman: 079] What this profile lets the report say. `rubric` false means
+  // no wording levers, no grade, and maintainability items reported apart from
+  // reliability findings — SCOPE.md's Codex profile, step 8.
+  const rubric = profilePolicy(audit).wordingRubric !== false;
   const findingByRule = new Map(findings.filter((f) => f.state).map((f) => [f.rule, f]));
   const rulesById = new Map(rules.map((r) => [r.id, r]));
   const stateOf = (r) => findingByRule.get(r.id) || null;
@@ -3446,7 +3748,11 @@ function renderReport(audit, opts = {}) {
     .map((s) => `${counts.get(s)} ${stateWord(s, counts.get(s))}`);
   out.push(`**${topology.join(", ")}** across ${files.filter((f) => f.ruleCount > 0).length} file(s).`);
   out.push("");
-  out.push("Findings are this report's primary output. The structural-hygiene grade at the bottom is a secondary summary — it never overrides a hard gate, and it never predicts compliance.");
+  out.push(rubric
+    ? "Findings are this report's primary output. The structural-hygiene grade at the bottom is a secondary summary — it never overrides a hard gate, and it never predicts compliance."
+    // [Foreman: 079] No grade to demote, so the sentence says what is there
+    // instead of pointing at a number the report does not print.
+    : "Findings are this report's primary output. This profile carries no hygiene grade, so they are the whole of it — and no finding here predicts compliance.");
   out.push("");
 
   if (opts.prev) pushProgressSection(out, audit, opts.prev, findings);
@@ -3469,16 +3775,29 @@ function renderReport(audit, opts = {}) {
     out.push("");
   }
 
+  // [Foreman: 079] The chain the gates above refer to, right after them: a
+  // reader who has just been told a file is never read needs the order and the
+  // arithmetic that made it so.
+  pushChainSection(out, files, (audit.coverage || {}).budget);
+
   // 4. Operational findings — loaded, but risky.
   // A hard-gated rule is named above with its state, never here with a grade:
   // a rule the host never loads has no operational behavior to be weak at.
-  const weak = rules.filter((r) => r.weak && !gated.has(r.id)).sort((a, b) => a.score - b.score);
+  // [Foreman: 079] The three score-derived lists are the wording rubric's own,
+  // so a profile that declines it gets none of them.
+  const weak = rubric ? rules.filter((r) => r.weak && !gated.has(r.id)).sort((a, b) => a.score - b.score) : [];
   const stalls = rules.filter((r) => r.stallRisk);
-  const buried = rules.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD);
+  const buried = rubric ? rules.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD) : [];
   const stale = rules.filter((r) => r.staleness && r.staleness.missing.length);
   const badCategories = rules.filter((r) => r.invalidCategory);
   // [Foreman: 076] Corpus findings the renderer lists rather than re-derives.
-  const duplicates = findings.filter((f) => f.type === "duplicate");
+  // [Foreman: 079] Duplicates and file shape are maintainability, not
+  // reliability. Under a wording rubric they have always been listed here;
+  // without one they move to their own section below, where SCOPE.md's step 8
+  // says optional improvements belong.
+  const allDuplicates = findings.filter((f) => f.type === "duplicate");
+  const duplicates = rubric ? allDuplicates : [];
+  const maintainability = rubric ? [] : allDuplicates.concat(findings.filter((f) => f.type === "action-clarity"));
   const conflicts = findings.filter((f) => f.type === "conflict");
   const overlaps = findings.filter((f) => f.type === "scope-overlap");
   const proposals = ((audit.semantic || {}).candidates) || [];
@@ -3525,9 +3844,13 @@ function renderReport(audit, opts = {}) {
   }
 
   if (stalls.length) {
+    // [Foreman: 079] The section's evidence tag is the evidence its findings
+    // actually carry. On a profile the wording study never covered the pattern
+    // is a structural observation, and the banner must not upgrade it.
+    const stallEvidence = rubric ? WORDING_STUDY_EVIDENCE : STALL_STRUCTURE_EVIDENCE;
     out.push("### Stall risks (bare prohibitions)");
     out.push("");
-    out.push(`A prohibition with no named alternative can stall a run outright when the task needs the banned thing. Pair it with the replacement — "Never X — do Y instead" — or with the escape hatch ("stop and ask"). ${evidenceTag(WORDING_STUDY_EVIDENCE)} — ${WORDING_STUDY_EVIDENCE.limits}.`);
+    out.push(`A prohibition with no named alternative can stall a run outright when the task needs the banned thing. Pair it with the replacement — "Never X — do Y instead" — or with the escape hatch ("stop and ask"). ${evidenceTag(stallEvidence)} — ${stallEvidence.limits}.`);
     out.push("");
     for (const r of stalls) {
       out.push(`- ${r.id} (${loc(r)}) "${truncate(r.text, 80)}"`);
@@ -3609,10 +3932,37 @@ function renderReport(audit, opts = {}) {
     out.push("");
   }
 
+  // [Foreman: 079] Maintainability, separated from reliability — SCOPE.md's
+  // Codex profile, step 8. Nothing here says the host will fail to act on a
+  // rule; it says the corpus would be easier to keep correct. The section only
+  // exists for a profile with no wording rubric, because under one these items
+  // are already grouped with the findings they inform.
+  const shapes = findings.filter((f) => f.type === "file-shape");
+  if (!rubric) {
+    out.push("## Maintainability");
+    out.push("");
+    if (!maintainability.length && !shapes.length) {
+      out.push("None — nothing in the corpus is redundant or hard to keep correct.");
+      out.push("");
+    } else {
+      out.push("Optional improvements. None of these is a reliability failure: every rule below is one the host loads and can act on.");
+      out.push("");
+      for (const f of maintainability.filter((x) => x.type === "action-clarity")) {
+        const r = rulesById.get(f.rule);
+        out.push(`- ${r ? ruleLink(r, 60) : f.rule} — ${f.summary} ${evidenceTag(f.evidence)}`);
+      }
+      if (maintainability.some((f) => f.type === "duplicate")) {
+        out.push("");
+        pushDuplicateSection(out, maintainability.filter((f) => f.type === "duplicate"), spanLink);
+      }
+      if (shapes.length) pushRestructureSection(out, shapes);
+    }
+  }
+
   // 5. Policy placement — advisory and mechanical candidates.
   const hooks = rules.filter((r) => r.hookOpportunity);
   const placed = rules.filter((r) => r.placement);
-  const restructure = findings.filter((f) => f.type === "file-shape");
+  const restructure = rubric ? shapes : [];
   const redundant = findings.filter((f) => f.type === "redundant-enforcement");
   const advisory = findings.filter((f) => f.state === "advisory");
   const advisoryByCategory = advisory.filter((f) => f.evidence.level === "mechanical").length;
@@ -3701,42 +4051,56 @@ function renderReport(audit, opts = {}) {
     : `corpus grade **${audit.corpusGrade} (${fmt(audit.corpusScore)})**, mandate rules only`;
   out.push("## Structural hygiene (secondary)");
   out.push("");
-  out.push("A summary of how rules are written, scoped, and placed — never a prediction that Claude will comply, and never a reason to discount a hard gate above. A rule the host cannot apply shows that state whatever it scores here.");
-  out.push("");
-  out.push(`**${rules.length} rules across ${files.filter((f) => f.ruleCount > 0).length} file(s)** — ${corpusBit}.`);
-  out.push("");
-  // [Foreman: 071] The scoring contract requires a hygiene score to state its
-  // evidence mix. A renormalized score is a mean over a smaller factor set, so
-  // it is not comparable to a model-judged one and does not pretend to be.
-  if (deterministicOnly) {
-    out.push("Evidence mix: deterministic factors only — no model judgment entered these scores, and each is renormalized over the factors that were measured.");
+  const headcount = `**${rules.length} rules across ${files.filter((f) => f.ruleCount > 0).length} file(s)**`;
+  if (rubric) {
+    out.push("A summary of how rules are written, scoped, and placed — never a prediction that Claude will comply, and never a reason to discount a hard gate above. A rule the host cannot apply shows that state whatever it scores here.");
+    out.push("");
+    out.push(`${headcount} — ${corpusBit}.`);
+    out.push("");
+    // [Foreman: 071] The scoring contract requires a hygiene score to state its
+    // evidence mix. A renormalized score is a mean over a smaller factor set, so
+    // it is not comparable to a model-judged one and does not pretend to be.
+    if (deterministicOnly) {
+      out.push("Evidence mix: deterministic factors only — no model judgment entered these scores, and each is renormalized over the factors that were measured.");
+      out.push("");
+    }
+    // [Foreman: 074] Said once, where the number is, so nobody reads the grade as
+    // covering files that live outside the repo.
+    if (files.some((f) => f.scope === "user")) {
+      out.push("User-scope files are graded under their own section and never move the project grade.");
+      out.push("");
+    }
+    out.push("Grades assume the least forgiving reader: small models, subagents, headless runs. If only large models in interactive sessions read this corpus, treat severity one notch softer.");
+    out.push("");
+  } else {
+    // [Foreman: 079] Where the grade would sit. Said once and plainly: the
+    // hygiene rubric was measured on the Claude Code profile, and a number
+    // carried to a host it was never measured on would be a claim assay cannot
+    // support. Everything above it — the gates, the chain, the findings — is
+    // host-neutral and ran in full.
+    out.push(`${headcount} — no grade.`);
+    out.push("");
+    out.push(`The structural-hygiene rubric is measured on the Claude Code profile. It is not applied to \`${(audit.profile || {}).host || "this host"}\` sources until there is evidence for this one, so nothing here is graded and the findings above are the whole report.`);
     out.push("");
   }
-  // [Foreman: 074] Said once, where the number is, so nobody reads the grade as
-  // covering files that live outside the repo.
-  if (files.some((f) => f.scope === "user")) {
-    out.push("User-scope files are graded under their own section and never move the project grade.");
-    out.push("");
-  }
-  out.push("Grades assume the least forgiving reader: small models, subagents, headless runs. If only large models in interactive sessions read this corpus, treat severity one notch softer.");
-  out.push("");
   out.push("### Files");
   out.push("");
   out.push("| File | Rules | Grade | Loading |");
   out.push("|---|---|---|---|");
   for (const f of files.filter((x) => x.scope !== "user")) {
     // [Foreman: 076] An unselected variant is listed, never described as loading.
-    const loading = f.selected === false ? "not loaded — shadowed"
-      : f.globs && f.globs.length ? "scoped: " + f.globs.join(", ") : "always loaded";
     const g = f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`;
-    out.push(`| ${f.path} | ${f.ruleCount} | ${g} | ${loading} |`);
+    out.push(`| ${f.path} | ${f.ruleCount} | ${g} | ${loadingCell(f)} |`);
   }
   out.push("");
   pushUserScopeSection(out, files);
 
   if (weakSkills.length) pushWeakSkillSection(out, weakSkills);
 
-  if (opts.verbose) {
+  // [Foreman: 079] Every column of this table is a rubric factor, so a profile
+  // without the rubric has no table to print — the Instruction chain and Files
+  // sections are that profile's inventory.
+  if (opts.verbose && rubric) {
     out.push("## All rules");
     out.push("");
     out.push("Each column scores one thing about the rule, 0 (worst) to 1 (best): whether it has a firm verb, names an alternative, has a clear trigger, is scoped right, sits high in the file, is concrete, and how much it needs Claude's judgment rather than a hook.");
@@ -3754,8 +4118,10 @@ function renderReport(audit, opts = {}) {
       out.push(`| ${ruleLink(r, 40)} | ${r.category} | ${cells} | ${fmt(r.score)} | ${r.grade} |`);
     }
     out.push("");
-    if (suppressed.length) pushSuppressedSection(out, suppressed);
   }
+  // [Foreman: 079] Outside the table above, because a dropped entry must be
+  // recoverable under --verbose whether or not the profile has a rubric.
+  if (opts.verbose && suppressed.length) pushSuppressedSection(out, suppressed);
 
   return out.join("\n");
 }
@@ -3789,9 +4155,13 @@ function artifactRuleData(audit) {
   // evidence behind it, and sorts hard gates to the top before it sorts by
   // score — the same demotion the markdown report makes.
   const findings = audit.findings || [];
+  // [Foreman: 079] Without a wording rubric there is no weakest factor to name:
+  // the issue and fix cells stay empty rather than quoting a rubric the profile
+  // declined.
+  const rubric = profilePolicy(audit).wordingRubric !== false;
   const byRule = new Map(findings.filter((f) => f.state).map((f) => [f.rule, f]));
   return audit.rules.filter((r) => !r.suppressed).map((r) => {
-    const names = rowWeaknesses(r);
+    const names = rubric ? rowWeaknesses(r) : [];
     const f = byRule.get(r.id);
     return {
       id: r.id, file: r.file, line: r.lineStart, text: r.text,
@@ -4166,6 +4536,21 @@ function renderArtifact(audit) {
     "The host cannot apply these as written. No wording fix reaches them, and no hygiene score overrides one.",
     gates.map((f) => item(f, `${ruleAt(f.rule)} — ${f.state}: ${f.summary} ${evidenceTag(f.evidence)}`))));
 
+  // [Foreman: 079] The resolved chain and the budget findings that read it —
+  // present only for a profile whose sources carry a read order, absent for one
+  // whose host documents none.
+  body.push(artifactTable("chain", 2, "Instruction chain",
+    "The order the host reads these in, and where its budget runs out. A file lower in the table is the later word; a file the host never opens takes no effect whatever it says.",
+    ["#", "Source", "Bytes", "From", "Status", "Why"],
+    chainRows(files).map((f) => [
+      String(f.precedence), f.path, f.bytes == null ? "—" : String(f.bytes),
+      Number.isInteger(f.startsAtByte) ? String(f.startsAtByte) : "—",
+      plainText(chainStatus(f)), plainText(f.selectionReason || ""),
+    ])));
+  body.push(artifactSection("budget", 2, "Byte budget",
+    "The host stops adding instruction sources at a documented limit. These are the sources that reach it: one the limit lands inside, and any that begin past it.",
+    byType("budget-exceeded").concat(byType("budget-truncation")).map((f) => item(f, f.summary + " " + evidenceTag(f.evidence)))));
+
   // Operational findings.
   const operational = [];
   operational.push(artifactSection("conflicts", 3, "Conflicts",
@@ -4209,6 +4594,11 @@ function renderArtifact(audit) {
     body.push(...operational);
   }
 
+  // [Foreman: 079] Maintainability, apart from the reliability findings above.
+  body.push(artifactSection("maintainability", 2, "Maintainability",
+    "Optional improvements. None of these is a reliability failure: every rule below is one the host loads and can act on.",
+    byType("action-clarity").map((f) => item(f, `${ruleAt(f.rule)} — ${f.summary} ${evidenceTag(f.evidence)}`))));
+
   // Policy placement.
   const placement = [];
   const activeRules = rules.filter((r) => !gates.some((f) => f.rule === r.id)).length;
@@ -4241,16 +4631,23 @@ function renderArtifact(audit) {
   }
 
   // Structural hygiene.
-  const corpus = audit.corpusScore == null ? "no mandate rules left to grade"
-    : `corpus grade ${audit.corpusGrade} (${fmt(audit.corpusScore)}), mandate rules only`;
+  // [Foreman: 079] A profile without the rubric gets the same sentence the
+  // markdown report puts where the grade would be, not an empty grade cell.
+  const rubric = profilePolicy(audit).wordingRubric !== false;
+  const corpus = !rubric ? "no grade"
+    : audit.corpusScore == null ? "no mandate rules left to grade"
+      : `corpus grade ${audit.corpusGrade} (${fmt(audit.corpusScore)}), mandate rules only`;
+  const hygieneNote = rubric
+    ? "A summary of how rules are written, scoped, and placed — never a prediction that Claude will comply, and never a reason to discount a hard gate above."
+    : `The structural-hygiene rubric is measured on the Claude Code profile. It is not applied to ${(audit.profile || {}).host || "this host"} sources until there is evidence for this one, so nothing here is graded.`;
   body.push('<section data-section="hygiene" id="assay-hygiene"><h2>Structural hygiene (secondary)</h2>' +
-    '<p class="note">A summary of how rules are written, scoped, and placed — never a prediction that Claude will comply, and never a reason to discount a hard gate above.</p>' +
+    `<p class="note">${esc(hygieneNote)}</p>` +
     `<p class="headline">${esc(rules.length + " rules across " + withRules + " file(s) — " + corpus + ".")}</p></section>`);
   body.push(artifactTable("files", 3, "Files", "", ["File", "Rules", "Grade", "Loading"],
     files.filter((f) => f.scope !== "user").map((f) => [
       f.path, String(f.ruleCount),
       f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`,
-      f.selected === false ? "not loaded — shadowed" : f.globs && f.globs.length ? "scoped: " + f.globs.join(", ") : "always loaded",
+      loadingCell(f),
     ])));
   body.push(artifactTable("user-scope", 3, "User scope",
     "These load for every project on this machine. They are graded here but left out of the project grade.",
@@ -4382,7 +4779,7 @@ function cmdRemeasure(root, opts) {
     }
   }
 
-  const scanData = scan(root, { projectOnly: opts.projectOnly, probeHost: true });
+  const scanData = scan(root, { projectOnly: opts.projectOnly, probeHost: true, adapter: opts.adapter });
   writeRecord(path.join(tmp, "scan.json"), "scan", scanData, root);
 
   let judgments = null;
@@ -4435,7 +4832,12 @@ function cmdRemeasure(root, opts) {
 // failure — a missing input, a malformed judgments file, a usage error.
 const COMMANDS = ["scan", "report", "remeasure", "artifact", "clean"];
 const FLAGS = new Set(["--verbose", "--json", "--project-only"]);
-const USAGE = "Usage: assay.js <" + COMMANDS.join("|") + "> [--root <path>] [--verbose] [--json] [--project-only]";
+// [Foreman: 079] Flags that take a value, mapped to what that value is, so the
+// parser skips the argument instead of rejecting it as an unknown flag and the
+// error says what was missing.
+const VALUE_FLAGS = new Map([["--root", "path"], ["--host", "profile name"]]);
+const USAGE = "Usage: assay.js <" + COMMANDS.join("|") + "> [--root <path>] [--host <" +
+  Object.keys(ADAPTERS).join("|") + ">] [--verbose] [--json] [--project-only]";
 
 function usageError(message) {
   process.stderr.write(message + "\n" + USAGE + "\n");
@@ -4451,8 +4853,8 @@ function main() {
   // An unrecognized flag used to be ignored, so a typo silently produced the
   // default output instead of what was asked for.
   for (let i = 1; i < args.length; i++) {
-    if (args[i] === "--root") {
-      if (!args[i + 1]) usageError("--root needs a path.");
+    if (VALUE_FLAGS.has(args[i])) {
+      if (!args[i + 1]) usageError(args[i] + " needs a " + VALUE_FLAGS.get(args[i]) + ".");
       i++;
       continue;
     }
@@ -4460,11 +4862,21 @@ function main() {
   }
   const rootIdx = args.indexOf("--root");
   const root = rootIdx !== -1 ? args[rootIdx + 1] : process.cwd();
+  // [Foreman: 079] Which host profile discovery runs under. Default is the
+  // profile assay shipped with, so an existing invocation is unchanged. An
+  // unknown name is a usage error naming the profiles that exist — silently
+  // auditing the wrong host would be worse than refusing.
+  const hostIdx = args.indexOf("--host");
+  const host = hostIdx !== -1 ? args[hostIdx + 1] : DEFAULT_HOST;
+  if (!ADAPTERS[host]) {
+    usageError("Unknown host: " + host + " — valid hosts are " + Object.keys(ADAPTERS).join(", ") + ".");
+  }
   const opts = {
     verbose: args.includes("--verbose"),
     json: args.includes("--json"),
     // [Foreman: 074] Keep the audit inside the repo: no user-scope discovery.
     projectOnly: args.includes("--project-only"),
+    adapter: ADAPTERS[host],
   };
 
   if (command === "scan") cmdScan(root, opts);
@@ -4495,6 +4907,9 @@ module.exports = {
   redactSecrets, coverageLines,
   // [Foreman: 072] the record contract
   RECORD_SCHEMA, SCHEMA_VERSION, ANALYZER_VERSION, validateRecord, makeRecord,
+  // [Foreman: 079] the host-profile contract: the registry `--host` selects
+  // from, and the policy every analyzer consults instead of a host name
+  ADAPTERS, DEFAULT_POLICY, profilePolicy,
   // [Foreman: 071] the semantic contract: rubric axis + the candidate kinds a
   // later entry's semantic pass may propose
   RUBRIC_VERSION, SEMANTIC_CANDIDATE_KINDS,

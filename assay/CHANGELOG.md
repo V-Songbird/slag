@@ -4,6 +4,13 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [Unreleased]
+
+### Added
+
+- assay can audit a second host. `--host codex` discovers the `AGENTS.md` instruction chain Codex reads — `AGENTS.override.md` over `AGENTS.md` over configured fallback names, in every directory from the project root down to where the session starts — and the report shows the resolved chain: read order, running byte total, and the host's documented combined byte cap applied where the host applies it
+- A Codex report is findings-first and grade-free: shadowed files, files past the byte cap, stale references, conflicts, duplicates, and bare prohibitions all land as findings, while the structural-hygiene grade stays off — that rubric was measured on the Claude Code profile and is not carried to a host without evidence for it
+
 ## [0.7.0-alpha] — 2026-07-28
 
 ### Added

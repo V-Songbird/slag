@@ -19,6 +19,13 @@ const engine = require("../scripts/assay.js");
 const EMPTY_USER_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "assay-userdir-"));
 process.env.ASSAY_USER_DIR = EMPTY_USER_DIR;
 
+// [Foreman: 079] The same seam for the Codex profile: CODEX_HOME is the host's
+// own documented variable for its configuration and global instruction file, so
+// pointing it at an empty directory keeps the developer's real ~/.codex out of
+// every fixture. Tests that want a populated one pass `codexHome` explicitly.
+const EMPTY_CODEX_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "assay-codexhome-"));
+process.env.CODEX_HOME = EMPTY_CODEX_HOME;
+
 function tmpProject(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "assay-test-"));
   for (const [rel, content] of Object.entries(files)) {
@@ -3753,4 +3760,364 @@ test("the adapter reports no documented byte budget and cites its sources", () =
     assert.ok(d.claim && /^https:\/\//.test(d.url), d.claim);
     assert.match(d.verified, /^\d{4}-\d{2}-\d{2}$/);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Codex host profile — [Foreman: 079]
+// ---------------------------------------------------------------------------
+
+const codex = engine.ADAPTERS.codex;
+
+// A Codex home of its own — a config.toml here is the host configuration the
+// adapter reads, not an instruction source.
+function tmpCodexHome(files) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "assay-codex-"));
+  for (const [rel, content] of Object.entries(files || {})) {
+    fs.writeFileSync(path.join(dir, rel), content);
+  }
+  return dir;
+}
+
+function codexContext(root, extra) {
+  return codex.detectContext({ root, projectOnly: true, codexHome: EMPTY_CODEX_HOME, ...extra });
+}
+
+// One rule per file, so a chain's shape is readable off the rule list.
+const AGENTS_ROOT = "# House rules\n\n- Never use `var` — use `const` instead.\n";
+
+test("AGENTS.override.md wins its directory, and the file it beat reports as shadowed", () => {
+  const root = tmpProject({
+    "AGENTS.override.md": "# Override\n\n- Always run `npm test` before committing.\n",
+    "AGENTS.md": AGENTS_ROOT,
+  });
+  const { sources } = codex.discoverSources(codexContext(root));
+
+  assert.deepEqual(sources.map((s) => s.path), ["AGENTS.override.md", "AGENTS.md"]);
+  assert.equal(sources[0].alwaysLoaded, true);
+  assert.equal(sources[0].selected, undefined, "the selected file carries no selection flag");
+  assert.equal(sources[1].selected, false);
+  assert.equal(sources[1].shadowedBy, "AGENTS.override.md");
+  assert.equal(sources[1].alwaysLoaded, false);
+  assert.match(sources[1].selectionReason, /`AGENTS\.override\.md` was selected here/);
+  // the loser is not part of the byte accounting: the host never opens it
+  assert.equal(sources[1].startsAtByte, undefined);
+
+  // and its rules are reported, as shadowed rather than as live policy
+  const audit = engine.composeAudit(engine.scan(root, { adapter: codex, projectOnly: true }), null);
+  const shadowed = audit.findings.filter((f) => f.state === "shadowed");
+  assert.equal(shadowed.length, 1);
+  assert.match(shadowed[0].summary, /^`AGENTS\.md` is not the variant the host selected/);
+  assert.deepEqual(audit.relationships.filter((r) => r.kind === "shadows").map((r) => r.between),
+    [["AGENTS.override.md", "AGENTS.md"]]);
+});
+
+test("a configured fallback name is selected in configured order; an unconfigured one is never read", () => {
+  const home = tmpCodexHome({ "config.toml": 'project_doc_fallback_filenames = ["TEAM_GUIDE.md", ".agents.md"]\n' });
+  const files = {
+    "TEAM_GUIDE.md": "- Use `const` for locals.\n",
+    ".agents.md": "- Always run `npm test` before committing.\n",
+    "HOUSE_RULES.md": "- Never use `var`.\n",
+  };
+  const root = tmpProject(files);
+  const ctx = codexContext(root, { codexHome: home });
+  assert.deepEqual(ctx.config.fallbackFilenames, ["TEAM_GUIDE.md", ".agents.md"]);
+  assert.equal(ctx.config.fallbackFilenamesSource, "configured");
+
+  const { sources } = codex.discoverSources(ctx);
+  // configured order decides the winner, and HOUSE_RULES.md is not a candidate
+  assert.deepEqual(sources.map((s) => s.path), ["TEAM_GUIDE.md", ".agents.md"]);
+  assert.equal(sources[1].selected, false);
+
+  // with no config the doc documents no default list, so no fallback is a
+  // candidate at all — assay does not invent one
+  const bare = codexContext(tmpProject(files));
+  assert.deepEqual(bare.config.fallbackFilenames, []);
+  assert.equal(bare.config.fallbackFilenamesSource, "default");
+  assert.deepEqual(codex.discoverSources(bare).sources, []);
+});
+
+test("the chain runs from the project root down to the startup directory, later files outranking earlier", () => {
+  const root = tmpProject({
+    "AGENTS.md": AGENTS_ROOT,
+    "svc/AGENTS.md": "# Service\n\n- Always run `npm test` before committing.\n",
+    "svc/api/AGENTS.md": "# API\n\n- Return typed errors from every handler.\n",
+    "other/AGENTS.md": "# Off the chain\n\n- Use two-space indentation.\n",
+  });
+  const startup = path.join(root, "svc", "api");
+  const { sources } = codex.discoverSources(codexContext(root, { startup }));
+
+  assert.deepEqual(sources.map((s) => s.path), ["AGENTS.md", "svc/AGENTS.md", "svc/api/AGENTS.md"]);
+  // read order is emission order; precedence rises with it, so the file nearest
+  // the startup directory is the later word
+  assert.deepEqual(sources.map((s) => s.precedence), [2, 3, 4]);
+  assert.match(sources[1].selectionReason, /chain position 2 of 3 \(`svc`\)/);
+  // the byte accounting is cumulative in that same order
+  let at = 0;
+  for (const s of sources) {
+    assert.equal(s.startsAtByte, at);
+    assert.equal(s.loaded, true);
+    at += s.bytes;
+  }
+
+  // a directory beside the chain is not discovered — that is what a chain means
+  assert.equal(sources.some((s) => s.path.startsWith("other/")), false);
+  // and equal endpoints are a chain of one
+  assert.deepEqual(codex.discoverSources(codexContext(root)).sources.map((s) => s.path), ["AGENTS.md"]);
+
+  // the resolved chain reaches the report, with each directory and why it won
+  const audit = engine.composeAudit(engine.scan(root, { adapter: codex, projectOnly: true, startup }), null);
+  const report = engine.renderReport(audit);
+  const trace = report.slice(report.indexOf("## Instruction chain"), report.indexOf("## Operational findings"));
+  for (const p of ["AGENTS.md", "svc/AGENTS.md", "svc/api/AGENTS.md"]) assert.ok(trace.includes(p), "chain is missing " + p);
+  assert.match(trace, /chain position 3 of 3/);
+  assert.match(trace, /Chain total \d+ bytes against a documented 32768-byte cap \(default\)/);
+});
+
+// A file big enough to move a small cap, with one rule per line so the
+// truncation boundary lands between rules that can be named.
+function agentsFile(label, lines) {
+  return `# ${label}\n\n` + Array.from({ length: lines }, (_, i) =>
+    `- Always run step ${i} of the ${label} checklist before committing.`).join("\n") + "\n";
+}
+
+test("the combined byte cap truncates the source it lands in and drops every source past it", () => {
+  const home = tmpCodexHome({ "config.toml": "# codex\nproject_doc_max_bytes = 400\n" });
+  const root = tmpProject({
+    "AGENTS.md": agentsFile("root", 10),
+    "svc/AGENTS.md": agentsFile("service", 10),
+    "svc/api/AGENTS.md": "# API\n\n- Return typed errors from every handler.\n",
+  });
+  const startup = path.join(root, "svc", "api");
+  const ctx = codexContext(root, { codexHome: home, startup });
+  assert.equal(ctx.config.maxBytes, 400);
+  assert.equal(ctx.config.maxBytesSource, "configured");
+  assert.deepEqual(codex.budgets(ctx).documented.amount, 400);
+
+  // `userDir` is the Codex home to this adapter — the engine passes one option
+  // for "the host's own directory" and each profile says what lives in it.
+  const scanData = engine.scan(root, { adapter: codex, projectOnly: true, startup, userDir: home });
+  const [first, second, third] = scanData.files;
+  // the cap is combined across the chain, so where it lands depends on what was
+  // read before it: inside the first file, and past the two after it
+  assert.equal(first.loaded, true);
+  assert.equal(first.truncated, true);
+  assert.equal(first.truncatedAtByte, 400);
+  assert.ok(first.truncatedAtLine > 1 && first.truncatedAtLine < first.lineCount);
+  assert.equal(second.loaded, false);
+  assert.equal(second.alwaysLoaded, false, "a source past the cap never loads");
+  assert.equal(third.loaded, false);
+
+  const audit = engine.composeAudit(scanData, null);
+  const truncation = audit.findings.find((f) => f.type === "budget-truncation");
+  assert.match(truncation.summary, /the cap lands inside `AGENTS\.md`, at byte 400 of it \(line \d+\)/);
+  assert.match(truncation.summary, /the chain is \d+ bytes, the cap is 400 \(configured\)/);
+  assert.equal(truncation.evidence.level, "documented");
+
+  const dropped = audit.findings.filter((f) => f.type === "budget-exceeded");
+  assert.deepEqual(dropped.map((f) => f.sources[0].path), ["svc/AGENTS.md", "svc/api/AGENTS.md"]);
+  assert.match(dropped[0].summary, /starts at byte \d+ of the instruction chain and is never read/);
+
+  // a file that begins past the cap is never added under any reading of the doc,
+  // so its rules are inactive — and only its rules are
+  const byId = new Map(audit.rules.map((r) => [r.id, r]));
+  const inactive = audit.findings.filter((f) => f.state === "inactive");
+  assert.ok(inactive.length >= 2);
+  assert.deepEqual([...new Set(inactive.map((f) => byId.get(f.rule).file))], ["svc/AGENTS.md", "svc/api/AGENTS.md"]);
+
+  // the tail of the file the cap lands INSIDE is at-risk, not inactive: the doc
+  // stops adding files at that point and does not say whether this one arrives
+  // whole, so assay names the risk instead of claiming non-delivery
+  const tail = audit.findings.filter((f) => f.state && f.analyzer === "byte-budget" &&
+    byId.get(f.rule).file === "AGENTS.md");
+  assert.ok(tail.length >= 1);
+  for (const f of tail) {
+    assert.equal(f.state, "at-risk");
+    assert.ok(byId.get(f.rule).lineStart > first.truncatedAtLine, f.rule);
+  }
+  assert.match(tail[0].summary, /the host's documented cap lands at line \d+ of `AGENTS\.md`, above this rule/);
+  assert.match(tail[0].explanation, /it does not say whether this file arrives whole or is cut at the boundary/);
+  assert.match(tail[0].evidence.limits, /the fate of the crossing file's remainder is not/);
+  assert.match(engine.renderReport(audit), /crosses the host's byte cap at byte 400/);
+});
+
+test("the cap defaults to 32768 with no config, and a malformed config falls back without throwing", () => {
+  const root = tmpProject({ "AGENTS.md": AGENTS_ROOT });
+  assert.equal(codexContext(root).config.maxBytes, 32768);
+  assert.equal(codexContext(root).config.maxBytesSource, "default");
+  assert.equal(codexContext(root).configIssue, null);
+  assert.equal(codex.budgets().documented.amount, codex.DEFAULT_MAX_BYTES);
+
+  const broken = tmpCodexHome({ "config.toml": 'project_doc_max_bytes = "lots"\nproject_doc_fallback_filenames = 3\n' });
+  const ctx = codexContext(root, { codexHome: broken });
+  assert.equal(ctx.config.maxBytes, 32768, "a value assay cannot read is not a value it guesses at");
+  assert.deepEqual(ctx.config.fallbackFilenames, []);
+  assert.match(ctx.configIssue.reason, /unreadable value for project_doc_max_bytes, project_doc_fallback_filenames/);
+
+  // and the malformed file is a coverage gap the report names, not a crash
+  const scanData = engine.scan(root, { adapter: codex, projectOnly: true, userDir: broken });
+  assert.equal(scanData.coverage.inaccessible.length, 1);
+  assert.match(engine.renderReport(engine.composeAudit(scanData, null)), /could not read `.*config\.toml`/);
+
+  // a table header ends the top-level read; nothing under [hooks] is a root key
+  assert.deepEqual(codex.parseTopLevelToml('a = 1\n[hooks]\nproject_doc_max_bytes = 9\n'), { a: 1 });
+});
+
+test("--host names the profile discovery runs under, and an unknown one is a usage error", () => {
+  const root = tmpProject({ "AGENTS.md": AGENTS_ROOT });
+
+  const unknown = cli(root, "scan", "--host", "gemini");
+  assert.equal(unknown.code, 1);
+  assert.match(unknown.err, /Unknown host: gemini — valid hosts are claude-code, codex\./);
+  assert.match(unknown.err, /--host <claude-code\|codex>/);
+  assert.equal(cli(root, "scan", "--host").code, 1, "--host needs a value");
+
+  const scanned = cli(root, "scan", "--host", "codex");
+  assert.equal(scanned.code, 0, scanned.err);
+  const record = readJson(root, "scan.json");
+  assert.equal(engine.validateRecord(record, "scan"), null);
+  assert.deepEqual(record.profile, { host: "codex", version: 1, policy: { wordingRubric: false } });
+  assert.deepEqual(record.files.map((f) => f.path), ["AGENTS.md"]);
+  assert.equal(record.coverage.budget.amount, 32768);
+  assert.match(record.coverage.profileNotes[0], /^codex profile v1: instruction chain only/);
+
+  const reported = cli(root, "report", "--host", "codex");
+  assert.equal(reported.code, 0, reported.err);
+  assert.match(reported.out, /codex profile · schema 1/);
+  assert.equal(cli(root, "artifact").code, 0);
+});
+
+test("no --host is the Claude profile, and the record it writes is the one it always wrote", () => {
+  const root = cliFixture();
+  assert.equal(cli(root, "scan").code, 0);
+  const implicit = readJson(root, "scan.json");
+  assert.equal(cli(root, "scan", "--host", "claude-code").code, 0);
+  const explicit = readJson(root, "scan.json");
+
+  // the profile that declares no policy adds no key: same envelope, same
+  // context, same coverage as before the registry existed
+  assert.deepEqual(implicit.profile, { host: "claude-code", version: 2 });
+  assert.deepEqual(Object.keys(implicit.context), ["projectRoot", "startupDirectory", "userDir", "hostVersion", "analysisTime"]);
+  assert.equal("budget" in implicit.coverage, false);
+  assert.equal("profileNotes" in implicit.coverage, false);
+  assert.equal(implicit.files.some((f) => "startsAtByte" in f || "loaded" in f), false);
+
+  for (const r of [implicit, explicit]) {
+    delete r.context.analysisTime;
+    delete r.context.hostVersion;
+  }
+  assert.deepEqual(explicit, implicit, "--host claude-code is the default, spelled out");
+});
+
+// The rubric levers, live under the profile they were measured on and withdrawn
+// under the one they were not. Same corpus text both times, so the difference is
+// the profile and nothing else.
+const RUBRIC_FIXTURE = [
+  "# House rules",
+  "",
+  "- Try to prefer functional components where possible.",
+  "- Never pin dependencies to exact versions in `package.json`.",
+  "- Always pin dependencies to exact versions in `package.json`.",
+  "- Never use `var`.",
+  "- Read the notes in `docs/gone.md` before starting.",
+  "- Only `snake_case` for column names.",
+  "",
+]
+  .concat(Array.from({ length: 50 }, (_, i) => "Background paragraph line " + i + " for padding.\n"))
+  .concat(["- Always run `npm test` before committing.", ""]).join("\n");
+
+test("the Claude wording rubric is not applied to a profile it was never measured on", () => {
+  const codexAudit = engine.composeAudit(
+    engine.scan(tmpProject({ "AGENTS.md": RUBRIC_FIXTURE }), { adapter: codex, projectOnly: true }), null);
+  const claudeAudit = engine.composeAudit(
+    engine.scan(tmpProject({ "CLAUDE.md": RUBRIC_FIXTURE }), { projectOnly: true }), null);
+
+  // the levers are live on the profile that owns them — otherwise this test
+  // would pass on a corpus the rubric never had anything to say about
+  const claudeAnalyzers = new Set(claudeAudit.findings.filter((f) => f.state).map((f) => f.analyzer));
+  for (const lever of ["verb-strength", "position"]) {
+    assert.ok(claudeAnalyzers.has(lever), "the Claude profile stopped deriving " + lever);
+  }
+  assert.ok(claudeAudit.corpusGrade, "the Claude profile stopped grading");
+
+  // and none of them reaches the Codex profile
+  const states = codexAudit.findings.filter((f) => f.state);
+  assert.deepEqual(states.filter((f) => f.analyzer === "position"), []);
+  assert.deepEqual(states.filter((f) => f.analyzer === "trigger-distance"), []);
+  assert.deepEqual(states.filter((f) => f.state === "ambiguous"), []);
+  assert.deepEqual(states.filter((f) => f.state === "at-risk" && f.analyzer === "verb-strength"), []);
+  assert.deepEqual(states.filter((f) => f.state === "advisory"), []);
+
+  // no grade anywhere: not on the corpus, not on a file, not on a rule
+  assert.equal(codexAudit.corpusScore, null);
+  assert.equal(codexAudit.corpusGrade, null);
+  assert.deepEqual(codexAudit.files.map((f) => f.grade), [null]);
+  assert.deepEqual([...new Set(codexAudit.rules.map((r) => r.score))], [null]);
+
+  // the host-neutral analyses all still run
+  const byState = (s) => codexAudit.findings.filter((f) => f.state === s);
+  assert.equal(byState("blocked").length, 1, "a stale reference is still a hard gate");
+  assert.match(byState("blocked")[0].summary, /docs\/gone\.md/);
+  assert.equal(byState("conflicting").length, 2, "both sides of the conflict pair");
+  assert.equal(codexAudit.findings.filter((f) => f.type === "conflict").length, 1);
+  const stall = byState("at-risk").filter((f) => f.analyzer === "framing-polarity");
+  assert.equal(stall.length, 1, "a prohibition with no alternative is still named");
+  assert.equal(stall[0].evidence.level, "heuristic", "the experiment's tier does not travel to a host it never covered");
+  // an unreadable action is a maintainability item here, not a reliability state
+  const clarity = codexAudit.findings.filter((f) => f.type === "action-clarity");
+  assert.equal(clarity.length, 1);
+  assert.equal(clarity[0].tier, "maintainability");
+
+  const report = engine.renderReport(codexAudit, { verbose: true });
+  assert.doesNotMatch(report, /corpus grade/);
+  assert.doesNotMatch(report, /## All rules/);
+  assert.match(report, /\*\*7 rules across 1 file\(s\)\*\* — no grade\./);
+  assert.match(report, /The structural-hygiene rubric is measured on the Claude Code profile\./);
+  assert.doesNotMatch(report, /experiment-supported/, "no Claude-tier evidence tag survives into a Codex report");
+  // maintainability is reported apart from the reliability findings
+  const maintainability = report.slice(report.indexOf("## Maintainability"), report.indexOf("## Policy placement"));
+  assert.match(maintainability, /None of these is a reliability failure/);
+  assert.match(maintainability, /no directive verb could be read out of it/);
+  assert.match(maintainability, /### Restructure candidates/);
+  // and the artifact renders the same record without a Claude-only section
+  const html = engine.renderArtifact(codexAudit);
+  assert.match(html, /id="assay-chain"/);
+  assert.match(html, /id="assay-maintainability"/);
+  assert.doesNotMatch(html, /id="assay-other"/, "every finding found a section");
+  assert.match(html, /no grade/);
+});
+
+test("two scans of one Codex project differ only in analysisTime", () => {
+  const root = tmpProject({
+    "AGENTS.override.md": "# Override\n\n- Always run `npm test` before committing.\n",
+    "AGENTS.md": AGENTS_ROOT,
+    "svc/AGENTS.md": "# Service\n\n- Return typed errors from every handler.\n",
+  });
+  const startup = path.join(root, "svc");
+  const once = engine.makeRecord("scan", engine.scan(root, { adapter: codex, projectOnly: true, startup }), root);
+  const twice = engine.makeRecord("scan", engine.scan(root, { adapter: codex, projectOnly: true, startup }), root);
+  for (const r of [once, twice]) delete r.context.analysisTime;
+  assert.equal(JSON.stringify(once), JSON.stringify(twice));
+});
+
+test("the Codex adapter reports the documented cap and cites a source for every behavior it encodes", () => {
+  const documented = codex.budgets().documented;
+  assert.equal(documented.amount, 32768);
+  assert.equal(documented.unit, "bytes");
+  assert.match(documented.scope, /combined/);
+  assert.match(documented.url, /^https:\/\/learn\.chatgpt\.com\//);
+
+  const provenance = codex.docs();
+  assert.ok(provenance.length >= 6);
+  for (const d of provenance) {
+    assert.ok(d.claim && /^https:\/\//.test(d.url), d.claim);
+    assert.equal(d.verified, "2026-07-28");
+  }
+  // the profile declares what it does not cover, and the report prints it
+  assert.ok(codex.coverageNotes().some((n) => /skills, hooks, and packaging land with entry 080/.test(n)));
+  assert.ok(codex.coverageNotes().some((n) => /no live Codex host was probed/.test(n)));
+  // and it never probes the host unless asked
+  assert.equal(codexContext(tmpProject({})).hostVersion, null);
+  assert.deepEqual(codex.discoverSkills(), { project: [], user: [] });
+  assert.deepEqual(codex.discoverHooks(), []);
+  assert.deepEqual(codex.discoverRepoChecks(), { checks: [], inaccessible: [] });
 });
