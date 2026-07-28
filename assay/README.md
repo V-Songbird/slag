@@ -74,7 +74,7 @@ Nothing to configure. Works at the next session.
 | Grade your rules and get the fix list | `/assay:audit` |
 | Same, but apply rewrites without the menu | `/assay:audit --fix` |
 | See every factor score per rule | `/assay:audit --verbose` |
-| Open a sortable, expandable HTML report | `/assay:audit --artifact` |
+| Open the whole report as HTML, with search and filters | `/assay:audit --artifact` |
 | Grade the repo's files only, not your own | `/assay:audit --project-only` |
 | Build a skill that reliably triggers | `/assay:craft-skill` |
 | Fix a skill Claude keeps ignoring | `/assay:craft-skill <skill name>` |

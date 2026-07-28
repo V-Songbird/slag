@@ -27,6 +27,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - The report opens with a count of what was found by kind, and `remeasure` shows those counts before and after your fixes
 - The audit runs fully offline. With no model judgments present the report still lands — labelled `deterministic only`, with the model-judged checks named in **Coverage** as not run, and each score computed over the factors that were actually measured. `/assay:audit --deterministic` is the flag that asks for it
 - Judgments now record their provenance — which model made them, under which rubric version, and when — and the report says so when the rubric has changed since they were made
+- The HTML report now carries the whole audit: every finding, the ladder, coverage, hygiene, with search, state/severity/evidence filters, keyboard navigation, and a button that downloads the record as JSON
+- Secrets in hook commands are masked in both report views. The finding itself stays visible — redaction hides the value, never the mechanism
 
 ### Changed
 

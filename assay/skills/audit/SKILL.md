@@ -259,12 +259,15 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" artifact
 ```
 
 It writes `.assay-tmp/report.html` — a self-contained page (no external assets,
-the audit data embedded as inline JSON) with a sortable rule table — hard gates
-first, then worst score — carrying each rule's state and evidence tag, where
-clicking a row expands that rule's full untruncated text, every factor score,
-its grade, and the suggested fix. Publish it with the `Artifact` tool, passing that file's
-path: the file is already page content only, so the Artifact skeleton wraps it
-unchanged. Give the reader the returned URL.
+the audit record embedded as inline JSON) carrying the whole report: coverage,
+hard gates, every operational finding, the enforcement ladder, structural
+hygiene and the suppressed entries. The rule table sorts hard gates first, then
+worst score, and a row opens to that rule's full untruncated text, every factor
+score, its grade, and the suggested fix. A filter box and state, severity and
+evidence chips narrow it; a button downloads the record as `assay-audit.json`.
+Secrets in hook commands are masked in the page. Publish it with the `Artifact`
+tool, passing that file's path: the file is already page content only, so the
+Artifact skeleton wraps it unchanged. Give the reader the returned URL.
 
 ## 4. Offer fixes
 

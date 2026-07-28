@@ -2835,10 +2835,15 @@ function deriveFindings(audit) {
   // copies are real rules, and the duplication is a property of the pair.
   for (const pair of duplicates) {
     const exact = pair.tier === "exact";
-    const { keep, drop } = keepSuggestion(pair, files);
+    const { keep, drop, why } = keepSuggestion(pair, files);
     const crossScope = (files[pair.a.fileIndex] || {}).scope !== (files[pair.b.fileIndex] || {}).scope;
     push({
       type: "duplicate", severity: exact ? "medium" : "low", analyzer: "duplicate-detection",
+      // [Foreman: 078] The tier and the keep/drop call travel WITH the finding so
+      // a renderer can print the same line without re-pairing the corpus.
+      tier: pair.tier, keepWhy: why,
+      keep: { path: keep.file, lineStart: keep.lineStart },
+      drop: { path: drop.file, lineStart: drop.lineStart },
       summary: `the same duty is stated at ${pair.a.file}:${pair.a.lineStart} and at ${pair.b.file}:${pair.b.lineStart}`,
       explanation: (exact
         ? "The two are identical once whitespace and case are normalized."
@@ -2859,6 +2864,9 @@ function deriveFindings(audit) {
   for (const candidate of restructureCandidates(audit)) {
     push({
       type: "file-shape", severity: "medium", analyzer: "file-shape",
+      // [Foreman: 078] carried so the renderer lists the reasons without
+      // re-measuring the file
+      reasons: candidate.reasons,
       summary: "the file's shape holds its rules back: " + candidate.reasons.join(", "),
       explanation: "This is a property of the file, not of any one rule in it, so no per-rule rewrite reaches it.",
       evidence: { level: "heuristic", basis: "narrative share, rule position, and file length thresholds" },
@@ -2949,6 +2957,59 @@ function deriveRelationships(audit) {
   return rels
     .sort((a, b) => a.kind.localeCompare(b.kind))
     .map((rel, i) => ({ id: "REL" + String(i + 1).padStart(3, "0"), ...rel }));
+}
+
+// ---------------------------------------------------------------------------
+// Secret redaction — one function, applied at render time by every renderer
+// ---------------------------------------------------------------------------
+
+// [Foreman: 078]
+// A hook command, a repository-check name, or a provenance string is copied out
+// of configuration somebody wrote, and configuration is where a pasted token
+// ends up. Redaction hides the VALUE and never the finding: the mechanism stays
+// listed, at its level, with its state chain — only the credential is masked.
+// Rule text is never redacted; it is the developer's own prose and the thing
+// this product is about.
+//
+// razor: fixed high-confidence prefixes plus a key=value form. No entropy scan —
+// a "long random-looking string" detector eats commit SHAs, content hashes, and
+// rule ids, and a false redaction in a report about wording is worse than a
+// missed one in a file the developer already has open. The upgrade path is a
+// user-supplied pattern list in config, not a cleverer regex.
+const REDACTED = "[redacted]";
+const SECRET_PATTERNS = [
+  /sk-[A-Za-z0-9]{16,}/g,
+  /ghp_[A-Za-z0-9]{20,}/g,
+  /AKIA[A-Z0-9]{12,}/g,
+  /Bearer\s+\S{16,}/g,
+  // the key survives so the reader still knows WHICH credential was there
+  /((?:token|secret|password|api[_-]?key)\s*[=:]\s*)\S+/gi,
+];
+
+function redactSecrets(text) {
+  if (typeof text !== "string") return text;
+  let out = text;
+  for (const pattern of SECRET_PATTERNS) {
+    // a pattern with no capture group hands the callback the match offset, not a
+    // key — only a string second argument is the key half of `key=value`
+    out = out.replace(pattern, (match, key) => (typeof key === "string" ? key : "") + REDACTED);
+  }
+  return out;
+}
+
+// Every string in a copy of the record. Used for the artifact's JSON export:
+// the page is publishable page content, so nothing embedded in it may carry a
+// credential. The record on disk (`.assay-tmp/audit.json`) keeps the raw value —
+// that is where fidelity lives. See docs/foreman/078.md.
+function redactRecord(value) {
+  if (typeof value === "string") return redactSecrets(value);
+  if (Array.isArray(value)) return value.map(redactRecord);
+  if (isRecordObject(value)) {
+    const out = {};
+    for (const key of Object.keys(value)) out[key] = redactRecord(value[key]);
+    return out;
+  }
+  return value;
 }
 
 function fmt(x) {
@@ -3118,28 +3179,29 @@ function restructureCandidates(audit) {
 // [Foreman: 066] One line per pair: both sites clickable, the tier's evidence
 // tag, and which copy looks worth keeping. The wording stays a suggestion —
 // assay names the removal candidate and edits nothing.
-function pushDuplicateSection(out, pairs, files, loc) {
+// [Foreman: 078] Read out of the duplicate findings, never re-paired here: the
+// tier, the keeper and the reason all travel with the finding.
+function pushDuplicateSection(out, dupes, span) {
   out.push("### Duplicates");
   out.push("");
   out.push("The same duty stated twice. Both copies are graded — a duplicate never moves a score or the corpus grade — and assay edits neither: pick which one survives.");
   out.push("");
-  for (const pair of pairs) {
-    const exact = pair.tier === "exact";
-    const { keep, drop, why } = keepSuggestion(pair, files);
-    const tag = exact ? "[mechanical]" : "[heuristic]";
-    out.push(`- ${loc(pair.a)} ↔ ${loc(pair.b)} — ${exact ? "exact" : "near"} copy ${tag} — consider keeping ${loc(keep)} (${why}); ${loc(drop)} is the removal candidate`);
+  for (const f of dupes) {
+    const [a, b] = f.sources;
+    out.push(`- ${span(a)} ↔ ${span(b)} — ${f.tier} copy ${evidenceTag(f.evidence)} — consider keeping ${span(f.keep)} (${f.keepWhy}); ${span(f.drop)} is the removal candidate`);
   }
   out.push("");
 }
 
-function pushRestructureSection(out, candidates) {
+function pushRestructureSection(out, shapes) {
   out.push("### Restructure candidates");
   out.push("");
   out.push("These files score low because of their shape, not their wording — a per-rule rewrite can't reach the problem. Reshape the file itself: [heuristic]");
   out.push("");
-  for (const c of candidates) {
-    out.push(`- [${c.path}](${c.path}) — ${c.reasons.join(", ")}`);
-    for (const r of c.restructures) out.push(`  - ${r}`);
+  for (const f of shapes) {
+    const p = f.sources[0].path;
+    out.push(`- [${p}](${p}) — ${(f.reasons || []).join(", ")}`);
+    for (const r of f.safeActions) out.push(`  - ${r}`);
   }
   out.push("");
 }
@@ -3171,46 +3233,67 @@ function pushUserScopeSection(out, files) {
 // thing the verification pass must never do, so its count belongs here.
 // razor: counts and one line per unreadable source — not a per-file table. The
 // per-file breakdown already exists under "## Files".
-function pushCoverageSection(out, audit, rules, suppressed, findings) {
+// [Foreman: 078] The coverage story as data, so the markdown report and the HTML
+// report say the same sentences instead of each writing their own. `finding`
+// names the finding a line stands for, wherever one exists.
+function coverageLines(audit, rules, suppressed, findings) {
   const cov = audit.coverage || {};
   const parsed = cov.filesParsed != null ? cov.filesParsed : audit.files.length;
   const discovered = cov.filesDiscovered != null ? cov.filesDiscovered : parsed;
-  out.push("## Coverage");
-  out.push("");
-  out.push(`- ${parsed} of ${discovered} instruction file(s) parsed, ${rules.length} rule(s) graded, ${cov.proseChunks || 0} prose chunk(s) set aside`);
-  out.push(`- ${cov.excludedLines || 0} line(s) excluded from grading (assay-ignore spans, tag bodies, comment-only lines)`);
+  const out = [];
+  const add = (text, finding = null, depth = 0) => out.push({ text, finding, depth });
+  add(`${parsed} of ${discovered} instruction file(s) parsed, ${rules.length} rule(s) graded, ${cov.proseChunks || 0} prose chunk(s) set aside`);
+  add(`${cov.excludedLines || 0} line(s) excluded from grading (assay-ignore spans, tag bodies, comment-only lines)`);
   // [Foreman: 076] What every session pays before it reads anything. The count
   // always prints; it only becomes a finding above assay's own threshold, and
   // the finding says the host documents no cap of its own.
-  out.push(`- ${alwaysLoadedBytes(audit).total} bytes of always-loaded instructions (user + project memory, unscoped rules)`);
+  add(`${alwaysLoadedBytes(audit).total} bytes of always-loaded instructions (user + project memory, unscoped rules)`);
   const pressure = (findings || []).find((f) => f.type === "context-pressure");
-  if (pressure) out.push(`  - ${pressure.summary} ${evidenceTag(pressure.evidence)} — ${pressure.evidence.limits}`);
+  if (pressure) add(`${pressure.summary} ${evidenceTag(pressure.evidence)} — ${pressure.evidence.limits}`, pressure, 1);
   // [Foreman: 071] The coverage gap the deterministic default opens, named where
   // every other gap is named. What did not run is part of what the audit covered.
   if (!audit.semantic) {
-    out.push("- model-judged checks did not run (trigger clarity, enforceability, rule-verification); deterministic findings only");
+    add("model-judged checks did not run (trigger clarity, enforceability, rule-verification); deterministic findings only");
   }
   if (suppressed.length) {
-    out.push(`- ${suppressed.length} entr${suppressed.length === 1 ? "y" : "ies"} suppressed by the verification pass as not rules — rerun with \`--verbose\` to see each one with its reason`);
+    add(`${suppressed.length} entr${suppressed.length === 1 ? "y" : "ies"} suppressed by the verification pass as not rules — rerun with \`--verbose\` to see each one with its reason`);
   }
   const nonLatin = rules.filter((r) => r.nonLatin).length;
   if (nonLatin) {
-    out.push(`- ${nonLatin} rule(s) contain non-Latin script — assay grades English only, so treat those scores as unreliable rather than low`);
+    add(`${nonLatin} rule(s) contain non-Latin script — assay grades English only, so treat those scores as unreliable rather than low`);
   }
   const badCategories = rules.filter((r) => r.invalidCategory).length;
-  if (badCategories) out.push(`- ${badCategories} unknown category annotation(s) — listed below`);
+  if (badCategories) add(`${badCategories} unknown category annotation(s) — listed below`);
   // [Foreman: 073] A construct the parser could not map faithfully is named
   // here rather than quietly read as prose. It lowers coverage; it never
   // becomes an inferred non-rule.
-  const unsupported = (audit.sources || []).reduce((n, s) => n + (s.unsupported || []).length, 0);
-  if (unsupported) out.push(`- ${unsupported} unsupported construct(s) — inventoried, not graded`);
+  // [Foreman: 078] Named one by one, not only counted — a construct nothing
+  // names is a finding the reader cannot act on.
+  const constructs = (findings || []).filter((f) => f.type === "unsupported-construct");
+  if (constructs.length) {
+    add(`${constructs.length} unsupported construct(s) — inventoried, not graded`);
+    for (const f of constructs) {
+      add(`\`${f.sources[0].path}\`:${f.sources[0].lineStart} — ${f.summary}`, f, 1);
+    }
+  }
   // [Foreman: 074] Surfaces that exist and shape behavior but are not scored.
   const userSkills = (cov.userSkills || []).length;
-  if (userSkills) out.push(`- ${userSkills} user skill(s) present — not graded`);
+  if (userSkills) add(`${userSkills} user skill(s) present — not graded`);
   const agents = (cov.agents || []).length;
-  if (agents) out.push(`- ${agents} subagent(s) defined in \`.claude/agents/\` — inventoried, not graded`);
+  if (agents) add(`${agents} subagent(s) defined in \`.claude/agents/\` — inventoried, not graded`);
+  const unreadable = (findings || []).filter((f) => f.type === "inaccessible-source");
   for (const s of cov.inaccessible || []) {
-    out.push(`- could not read \`${s.path}\` (${s.reason}) — nothing in it was graded`);
+    const f = unreadable.find((x) => (x.sources[0] || {}).path === s.path) || null;
+    add(redactSecrets(`could not read \`${s.path}\` (${s.reason}) — nothing in it was graded`), f);
+  }
+  return out;
+}
+
+function pushCoverageSection(out, audit, rules, suppressed, findings) {
+  out.push("## Coverage");
+  out.push("");
+  for (const line of coverageLines(audit, rules, suppressed, findings)) {
+    out.push("  ".repeat(line.depth) + "- " + line.text);
   }
   out.push("");
 }
@@ -3234,8 +3317,10 @@ function stateChain(states) {
   return STATE_ORDER.map((k) => `${k} ${STATE_GLYPHS[String(states[k])] || "?"}`).join(" · ");
 }
 
+// [Foreman: 078] Every mechanism string a renderer prints goes through
+// redaction — the name of a hook is a shell command out of settings.json.
 function mechanismDetail(m) {
-  return m.type === "hook" ? `${(m.coverage.events || [])[0]}: ${m.name}` : m.name;
+  return redactSecrets(m.type === "hook" ? `${(m.coverage.events || [])[0]}: ${m.name}` : m.name);
 }
 
 // The level line names what is there, not everything that is there: a project
@@ -3249,7 +3334,7 @@ function mechanismDetails(atLevel) {
   return shown.join(", ") + (rest > 0 ? `, +${rest} more` : "");
 }
 
-function pushLadderSection(out, audit, mechanisms, activeRules, opts) {
+function pushLadderSection(out, audit, mechanisms, activeRules, opts, findings) {
   out.push("### Enforcement ladder");
   out.push("");
   out.push("A mechanism listed here is configured. Only validation can show it runs — assay never infers execution from presence.");
@@ -3266,14 +3351,19 @@ function pushLadderSection(out, audit, mechanisms, activeRules, opts) {
     out.push(`- **Level ${level} — ${MECHANISM_LEVEL_LABELS[level]}**: ${counts.join(", ")} (${mechanismDetails(atLevel)}) — configured, not verified`);
     if (!opts.verbose) continue;
     for (const m of atLevel) {
-      out.push(`  - ${m.id} \`${m.name}\` (${m.source}) — ${stateChain(m.states)}`);
-      for (const limit of m.coverage.limits || []) out.push(`    - ${limit}`);
+      out.push(redactSecrets(`  - ${m.id} \`${m.name}\` (${m.source}) — ${stateChain(m.states)}`));
+      for (const limit of m.coverage.limits || []) out.push(redactSecrets(`    - ${limit}`));
     }
+  }
+  // [Foreman: 078] One name defined at two scopes is a property of the ladder,
+  // so it prints here rather than being a finding no view ever shows.
+  for (const f of (findings || []).filter((x) => x.type === "mechanism-overlap")) {
+    out.push(`- ${redactSecrets(f.summary)} ${evidenceTag(f.evidence)}`);
   }
   // A surface that exists and could not be read is a hole in this ladder, named
   // here rather than counted as an empty level.
   for (const s of ((audit.repoChecks || {}).inaccessible) || []) {
-    out.push(`- could not read \`${s.path}\` (${s.reason}) — any gate there is missing from this ladder`);
+    out.push(redactSecrets(`- could not read \`${s.path}\` (${s.reason}) — any gate there is missing from this ladder`));
   }
   if (!opts.verbose) {
     out.push("");
@@ -3294,9 +3384,11 @@ function renderReport(audit, opts = {}) {
   const { files } = audit;
   const rules = audit.rules.filter((r) => !r.suppressed);
   const suppressed = audit.rules.filter((r) => r.suppressed);
-  // A hand-built audit (a test fixture, an older record) still renders: the
-  // derivation is a pure function of the audit either way.
-  const findings = audit.findings || deriveFindings(audit);
+  // [Foreman: 078] The record is the sole input. A renderer never re-derives a
+  // finding, a mechanism, a pair, or a score — a hand-built audit with no
+  // `findings` renders an empty report rather than a second, differently-timed
+  // analysis. What the reader sees is what the record says.
+  const findings = audit.findings || [];
   const findingByRule = new Map(findings.filter((f) => f.state).map((f) => [f.rule, f]));
   const rulesById = new Map(rules.map((r) => [r.id, r]));
   const stateOf = (r) => findingByRule.get(r.id) || null;
@@ -3304,6 +3396,9 @@ function renderReport(audit, opts = {}) {
   // file:line as a markdown link — Claude Code renders it clickable, opening
   // the rule at its exact line
   const loc = (r) => `[${r.file}:${r.lineStart}](${r.file}:${r.lineStart})`;
+  // [Foreman: 078] the same link off a finding's source span, which is what a
+  // corpus finding carries instead of a rule
+  const spanLink = (s) => `[${s.path}:${s.lineStart}](${s.path}:${s.lineStart})`;
   // The rule cell itself is the click target: a bare line number is useless to
   // a reader, so the rule id + text opens the file at its line. Brackets in the
   // label would break the markdown link, so drop them.
@@ -3321,7 +3416,7 @@ function renderReport(audit, opts = {}) {
   out.push("# Rule audit — " + path.basename(audit.root));
   out.push("");
   // [Foreman: 072] Who produced this, under which host profile and schema.
-  out.push(recordBanner(audit) + (deterministicOnly ? " · deterministic only" : ""));
+  out.push(redactSecrets(recordBanner(audit)) + (deterministicOnly ? " · deterministic only" : ""));
   out.push("");
   // [Foreman: 071] The judgment cache invalidates structurally on an edited rule
   // (the key is a content hash); a changed rubric is the axis a hash cannot see.
@@ -3382,8 +3477,8 @@ function renderReport(audit, opts = {}) {
   const buried = rules.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD);
   const stale = rules.filter((r) => r.staleness && r.staleness.missing.length);
   const badCategories = rules.filter((r) => r.invalidCategory);
-  const duplicates = duplicatePairs(audit);
   // [Foreman: 076] Corpus findings the renderer lists rather than re-derives.
+  const duplicates = findings.filter((f) => f.type === "duplicate");
   const conflicts = findings.filter((f) => f.type === "conflict");
   const overlaps = findings.filter((f) => f.type === "scope-overlap");
   const proposals = ((audit.semantic || {}).candidates) || [];
@@ -3470,7 +3565,7 @@ function renderReport(audit, opts = {}) {
     out.push("");
   }
 
-  if (duplicates.length) pushDuplicateSection(out, duplicates, files, loc);
+  if (duplicates.length) pushDuplicateSection(out, duplicates, spanLink);
 
   if (overlaps.length) {
     out.push("### Scope overlap");
@@ -3517,13 +3612,13 @@ function renderReport(audit, opts = {}) {
   // 5. Policy placement — advisory and mechanical candidates.
   const hooks = rules.filter((r) => r.hookOpportunity);
   const placed = rules.filter((r) => r.placement);
-  const restructure = restructureCandidates(audit);
+  const restructure = findings.filter((f) => f.type === "file-shape");
   const redundant = findings.filter((f) => f.type === "redundant-enforcement");
   const advisory = findings.filter((f) => f.state === "advisory");
   const advisoryByCategory = advisory.filter((f) => f.evidence.level === "mechanical").length;
   const advisoryByModel = advisory.length - advisoryByCategory;
   // [Foreman: 077] Every mechanism the project already has, by ladder level.
-  const mechanisms = audit.mechanisms || deriveMechanisms(audit);
+  const mechanisms = audit.mechanisms || [];
   const activeRules = rules.filter((r) => !gated.has(r.id)).length;
   out.push("## Policy placement");
   out.push("");
@@ -3544,7 +3639,7 @@ function renderReport(audit, opts = {}) {
     if (advisory.length) out.push("");
   }
 
-  if (mechanisms.length) pushLadderSection(out, audit, mechanisms, activeRules, opts);
+  if (mechanisms.length) pushLadderSection(out, audit, mechanisms, activeRules, opts, findings);
 
   // [Foreman: 076] A rule whose moment a wired hook already fires on. The hook
   // is read out of the settings files, never watched — so this says "already
@@ -3556,7 +3651,8 @@ function renderReport(audit, opts = {}) {
     out.push("");
     for (const f of redundant) {
       const r = rulesById.get(f.rule);
-      out.push(`- ${r ? ruleLink(r, 60) : f.rule} — ${f.summary}`);
+      // the summary quotes the wired hook command — redact before it prints
+      out.push(`- ${r ? ruleLink(r, 60) : f.rule} — ${redactSecrets(f.summary)}`);
     }
     out.push("");
   }
@@ -3673,26 +3769,26 @@ function truncate(text, n) {
 // artifact — self-contained interactive HTML report
 // ---------------------------------------------------------------------------
 
-// [Foreman: 054]
-// The markdown report opens a rule at its line; the artifact is the richer
-// preview the operator reads in a browser — a sortable table where a row
-// expands to the rule's full untruncated text, every factor score, its grade,
-// and the suggested fix. It is built from audit.json, the same object the
-// report renders, so the two never disagree. The generated file is page
-// content only (no <!doctype>/<html>/<head>/<body>) so it both opens standalone
-// in a browser AND publishes unchanged through the Artifact tool, which wraps
-// its own skeleton around it — see docs/foreman/054.md.
+// [Foreman: 054, 078]
+// The markdown report opens a rule at its line; the artifact is the same report
+// in a browser — every finding the markdown carries, plus a filter box, facet
+// chips, keyboard-reachable disclosure, and a JSON export. It is built from the
+// audit record, the same object renderReport renders and with the same rule
+// against it: nothing here re-derives a finding, a mechanism or a score. The
+// generated file is page content only (no <!doctype>/<html>/<head>/<body>) so it
+// both opens standalone in a browser AND publishes unchanged through the
+// Artifact tool, which wraps its own skeleton around it — see
+// docs/foreman/054.md and docs/foreman/078.md.
 
-// Per-rule payload for the client. hookInventory is deliberately absent: it is
-// the report author's working input, never surfaced to a reader, same as the
-// markdown report. Rule text is carried as data and rendered with textContent
-// client-side, never innerHTML — a rule that contains markup or a URL is shown
-// literally, never loaded or executed.
+// Per-rule row data. hookInventory is deliberately absent: it is the report
+// author's working input, and the ladder below names the mechanisms a reader is
+// meant to see. Every string from the record reaches the page through esc(),
+// so a rule that contains markup or a URL is shown literally, never parsed.
 function artifactRuleData(audit) {
   // [Foreman: 075] The page carries each rule's primary state and the kind of
   // evidence behind it, and sorts hard gates to the top before it sorts by
   // score — the same demotion the markdown report makes.
-  const findings = audit.findings || deriveFindings(audit);
+  const findings = audit.findings || [];
   const byRule = new Map(findings.filter((f) => f.state).map((f) => [f.rule, f]));
   return audit.rules.filter((r) => !r.suppressed).map((r) => {
     const names = rowWeaknesses(r);
@@ -3700,10 +3796,13 @@ function artifactRuleData(audit) {
     return {
       id: r.id, file: r.file, line: r.lineStart, text: r.text,
       category: r.category, score: r.score, grade: r.grade, weak: r.weak,
+      // [Foreman: 078] the finding this row IS, so the page can prove it lost none
+      findingId: f ? f.id : null,
       state: f ? f.state : "healthy",
       stateRank: f ? STATE_RANK.get(f.state) : STATE_RANK.get("healthy"),
       severity: f ? f.severity : "info",
       evidence: f ? evidenceTag(f.evidence) : "",
+      evidenceLevel: f ? (f.evidence || {}).level || "" : "",
       why: f ? f.summary : "",
       stallRisk: r.stallRisk, hookOpportunity: r.hookOpportunity,
       placement: r.placement ? r.placement.bestFit : null,
@@ -3714,19 +3813,64 @@ function artifactRuleData(audit) {
   });
 }
 
+// [Foreman: 078] Everything the record puts on the page goes through here. HTML
+// is generated server-side so the page reads without JavaScript and so every
+// finding id is a real attribute a test can count.
+const HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+
+function esc(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+}
+
+// A markdown line as plain text. The HTML sections reuse the markdown report's
+// own sentences rather than restating them, so the link syntax and the emphasis
+// markers come off on the way through.
+function plainText(md) {
+  return md.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*]/g, "");
+}
+
+// Markdown lines a section builder emitted, as depth-tagged plain text.
+function bulletLines(build) {
+  const out = [];
+  build(out);
+  return out.filter((l) => /^\s*- /.test(l)).map((l) => ({
+    depth: Math.floor((l.length - l.replace(/^ */, "").length) / 2),
+    text: plainText(l.replace(/^\s*- /, "")),
+  }));
+}
+
 const ARTIFACT_STYLE = `<style>
   #assay-report { font: 14px/1.5 system-ui, sans-serif; max-width: 1100px; margin: 0 auto; padding: 1rem;
     color: #1a1a1a; }
+  #assay-report [hidden] { display: none !important; }
   #assay-report h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  #assay-report h2 { font-size: 1.1rem; margin: 1.6rem 0 .3rem; }
+  #assay-report h3 { font-size: .95rem; margin: 1.1rem 0 .3rem; }
   #assay-report .sub { color: #666; margin: 0 0 1rem; }
+  #assay-report .note { color: #555; margin: .2rem 0 .6rem; }
+  #assay-report .headline { font-weight: 600; margin: .8rem 0; }
+  #assay-report #assay-controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center;
+    padding: .6rem 0; position: sticky; top: 0; background: inherit; }
+  #assay-report #assay-search { flex: 1 1 16rem; padding: .35rem .5rem; font: inherit; border-radius: 4px;
+    border: 1px solid #bbb; background: transparent; color: inherit; }
+  #assay-report #assay-filters { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; }
+  #assay-report .facet { font-size: .75rem; color: #666; margin-left: .4rem; }
+  #assay-report button { font: inherit; color: inherit; background: transparent; border: 1px solid #bbb;
+    border-radius: 4px; padding: .15rem .5rem; cursor: pointer; }
+  #assay-report button:focus-visible { outline: 2px solid #0b6bcb; outline-offset: 1px; }
+  #assay-report .chip { font-size: .78rem; }
+  #assay-report .chip[aria-pressed="true"] { background: #0b6bcb; border-color: #0b6bcb; color: #fff; }
+  #assay-report .items { margin: .2rem 0 .8rem; padding-left: 1.1rem; }
+  #assay-report .items > li { margin-bottom: .25rem; }
+  #assay-report .sub-items { margin: .1rem 0 .3rem; padding-left: 1.1rem; color: #555; }
   #assay-report table { border-collapse: collapse; width: 100%; margin-bottom: 1.5rem; }
   #assay-report th, #assay-report td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #e2e2e2;
     vertical-align: top; }
-  #assay-report thead th { cursor: pointer; user-select: none; white-space: nowrap; border-bottom: 2px solid #ccc; }
-  #assay-report thead th.sorted::after { content: " \\25B4"; }
-  #assay-report thead th.sorted.desc::after { content: " \\25BE"; }
-  #assay-report tbody tr.rule { cursor: pointer; }
-  #assay-report tbody tr.rule:hover { background: rgba(0,0,0,.04); }
+  #assay-report thead th { white-space: nowrap; border-bottom: 2px solid #ccc; }
+  #assay-report thead th button { border: 0; padding: 0; font-weight: 600; }
+  #assay-report th[aria-sort="ascending"] button::after { content: " \\25B4"; }
+  #assay-report th[aria-sort="descending"] button::after { content: " \\25BE"; }
+  #assay-report .disclose { border: 0; padding: 0; text-align: left; text-decoration: underline dotted; }
   #assay-report .badge { display: inline-block; min-width: 1.4rem; text-align: center; padding: 0 .4rem;
     border-radius: 4px; font-weight: 600; color: #fff; }
   #assay-report .g-A { background: #1a7f37; } #assay-report .g-B { background: #4a9c2e; }
@@ -3745,10 +3889,11 @@ const ARTIFACT_STYLE = `<style>
   #assay-report .muted { color: #777; font-size: .85rem; }
   @media (prefers-color-scheme: dark) {
     #assay-report { color: #e6e6e6; }
-    #assay-report .sub, #assay-report .muted { color: #9aa0a6; }
+    #assay-report .sub, #assay-report .muted, #assay-report .note,
+    #assay-report .sub-items, #assay-report .facet { color: #9aa0a6; }
     #assay-report th, #assay-report td { border-color: #333; }
     #assay-report thead th { border-bottom-color: #555; }
-    #assay-report tbody tr.rule:hover { background: rgba(255,255,255,.06); }
+    #assay-report #assay-search, #assay-report button { border-color: #555; }
     #assay-report .tag { background: #333; color: #bbb; }
     #assay-report .detail { background: rgba(255,255,255,.04); }
     #assay-report .detail pre, #assay-report .factors span { background: rgba(255,255,255,.08); }
@@ -3756,143 +3901,410 @@ const ARTIFACT_STYLE = `<style>
   }
 </style>`;
 
+// [Foreman: 078]
+// The page's behavior, and only its behavior: the DOM arrives rendered from the
+// record, so this adds filtering, sorting, disclosure and the export and nothing
+// that could disagree with what the server wrote. Every listener is attached
+// here rather than inline, so the page carries no event-handler attributes.
 const ARTIFACT_SCRIPT = `<script>
 (function () {
   var root = document.getElementById("assay-report");
-  var data = JSON.parse(document.getElementById("assay-data").textContent);
-  var GRADES = { A: 0, B: 1, C: 2, D: 3, F: 4 };
-  function el(tag, cls, text) {
-    var e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (text != null) e.textContent = text;
-    return e;
+  if (!root) return;
+  var search = document.getElementById("assay-search");
+  var chips = root.querySelectorAll("#assay-filters button.chip");
+  var units = root.querySelectorAll("[data-unit]");
+  var sections = root.querySelectorAll("section[data-section]");
+
+  function detailOf(unit) {
+    var id = unit.getAttribute("data-detail");
+    return id ? document.getElementById(id) : null;
   }
-  function badge(g) { return el("span", "badge g-" + g, g); }
 
-  var h1 = el("h1", null, "Rule audit — " + data.root);
-  root.appendChild(h1);
-  if (data.banner) root.appendChild(el("p", "muted", data.banner));
-  var sub = el("p", "sub");
-  sub.textContent = data.corpusScore == null
-    ? data.rules.length + " rules — no mandate rules to grade"
-    : data.rules.length + " rules — corpus grade " + data.corpusGrade + " (" + data.corpusScore.toFixed(2) + ")"
-      + (data.suppressedCount ? ", " + data.suppressedCount + " suppressed" : "");
-  root.appendChild(sub);
+  function apply() {
+    var q = (search.value || "").trim().toLowerCase();
+    var on = {};
+    Array.prototype.forEach.call(chips, function (c) {
+      if (c.getAttribute("aria-pressed") !== "true") return;
+      var facet = c.getAttribute("data-facet");
+      (on[facet] = on[facet] || []).push(c.getAttribute("data-value"));
+    });
+    var facets = Object.keys(on);
+    Array.prototype.forEach.call(units, function (u) {
+      var ok = true;
+      for (var i = 0; i < facets.length && ok; i++) {
+        ok = on[facets[i]].indexOf(u.getAttribute("data-" + facets[i]) || "") >= 0;
+      }
+      if (ok && q) ok = u.textContent.toLowerCase().indexOf(q) >= 0;
+      u.hidden = !ok;
+      var detail = detailOf(u);
+      if (detail && !ok) {
+        detail.hidden = true;
+        var b = u.querySelector("button.disclose");
+        if (b) b.setAttribute("aria-expanded", "false");
+      }
+    });
+    Array.prototype.forEach.call(sections, function (s) {
+      var own = s.querySelectorAll("[data-unit]");
+      s.hidden = own.length > 0 && !Array.prototype.some.call(own, function (u) { return !u.hidden; });
+    });
+  }
 
-  var cols = [
-    { key: "id", label: "Rule", get: function (r) { return r.id; } },
-    { key: "file", label: "File", get: function (r) { return r.file + ":" + r.line; } },
-    { key: "state", label: "State", get: function (r) { return r.stateRank; }, num: true,
-      text: function (r) { return r.state; } },
-    { key: "evidence", label: "Evidence", get: function (r) { return r.evidence; } },
-    { key: "category", label: "Cat", get: function (r) { return r.category; } },
-    { key: "issues", label: "Main issue", get: function (r) { return r.issues.join(", "); } },
-    { key: "score", label: "Score", get: function (r) { return r.score.toFixed(2); }, num: true },
-    { key: "grade", label: "Grade", get: function (r) { return GRADES[r.grade]; }, num: true }
-  ];
-  var table = el("table"), thead = el("thead"), htr = el("tr");
-  cols.forEach(function (c, i) {
-    var th = el("th", null, c.label);
-    th.addEventListener("click", function () { sortBy(i); });
-    htr.appendChild(th);
+  search.addEventListener("input", apply);
+  Array.prototype.forEach.call(chips, function (c) {
+    c.addEventListener("click", function () {
+      c.setAttribute("aria-pressed", c.getAttribute("aria-pressed") === "true" ? "false" : "true");
+      apply();
+    });
   });
-  thead.appendChild(htr); table.appendChild(thead);
-  var tbody = el("tbody"); table.appendChild(tbody); root.appendChild(table);
 
-  var rows = data.rules.slice();
+  Array.prototype.forEach.call(root.querySelectorAll("button.disclose"), function (b) {
+    b.addEventListener("click", function () {
+      var open = b.getAttribute("aria-expanded") === "true";
+      var d = document.getElementById(b.getAttribute("aria-controls"));
+      b.setAttribute("aria-expanded", open ? "false" : "true");
+      if (d) d.hidden = open;
+    });
+  });
+
+  var tbody = document.getElementById("assay-rows");
+  var heads = root.querySelectorAll("#assay-rules thead th");
   var sortCol = -1, sortDesc = false;
-
-  function detailRow(r) {
-    var tr = el("tr", "detail"), td = el("td");
-    td.colSpan = cols.length;
-    var pre = el("pre", null, r.text); td.appendChild(pre);
-    if (r.why) td.appendChild(el("p", "muted", r.state + " — " + r.why + " " + r.evidence));
-    var fx = el("div", "factors");
-    data.factorColumns.forEach(function (fc) {
-      var k = fc[0], v = k === "F8" ? r.f8 : r.factors[k];
-      var s = el("span", v != null && v < 0.6 ? "low" : null, fc[1] + " " + (v == null ? "—" : v.toFixed(2)));
-      fx.appendChild(s);
-    });
-    td.appendChild(fx);
-    var flags = [];
-    if (r.stallRisk) flags.push("stall risk");
-    if (r.hookOpportunity) flags.push("better as a hook");
-    if (r.placement) flags.push("placement: " + r.placement);
-    if (flags.length) td.appendChild(el("p", "muted", flags.join(" · ")));
-    if (r.fixes.length) {
-      var ul = el("ul", "fixes");
-      r.fixes.forEach(function (f) { ul.appendChild(el("li", null, f)); });
-      td.appendChild(ul);
-    } else {
-      td.appendChild(el("p", "muted", "No fix suggested — this rule is above its floor."));
-    }
-    tr.appendChild(td);
-    return tr;
-  }
-
-  function render() {
-    tbody.textContent = "";
-    rows.forEach(function (r) {
-      var tr = el("tr", "rule");
-      cols.forEach(function (c) {
-        var td = el("td");
-        if (c.key === "grade") td.appendChild(badge(r.grade));
-        else td.textContent = c.text ? c.text(r) : c.get(r);
-        tr.appendChild(td);
+  Array.prototype.forEach.call(heads, function (th, i) {
+    var b = th.querySelector("button");
+    if (!b || !tbody) return;
+    b.addEventListener("click", function () {
+      if (i === sortCol) sortDesc = !sortDesc; else { sortCol = i; sortDesc = false; }
+      var num = th.getAttribute("data-num") === "1";
+      var rows = Array.prototype.slice.call(tbody.querySelectorAll("tr.rule"));
+      rows.sort(function (p, q) {
+        var x = p.children[i].getAttribute("data-sort") || "";
+        var y = q.children[i].getAttribute("data-sort") || "";
+        if (num) { x = parseFloat(x); y = parseFloat(y); } else { x = x.toLowerCase(); y = y.toLowerCase(); }
+        if (x < y) return sortDesc ? 1 : -1;
+        if (x > y) return sortDesc ? -1 : 1;
+        return 0;
       });
-      var detail = null;
-      tr.addEventListener("click", function () {
-        if (detail) { detail.remove(); detail = null; return; }
-        detail = detailRow(r);
-        tr.parentNode.insertBefore(detail, tr.nextSibling);
+      rows.forEach(function (r) {
+        tbody.appendChild(r);
+        var d = detailOf(r);
+        if (d) tbody.appendChild(d);
       });
-      tbody.appendChild(tr);
+      Array.prototype.forEach.call(heads, function (h, j) {
+        if (j === i) h.setAttribute("aria-sort", sortDesc ? "descending" : "ascending");
+        else h.removeAttribute("aria-sort");
+      });
     });
-    Array.prototype.forEach.call(thead.querySelectorAll("th"), function (th, i) {
-      th.className = i === sortCol ? "sorted" + (sortDesc ? " desc" : "") : "";
+  });
+
+  var exportBtn = document.getElementById("assay-export");
+  if (exportBtn) {
+    exportBtn.addEventListener("click", function () {
+      var record = JSON.parse(document.getElementById("assay-data").textContent);
+      var blob = new Blob([JSON.stringify(record, null, 2)], { type: "application/json" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "assay-audit.json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     });
   }
-  function sortBy(i) {
-    if (i === sortCol) sortDesc = !sortDesc; else { sortCol = i; sortDesc = false; }
-    var c = cols[i];
-    rows.sort(function (a, b) {
-      var x = c.num ? c.get(a) : c.get(a).toString().toLowerCase();
-      var y = c.num ? c.get(b) : c.get(b).toString().toLowerCase();
-      if (x < y) return sortDesc ? 1 : -1;
-      if (x > y) return sortDesc ? -1 : 1;
-      return 0;
-    });
-    render();
-  }
-  function defaultSort() {
-    sortCol = -1; sortDesc = false;
-    rows.sort(function (a, b) {
-      if (a.stateRank !== b.stateRank) return a.stateRank - b.stateRank;
-      return a.score - b.score;
-    });
-    render();
-  }
-  defaultSort(); // hard gates first, then worst score
 })();
 </script>`;
 
+// [Foreman: 078]
+// One list item. `finding` is the record entry the line stands for — its id
+// becomes the attribute the parity test counts, and its state, severity and
+// evidence level become the facets the chips filter on. A line that is not a
+// finding carries no facets, so any active facet filters it out.
+function artifactItem(finding, text, sub) {
+  const f = finding || null;
+  const facets = f
+    ? ` data-finding-id="${esc(f.id)}" data-state="${esc(f.state || "")}"` +
+      ` data-severity="${esc(f.severity || "")}" data-evidence="${esc((f.evidence || {}).level || "")}"`
+    : "";
+  const subs = (sub || []).filter(Boolean).map((s) => `<li>${esc(s)}</li>`).join("");
+  return `<li data-unit="item"${facets}>${esc(text)}` +
+    (subs ? `<ul class="sub-items">${subs}</ul>` : "") + "</li>";
+}
+
+function artifactSection(id, level, title, note, items) {
+  if (!items.length) return "";
+  return `<section data-section="${esc(id)}" id="assay-${esc(id)}">` +
+    `<h${level}>${esc(title)}</h${level}>` +
+    (note ? `<p class="note">${esc(note)}</p>` : "") +
+    `<ul class="items">${items.join("")}</ul></section>`;
+}
+
+function artifactTable(id, level, title, note, columns, rows) {
+  if (!rows.length) return "";
+  const head = columns.map((c) => `<th scope="col">${esc(c)}</th>`).join("");
+  const body = rows.map((cells) =>
+    "<tr>" + cells.map((c) => `<td>${esc(c)}</td>`).join("") + "</tr>").join("");
+  return `<section data-section="${esc(id)}" id="assay-${esc(id)}">` +
+    `<h${level}>${esc(title)}</h${level}>` +
+    (note ? `<p class="note">${esc(note)}</p>` : "") +
+    `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></section>`;
+}
+
+// The rules table: the artifact's centerpiece since 054, now carrying one
+// `data-finding-id` per row so every rule state in the record is accounted for
+// on the page. The disclosure is a real button — the row is reachable, openable
+// and closable from the keyboard alone.
+const ARTIFACT_COLUMNS = [
+  ["Rule", false], ["File", false], ["State", true], ["Evidence", false],
+  ["Cat", false], ["Main issue", false], ["Score", true], ["Grade", true],
+];
+const GRADE_RANK = { A: 0, B: 1, C: 2, D: 3, F: 4 };
+
+function artifactRulesTable(rows, factorColumns) {
+  if (!rows.length) return "";
+  const head = ARTIFACT_COLUMNS.map(([label, num]) =>
+    `<th scope="col"${num ? ' data-num="1"' : ""}><button type="button">${esc(label)}</button></th>`).join("");
+  const body = rows.map((r) => {
+    const detailId = "assay-detail-" + esc(r.id);
+    const cells = [
+      `<td data-sort="${esc(r.id)}"><button type="button" class="disclose" aria-expanded="false" aria-controls="${detailId}">${esc(r.id)}</button></td>`,
+      `<td data-sort="${esc(r.file + ":" + r.line)}">${esc(r.file + ":" + r.line)}</td>`,
+      `<td data-sort="${esc(r.stateRank)}">${esc(r.state)}</td>`,
+      `<td data-sort="${esc(r.evidence)}">${esc(r.evidence)}</td>`,
+      `<td data-sort="${esc(r.category)}">${esc(r.category)}</td>`,
+      `<td data-sort="${esc(r.issues.join(", "))}">${esc(r.issues.join(", "))}</td>`,
+      `<td data-sort="${esc(r.score)}">${esc(fmt(r.score))}</td>`,
+      `<td data-sort="${esc(GRADE_RANK[r.grade])}"><span class="badge g-${esc(r.grade)}">${esc(r.grade)}</span></td>`,
+    ].join("");
+    const factors = factorColumns.map(([key, label]) => {
+      const v = key === "F8" ? r.f8 : r.factors[key];
+      return `<span class="${v != null && v < WEAK_FACTOR_THRESHOLD ? "low" : ""}">${esc(label)} ${esc(v == null ? "—" : fmt(v))}</span>`;
+    }).join("");
+    const flags = [
+      r.stallRisk ? "stall risk" : "",
+      r.hookOpportunity ? "better as a hook" : "",
+      r.placement ? "placement: " + r.placement : "",
+    ].filter(Boolean).join(" · ");
+    const fixes = r.fixes.length
+      ? `<ul class="fixes">${r.fixes.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>`
+      : '<p class="muted">No fix suggested — this rule is above its floor.</p>';
+    const detail = `<tr class="detail" id="${detailId}" hidden><td colspan="${ARTIFACT_COLUMNS.length}">` +
+      `<pre>${esc(r.text)}</pre>` +
+      (r.why ? `<p class="muted">${esc(r.state + " — " + r.why + " " + r.evidence)}</p>` : "") +
+      `<div class="factors">${factors}</div>` +
+      (flags ? `<p class="muted">${esc(flags)}</p>` : "") + fixes + "</td></tr>";
+    return `<tr class="rule" data-unit="rule" data-detail="${detailId}"` +
+      (r.findingId ? ` data-finding-id="${esc(r.findingId)}"` : "") +
+      ` data-state="${esc(r.state)}" data-severity="${esc(r.severity)}"` +
+      ` data-evidence="${esc(r.evidenceLevel)}">${cells}</tr>` + detail;
+  }).join("");
+  return '<section data-section="rules" id="assay-rules-section"><h3>Rules</h3>' +
+    '<p class="note">Every rule the host loads, hard gates first. Open a row for its full text, factor scores and suggested fix.</p>' +
+    `<table id="assay-rules"><thead><tr>${head}</tr></thead><tbody id="assay-rows">${body}</tbody></table></section>`;
+}
+
+// The facet chips, built from the values actually present in this record — a
+// chip for a state no rule holds would filter to nothing and teach nothing.
+function artifactChips(rows, findings) {
+  const facets = [["state", "State"], ["severity", "Severity"], ["evidence", "Evidence"]];
+  const values = { state: new Set(), severity: new Set(), evidence: new Set() };
+  for (const r of rows) {
+    values.state.add(r.state);
+    values.severity.add(r.severity);
+    if (r.evidenceLevel) values.evidence.add(r.evidenceLevel);
+  }
+  for (const f of findings) {
+    if (f.state) values.state.add(f.state);
+    if (f.severity) values.severity.add(f.severity);
+    if (f.evidence && f.evidence.level) values.evidence.add(f.evidence.level);
+  }
+  return facets.map(([facet, label]) => {
+    const present = [...values[facet]].filter(Boolean).sort();
+    if (!present.length) return "";
+    return `<span class="facet">${esc(label)}</span>` + present.map((v) =>
+      `<button type="button" class="chip" data-facet="${esc(facet)}" data-value="${esc(v)}" aria-pressed="false">${esc(v)}</button>`).join("");
+  }).join("");
+}
+
+// [Foreman: 078]
+// The HTML report, section for section in the markdown report's order. Every
+// list is a filter over `audit.findings`, `audit.mechanisms` or a record field —
+// nothing on this page is measured a second time on the way out. The catch-all
+// at the end is the honesty valve: a finding no section above claimed still
+// reaches the reader, and the parity test still balances.
 function renderArtifact(audit) {
-  const payload = {
-    root: path.basename(audit.root),
-    // [Foreman: 072] the record's own provenance, so the page says what produced it
-    banner: recordBanner(audit),
-    corpusScore: audit.corpusScore,
-    corpusGrade: audit.corpusGrade,
-    suppressedCount: audit.rules.filter((r) => r.suppressed).length,
-    factorColumns: FACTOR_COLUMNS,
-    rules: artifactRuleData(audit),
-  };
-  // Escape "<" so no substring of the embedded data (a rule quoting "</script>"
-  // or any markup) can break out of the JSON <script> block.
-  const json = JSON.stringify(payload).replace(/</g, "\\u003c");
+  const rules = audit.rules.filter((r) => !r.suppressed);
+  const suppressed = audit.rules.filter((r) => r.suppressed);
+  const findings = audit.findings || [];
+  const mechanisms = audit.mechanisms || [];
+  const files = audit.files || [];
+  // [Foreman: 075] hard gates first, then worst score — the same demotion the
+  // markdown report makes, settled here so the page arrives already ordered.
+  const rows = artifactRuleData(audit).sort((a, b) => a.stateRank - b.stateRank || a.score - b.score);
+  const rulesById = new Map(rules.map((r) => [r.id, r]));
+  const byType = (type) => findings.filter((f) => f.type === type);
+  const seen = new Set(rows.map((r) => r.findingId).filter(Boolean));
+  const item = (f, text, sub) => { if (f) seen.add(f.id); return artifactItem(f, text, sub); };
+  const at = (s) => s.path + ":" + s.lineStart;
+  const ruleAt = (id) => { const r = rulesById.get(id); return r ? r.file + ":" + r.lineStart : id; };
+  const body = [];
+
+  // Coverage — the same sentences the markdown report prints, from one builder.
+  body.push(artifactSection("coverage", 2, "Coverage", "",
+    coverageLines(audit, rules, suppressed, findings)
+      .map((l) => item(l.finding, (l.depth ? "↳ " : "") + plainText(l.text)))));
+
+  const counts = stateCounts(findings);
+  const topology = FINDING_STATES.filter((s) => counts.get(s)).map((s) => `${counts.get(s)} ${stateWord(s, counts.get(s))}`);
+  const withRules = files.filter((f) => f.ruleCount > 0).length;
+  if (topology.length) {
+    body.push(`<p class="headline">${esc(topology.join(", ") + " across " + withRules + " file(s).")}</p>`);
+  }
+
+  // Hard gates.
+  const gates = findings.filter((f) => HARD_GATE_STATES.has(f.state));
+  body.push(artifactSection("gates", 2, "Hard gates",
+    "The host cannot apply these as written. No wording fix reaches them, and no hygiene score overrides one.",
+    gates.map((f) => item(f, `${ruleAt(f.rule)} — ${f.state}: ${f.summary} ${evidenceTag(f.evidence)}`))));
+
+  // Operational findings.
+  const operational = [];
+  operational.push(artifactSection("conflicts", 3, "Conflicts",
+    "Two loaded rules that ban and command the same action. assay names the pair and stops.",
+    byType("conflict").map((f) => item(f, f.sources.map(at).join(" ↔ ") + " — " + f.summary, [f.explanation]))));
+  operational.push(artifactRulesTable(rows, FACTOR_COLUMNS));
+  operational.push(artifactSection("stalls", 3, "Stall risks (bare prohibitions)",
+    "A prohibition with no named alternative can stall a run outright when the task needs the banned thing.",
+    rules.filter((r) => r.stallRisk).map((r) => artifactItem(null, `${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}"`))));
+  operational.push(artifactSection("buried", 3, "Buried rules",
+    "These sit in the bottom half of a long file, where rules lose force.",
+    rules.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD).map((r) =>
+      artifactItem(null, `${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}" — line ${r.lineStart} of ${(files[r.fileIndex] || {}).lineCount || "?"}`))));
+  operational.push(artifactSection("stale", 3, "Stale references",
+    "A rule pointing at a path that no longer resolves makes Claude re-discover it or give up.",
+    rules.filter((r) => r.staleness && r.staleness.missing.length).map((r) =>
+      artifactItem(null, `${r.id} (${r.file}:${r.lineStart})`,
+        r.staleness.missing.map((m) => "cites " + m.ref + ((m.moved || []).length ? " → likely moved to " + m.moved.slice(0, 4).join(", ") : " → no file by that name in the repo"))))));
+  operational.push(artifactSection("duplicates", 3, "Duplicates",
+    "The same duty stated twice. Both copies are graded and assay edits neither: pick which one survives.",
+    byType("duplicate").map((f) => item(f,
+      `${at(f.sources[0])} ↔ ${at(f.sources[1])} — ${f.tier} copy ${evidenceTag(f.evidence)}`,
+      [`consider keeping ${at(f.keep)} (${f.keepWhy}); ${at(f.drop)} is the removal candidate`]))));
+  operational.push(artifactSection("overlaps", 3, "Scope overlap",
+    "These scoped files load together for the same paths, which is how their rules ended up colliding.",
+    byType("scope-overlap").map((f) => item(f, f.summary))));
+  const proposals = ((audit.semantic || {}).candidates) || [];
+  operational.push(artifactSection("proposals", 3, "Model-proposed relationships",
+    "Proposals, not measurements: nothing here moved a rule's state, its score, the corpus grade, or the deterministic relationships. [model-inferred]",
+    proposals.map((c) => artifactItem(null,
+      `${c.kind} — ${c.accepted === true ? "accepted" : c.accepted === false ? "rejected" : "proposed"} — ${c.summary || ""}${c.reason ? " (" + c.reason + ")" : ""}`))));
+  operational.push(artifactSection("categories", 3, "Unknown category annotations",
+    "The annotation was not recognized, so the rule was graded under its file's default category.",
+    byType("unknown-category").map((f) => item(f, `${ruleAt(f.rule)} — ${f.summary}`))));
+  operational.push(artifactSection("nonlatin", 3, "Non-Latin script",
+    "Wording checks are English-only, so these factor scores measure nothing. Read them as unreliable, not as low.",
+    byType("unsupported-language").map((f) => item(f, `${ruleAt(f.rule)} — ${f.summary}`))));
+  if (operational.some(Boolean)) {
+    body.push('<section data-section="operational" id="assay-operational"><h2>Operational findings</h2>' +
+      '<p class="note">Rules the host loads that carry a risk to how reliably they act. Each line names the kind of evidence behind it.</p></section>');
+    body.push(...operational);
+  }
+
+  // Policy placement.
+  const placement = [];
+  const activeRules = rules.filter((r) => !gates.some((f) => f.rule === r.id)).length;
+  if (mechanisms.length) {
+    const ladder = bulletLines((out) => pushLadderSection(out, audit, mechanisms, activeRules, { verbose: true }, []))
+      .map((l) => artifactItem(null, "↳ ".repeat(l.depth) + l.text));
+    placement.push(artifactSection("ladder", 3, "Enforcement ladder",
+      "A mechanism listed here is configured. Only validation can show it runs — assay never infers execution from presence.",
+      ladder.concat(byType("mechanism-overlap").map((f) => item(f, redactSecrets(f.summary) + " " + evidenceTag(f.evidence))))));
+  }
+  placement.push(artifactSection("wired", 3, "Already wired",
+    "A hook is already configured for the moment each of these rules names. assay read that out of the settings files and has not watched it run.",
+    byType("redundant-enforcement").map((f) => item(f, `${ruleAt(f.rule)} — ${redactSecrets(f.summary)}`))));
+  placement.push(artifactSection("hooks", 3, "Better enforced by a hook",
+    "A hook or script could enforce these mechanically, on every run. [model-inferred]",
+    rules.filter((r) => r.hookOpportunity).map((r) =>
+      artifactItem(null, `${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}"`))));
+  placement.push(artifactSection("candidates", 3, "Placement candidates",
+    "Rules whose job fits a Claude Code primitive better than rule prose. [heuristic]",
+    rules.filter((r) => r.placement).map((r) => artifactItem(null,
+      `${r.id} (${r.file}:${r.lineStart}) → ${r.placement.bestFit} — "${truncate(r.text, 70)}"`,
+      [Object.entries(r.placement.detections).map(([p, d]) => `${p} ${fmt(d.confidence)} [${d.evidence.join(", ")}]`).join("; ")]))));
+  placement.push(artifactSection("restructure", 3, "Restructure candidates",
+    "These files score low because of their shape, not their wording — a per-rule rewrite can't reach the problem.",
+    byType("file-shape").map((f) => item(f, `${f.sources[0].path} — ${(f.reasons || []).join(", ")}`, f.safeActions))));
+  if (placement.some(Boolean)) {
+    body.push('<section data-section="placement" id="assay-placement"><h2>Policy placement</h2>' +
+      '<p class="note">Where each policy belongs: a mechanism that enforces it, or prose that asks for judgment.</p></section>');
+    body.push(...placement);
+  }
+
+  // Structural hygiene.
+  const corpus = audit.corpusScore == null ? "no mandate rules left to grade"
+    : `corpus grade ${audit.corpusGrade} (${fmt(audit.corpusScore)}), mandate rules only`;
+  body.push('<section data-section="hygiene" id="assay-hygiene"><h2>Structural hygiene (secondary)</h2>' +
+    '<p class="note">A summary of how rules are written, scoped, and placed — never a prediction that Claude will comply, and never a reason to discount a hard gate above.</p>' +
+    `<p class="headline">${esc(rules.length + " rules across " + withRules + " file(s) — " + corpus + ".")}</p></section>`);
+  body.push(artifactTable("files", 3, "Files", "", ["File", "Rules", "Grade", "Loading"],
+    files.filter((f) => f.scope !== "user").map((f) => [
+      f.path, String(f.ruleCount),
+      f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`,
+      f.selected === false ? "not loaded — shadowed" : f.globs && f.globs.length ? "scoped: " + f.globs.join(", ") : "always loaded",
+    ])));
+  body.push(artifactTable("user-scope", 3, "User scope",
+    "These load for every project on this machine. They are graded here but left out of the project grade.",
+    ["File", "Rules", "Grade"],
+    files.filter((f) => f.scope === "user").map((f) => [
+      f.path, String(f.ruleCount), f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`,
+    ])));
+
+  // Weak skills — the same rows the markdown table carries.
+  const weakSkills = [];
+  pushWeakSkillSection(weakSkills, (audit.skills || []).filter((s) => {
+    const c = s.checks;
+    if (c.mode === "dead") return true;
+    if (c.mode === "user-only") return c.overSpecified || c.overCap || c.empty;
+    return c.missing.length || c.overCap || c.redundant || c.hasWhenToUse;
+  }));
+  const skillRows = weakSkills.filter((l) => l.startsWith("| ") && !l.startsWith("| Skill") && !l.startsWith("|---"))
+    .map((l) => l.split("|").slice(1, -1).map((c) => plainText(c.trim())));
+  body.push(artifactTable("skills", 2, "Weak skill descriptions", "Every check below is read out of the frontmatter, not judged. [mechanical]",
+    ["Skill", "Where", "Chars", "Issue"], skillRows));
+
+  // Suppressed — present, collapsed, exactly as --verbose has it in markdown.
+  const suppressedItems = byType("suppressed-entry").map((f) =>
+    item(f, `${ruleAt(f.rule)} — ${f.summary}`));
+  if (suppressedItems.length) {
+    body.push('<section data-section="suppressed" id="assay-suppressed"><h2>Suppressed</h2>' +
+      '<p class="note">Extracted and scored, then dropped from every count above — the verification pass judged them prose rather than instructions.</p>' +
+      '<p><button type="button" class="disclose" aria-expanded="false" aria-controls="assay-suppressed-list">' +
+      esc(suppressedItems.length + " suppressed entr" + (suppressedItems.length === 1 ? "y" : "ies")) + "</button></p>" +
+      `<ul class="items" id="assay-suppressed-list" hidden>${suppressedItems.join("")}</ul></section>`);
+  }
+
+  // Anything no section above claimed. It is never empty by design — it is empty
+  // because every finding found a home, and it says so the moment one does not.
+  const orphans = findings.filter((f) => !seen.has(f.id));
+  body.push(artifactSection("other", 2, "Other findings",
+    "Findings no section above claims. They are listed here rather than dropped.",
+    orphans.map((f) => item(f, `${f.type} — ${redactSecrets(f.summary)} ${evidenceTag(f.evidence)}`))));
+
+  const controls = '<div id="assay-controls">' +
+    '<input id="assay-search" type="search" placeholder="Filter rules and findings…" aria-label="Filter rules and findings">' +
+    `<div id="assay-filters" role="group" aria-label="Filter by state, severity and evidence">${artifactChips(rows, findings)}</div>` +
+    '<button type="button" id="assay-export">Download JSON</button></div>';
+  const header = `<h1>${esc("Rule audit — " + path.basename(audit.root))}</h1>` +
+    `<p class="muted">${esc(redactSecrets(recordBanner(audit)) + (audit.semantic ? "" : " · deterministic only"))}</p>`;
+
+  // [Foreman: 078] The export carries the record, redacted. The page is
+  // publishable content, so no credential may ride inside it; the raw record
+  // stays in .assay-tmp/audit.json. Escape "<" so no substring of the embedded
+  // data can break out of the JSON block.
+  const json = JSON.stringify(redactRecord(audit)).replace(/</g, "\\u003c");
   return [
     ARTIFACT_STYLE,
-    '<div id="assay-report"></div>',
+    '<div id="assay-report">' + header + controls + body.filter(Boolean).join("") + "</div>",
     '<script type="application/json" id="assay-data">' + json + "</script>",
     ARTIFACT_SCRIPT,
   ].join("\n");
@@ -4079,6 +4491,8 @@ module.exports = {
   deriveMechanisms, MECHANISM_LEVELS, MECHANISM_LIMITS,
   looksLikeStatement, hasImperativeVerb, checkSkillDescription, gradeSkill, findSkillFiles,
   renderArtifact, artifactRuleData,
+  // [Foreman: 078] the output contract: one record, both renderers, one masker
+  redactSecrets, coverageLines,
   // [Foreman: 072] the record contract
   RECORD_SCHEMA, SCHEMA_VERSION, ANALYZER_VERSION, validateRecord, makeRecord,
   // [Foreman: 071] the semantic contract: rubric axis + the candidate kinds a

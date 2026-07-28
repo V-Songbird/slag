@@ -2209,31 +2209,40 @@ test("renderArtifact emits self-contained page content with no external assets",
   // page content only — the Artifact tool supplies the document skeleton
   assert.doesNotMatch(html, /<!doctype|<html\b|<head\b|<body\b/i);
   assert.match(html, /id="assay-data"/);
-  // [Foreman: 075] hard gates sort to the top before score is considered
-  assert.match(html, /sortCol = -1[\s\S]*defaultSort\(\); \/\/ hard gates first, then worst score/);
+  // [Foreman: 078] every listener is attached in script, never as an attribute
+  assert.doesNotMatch(html, /\son(?:click|change|input|load|keydown)\s*=/i);
 });
+
+function embeddedRecord(html) {
+  const block = html.match(/<script type="application\/json" id="assay-data">([\s\S]*?)<\/script>/);
+  assert.ok(block, "data block present");
+  return { raw: block[1], record: JSON.parse(block[1]) };
+}
+
+const bodyOf = (html) => html.slice(0, html.indexOf('id="assay-data"'));
+const findingIdsIn = (html) => new Set([...html.matchAll(/data-finding-id="([^"]+)"/g)].map((m) => m[1]));
 
 test("renderArtifact escapes < so embedded rule text can't break out of the script block", () => {
   const html = engine.renderArtifact(fixtureAudit());
   // the literal </script> inside the rule text must be escaped in the data block
-  const dataBlock = html.match(/<script type="application\/json" id="assay-data">([\s\S]*?)<\/script>/);
-  assert.ok(dataBlock, "data block present");
-  assert.doesNotMatch(dataBlock[1], /<\/script>/i);
-  assert.ok(dataBlock[1].includes("\\u003c"), "< is escaped in the data block");
-  // and the parsed payload restores the original rule text intact
-  const data = JSON.parse(dataBlock[1]);
-  assert.match(data.rules[0].text, /<\/script>/);
+  const { raw, record } = embeddedRecord(html);
+  assert.doesNotMatch(raw, /<\/script>/i);
+  assert.ok(raw.includes("\\u003c"), "< is escaped in the data block");
+  // and the parsed record restores the original rule text intact
+  assert.match(record.rules[0].text, /<\/script>/);
+  // in the rendered page the same text is HTML-escaped, never markup
+  assert.doesNotMatch(bodyOf(html), /<\/script>/i);
+  assert.match(html, /&lt;\/script&gt;/);
 });
 
-test("renderArtifact never surfaces hookInventory and drops suppressed rules", () => {
-  const html = engine.renderArtifact(fixtureAudit());
-  assert.doesNotMatch(html, /hookInventory|secret-scan\.js/);
-  const dataBlock = html.match(/<script type="application\/json" id="assay-data">([\s\S]*?)<\/script>/);
-  const data = JSON.parse(dataBlock[1].replace(/\u003c/g, "<"));
-  assert.equal(data.rules.length, 1);
-  assert.equal(data.rules[0].id, "R001");
-  assert.equal(data.suppressedCount, 1);
-  assert.equal(data.corpusGrade, "D");
+// [Foreman: 078] The rules table is what a reader sees; the raw wired-hook
+// inventory stays the report author's working input, as it has since 054.
+test("the rules table drops suppressed rules and never prints the raw hook inventory", () => {
+  const body = bodyOf(engine.renderArtifact(fixtureAudit()));
+  assert.doesNotMatch(body, /hookInventory/);
+  assert.equal((body.match(/<tr class="rule"/g) || []).length, 1);
+  assert.match(body, /R001/);
+  assert.doesNotMatch(body, /This is a note about the project/);
 });
 
 test("artifactRuleData carries full untruncated text, factor scores, and fixes", () => {
@@ -2248,17 +2257,18 @@ test("artifactRuleData carries full untruncated text, factor scores, and fixes",
 });
 
 // [Foreman: 075]
-test("the artifact carries State and Evidence columns and sorts hard gates first", () => {
+test("the artifact carries State and Evidence columns and puts hard gates first", () => {
   const audit = auditOf({
     ".claude/rules/dead.md": '---\npaths: ["nope/**/*.ts"]\n---\n\n- Return typed errors from every handler.\n',
     "CLAUDE.md": "- Validate every request body at the handler boundary.\n",
   });
   const html = engine.renderArtifact(audit);
-  assert.match(html, /label: "State"/);
-  assert.match(html, /label: "Evidence"/);
-  // default order is state precedence first, score only as the tiebreak
-  assert.match(html, /a\.stateRank !== b\.stateRank/);
-  assert.match(html, /defaultSort\(\); \/\/ hard gates first, then worst score/);
+  assert.match(html, /<th scope="col" data-num="1"><button type="button">State<\/button><\/th>/);
+  assert.match(html, /<th scope="col"><button type="button">Evidence<\/button><\/th>/);
+  // the server writes the rows already ordered: state precedence, score as tiebreak
+  const states = [...bodyOf(html).matchAll(/<tr class="rule"[^>]*data-state="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(states[0], "inactive");
+  assert.ok(states.length > 1);
 
   const rows = engine.artifactRuleData(audit);
   const gate = rows.find((r) => r.state === "inactive");
@@ -2275,11 +2285,229 @@ test("renderArtifact round-trips a real audit built from the scoring pipeline", 
   const scanData = engine.scan(root);
   const audit = engine.composeAudit(scanData, { [scanData.rules[0].key]: { F3: 0.7, F8: 0.9 } });
   const html = engine.renderArtifact(audit);
-  const dataBlock = html.match(/<script type="application\/json" id="assay-data">([\s\S]*?)<\/script>/);
-  const data = JSON.parse(dataBlock[1].replace(/\u003c/g, "<"));
-  assert.equal(data.rules.length, 1);
-  assert.equal(data.factorColumns.length, 7);
+  // the embedded block is the record itself — the export is a record, not a view
+  const { record } = embeddedRecord(html);
+  assert.equal(record.rules.length, 1);
+  assert.deepEqual(record.findings.map((f) => f.id), audit.findings.map((f) => f.id));
+  assert.equal((bodyOf(html).match(/<tr class="rule"/g) || []).length, 1);
 });
+
+// ---------------------------------------------------------------------------
+// Output contract — one record, every renderer — [Foreman: 078]
+// ---------------------------------------------------------------------------
+
+// One composed audit rich enough to reach every section both renderers have: a
+// hard gate, weak rules, a duplicate pair, a conflict pair, a suppressed entry,
+// mechanisms at three ladder levels, a semantic candidate, and a user-scope file.
+function richAudit() {
+  const userDir = tmpProject({
+    "CLAUDE.md": "# Mine\n\n- Always answer in English.\n",
+    "skills/deploy/SKILL.md": "---\nname: deploy\ndescription: short\n---\n\nbody\n",
+  });
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "# Rules",
+      "",
+      PIN_YES,
+      "- Always run the full test suite before every commit.",
+      "- Write clean, maintainable code.",
+      "- Read the notes in `docs/gone.md` before starting.",
+      "",
+      "This paragraph is background for the reader, not a rule.",
+      "",
+    ].join("\n"),
+    ".claude/rules/deps.md": "# Deps\n\n" + PIN_NO + "\n",
+    ".claude/rules/testing.md": "# Testing\n\n- Always run the full test suite before every commit.\n",
+    ".claude/rules/dead.md": '---\npaths: ["nope/**/*.ts"]\n---\n\n- Return typed errors from every handler.\n',
+    ".claude/skills/deploy/SKILL.md": "---\nname: deploy\ndescription: short\n---\n\nbody\n",
+    ".claude/agents/reviewer.md": "---\nname: reviewer\n---\n\nbody\n",
+    "package.json": JSON.stringify({ name: "x", scripts: { test: "node --test" } }),
+  });
+  const scanData = engine.scan(root, { userDir });
+  // A host whose hook label keeps the argument list: the record then carries a
+  // credential, which is exactly what render-time redaction exists for.
+  scanData.hookInventory = [{
+    event: "PreToolUse", matcher: "*", source: "project",
+    command: "secret-scan.js --token=abc123SECRETxyz789",
+  }];
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.4, F8: 0.4 };
+  const prose = scanData.rules.find((r) => /clean, maintainable/.test(r.text));
+  judgments[prose.key] = { F3: 0.4, F8: 0.4, notRule: "Describes a preference; asks for nothing." };
+  judgments._candidates = [
+    { kind: "paraphrase-duplicate", keys: [scanData.rules[0].key], summary: "Reads like the deps rule.", reason: "Different words, one duty.", accepted: null },
+  ];
+  return engine.composeAudit(scanData, judgments);
+}
+
+// The fixture is only worth its parity claim if it actually reaches every part
+// of the record the renderers read.
+test("the parity fixture carries a gate, a conflict, a duplicate, a mechanism and a suppressed entry", () => {
+  const audit = richAudit();
+  const types = new Set(audit.findings.map((f) => f.type));
+  for (const type of ["conflict", "duplicate", "suppressed-entry"]) {
+    assert.ok(types.has(type), "fixture is missing a " + type + " finding");
+  }
+  assert.ok(audit.findings.some((f) => f.state === "inactive"), "fixture is missing a hard gate");
+  assert.ok(audit.mechanisms.length >= 2, "fixture is missing its ladder");
+  assert.ok(audit.relationships.length >= 2, "fixture is missing its relationships");
+  assert.ok(audit.files.some((f) => f.scope === "user"), "fixture is missing user scope");
+  assert.ok(audit.semantic.candidates.length, "fixture is missing its semantic candidate");
+});
+
+test("every finding in the record reaches the HTML report, and nothing else does", () => {
+  const audit = richAudit();
+  const shown = findingIdsIn(bodyOf(engine.renderArtifact(audit)));
+  const recorded = new Set(audit.findings.map((f) => f.id));
+  assert.deepEqual([...shown].sort(), [...recorded].sort());
+});
+
+test("every finding in the record is named in the markdown report", () => {
+  const audit = richAudit();
+  const md = engine.renderReport(audit, { verbose: true });
+  for (const f of audit.findings) {
+    const spans = (f.sources || []).map((s) => s.path + ":" + s.lineStart);
+    const named = md.includes(f.summary) || (f.rule && md.includes(f.rule)) ||
+      spans.some((s) => md.includes(s));
+    assert.ok(named, "markdown never names finding " + f.id + " (" + f.type + ")");
+  }
+});
+
+test("every mechanism and every relationship is represented in both renderers", () => {
+  const audit = richAudit();
+  const md = engine.renderReport(audit, { verbose: true });
+  const html = engine.renderArtifact(audit);
+  for (const m of audit.mechanisms) {
+    const name = engine.redactSecrets(m.name);
+    assert.ok(md.includes(name), "markdown drops mechanism " + m.id);
+    assert.ok(html.includes(name.replace(/&/g, "&amp;")), "html drops mechanism " + m.id);
+  }
+  // relationships are the edges behind the conflict, duplicate and shadow
+  // findings — each is present wherever its finding is
+  for (const rel of audit.relationships) {
+    assert.ok(["conflict", "duplicate", "covers", "shadows"].includes(rel.kind));
+  }
+  const kinds = new Set(audit.relationships.map((r) => r.kind));
+  if (kinds.has("conflict")) assert.match(md, /### Conflicts/);
+  if (kinds.has("duplicate")) assert.match(md, /### Duplicates/);
+  if (kinds.has("conflict")) assert.match(html, /id="assay-conflicts"/);
+  if (kinds.has("duplicate")) assert.match(html, /id="assay-duplicates"/);
+});
+
+// [Foreman: 078] The contract in one test: a renderer reads the record. Poison
+// the record and both outputs carry the poison — if either recomputed anything,
+// the original text would come back instead.
+test("neither renderer recomputes: an edited record renders exactly as edited", () => {
+  const audit = richAudit();
+  const finding = audit.findings.find((f) => f.type === "duplicate");
+  finding.summary = "POISONED-SUMMARY-MARKER";
+  const mechanism = audit.mechanisms[0];
+  mechanism.name = "POISONED-MECHANISM-MARKER";
+
+  const md = engine.renderReport(audit, { verbose: true });
+  const html = engine.renderArtifact(audit);
+  assert.match(md, /POISONED-MECHANISM-MARKER/);
+  assert.match(html, /POISONED-MECHANISM-MARKER/);
+  // the duplicate summary is the finding's own line in the HTML report
+  assert.match(html, /POISONED-SUMMARY-MARKER|assay-duplicates/);
+  assert.ok(html.includes(finding.id), "the poisoned finding kept its place on the page");
+
+  // and dropping the derived arrays empties the renderers rather than making
+  // them derive a second, differently-timed analysis
+  const bare = { ...audit, findings: [], mechanisms: [] };
+  const bareMd = engine.renderReport(bare, { verbose: true });
+  assert.doesNotMatch(bareMd, /POISONED-MECHANISM-MARKER/);
+  assert.doesNotMatch(bareMd, /### Duplicates|### Conflicts|Enforcement ladder/);
+  assert.equal(findingIdsIn(bodyOf(engine.renderArtifact(bare))).size, 0);
+});
+
+test("a secret in a hook command is masked in both reports and kept in the record", () => {
+  const audit = richAudit();
+  const md = engine.renderReport(audit, { verbose: true });
+  const html = engine.renderArtifact(audit);
+  // the record keeps the raw value — redaction is a render concern
+  assert.ok(audit.mechanisms.some((m) => m.name.includes("abc123SECRETxyz789")));
+  for (const [label, out] of [["markdown", md], ["html", html]]) {
+    assert.doesNotMatch(out, /abc123SECRETxyz789/, label + " leaked the token");
+    assert.match(out, /--token=\[redacted\]/, label + " never masked the token");
+    // the mechanism itself is still there — redaction hides the value, never
+    // the existence of the finding
+    assert.match(out, /secret-scan\.js/, label + " dropped the hook entirely");
+  }
+  // the page is publishable content, so its embedded export is masked too
+  assert.doesNotMatch(embeddedRecord(html).raw, /abc123SECRETxyz789/);
+});
+
+test("redactSecrets masks the known credential shapes and leaves prose alone", () => {
+  const cases = [
+    ["deploy --token=abc123SECRETxyz789", "deploy --token=[redacted]"],
+    ["api_key: 9f8e7d6c5b4a3928", "api_key: [redacted]"],
+    // the token run is non-whitespace to its end, so a hugging quote goes with it
+    ["curl -H 'Bearer aaaaaaaaaaaaaaaaaaaa'", "curl -H '[redacted]"],
+    ["sk-abcdefghijklmnopqrstuvwx", "[redacted]"],
+    ["ghp_abcdefghijklmnopqrstuvwxyz", "[redacted]"],
+    ["AKIAABCDEFGHIJKLMNOP", "[redacted]"],
+  ];
+  for (const [input, expected] of cases) {
+    assert.equal(engine.redactSecrets(input), expected);
+  }
+  // a commit sha, a path and ordinary rule prose are not credentials
+  for (const safe of [
+    "run tests at 146811bfae2c9d0e1f",
+    "see .claude/rules/testing.md",
+    "Never commit a secret — run the scanner first.",
+  ]) {
+    assert.equal(engine.redactSecrets(safe), safe);
+  }
+});
+
+test("the HTML report ships search, filter chips, keyboard disclosure and a JSON export", () => {
+  const body = bodyOf(engine.renderArtifact(richAudit()));
+  assert.match(body, /<input id="assay-search" type="search"[^>]*aria-label="Filter rules and findings"/);
+  assert.match(body, /<div id="assay-filters" role="group"/);
+  assert.match(body, /<button type="button" class="chip" data-facet="state" data-value="[^"]+" aria-pressed="false">/);
+  assert.match(body, /data-facet="severity"/);
+  assert.match(body, /data-facet="evidence"/);
+  assert.match(body, /<button type="button" id="assay-export">/);
+  // every disclosure is a real button that says whether it is open
+  assert.match(body, /<button type="button" class="disclose" aria-expanded="false" aria-controls="assay-detail-R\d+">/);
+  assert.doesNotMatch(body, /<div[^>]*class="[^"]*disclose/);
+  // the sort controls are buttons in the header cells, not click handlers on <th>
+  assert.match(body, /<th scope="col"[^>]*><button type="button">Rule<\/button><\/th>/);
+  // the export downloads the embedded record under a stable name
+  const html = engine.renderArtifact(richAudit());
+  assert.match(html, /a\.download = "assay-audit\.json"/);
+  assert.match(html, /new Blob\(/);
+});
+
+test("the HTML report carries every section the markdown report has", () => {
+  const html = engine.renderArtifact(richAudit());
+  for (const id of [
+    "assay-coverage", "assay-gates", "assay-operational", "assay-conflicts",
+    "assay-rules-section", "assay-duplicates", "assay-placement", "assay-ladder",
+    "assay-hygiene", "assay-files", "assay-user-scope", "assay-suppressed",
+  ]) {
+    assert.match(html, new RegExp('id="' + id + '"'), "html is missing section " + id);
+  }
+  // the file-shape section needs a file with a shape problem, which the parity
+  // fixture deliberately does not have
+  const narrative = auditOf({
+    "CLAUDE.md": [
+      "# Overview", "",
+      "Background: this repository is a personal experiment.",
+      "It carries no runtime dependencies whatsoever.",
+      "The whole tool is plain standard library code.",
+      "The history behind this file is long and winding.",
+      "", "- Run the tests before every commit.",
+    ].join("\n"),
+  });
+  assert.match(engine.renderArtifact(narrative), /id="assay-restructure"/);
+  // suppressed entries are present but folded away, like --verbose in markdown
+  assert.match(html, /<ul class="items" id="assay-suppressed-list" hidden>/);
+  // and the catch-all is empty, because every finding found a section
+  assert.doesNotMatch(html, /id="assay-other"/);
+});
+
 
 // ---------------------------------------------------------------------------
 // Command-level CLI — [Foreman: 070]
