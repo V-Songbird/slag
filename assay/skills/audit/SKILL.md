@@ -279,35 +279,115 @@ Artifact skeleton wraps it unchanged. Give the reader the returned URL.
 
 Skip this step entirely (go to 5) when the report has no weak rules, no weak
 skill descriptions, and no placement candidates, or when step 3 left the report
-for the final message. If `--fix` was passed, skip the question and apply every
-rewrite — weak rules and weak skill descriptions — only.
+for the final message. If `--fix` was passed, skip the question: put every
+rewrite — weak rules and weak skill descriptions — into one batch named
+`fix-batch` in the draft plan below and apply that batch by name. A named batch
+is what keeps `--fix` a recorded approval instead of an implicit one.
 
 Otherwise ask ONE question with `AskUserQuestion` (`multiSelect: true`,
 header `"Fix menu"`), including only options that have evidence:
 
 - `Rewrite [N] weak rules` — only if weak rules exist. Description: "Rewrite the
-  rules below their quality floor in place; you review via git diff."
+  rules below their quality floor; you approve each patch and every write is
+  reversible."
 - `Rewrite [N] weak skill descriptions` — only if the report has a "Weak skill
   descriptions" section. Description: "Rewrite each skill's frontmatter
-  description to the trigger recipe in place; you review via git diff."
+  description to the trigger recipe; you approve each patch."
 - `Promote [N] candidates now` — only if placement candidates exist. Description:
   "Preview each hook, skill, or subagent built from the live official docs, and
   install the ones you approve; the rules stay active."
 - `Park [N] placement candidates` — only if placement candidates exist.
-  Description: "Record a deferred plan for each in .claude/assay-promotions.md;
-  the rules stay where they are, untouched."
+  Description: "Record a deferred plan for each; nothing is written to the rules
+  and the plan artifact keeps the promotion notes."
 
-Apply what was checked, per [references/fixes.md](references/fixes.md). If both
-promote and park are checked, promotion wins and parking covers the remainder.
-Match rules by exact text, never by line number. After applying, remind the
-user to review with `git diff`.
+If both promote and park are checked, promotion wins and parking covers the
+remainder. Everything checked goes into ONE draft plan — step 4a.
+
+## 4a. Plan, preview, apply, validate
+
+Mutation is one explicit transaction, and the engine owns every mechanical part
+of it: the source fingerprints, the exact patch, the staleness check, the change
+journal, rollback state, and the retirement gate. You own the wording and the
+approval. Never hand-edit a file this flow is going to write — an `Edit` behind
+the transaction's back leaves the plan stale and the journal blind.
+
+1. **Assemble the draft.** Write one `.assay-tmp/draft-plan.json` holding every
+   change the user checked, per [references/fixes.md](references/fixes.md).
+   Match each rule by its exact current text, never by line number.
+2. **Plan it.**
+
+   ```
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" plan --from .assay-tmp/draft-plan.json
+   ```
+
+   Exit 1 means the draft was rejected — an anchor that is not in the file, an
+   anchor that matches twice, a promotion with no documentation provenance. Fix
+   what the message names and rerun. Never route around a rejection by editing
+   the file yourself. The command prints the plan id and every change id, and
+   writes `.assay/plan-<id>.json`. It writes no policy file.
+3. **Preview from the plan, not from your draft.** Read the plan artifact and
+   show the user each change: its id, the target path, why that mechanism fits,
+   and the exact `old` → `new` text. The plan is what will be applied, so it is
+   what they get to see.
+4. **Collect approval per change**, then apply exactly the approved ids:
+
+   ```
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" apply --change <id> --change <id>
+   ```
+
+   Under `--fix` there is no per-change menu, so the batch is the boundary
+   instead: `apply --batch fix-batch`. Either way the ids are the approval
+   boundary — there is no apply-everything default, and a change the user did not
+   name is not applied even though the plan carries it. A stale file exits 1
+   naming both fingerprints and writes nothing; re-plan rather than forcing it. A
+   write whose result does not parse is restored automatically and exits 1.
+5. **Validate each applied change.**
+
+   ```
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" validate --change <id>
+   ```
+
+   It re-parses what was written, re-runs the static analysis and records the
+   delta, and — for a promotion — checks the host profile actually discovers the
+   new mechanism. assay never runs the repository's own tests, lint, or a fresh
+   session: those are external evidence, recorded as an attestation with
+   `--external "repo tests: pass"` when the user reports one, and a Proof record
+   is linked with `--proof <pointer>`, never executed. A failure exits 1 and
+   prints the rollback path; nothing is undone automatically at this stage.
+6. **Say what is now true.** The rule is still active — a promotion added the
+   mechanism beside the prose, a rewrite rephrased it in place. Tell the user
+   the duty may now be stated twice on purpose, and that `git diff` shows every
+   change.
+
+Every applied change is reversible for as long as the journal exists:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" rollback --change <id>
+```
+
+Offer it whenever a validation fails or the user dislikes the result. It works
+after every failure stage, including an apply that was interrupted mid-write.
+
+**Retiring the prose is a separate decision, never a step in this flow.** Offer
+it only if the user asks, and say the gate plainly: `retire --change <id>`
+refuses unless the journal already holds validation evidence marking that change
+a success, it needs its own change id as its own approval, and keeping the prose
+as documentation or defence in depth is a legitimate outcome. Because the gate
+reads the journal, retire before step 5 cleans it — a cleaned journal has no
+evidence left to satisfy the gate.
+
+**Parking is a plan nobody applied.** A parked candidate is a `park` change in
+the plan artifact: recorded with its signals, its target primitive and its
+promotion note, with no patch and nothing written to the rules. `apply` refuses
+a park by design. The plan file is the park record and `clean` never deletes it.
 
 ## 4b. Remeasure — once, only if a rewrite was applied
 
-Skip this step unless step 4 rewrote at least one weak rule or skill description.
+Skip this step unless step 4a applied at least one weak-rule or skill-description
+rewrite.
 Promotions and parks leave every graded rule where it was, so they change no
 grade; a rewrite changes a rule in place and its effect is exactly what this
-step shows. Do not clean between step 4 and here — the cached judgments and the
+step shows. Do not clean between step 4a and here — the cached judgments and the
 prior `audit.json` are what make the before/after possible.
 
 ```
@@ -335,6 +415,13 @@ before/after section to the user; it is the evidence the fixes landed.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" clean
 ```
 
-Always run this last, whether or not fixes were applied. Then write the final
-message: whatever step 3 did not already show, your three sentences, and what
-step 4 changed.
+Always run this last, whether or not fixes were applied. It removes
+`.assay-tmp/`, and the change journal too once every applied change has been
+validated, rolled back, or retired. It exits 1 and keeps the journal when one is
+still open — a journal holds the only copy of a pre-image, so it is never
+deleted while a write is unresolved. That exit is a prompt, not a failure of the
+audit: name the open changes it listed, and offer to validate or roll each one
+back. Parked plans survive either way.
+
+Then write the final message: whatever step 3 did not already show, your three
+sentences, and what step 4a changed.

@@ -19,7 +19,26 @@
 //                                        re-scans after fixes, reuses cached
 //                                        judgments (re-judging only reworded
 //                                        rules), prints a before/after report
-//   node assay.js clean [--root <path>]  removes .assay-tmp/
+//   node assay.js clean [--root <path>]  removes .assay-tmp/, and the change
+//                                        journal once it holds no open change
+//
+// [Foreman: 081] The safe-change transaction — diagnose is the scan/audit record
+// above, and these five are the mutation half:
+//   node assay.js plan --from <draft.json>
+//                                        validates + canonicalizes a draft plan,
+//                                        fingerprints every affected file and
+//                                        writes .assay/plan-<id>.json
+//   node assay.js apply --change <id> [--change <id> …] | --batch <id>
+//                                        applies ONLY the changes named here;
+//                                        the argument is the approval boundary
+//   node assay.js validate --change <id> [--external "<kind>: <result>"] [--proof <ptr>]
+//                                        runs the mechanical checks and records
+//                                        external attestations as evidence
+//   node assay.js rollback --change <id> | --transaction <id>
+//                                        restores journalled pre-images
+//   node assay.js retire --change <id>   deactivates the prose a validated
+//                                        mechanism replaced — refused without
+//                                        validation evidence
 //
 // --project-only skips user-scope discovery; ASSAY_USER_DIR overrides where the
 // user's own instruction files are looked for (default ~/.claude).
@@ -121,9 +140,14 @@ const RECORD_SCHEMA = {
   // Required payload arrays, by record kind.
   // [Foreman: 073] `sources` is required, not reserved: it carries the lossless
   // line inventory, and a record without it cannot show that nothing was lost.
+  // [Foreman: 081] `plan` is the third kind, through the same envelope: a plan
+  // is an analysis artifact like the other two and names the same analyzer,
+  // parser, profile and context. Additive by construction — scan and audit
+  // validation reads its own row of this table and never sees this one.
   payload: {
     scan: ["files", "sources", "rules", "skills", "hookInventory"],
     audit: ["files", "sources", "rules", "skills", "hookInventory"],
+    plan: ["changes"],
   },
   // Reserved: the output contract promises these, nothing fills them yet, and
   // they are allowed but never required at the top level. Later entries add
@@ -265,6 +289,14 @@ function isRecordObject(x) {
   return Boolean(x) && typeof x === "object" && !Array.isArray(x);
 }
 
+// The one content-hash primitive: a source file's fingerprint. `sources[]` has
+// carried it since 073, and [Foreman: 081] the change transaction reuses it —
+// a plan's staleness check and a scan's inventory must agree on what "this file
+// is unchanged" means, and they do because it is the same function.
+function hashContent(text) {
+  return crypto.createHash("sha1").update(text).digest("hex");
+}
+
 // null when the record is a valid instance of `kind`; otherwise a short reason,
 // naming the schema version found so the caller can say what to rerun.
 function validateRecord(record, kind) {
@@ -292,6 +324,11 @@ function validateRecord(record, kind) {
   for (const key of payload) {
     if (!Array.isArray(record[key])) return key + " is missing or not an array";
   }
+  // [Foreman: 081] A plan is the one record kind a later command WRITES FROM, so
+  // its payload is checked at the read boundary too, not only when it is built.
+  // A hand-edited plan missing a fingerprint or a patch is rejected here rather
+  // than discovered halfway through an apply.
+  if (kind === "plan") return validatePlanChanges(record.changes, record.batches);
   return null;
 }
 
@@ -2109,7 +2146,7 @@ function scan(root, options = {}) {
       // of the window it costs — the two inputs the context-pressure line needs
       alwaysLoaded: file.alwaysLoaded === true,
       bytes: Buffer.byteLength(file.content, "utf-8"),
-      sourceHash: crypto.createHash("sha1").update(file.content).digest("hex"),
+      sourceHash: hashContent(file.content),
       lineCount: file.lineCount,
       spans,
       unsupported,
@@ -5117,19 +5154,883 @@ function cmdRemeasure(root, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// The safe-change transaction — [Foreman: 081]
+// ---------------------------------------------------------------------------
+
+// SCOPE.md's migration contract is `diagnose → plan → apply → validate →
+// retire`. `diagnose` is not a command: the scan/audit record already IS the
+// diagnose artifact — context, coverage, per-file source hashes, findings as
+// evidence. The five below are the mutation half, and the split between them and
+// the audit skill is the mechanical-first rule drawn as a line: the skill
+// interviews, chooses the rewrite, and collects approval; the engine owns the
+// plan schema, the fingerprints, the exact patch, the staleness check, the
+// journal, the rollback state and the retirement gate. A model cannot decide a
+// mechanical fact, so none of those live in prose.
+
+// Where transaction state lives. NOT in `.assay-tmp/`: that directory's whole
+// contract is "disposable", `clean` removes it, and the journal holds the only
+// copy of a pre-image — the one file in this product that cannot be regenerated
+// from the repository. A sibling `.assay/` keeps durability and disposability in
+// different directories, so no future change to `clean` can widen into deleting
+// an unrolled-back write. `clean` still removes a CLOSED journal (said out loud
+// when it does) and refuses an open one; plan artifacts are kept, because a
+// parked plan is a record the user meant to keep.
+const STATE_DIR = ".assay";
+const JOURNAL_FILE = "journal.jsonl";
+
+// The kinds of change a plan may carry. `park` is the deferral: recorded, never
+// applied — the plan artifact itself is the park record.
+const CHANGE_KINDS = ["rule-rewrite", "stale-reference-repair", "placement-promotion", "park"];
+
+// Validation proportional to the kind, filled in when a draft names none. The
+// steps are the mechanical ones assay can run itself; repository tests, fresh
+// session smoke tests and Proof arrive through `--external` / `--proof` instead.
+const VALIDATION_STEPS = {
+  "rule-rewrite": ["reparse", "static-reanalysis"],
+  "stale-reference-repair": ["reparse", "static-reanalysis"],
+  "placement-promotion": ["reparse", "host-discovery", "static-reanalysis"],
+  park: [],
+};
+const VALIDATION_STEP_NAMES = ["reparse", "host-discovery", "static-reanalysis"];
+
+const MECHANISM_TYPES = ["hook", "skill", "subagent"];
+
+function statePath(root, ...parts) {
+  return path.join(root, STATE_DIR, ...parts);
+}
+
+// A path a plan is allowed to write: project-relative, inside the root. The
+// trust boundary — a draft plan is JSON the skill assembled, and an absolute or
+// `..` path in it must never become a write outside the project.
+function resolvePlanPath(root, rel) {
+  if (typeof rel !== "string" || !rel.trim() || path.isAbsolute(rel)) return null;
+  const base = path.resolve(root);
+  const full = path.resolve(base, rel);
+  return full === base || full.startsWith(base + path.sep) ? full : null;
+}
+
+function countOccurrences(haystack, needle) {
+  let n = 0;
+  for (let i = haystack.indexOf(needle); i !== -1; i = haystack.indexOf(needle, i + needle.length)) n++;
+  return n;
+}
+
+// ---------------------------------------------------------------------------
+// Plan schema
+// ---------------------------------------------------------------------------
+
+// Read-boundary validation of a plan payload. Returns null when the changes are
+// a usable instance, otherwise the first reason — the same discipline
+// validateRecord uses, so a plan file rejects with one sentence naming what is
+// wrong.
+function validatePlanChanges(changes, batches) {
+  if (!changes.length) return "a plan carries at least one change";
+  const ids = new Set();
+  for (const c of changes) {
+    if (!isRecordObject(c)) return "a change is not an object";
+    if (typeof c.id !== "string" || !c.id) return "a change is missing a string id";
+    if (ids.has(c.id)) return "duplicate change id: " + c.id;
+    ids.add(c.id);
+    if (!CHANGE_KINDS.includes(c.kind)) return "change " + c.id + ": unknown kind " + JSON.stringify(c.kind);
+    if (typeof c.rationale !== "string" || !c.rationale) return "change " + c.id + ": rationale is missing";
+    if (!Array.isArray(c.files)) return "change " + c.id + ": files is missing or not an array";
+    if (!Array.isArray(c.patches)) return "change " + c.id + ": patches is missing or not an array";
+    if (c.kind === "park") {
+      if (c.patches.length) return "change " + c.id + ": a park carries no patch — it records a deferral";
+    } else if (!c.patches.length) {
+      return "change " + c.id + ": no patch — a change that writes nothing is a park";
+    }
+    for (const p of [...c.patches, ...(c.retire ? [c.retire] : [])]) {
+      const problem = validatePlanPatch(c.id, p);
+      if (problem) return problem;
+    }
+    if (!Array.isArray(c.validation)) return "change " + c.id + ": validation is missing or not an array";
+    for (const step of c.validation) {
+      if (!VALIDATION_STEP_NAMES.includes(step)) return "change " + c.id + ": unknown validation step " + JSON.stringify(step);
+    }
+    if (typeof c.rollback !== "string" || !c.rollback) return "change " + c.id + ": rollback story is missing";
+    if (c.kind === "placement-promotion") {
+      // A generated host artifact names the documentation its format came from,
+      // and the mechanism it claims to install — otherwise `validate` has no
+      // discovery question to ask and the format has no provenance.
+      if (!isRecordObject(c.mechanism) || !MECHANISM_TYPES.includes(c.mechanism.type) || !c.mechanism.name) {
+        return "change " + c.id + ": a promotion names mechanism { type: " + MECHANISM_TYPES.join("|") + ", name }";
+      }
+      if (!Array.isArray(c.provenance) || !c.provenance.length) {
+        return "change " + c.id + ": a promotion records the documentation provenance behind its format";
+      }
+      for (const d of c.provenance) {
+        if (!isRecordObject(d) || typeof d.claim !== "string" || typeof d.url !== "string") {
+          return "change " + c.id + ": each provenance entry needs a claim and a url";
+        }
+      }
+    }
+  }
+  if (batches !== undefined) {
+    if (!isRecordObject(batches)) return "batches is not an object";
+    for (const [name, members] of Object.entries(batches)) {
+      if (!Array.isArray(members) || !members.length) return "batch " + name + " is empty";
+      for (const m of members) if (!ids.has(m)) return "batch " + name + " names unknown change " + m;
+    }
+  }
+  return null;
+}
+
+function validatePlanPatch(changeId, p) {
+  const where = "change " + changeId + ": patch";
+  if (!isRecordObject(p)) return where + " is not an object";
+  if (typeof p.path !== "string" || !p.path) return where + " is missing a path";
+  if (typeof p.new !== "string") return where + " on " + p.path + " is missing a `new` string";
+  // The fingerprint is the staleness check's whole basis, so its absence is a
+  // rejection rather than a re-derivation: a plan that cannot say what the file
+  // looked like cannot say the file is unchanged.
+  if (!("sourceHash" in p)) return where + " on " + p.path + " is missing its source fingerprint";
+  const creates = p.sourceHash === null;
+  if (!creates && typeof p.sourceHash !== "string") return where + " on " + p.path + " has a non-string fingerprint";
+  if (creates && p.old !== null) return where + " on " + p.path + " creates the file, so `old` is null";
+  if (!creates && (typeof p.old !== "string" || !p.old)) return where + " on " + p.path + " is missing the `old` text it replaces";
+  return null;
+}
+
+// Draft → canonical plan payload. Everything mechanical is computed here rather
+// than trusted from the draft: the fingerprints, the affected-file list, the
+// default validation steps, and the uniqueness of every `old` string.
+function planFromDraft(draft, root) {
+  const problems = [];
+  if (!isRecordObject(draft)) return { problems: ["the draft is not a JSON object"] };
+  if (!Array.isArray(draft.changes) || !draft.changes.length) {
+    return { problems: ["the draft has no `changes` array"] };
+  }
+  const changes = [];
+  for (const raw of draft.changes) {
+    if (!isRecordObject(raw)) { problems.push("a change is not an object"); continue; }
+    const id = typeof raw.id === "string" ? raw.id.trim() : "";
+    const label = "change " + (id || "?");
+    const patches = [];
+    for (const p of Array.isArray(raw.patches) ? raw.patches : []) {
+      const patch = fingerprintPatch(p, root, label, problems);
+      if (patch) patches.push(patch);
+    }
+    let retire = null;
+    if (raw.retire !== undefined && raw.retire !== null) {
+      retire = fingerprintPatch(raw.retire, root, label + " retirement", problems);
+    }
+    const files = [...new Set([...patches, ...(retire ? [retire] : [])].map((p) => p.path))].sort();
+    const validation = [...new Set(
+      Array.isArray(raw.validation) && raw.validation.length ? raw.validation : (VALIDATION_STEPS[raw.kind] || [])
+    )].sort();
+    // Key order is fixed so two runs over the same draft produce byte-identical
+    // plans, which is what makes the plan id a content hash rather than a clock.
+    const change = {
+      id, kind: raw.kind, rationale: typeof raw.rationale === "string" ? raw.rationale.trim() : "",
+      files, patches: patches.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+      validation,
+      rollback: typeof raw.rollback === "string" && raw.rollback.trim()
+        ? raw.rollback.trim()
+        : "restore the journalled pre-image of every file this change wrote",
+      coverage: {
+        predicted: typeof raw.predicted === "string" ? raw.predicted : "",
+        limitations: Array.isArray(raw.limitations) ? raw.limitations.filter((l) => typeof l === "string") : [],
+      },
+    };
+    if (raw.addresses) change.addresses = String(raw.addresses);
+    if (raw.mechanism) change.mechanism = { type: raw.mechanism.type, name: raw.mechanism.name };
+    if (raw.provenance) change.provenance = raw.provenance;
+    if (retire) change.retire = retire;
+    changes.push(change);
+  }
+  changes.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const batches = {};
+  for (const name of Object.keys(draft.batches || {}).sort()) {
+    batches[name] = [...new Set(draft.batches[name])].sort();
+  }
+  const problem = problems.length ? null : validatePlanChanges(changes, batches);
+  if (problem) problems.push(problem);
+  if (problems.length) return { problems };
+  const planId = hashContent(JSON.stringify({ changes, batches })).slice(0, 12);
+  return {
+    problems: [],
+    payload: {
+      planId,
+      changes,
+      batches,
+      coverage: { changes: changes.length, files: [...new Set(changes.flatMap((c) => c.files))].sort() },
+    },
+  };
+}
+
+function fingerprintPatch(raw, root, label, problems) {
+  if (!isRecordObject(raw)) { problems.push(label + ": a patch is not an object"); return null; }
+  const rel = typeof raw.path === "string" ? raw.path.replace(/\\/g, "/").trim() : "";
+  const full = resolvePlanPath(root, rel);
+  if (!full) { problems.push(label + ": " + JSON.stringify(raw.path) + " is not a project-relative path"); return null; }
+  if (typeof raw.new !== "string") { problems.push(label + ": the patch on " + rel + " has no `new` string"); return null; }
+  const exists = fs.existsSync(full);
+  const creates = raw.old === null || raw.old === undefined;
+  if (creates) {
+    if (exists) { problems.push(label + ": " + rel + " already exists — give the patch an `old` string to edit it"); return null; }
+    return { path: rel, sourceHash: null, old: null, new: raw.new };
+  }
+  if (typeof raw.old !== "string" || !raw.old) { problems.push(label + ": the patch on " + rel + " has an empty `old`"); return null; }
+  if (!exists) { problems.push(label + ": " + rel + " does not exist, so no fingerprint can be taken"); return null; }
+  const content = fs.readFileSync(full, "utf-8");
+  const hits = countOccurrences(content, raw.old);
+  if (hits === 0) { problems.push(label + ": the `old` text is not in " + rel); return null; }
+  if (hits > 1) {
+    problems.push(label + ": the `old` text occurs " + hits + " times in " + rel +
+      " — extend it with surrounding context until it matches once");
+    return null;
+  }
+  return { path: rel, sourceHash: hashContent(content), old: raw.old, new: raw.new };
+}
+
+// ---------------------------------------------------------------------------
+// The journal
+// ---------------------------------------------------------------------------
+
+// ARCHITECT'S CALL, encoded here: a journal row stores its pre-image VERBATIM.
+// Reversibility beats redaction inside a private local file — a redacted
+// pre-image restores a file the user never had, which is data loss wearing a
+// safety hat. The journal is therefore never rendered into a report, an export,
+// or the HTML artifact; any future rendered view of it passes through
+// redactSecrets first, exactly as the two renderers already do.
+function appendJournal(root, row) {
+  const file = statePath(root, JOURNAL_FILE);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...row }) + "\n");
+}
+
+function readJournal(root) {
+  const file = statePath(root, JOURNAL_FILE);
+  if (!fs.existsSync(file)) return [];
+  const rows = [];
+  for (const line of fs.readFileSync(file, "utf-8").split("\n")) {
+    if (!line.trim()) continue;
+    try { rows.push(JSON.parse(line)); } catch { /* a torn last line is an interrupted append, not a lie */ }
+  }
+  return rows;
+}
+
+// The journal is append-only, so state is a replay rather than a field anyone
+// updates. Keyed by stage and path, so a change's apply write and its later
+// retirement write are two independent things to restore.
+function replayJournal(rows) {
+  const changes = new Map();
+  let order = 0;
+  for (const row of rows) {
+    if (!row.change) continue;
+    let c = changes.get(row.change);
+    if (!c) {
+      c = { id: row.change, transaction: row.transaction, plan: row.plan, writes: new Map(), evidence: [], rejected: false };
+      changes.set(row.change, c);
+    }
+    c.transaction = row.transaction || c.transaction;
+    const stage = row.stage || "apply";
+    const key = stage + "\0" + row.path;
+    if (row.event === "intent") {
+      c.writes.set(key, {
+        stage, path: row.path, preImage: row.preImage === undefined ? null : row.preImage,
+        patch: row.patch, written: false, restored: false, order: ++order,
+      });
+    } else if (row.event === "outcome") {
+      const w = c.writes.get(key);
+      if (w) { w.written = true; w.hashAfter = row.hashAfter; w.order = ++order; }
+    } else if (row.event === "restore") {
+      const w = c.writes.get(key);
+      if (w) { w.written = false; w.restored = true; w.order = ++order; }
+    } else if (row.event === "reject") {
+      c.rejected = true;
+    } else if (row.event === "evidence") {
+      c.evidence.push(row);
+    }
+  }
+  return changes;
+}
+
+function changeWrites(state, stage) {
+  return [...state.writes.values()].filter((w) => (stage ? w.stage === stage : true));
+}
+
+// Open = written (or interrupted mid-write) and not yet resolved. The three
+// resolutions are a passing validation, a rollback, and a retirement.
+function openChangeIds(rows) {
+  const open = [];
+  for (const c of replayJournal(rows).values()) {
+    const live = changeWrites(c).filter((w) => !w.restored);
+    if (!live.length) continue;
+    if (changeWrites(c, "retire").some((w) => w.written)) continue;
+    const interrupted = live.some((w) => !w.written);
+    if (!interrupted && c.evidence.some((e) => e.result === "pass")) continue;
+    open.push(c.id);
+  }
+  return open;
+}
+
+// ---------------------------------------------------------------------------
+// Writing, and checking what was written
+// ---------------------------------------------------------------------------
+
+function readIfExists(full) {
+  return fs.existsSync(full) ? fs.readFileSync(full, "utf-8") : null;
+}
+
+// The mechanical post-write check, proportional to what the file is: JSON parses
+// as JSON, a Markdown file's frontmatter parses as YAML and its body re-parses,
+// and every path the change claims to have written exists. Nothing here judges
+// content — it establishes that the artifact assay just produced is readable by
+// the same parsers the host uses.
+function postWriteProblems(root, paths) {
+  const problems = [];
+  for (const rel of paths) {
+    const full = path.join(root, rel);
+    if (!fs.existsSync(full)) { problems.push(rel + " was written but is not on disk"); continue; }
+    const text = fs.readFileSync(full, "utf-8");
+    const ext = path.extname(rel).toLowerCase();
+    if (ext === ".json") {
+      try { JSON.parse(text); } catch (err) { problems.push(rel + " is not valid JSON: " + err.message); }
+    } else if (ext === ".jsonl") {
+      text.split("\n").forEach((line, i) => {
+        if (!line.trim()) return;
+        try { JSON.parse(line); } catch (err) { problems.push(rel + " line " + (i + 1) + " is not valid JSON: " + err.message); }
+      });
+    } else if (ext === ".md") {
+      const fm = parseFrontmatterBlock(text);
+      if (fm.error) problems.push(rel + " frontmatter is not valid YAML: " + fm.error);
+      try { md.parse(text, {}); } catch (err) { problems.push(rel + " no longer parses as Markdown: " + err.message); }
+    }
+  }
+  return problems;
+}
+
+function writePatch(root, patch) {
+  const full = path.join(root, patch.path);
+  if (patch.sourceHash === null) {
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, patch.new);
+    return patch.new;
+  }
+  const content = fs.readFileSync(full, "utf-8");
+  const next = content.replace(patch.old, () => patch.new);
+  fs.writeFileSync(full, next);
+  return next;
+}
+
+// The crash-ordering rule, in one place: intent BEFORE the write, outcome AFTER
+// it. The journal may therefore claim a pre-image for a write that never
+// happened — restoring it is a no-op — but can never hold a write whose
+// pre-image was not recorded first, which would be unrecoverable. An intent with
+// no outcome is exactly an interrupted apply, and `rollback` resolves it.
+// razor: appendFileSync, not fsync — the ceiling is a power cut between the OS
+// write and the disk, which loses the last row rather than lying about it. An
+// fsync per row is the upgrade path if that ever matters.
+function journalledWrite(root, ctx, patch, stage) {
+  const full = path.join(root, patch.path);
+  const preImage = readIfExists(full);
+  appendJournal(root, {
+    event: "intent", stage, transaction: ctx.transaction, plan: ctx.plan, change: ctx.change,
+    path: patch.path, preImage, patch: { old: patch.old, new: patch.new },
+    hashBefore: preImage === null ? null : hashContent(preImage),
+  });
+  const written = writePatch(root, patch);
+  appendJournal(root, {
+    event: "outcome", stage, transaction: ctx.transaction, plan: ctx.plan, change: ctx.change,
+    path: patch.path, hashAfter: hashContent(written),
+  });
+}
+
+// Put one journalled write back the way it was. `preImage === null` means the
+// write created the file, so undoing it is removing the file again.
+function restoreWrite(root, ctx, write, cause) {
+  const full = path.join(root, write.path);
+  if (write.preImage === null) {
+    // The write created the file, so undoing it removes the file — and the
+    // directories the write had to create along with it, or a rolled-back skill
+    // promotion leaves an empty `.claude/skills/<name>/` behind.
+    fs.rmSync(full, { force: true });
+    for (let dir = path.dirname(full); dir.startsWith(path.resolve(root) + path.sep); dir = path.dirname(dir)) {
+      if (!fs.existsSync(dir) || fs.readdirSync(dir).length) break;
+      fs.rmdirSync(dir);
+    }
+  } else { fs.mkdirSync(path.dirname(full), { recursive: true }); fs.writeFileSync(full, write.preImage); }
+  appendJournal(root, {
+    event: "restore", stage: write.stage, transaction: ctx.transaction, plan: ctx.plan, change: ctx.change,
+    path: write.path, cause, hashAfter: write.preImage === null ? null : hashContent(write.preImage),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Locating a change
+// ---------------------------------------------------------------------------
+
+function planFiles(root) {
+  const dir = statePath(root);
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter((f) => /^plan-[0-9a-f]+\.json$/.test(f)).sort()
+    .map((f) => path.join(dir, f));
+}
+
+// A change id resolves against every plan artifact in `.assay/`. Two plans
+// defining the same id is a refusal, not a guess — the CLI argument is the
+// approval boundary and it has to mean one thing.
+// razor: all plans are searched on every lookup. A `--plan <id>` selector is the
+// upgrade path when a project keeps enough parked plans for that to cost.
+function findChange(root, changeId) {
+  const hits = [];
+  for (const file of planFiles(root)) {
+    const { record, problem } = readRecord(file, "plan");
+    if (problem) return { problem: path.relative(root, file) + " is not a readable plan (" + problem + ")" };
+    const change = record.changes.find((c) => c.id === changeId);
+    if (change) hits.push({ plan: record, change, file });
+  }
+  if (!hits.length) return { problem: "no plan in " + STATE_DIR + "/ defines change " + changeId };
+  if (hits.length > 1) {
+    return { problem: "change " + changeId + " is defined by " + hits.length + " plans (" +
+      hits.map((h) => h.plan.planId).join(", ") + ") — the id has to name one change" };
+  }
+  return hits[0];
+}
+
+function findBatch(root, batchId) {
+  const hits = [];
+  for (const file of planFiles(root)) {
+    const { record, problem } = readRecord(file, "plan");
+    if (problem) return { problem: path.relative(root, file) + " is not a readable plan (" + problem + ")" };
+    if (record.batches && record.batches[batchId]) hits.push({ plan: record, members: record.batches[batchId] });
+  }
+  if (!hits.length) return { problem: "no plan in " + STATE_DIR + "/ defines batch " + batchId };
+  if (hits.length > 1) return { problem: "batch " + batchId + " is defined by more than one plan" };
+  return hits[0];
+}
+
+function fail(message) {
+  process.stderr.write(message + "\n");
+  process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// plan
+// ---------------------------------------------------------------------------
+
+function cmdPlan(root, opts) {
+  if (!opts.from) fail("plan needs --from <draft.json>.");
+  const draftFile = path.resolve(root, opts.from);
+  if (!fs.existsSync(draftFile)) fail("No draft plan at " + opts.from + ".");
+  let draft;
+  try {
+    draft = JSON.parse(fs.readFileSync(draftFile, "utf-8"));
+  } catch (err) {
+    fail(opts.from + " is not valid JSON: " + err.message);
+  }
+  const { problems, payload } = planFromDraft(draft, root);
+  if (problems.length) fail("The draft plan was rejected:\n  " + problems.join("\n  "));
+  const file = statePath(root, "plan-" + payload.planId + ".json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  // The one file `plan` writes. It never touches a policy file: a plan states
+  // what WOULD be written and nothing more.
+  writeRecord(file, "plan", payload, root);
+  process.stdout.write(JSON.stringify({
+    planId: payload.planId,
+    planFile: STATE_DIR + "/plan-" + payload.planId + ".json",
+    changes: payload.changes.map((c) => ({ id: c.id, kind: c.kind, files: c.files })),
+    batches: payload.batches,
+  }, null, 2) + "\n");
+}
+
+// ---------------------------------------------------------------------------
+// apply
+// ---------------------------------------------------------------------------
+
+// The transaction id is a function of the plan and the exact set of approved
+// change ids, so the recorded boundary is the approval that was actually given.
+function transactionId(planId, ids) {
+  return "t" + hashContent(planId + "\0" + [...ids].sort().join(",")).slice(0, 10);
+}
+
+function cmdApply(root, opts) {
+  let ids = opts.changes;
+  if (opts.batch) {
+    // A batch is an approval too — an explicitly named one, defined in the plan.
+    // It is how `--fix` stays a recorded boundary rather than "apply everything".
+    const found = findBatch(root, opts.batch);
+    if (found.problem) fail(found.problem);
+    ids = [...ids, ...found.members];
+  }
+  if (!ids.length) {
+    fail("apply needs --change <id> (repeatable) or --batch <id>. There is no apply-everything default: " +
+      "the argument is the approval boundary.");
+  }
+  ids = [...new Set(ids)];
+
+  // Pre-flight every named change before writing anything. A stale plan must
+  // never half-apply, so staleness is decided across the whole approved set.
+  const selected = [];
+  for (const id of ids) {
+    const found = findChange(root, id);
+    if (found.problem) fail(found.problem);
+    const { plan, change } = found;
+    if (change.kind === "park") {
+      fail("change " + id + " is a park: a recorded deferral with nothing to apply. " +
+        "Its plan artifact is the park record.");
+    }
+    const ctx = { transaction: transactionId(plan.planId, ids), plan: plan.planId, change: id };
+    for (const patch of change.patches) {
+      const full = path.join(root, patch.path);
+      const found2 = fs.existsSync(full) ? hashContent(fs.readFileSync(full, "utf-8")) : null;
+      if (found2 !== patch.sourceHash) {
+        appendJournal(root, {
+          event: "reject", stage: "apply", transaction: ctx.transaction, plan: ctx.plan, change: id,
+          path: patch.path, reason: "stale-fingerprint", expected: patch.sourceHash, found: found2,
+        });
+        fail("Stale plan: " + patch.path + " changed since change " + id + " was planned.\n" +
+          "  planned fingerprint: " + (patch.sourceHash === null ? "(file absent)" : patch.sourceHash) + "\n" +
+          "  fingerprint now:     " + (found2 === null ? "(file absent)" : found2) + "\n" +
+          "  Re-plan against the current file: `assay.js plan --from <draft.json>`. Nothing was written.");
+      }
+    }
+    selected.push({ change, ctx });
+  }
+
+  const applied = [];
+  for (const { change, ctx } of selected) {
+    for (const patch of change.patches) journalledWrite(root, ctx, patch, "apply");
+    // Syntax validation happens the moment the write lands, not at `validate`
+    // time: an unparseable artifact is assay's own failure and it undoes it.
+    const problems = postWriteProblems(root, change.patches.map((p) => p.path));
+    if (problems.length) {
+      const state = replayJournal(readJournal(root)).get(change.id);
+      for (const w of changeWrites(state, "apply").filter((w) => w.written).sort((a, b) => b.order - a.order)) {
+        restoreWrite(root, ctx, w, "post-write-validation");
+      }
+      fail("Change " + change.id + " was restored: what it wrote does not parse.\n  " + problems.join("\n  ") +
+        "\n  Both the write and the restore are in " + STATE_DIR + "/" + JOURNAL_FILE + ".");
+    }
+    applied.push({ id: change.id, transaction: ctx.transaction, files: change.patches.map((p) => p.path) });
+  }
+
+  process.stdout.write(JSON.stringify({
+    applied,
+    journal: STATE_DIR + "/" + JOURNAL_FILE,
+    // No apply kind deletes or deactivates prose. A promotion adds the mechanism
+    // beside the rule; a rewrite replaces rule text and leaves the rule in place.
+    // Deactivation is `retire`, and only after validation evidence exists.
+    note: "The source instruction is still active. Validate next: `assay.js validate --change <id>`.",
+  }, null, 2) + "\n");
+}
+
+// ---------------------------------------------------------------------------
+// validate
+// ---------------------------------------------------------------------------
+
+// The journal's evidence vocabulary is SCOPE.md's, plus one: `attested`, for a
+// result recorded from outside — a repository test run, a fresh-session smoke
+// test. assay did not compute it and will not call it mechanical. The extra
+// level is safe here precisely because the journal is never rendered into a
+// report, so it can never sit beside a finding's evidence tag.
+function externalEvidence(spec) {
+  const at = spec.indexOf(":");
+  if (at === -1) return null;
+  const kind = spec.slice(0, at).trim();
+  const result = spec.slice(at + 1).trim();
+  if (!kind || !result) return null;
+  return { kind, result };
+}
+
+function validationEvidence(root, opts, change) {
+  const rows = [];
+  for (const step of change.validation) {
+    if (step === "reparse") {
+      const problems = postWriteProblems(root, change.files);
+      rows.push({
+        kind: "reparse", level: "mechanical", result: problems.length ? "fail" : "pass",
+        detail: problems.length ? problems.join("; ") : change.files.join(", ") + " parse",
+      });
+    } else if (step === "static-reanalysis") {
+      // razor: this step RECORDS the delta, it never fails on one. A finding
+      // that survives a change is not automatically a defect — a promotion
+      // deliberately leaves its rule and its placement finding in place. Deciding
+      // which surviving finding is wrong is a judgment, and the judgment belongs
+      // to the developer reading this row.
+      const audit = composeAudit(scan(root, { projectOnly: true, adapter: opts.adapter }), null);
+      const states = {};
+      // A rule finding names a `state`; a file or corpus finding names a `type`.
+      for (const f of audit.findings) {
+        const label = f.state || f.type;
+        states[label] = (states[label] || 0) + 1;
+      }
+      const rule = change.addresses ? audit.rules.find((r) => r.key === change.addresses) : null;
+      const addressed = change.addresses
+        ? (rule
+          ? "the rule it addressed still carries: " +
+            (audit.findings.filter((f) => f.rule === rule.id).map((f) => f.state || f.type).join(", ") || "no finding")
+          : "the rule it addressed no longer exists under that content hash")
+        : "no rule was named, so this records the corpus state only";
+      rows.push({
+        kind: "static-reanalysis", level: "mechanical", result: "pass",
+        detail: addressed + " — " + audit.findings.length + " finding(s) across " +
+          audit.rules.length + " rule(s): " +
+          Object.entries(states).map(([k, v]) => k + " " + v).join(", "),
+      });
+    } else if (step === "host-discovery") {
+      rows.push(hostDiscoveryEvidence(root, opts, change));
+    }
+  }
+  for (const spec of opts.external) {
+    const parsed = externalEvidence(spec);
+    if (!parsed) fail('--external takes "<kind>: <result>", e.g. --external "repo tests: pass".');
+    rows.push({
+      kind: parsed.kind, level: "attested", result: parsed.result,
+      detail: "recorded from outside — assay did not run this",
+    });
+  }
+  for (const pointer of opts.proof) {
+    // A Proof record is linked, never executed and never converted. `linked` is
+    // not `pass`, so a Proof pointer alone can never open the retirement gate.
+    rows.push({
+      kind: "proof-link", level: "behavior-observed", result: "linked", pointer,
+      detail: "a Proof record is referenced, not run, and is not validation evidence on its own",
+    });
+  }
+  return rows;
+}
+
+function hostDiscoveryEvidence(root, opts, change) {
+  const mech = change.mechanism || {};
+  const scanData = scan(root, { projectOnly: true, adapter: opts.adapter });
+  let seen = false;
+  if (mech.type === "hook") {
+    seen = scanData.hookInventory.some((h) => change.files.includes(h.source) ||
+      (h.command || "").includes(mech.name));
+  } else if (mech.type === "skill") {
+    seen = scanData.skills.some((s) => s.name === mech.name);
+  } else if (mech.type === "subagent") {
+    seen = (scanData.coverage.agents || []).includes(mech.name);
+  }
+  return {
+    kind: "host-discovery", level: "mechanical", result: seen ? "pass" : "fail",
+    // The state chain stops where the evidence stops. Discovery proves
+    // `configured` and nothing above it — assay read a file and never watched
+    // the mechanism run.
+    state: "configured",
+    detail: (seen ? "the host profile discovers " : "the host profile does not discover ") +
+      mech.type + " " + mech.name + " — configured, not enabled, trusted or verified",
+  };
+}
+
+function cmdValidate(root, opts) {
+  if (opts.changes.length !== 1) fail("validate takes exactly one --change <id>.");
+  const id = opts.changes[0];
+  const found = findChange(root, id);
+  if (found.problem) fail(found.problem);
+  const state = replayJournal(readJournal(root)).get(id);
+  const live = state ? changeWrites(state, "apply").filter((w) => w.written) : [];
+  if (!live.length) {
+    fail("Change " + id + " has not been applied (nothing in the journal to validate). " +
+      "Apply it first: `assay.js apply --change " + id + "`.");
+  }
+  const ctx = { transaction: state.transaction, plan: found.plan.planId, change: id };
+  const rows = validationEvidence(root, opts, found.change);
+  for (const row of rows) appendJournal(root, { event: "evidence", ...ctx, ...row });
+  const failed = rows.filter((r) => r.result === "fail");
+  if (failed.length) {
+    fail("Validation failed for change " + id + ":\n  " +
+      failed.map((r) => r.kind + ": " + r.detail).join("\n  ") +
+      "\n  Nothing was rolled back. Undo it with `assay.js rollback --change " + id + "`.");
+  }
+  process.stdout.write(JSON.stringify({
+    change: id, evidence: rows.map((r) => ({ kind: r.kind, level: r.level, result: r.result, detail: r.detail })),
+    note: "Evidence is in " + STATE_DIR + "/" + JOURNAL_FILE + ". The source instruction is still active; " +
+      "`assay.js retire --change " + id + "` is a separate decision.",
+  }, null, 2) + "\n");
+}
+
+// ---------------------------------------------------------------------------
+// rollback
+// ---------------------------------------------------------------------------
+
+function cmdRollback(root, opts) {
+  const journal = readJournal(root);
+  const state = replayJournal(journal);
+  let ids = opts.changes;
+  if (opts.transaction) {
+    const inTx = [...state.values()].filter((c) => c.transaction === opts.transaction).map((c) => c.id);
+    if (!inTx.length) fail("No transaction " + opts.transaction + " in " + STATE_DIR + "/" + JOURNAL_FILE + ".");
+    ids = [...ids, ...inTx];
+  }
+  if (!ids.length) fail("rollback needs --change <id> (repeatable) or --transaction <id>.");
+  ids = [...new Set(ids)];
+  for (const id of ids) if (!state.has(id)) fail("No change " + id + " in " + STATE_DIR + "/" + JOURNAL_FILE + ".");
+
+  // Reverse order of application, so a transaction unwinds the way it was laid
+  // down. Across the boundary of the rollback set, the honest simple behavior is
+  // a refusal: if a change NOT being rolled back wrote the same file later, its
+  // write is the current content and undoing an older one would silently discard
+  // it. Roll that one back first.
+  const selected = ids.map((id) => state.get(id));
+  const pending = selected.flatMap((c) => changeWrites(c).filter((w) => !w.restored).map((w) => ({ c, w })));
+  for (const { c, w } of pending) {
+    for (const other of state.values()) {
+      if (ids.includes(other.id)) continue;
+      const later = changeWrites(other).find((o) => o.path === w.path && !o.restored && o.order > w.order);
+      if (later) {
+        fail("Cannot roll back change " + c.id + ": change " + other.id + " wrote " + w.path +
+          " afterwards and is still applied. Roll that one back first.");
+      }
+    }
+  }
+
+  const report = [];
+  for (const c of selected.sort((a, b) => {
+    const la = Math.max(...changeWrites(a).map((w) => w.order), 0);
+    const lb = Math.max(...changeWrites(b).map((w) => w.order), 0);
+    return lb - la;
+  })) {
+    const writes = changeWrites(c);
+    if (!writes.length) {
+      report.push({ change: c.id, outcome: c.rejected
+        ? "nothing to roll back — the change was rejected as stale and never written"
+        : "nothing to roll back — nothing was written for this change" });
+      continue;
+    }
+    const live = writes.filter((w) => !w.restored);
+    if (!live.length) {
+      report.push({ change: c.id, outcome: "already restored — the journal shows every write put back" });
+      continue;
+    }
+    const ctx = { transaction: c.transaction, plan: c.plan, change: c.id };
+    const restored = [];
+    for (const w of live.sort((a, b) => b.order - a.order)) {
+      // An intent with no outcome is an interrupted apply: the write may or may
+      // not have landed, and restoring the pre-image makes both cases the same.
+      restoreWrite(root, ctx, w, w.written ? "rollback" : "interrupted-apply");
+      restored.push(w.path);
+    }
+    report.push({
+      change: c.id, outcome: live.some((w) => !w.written) ? "interrupted apply resolved" : "restored",
+      files: restored,
+    });
+  }
+  process.stdout.write(JSON.stringify({ rolledBack: report, journal: STATE_DIR + "/" + JOURNAL_FILE }, null, 2) + "\n");
+}
+
+// ---------------------------------------------------------------------------
+// retire
+// ---------------------------------------------------------------------------
+
+function cmdRetire(root, opts) {
+  // Its own approval boundary: retiring source policy is a separate action and a
+  // separate argument, never a tail on the apply that replaced it.
+  if (opts.changes.length !== 1) fail("retire takes exactly one --change <id> — its own approval.");
+  const id = opts.changes[0];
+  const found = findChange(root, id);
+  if (found.problem) fail(found.problem);
+  if (!found.change.retire) {
+    fail("The plan declares no retirement patch for change " + id + ". Retirement is planned like any other " +
+      "write: give the change a `retire` patch naming the prose to deactivate.");
+  }
+  const state = replayJournal(readJournal(root)).get(id);
+
+  // THE GATE, mechanical and unconditional. SCOPE.md: no source instruction is
+  // retired without validation evidence. Not a warning, not a default — a
+  // refusal that names what is missing.
+  const missing = [];
+  const applied = state ? changeWrites(state, "apply").filter((w) => w.written) : [];
+  if (!applied.length) missing.push("the change has not been applied (no write in the journal)");
+  if (!state || !state.evidence.some((e) => e.result === "pass")) {
+    missing.push("the journal holds no validation evidence marking success for this change");
+  }
+  if (missing.length) {
+    fail("Refusing to retire change " + id + ":\n  " + missing.join("\n  ") +
+      "\n  Run `assay.js validate --change " + id + "` first. Source policy stays active until evidence exists.");
+  }
+
+  const patch = found.change.retire;
+  const full = path.join(root, patch.path);
+  const now = fs.existsSync(full) ? hashContent(fs.readFileSync(full, "utf-8")) : null;
+  const ctx = { transaction: state.transaction, plan: found.plan.planId, change: id };
+  if (now !== patch.sourceHash) {
+    appendJournal(root, {
+      event: "reject", stage: "retire", ...ctx, path: patch.path,
+      reason: "stale-fingerprint", expected: patch.sourceHash, found: now,
+    });
+    fail("Stale plan: " + patch.path + " changed since the retirement was planned.\n" +
+      "  planned fingerprint: " + (patch.sourceHash === null ? "(file absent)" : patch.sourceHash) + "\n" +
+      "  fingerprint now:     " + (now === null ? "(file absent)" : now) + "\n" +
+      "  Re-plan the retirement. Nothing was written.");
+  }
+  journalledWrite(root, ctx, patch, "retire");
+  const problems = postWriteProblems(root, [patch.path]);
+  if (problems.length) {
+    const after = replayJournal(readJournal(root)).get(id);
+    for (const w of changeWrites(after, "retire").filter((w) => w.written)) restoreWrite(root, ctx, w, "post-write-validation");
+    fail("The retirement of change " + id + " was restored: what it wrote does not parse.\n  " + problems.join("\n  "));
+  }
+  process.stdout.write(JSON.stringify({
+    retired: id, file: patch.path, journal: STATE_DIR + "/" + JOURNAL_FILE,
+    note: "Keeping the prose as documentation or defence in depth is a legitimate outcome — " +
+      "retiring it is not the reward for a validated mechanism. Reversible: `assay.js rollback --change " + id + "`.",
+  }, null, 2) + "\n");
+}
+
+// ---------------------------------------------------------------------------
+// clean
+// ---------------------------------------------------------------------------
+
+function cmdClean(root) {
+  fs.rmSync(path.join(root, TMP_DIR), { recursive: true, force: true });
+  const journal = statePath(root, JOURNAL_FILE);
+  if (!fs.existsSync(journal)) return;
+  const open = openChangeIds(readJournal(root));
+  if (open.length) {
+    fail("Removed " + TMP_DIR + "/, kept " + STATE_DIR + "/" + JOURNAL_FILE + ": " + open.length +
+      " open change(s) — " + open.join(", ") + ".\n  An open change is applied and unresolved. Close each one " +
+      "with `validate`, `rollback`, or `retire`; a journal holding the only copy of a pre-image is never deleted.");
+  }
+  fs.rmSync(journal, { force: true });
+  const kept = planFiles(root).length;
+  if (!kept) fs.rmSync(statePath(root), { recursive: true, force: true });
+  process.stdout.write("Removed " + TMP_DIR + "/ and the closed journal." +
+    (kept ? " Kept " + kept + " plan artifact(s) in " + STATE_DIR + "/." : "") + "\n");
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
 // [Foreman: 070] One exit-code contract: 0 on success, 1 on any expected
 // failure — a missing input, a malformed judgments file, a usage error.
-const COMMANDS = ["scan", "report", "remeasure", "artifact", "clean"];
+// [Foreman: 081] The transaction commands join it unchanged: a stale plan, an
+// unknown change id, a failed validation and a refused retirement all exit 1.
+const COMMANDS = ["scan", "report", "remeasure", "artifact", "clean",
+  "plan", "apply", "validate", "rollback", "retire"];
 const FLAGS = new Set(["--verbose", "--json", "--project-only"]);
 // [Foreman: 079] Flags that take a value, mapped to what that value is, so the
 // parser skips the argument instead of rejecting it as an unknown flag and the
 // error says what was missing.
-const VALUE_FLAGS = new Map([["--root", "path"], ["--host", "profile name"]]);
-const USAGE = "Usage: assay.js <" + COMMANDS.join("|") + "> [--root <path>] [--host <" +
-  Object.keys(ADAPTERS).join("|") + ">] [--verbose] [--json] [--project-only]";
+const VALUE_FLAGS = new Map([
+  ["--root", "path"], ["--host", "profile name"],
+  // [Foreman: 081] The transaction's arguments. `--change` repeats, and that
+  // repetition IS the approval boundary — every id written out by hand.
+  ["--from", "draft plan path"], ["--change", "change id"], ["--batch", "batch id"],
+  ["--transaction", "transaction id"], ["--external", '"<kind>: <result>"'], ["--proof", "record pointer"],
+]);
+const USAGE = [
+  "Usage: assay.js <" + COMMANDS.join("|") + "> [--root <path>]",
+  "  scan|remeasure  [--host <" + Object.keys(ADAPTERS).join("|") + ">] [--project-only] [--verbose] [--json]",
+  "  report          [--verbose] [--json]",
+  "  artifact | clean",
+  "  plan            --from <draft.json>",
+  "  apply           --change <id> [--change <id> …] | --batch <id>",
+  "  validate        --change <id> [--external \"<kind>: <result>\"] [--proof <pointer>]",
+  "  rollback        --change <id> [--change <id> …] | --transaction <id>",
+  "  retire          --change <id>",
+].join("\n");
+
+// Every occurrence of a repeatable value flag, in the order they were given.
+function valuesOf(args, flag) {
+  const out = [];
+  for (let i = 1; i < args.length; i++) if (args[i] === flag && args[i + 1]) out.push(args[i + 1]);
+  return out;
+}
 
 function usageError(message) {
   process.stderr.write(message + "\n" + USAGE + "\n");
@@ -5169,13 +6070,25 @@ function main() {
     // [Foreman: 074] Keep the audit inside the repo: no user-scope discovery.
     projectOnly: args.includes("--project-only"),
     adapter: ADAPTERS[host],
+    // [Foreman: 081] the transaction's arguments
+    from: args.includes("--from") ? args[args.indexOf("--from") + 1] : null,
+    changes: valuesOf(args, "--change"),
+    batch: args.includes("--batch") ? args[args.indexOf("--batch") + 1] : null,
+    transaction: args.includes("--transaction") ? args[args.indexOf("--transaction") + 1] : null,
+    external: valuesOf(args, "--external"),
+    proof: valuesOf(args, "--proof"),
   };
 
   if (command === "scan") cmdScan(root, opts);
   else if (command === "report") cmdReport(root, opts);
   else if (command === "remeasure") cmdRemeasure(root, opts);
   else if (command === "artifact") cmdArtifact(root); // [Foreman: 054]
-  else fs.rmSync(path.join(root, TMP_DIR), { recursive: true, force: true }); // clean
+  else if (command === "plan") cmdPlan(root, opts); // [Foreman: 081]
+  else if (command === "apply") cmdApply(root, opts);
+  else if (command === "validate") cmdValidate(root, opts);
+  else if (command === "rollback") cmdRollback(root, opts);
+  else if (command === "retire") cmdRetire(root, opts);
+  else cmdClean(root);
 }
 
 module.exports = {
@@ -5198,7 +6111,11 @@ module.exports = {
   // [Foreman: 078] the output contract: one record, both renderers, one masker
   redactSecrets, coverageLines,
   // [Foreman: 072] the record contract
-  RECORD_SCHEMA, SCHEMA_VERSION, ANALYZER_VERSION, validateRecord, makeRecord,
+  RECORD_SCHEMA, SCHEMA_VERSION, ANALYZER_VERSION, validateRecord, makeRecord, hashContent,
+  // [Foreman: 081] the safe-change transaction: the plan schema, the journal's
+  // replay, and where transaction state lives
+  CHANGE_KINDS, VALIDATION_STEPS, validatePlanChanges, planFromDraft,
+  readJournal, replayJournal, openChangeIds, postWriteProblems, STATE_DIR, JOURNAL_FILE,
   // [Foreman: 079] the host-profile contract: the registry `--host` selects
   // from, and the policy every analyzer consults instead of a host name
   ADAPTERS, DEFAULT_POLICY, profilePolicy, DEFAULT_NOUNS, profileNouns, readSkillMetadata,

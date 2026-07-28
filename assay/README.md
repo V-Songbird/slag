@@ -30,7 +30,7 @@ Rules get the same treatment: `/assay:craft-rules` grills you — when should it
 
 - **You stop guessing which rules are weak.** Every rule gets one finding at its exact line, with the kind of evidence behind it stated plainly — and a hygiene grade that never overrules a rule the host can't apply.
 - **Prohibitions that dead-end get flagged.** "Never X" with no alternative can stall a session mid-task, so it grades F until it names the replacement.
-- **The weak ones get rewritten, not lectured about.** One menu, your approval, then in-place edits you review with `git diff`.
+- **The weak ones get rewritten, not lectured about.** One menu, then the exact patch before you approve it — and every write is reversible.
 - **Wishes get unmasked as hooks.** Rules a script could enforce with an exit code are flagged, with the evidence, instead of burning goodwill as text. assay reads the hooks already wired for the project — from its settings, yours, and installed plugins — so a candidate that's already enforced gets marked covered, not proposed again.
 - **The same duty stated twice gets named once — and two that argue get named as a pair.** A rule copied from `CLAUDE.md` into a scoped rules file is flagged with both locations and which copy looks worth keeping. A rule that bans what another one commands is flagged with both addresses and *no* winner: assay names the disagreement, says which file the host reads last, and leaves the policy call to you. The grade doesn't move either way.
 - **Stale references get caught — and traced.** A rule citing a file that no longer exists is worse than no rule. assay reads the paths in backticks *and* in markdown links, and when the file has merely moved it names where it went, so the fix is one edit instead of a hunt.
@@ -53,7 +53,8 @@ Your user-level `CLAUDE.md` loads for this project too, so it gets graded — bu
 | --- | --- |
 | You run the audit | Every rule is extracted, scored, and graded |
 | The report lands | Findings first — what can't load, what's risky, what belongs in another mechanism — each a clickable link that opens the rule at its line; the hygiene grade follows at the bottom |
-| You check what to apply | Rewrites happen in place; placement candidates get previewed and built on your say-so, or parked with promotion notes |
+| You check what to fix | Every fix becomes a written plan first: the exact old-to-new text, the file it touches, and how it would be checked |
+| You approve | Only the changes you name get applied, each one journalled with the file as it was before — then checked, and offered back for rollback if you don't want it |
 | You're done | Temp files are cleaned up; `git diff` shows exactly what changed |
 
 ## Install
@@ -108,7 +109,8 @@ One scoring script and three skills — the audit with its two rubrics, craft-sk
 - Scoring is English-only. Rules in other languages will grade wrong; the report counts the ones in a non-Latin script so their numbers aren't mistaken for real grades.
 - Promotions are built at project scope, straight from the current official docs — fetched at promotion time, so the formats are never stale. You see each one before it's written, and nothing else gets installed.
 - The report lists what's already wired around the repo — skills, subagents, hooks, npm scripts, CI workflows — as an enforcement ladder, from advisory prose up to remote gates. Every entry says it is configured; none of them claim it runs, because assay reads files and never watches anything execute.
-- Nothing assay does takes a rule away from you. A promotion adds the mechanism and leaves the prose active; parking only writes down the plan. The duty is then stated twice on purpose — assay says so rather than quietly deleting one copy. A new file is configured, not proven: retiring the prose is your call, later, once you've watched the mechanism work.
+- Nothing assay does takes a rule away from you. A promotion adds the mechanism and leaves the prose active; parking only writes down the plan. The duty is then stated twice on purpose — assay says so rather than quietly deleting one copy. Deactivating the prose is a separate command that refuses to run until the replacement has been checked, and keeping it as documentation is a perfectly good answer.
+- Every write goes through a plan you see first. If the file changed since the plan was drawn up, the whole thing stops rather than patching over someone else's edit. Whatever does land is recorded with the file exactly as it was, so one command puts it back — including after an interrupted run.
 - Some files score low because of their shape, not their wording — too much narrative, most of their rules buried low, or just too long. Those land under **Restructure candidates**, which names the fix a per-rule rewrite can't reach: fence the narrative, move the load-bearing rules up, or split the file into scoped rule files.
 - Skip a rule you like as-is by putting `<!-- assay-ignore -->` on the line above it. To fence off a whole block of prose that reads like rules but isn't — a motivating story, a pasted requirement, a glossary — wrap it in `<!-- assay-ignore-start -->` and `<!-- assay-ignore-end -->`. Those lines leave the grade entirely, and a real rule below the block is no longer counted as buried under it.
 - Dead-glob detection (a scoped rules file whose file patterns match nothing) needs Node 22+; everything else runs on older Node.

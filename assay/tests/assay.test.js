@@ -3012,7 +3012,7 @@ test("an unknown command, an unknown flag, or a bare --root prints usage and exi
   const noCommand = cli(root);
   assert.equal(noCommand.code, 1);
   assert.match(noCommand.err, /No command given\./);
-  assert.match(noCommand.err, /Usage: assay\.js <scan\|report\|remeasure\|artifact\|clean>/);
+  assert.match(noCommand.err, /Usage: assay\.js <scan\|report\|remeasure\|artifact\|clean\|plan\|apply\|validate\|rollback\|retire>/);
 
   const badCommand = cli(root, "frobnicate");
   assert.equal(badCommand.code, 1);
@@ -3075,8 +3075,10 @@ test("scan, report, artifact and remeasure write nothing outside .assay-tmp", ()
   assert.equal(cli(root, "artifact").code, 0);
   assert.equal(cli(root, "remeasure").code, 0);
   assert.deepEqual(snapshotTree(root), before);
-  // no policy file was invented either
+  // no policy file was invented either, and no transaction state — [Foreman: 081]
+  // read-only analysis never opens the change journal
   assert.equal(fs.existsSync(path.join(root, ".claude", "assay-promotions.md")), false);
+  assert.equal(fs.existsSync(path.join(root, engine.STATE_DIR)), false);
 });
 
 test("a discovered file that cannot be read is counted and named, not dropped silently", () => {
@@ -4612,4 +4614,397 @@ test("two scans of one Codex project with skills and hooks differ only in analys
   for (const r of [once, twice]) delete r.context.analysisTime;
   assert.equal(JSON.stringify(once), JSON.stringify(twice));
   assert.ok(once.skills.length && once.hookInventory.length, "the fixture has to have both to prove anything");
+});
+
+// ---------------------------------------------------------------------------
+// The safe-change transaction — [Foreman: 081]
+// ---------------------------------------------------------------------------
+
+const TX_CLAUDE = [
+  "# Project rules",
+  "",
+  "- Never use `var` — use `const` instead.",
+  "- Run prettier before committing.",
+  "- Always update the changelog when you touch a public API.",
+  "",
+].join("\n");
+
+function txProject(extra) {
+  return tmpProject({ "CLAUDE.md": TX_CLAUDE, ...(extra || {}) });
+}
+
+// Write a draft and run `plan` over it; returns the parsed plan summary.
+function planDraft(root, draft, name = "draft.json") {
+  fs.writeFileSync(path.join(root, name), JSON.stringify(draft, null, 2));
+  const r = cli(root, "plan", "--from", name);
+  return { ...r, summary: r.code === 0 ? JSON.parse(r.out) : null };
+}
+
+const REWRITE_CHANGE = {
+  id: "c-rewrite",
+  kind: "rule-rewrite",
+  rationale: "The rule names no firing moment, so the duty is skipped.",
+  patches: [{
+    path: "CLAUDE.md",
+    old: "- Run prettier before committing.",
+    new: "- Before committing, run `npx prettier --write .` over every staged file.",
+  }],
+  predicted: "resolves the trigger-distance finding on this rule",
+  limitations: ["wording only — compliance is not measured here"],
+};
+
+// A promotion that builds a real skill beside the prose, and plans the
+// retirement of that prose as a separate patch.
+const PROMOTE_CHANGE = {
+  id: "c-skill",
+  kind: "placement-promotion",
+  rationale: "A multi-step changelog duty is a workflow, not a sentence.",
+  mechanism: { type: "skill", name: "changelog" },
+  provenance: [{ claim: "SKILL.md frontmatter", url: "https://code.claude.com/docs/en/skills.md", verified: "2026-07-28" }],
+  patches: [{
+    path: ".claude/skills/changelog/SKILL.md",
+    old: null,
+    new: ["---", "name: changelog",
+      'description: Updates CHANGELOG.md when a public API changes. Use when "update the changelog". Do NOT use for internal refactors.',
+      "---", "", "# changelog", "", "Always update the changelog when you touch a public API.", ""].join("\n"),
+  }],
+  retire: {
+    path: "CLAUDE.md",
+    old: "- Always update the changelog when you touch a public API.",
+    new: "<!-- retired: the `changelog` skill owns this duty. -->",
+  },
+};
+
+function journalRows(root) {
+  return engine.readJournal(root);
+}
+
+test("plan canonicalizes a draft, stamps every fingerprint, and validates as a plan record", () => {
+  const root = txProject();
+  const { code, summary } = planDraft(root, {
+    changes: [PROMOTE_CHANGE, REWRITE_CHANGE],
+    batches: { "all-rewrites": ["c-rewrite"] },
+  });
+  assert.equal(code, 0);
+  // canonical order is by change id, not draft order
+  assert.deepEqual(summary.changes.map((c) => c.id), ["c-rewrite", "c-skill"]);
+
+  const record = JSON.parse(fs.readFileSync(path.join(root, ".assay", "plan-" + summary.planId + ".json"), "utf-8"));
+  // the third record kind rides the same envelope as scan and audit
+  assert.equal(engine.validateRecord(record, "plan"), null);
+  assert.equal(record.schemaVersion, engine.SCHEMA_VERSION);
+  assert.equal(record.analyzer.name, "assay");
+  assert.ok(record.context.projectRoot && record.context.analysisTime);
+  // and the additive extension leaves the other two kinds alone
+  assert.equal(engine.validateRecord(record, "scan"), "files is missing or not an array");
+
+  const rewrite = record.changes.find((c) => c.id === "c-rewrite");
+  // the engine took the fingerprint; the draft never stated one
+  assert.equal(rewrite.patches[0].sourceHash, engine.hashContent(TX_CLAUDE));
+  assert.deepEqual(rewrite.files, ["CLAUDE.md"]);
+  // validation steps are filled proportionally to the kind
+  assert.deepEqual(rewrite.validation, ["reparse", "static-reanalysis"]);
+  assert.ok(rewrite.rollback.length);
+  // a created file plans with a null fingerprint — "this file must not exist yet"
+  const promo = record.changes.find((c) => c.id === "c-skill");
+  assert.equal(promo.patches[0].sourceHash, null);
+  assert.deepEqual(promo.validation, ["host-discovery", "reparse", "static-reanalysis"]);
+
+  // the plan id is a content hash: the same draft re-plans to the same artifact
+  const again = planDraft(root, { changes: [PROMOTE_CHANGE, REWRITE_CHANGE], batches: { "all-rewrites": ["c-rewrite"] } }, "draft2.json");
+  assert.equal(again.summary.planId, summary.planId);
+});
+
+test("a draft with no patch, an unfindable anchor, or an escaping path is rejected with exit 1", () => {
+  const root = txProject();
+  const noPatch = planDraft(root, { changes: [{ id: "c1", kind: "rule-rewrite", rationale: "why", patches: [] }] });
+  assert.equal(noPatch.code, 1);
+  assert.match(noPatch.err, /change c1: no patch — a change that writes nothing is a park/);
+
+  const missingAnchor = planDraft(root, {
+    changes: [{ id: "c1", kind: "rule-rewrite", rationale: "why", patches: [{ path: "CLAUDE.md", old: "- Not in the file.", new: "x" }] }],
+  });
+  assert.equal(missingAnchor.code, 1);
+  assert.match(missingAnchor.err, /the `old` text is not in CLAUDE\.md/);
+
+  const ambiguous = planDraft(tmpProject({ "CLAUDE.md": "- Do it.\n- Do it.\n" }), {
+    changes: [{ id: "c1", kind: "rule-rewrite", rationale: "why", patches: [{ path: "CLAUDE.md", old: "- Do it.", new: "- Do it now." }] }],
+  });
+  assert.equal(ambiguous.code, 1);
+  assert.match(ambiguous.err, /occurs 2 times[\s\S]*extend it with surrounding context/);
+
+  const escaping = planDraft(root, {
+    changes: [{ id: "c1", kind: "rule-rewrite", rationale: "why", patches: [{ path: "../outside.md", old: null, new: "x" }] }],
+  });
+  assert.equal(escaping.code, 1);
+  assert.match(escaping.err, /is not a project-relative path/);
+  assert.equal(fs.existsSync(path.join(root, "..", "outside.md")), false);
+
+  // and a hand-edited plan record missing a fingerprint fails at the read boundary
+  assert.match(engine.validatePlanChanges([{
+    id: "c1", kind: "rule-rewrite", rationale: "why", files: ["CLAUDE.md"],
+    patches: [{ path: "CLAUDE.md", old: "a", new: "b" }],
+    validation: ["reparse"], rollback: "restore",
+  }]), /is missing its source fingerprint/);
+});
+
+test("apply mutates the file exactly, journals intent then outcome, and leaves the prose active", () => {
+  const root = txProject();
+  planDraft(root, { changes: [PROMOTE_CHANGE] });
+  const { code, out } = cli(root, "apply", "--change", "c-skill");
+  assert.equal(code, 0);
+  const applied = JSON.parse(out);
+  assert.deepEqual(applied.applied[0].files, [".claude/skills/changelog/SKILL.md"]);
+
+  const built = fs.readFileSync(path.join(root, ".claude", "skills", "changelog", "SKILL.md"), "utf-8");
+  assert.equal(built, PROMOTE_CHANGE.patches[0].new);
+  // a promotion adds the mechanism BESIDE the prose; the rule is untouched
+  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE);
+  assert.match(applied.note, /source instruction is still active/);
+
+  const rows = journalRows(root);
+  assert.deepEqual(rows.map((r) => r.event), ["intent", "outcome"]);
+  // the intent carries the pre-image verbatim and precedes the write
+  assert.equal(rows[0].preImage, null, "the file did not exist, so there is no pre-image");
+  assert.equal(rows[0].patch.new, PROMOTE_CHANGE.patches[0].new);
+  assert.equal(rows[1].hashAfter, engine.hashContent(built));
+  assert.equal(rows[0].transaction, rows[1].transaction);
+});
+
+test("a file touched after planning makes apply exit 1, naming both hashes, and writes nothing", () => {
+  const root = txProject();
+  planDraft(root, { changes: [REWRITE_CHANGE] });
+  const edited = TX_CLAUDE.replace("# Project rules", "# Project rules (edited elsewhere)");
+  fs.writeFileSync(path.join(root, "CLAUDE.md"), edited);
+
+  const { code, err } = cli(root, "apply", "--change", "c-rewrite");
+  assert.equal(code, 1);
+  assert.match(err, /Stale plan: CLAUDE\.md changed since change c-rewrite was planned/);
+  assert.ok(err.includes(engine.hashContent(TX_CLAUDE)), "the planned fingerprint is named");
+  assert.ok(err.includes(engine.hashContent(edited)), "the current fingerprint is named");
+  assert.match(err, /assay\.js plan --from/);
+  // the file is exactly as the third party left it
+  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), edited);
+  const rows = journalRows(root);
+  assert.deepEqual(rows.map((r) => r.event), ["reject"]);
+  assert.equal(rows[0].reason, "stale-fingerprint");
+});
+
+test("apply writes only the change ids named on the command line", () => {
+  const root = txProject();
+  planDraft(root, { changes: [REWRITE_CHANGE, PROMOTE_CHANGE], batches: { "all-rewrites": ["c-rewrite"] } });
+  assert.equal(cli(root, "apply", "--change", "c-rewrite").code, 0);
+
+  // c-skill is in the same plan and in no batch that ran, so it did not happen
+  assert.equal(fs.existsSync(path.join(root, ".claude", "skills", "changelog", "SKILL.md")), false);
+  assert.deepEqual([...new Set(journalRows(root).map((r) => r.change))], ["c-rewrite"]);
+  assert.match(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), /npx prettier --write/);
+
+  // the batch is the other recorded boundary — named explicitly, defined in the
+  // plan, and it is what keeps `--fix` an approval rather than a default
+  const noArgs = cli(root, "apply");
+  assert.equal(noArgs.code, 1);
+  assert.match(noArgs.err, /no apply-everything default/);
+  assert.match(cli(root, "apply", "--batch", "not-a-batch").err, /no plan in \.assay\/ defines batch not-a-batch/);
+
+  const batched = txProject();
+  planDraft(batched, { changes: [REWRITE_CHANGE, PROMOTE_CHANGE], batches: { "fix-batch": ["c-rewrite"] } });
+  assert.equal(cli(batched, "apply", "--batch", "fix-batch").code, 0);
+  assert.deepEqual([...new Set(journalRows(batched).map((r) => r.change))], ["c-rewrite"]);
+});
+
+test("an interrupted apply is an intent with no outcome, and rollback resolves it", () => {
+  const root = txProject();
+  planDraft(root, { changes: [REWRITE_CHANGE] });
+  assert.equal(cli(root, "apply", "--change", "c-rewrite").code, 0);
+
+  // simulate the crash: the write landed, the outcome row never got appended
+  const journal = path.join(root, ".assay", "journal.jsonl");
+  const rows = fs.readFileSync(journal, "utf-8").split("\n").filter(Boolean);
+  assert.equal(JSON.parse(rows[1]).event, "outcome");
+  fs.writeFileSync(journal, rows[0] + "\n");
+  assert.deepEqual(engine.openChangeIds(journalRows(root)), ["c-rewrite"]);
+
+  const { code, out } = cli(root, "rollback", "--change", "c-rewrite");
+  assert.equal(code, 0);
+  assert.equal(JSON.parse(out).rolledBack[0].outcome, "interrupted apply resolved");
+  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE);
+  assert.equal(journalRows(root).at(-1).cause, "interrupted-apply");
+});
+
+test("a patch producing invalid YAML frontmatter is restored automatically, exit 1, both rows journalled", () => {
+  const root = txProject();
+  planDraft(root, {
+    changes: [{
+      ...PROMOTE_CHANGE, id: "c-broken", mechanism: { type: "skill", name: "broken" },
+      patches: [{ path: ".claude/skills/broken/SKILL.md", old: null, new: "---\nname: [unclosed\n---\n\n# broken\n" }],
+      retire: undefined,
+    }],
+  });
+  const { code, err } = cli(root, "apply", "--change", "c-broken");
+  assert.equal(code, 1);
+  assert.match(err, /Change c-broken was restored: what it wrote does not parse/);
+  assert.match(err, /frontmatter is not valid YAML/);
+  // the file is gone again, and so is the directory the write created
+  assert.equal(fs.existsSync(path.join(root, ".claude", "skills", "broken")), false);
+  const events = journalRows(root).map((r) => r.event);
+  assert.deepEqual(events, ["intent", "outcome", "restore"]);
+  assert.equal(journalRows(root).at(-1).cause, "post-write-validation");
+});
+
+test("validate records mechanical evidence, external attestations and a Proof link, each at its own level", () => {
+  const root = txProject();
+  planDraft(root, { changes: [PROMOTE_CHANGE] });
+  assert.equal(cli(root, "apply", "--change", "c-skill").code, 0);
+
+  const { code, out } = cli(root, "validate", "--change", "c-skill",
+    "--external", "repo tests: pass", "--proof", "proof/changelog-2026-07-28");
+  assert.equal(code, 0);
+  const evidence = JSON.parse(out).evidence;
+  const byKind = Object.fromEntries(evidence.map((e) => [e.kind, e]));
+  assert.equal(byKind.reparse.level, "mechanical");
+  assert.equal(byKind["host-discovery"].result, "pass");
+  // the state chain stops where the evidence stops
+  assert.match(byKind["host-discovery"].detail, /configured, not enabled, trusted or verified/);
+  assert.equal(byKind["static-reanalysis"].result, "pass");
+  // assay never runs the repository's own commands: an external result is attested
+  assert.equal(byKind["repo tests"].level, "attested");
+  assert.match(byKind["repo tests"].detail, /assay did not run this/);
+  // a Proof record is linked, never converted into a passing check
+  assert.equal(byKind["proof-link"].level, "behavior-observed");
+  assert.equal(byKind["proof-link"].result, "linked");
+  assert.equal(journalRows(root).filter((r) => r.event === "evidence").length, evidence.length);
+});
+
+test("rollback restores a validated change, and refuses while a later change still holds the file", () => {
+  const root = txProject();
+  planDraft(root, { changes: [REWRITE_CHANGE] });
+  assert.equal(cli(root, "apply", "--change", "c-rewrite").code, 0);
+  assert.equal(cli(root, "validate", "--change", "c-rewrite").code, 0);
+
+  // a second, separately planned change lands on the same file afterwards
+  planDraft(root, {
+    changes: [{
+      id: "c-later", kind: "stale-reference-repair", rationale: "the referenced path moved",
+      patches: [{ path: "CLAUDE.md", old: "- Never use `var` — use `const` instead.", new: "- Never use `var` — use `const` instead. See `docs/style.md`." }],
+    }],
+  }, "later.json");
+  assert.equal(cli(root, "apply", "--change", "c-later").code, 0);
+
+  const refused = cli(root, "rollback", "--change", "c-rewrite");
+  assert.equal(refused.code, 1);
+  assert.match(refused.err, /Cannot roll back change c-rewrite: change c-later wrote CLAUDE\.md afterwards/);
+
+  assert.equal(cli(root, "rollback", "--change", "c-later").code, 0);
+  const undone = cli(root, "rollback", "--change", "c-rewrite");
+  assert.equal(undone.code, 0);
+  assert.equal(JSON.parse(undone.out).rolledBack[0].outcome, "restored");
+  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE);
+  // rolling back twice says so rather than restoring a stale pre-image
+  assert.match(JSON.parse(cli(root, "rollback", "--change", "c-rewrite").out).rolledBack[0].outcome, /already restored/);
+});
+
+test("rollback after a stale rejection says there is nothing to undo", () => {
+  const root = txProject();
+  planDraft(root, { changes: [REWRITE_CHANGE] });
+  fs.writeFileSync(path.join(root, "CLAUDE.md"), TX_CLAUDE + "- One more rule.\n");
+  assert.equal(cli(root, "apply", "--change", "c-rewrite").code, 1);
+  const { code, out } = cli(root, "rollback", "--change", "c-rewrite");
+  assert.equal(code, 0);
+  assert.match(JSON.parse(out).rolledBack[0].outcome, /nothing to roll back — the change was rejected as stale/);
+});
+
+test("retire is refused without validation evidence, journalled once it has it, and reversible", () => {
+  const root = txProject();
+  planDraft(root, { changes: [PROMOTE_CHANGE] });
+
+  const beforeApply = cli(root, "retire", "--change", "c-skill");
+  assert.equal(beforeApply.code, 1);
+  assert.match(beforeApply.err, /the change has not been applied/);
+
+  assert.equal(cli(root, "apply", "--change", "c-skill").code, 0);
+  const beforeValidate = cli(root, "retire", "--change", "c-skill");
+  assert.equal(beforeValidate.code, 1);
+  assert.match(beforeValidate.err, /no validation evidence marking success/);
+  // the prose is still exactly where it was
+  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE);
+
+  assert.equal(cli(root, "validate", "--change", "c-skill").code, 0);
+  const retired = cli(root, "retire", "--change", "c-skill");
+  assert.equal(retired.code, 0);
+  assert.match(JSON.parse(retired.out).note, /Keeping the prose as documentation or defence in depth is a legitimate outcome/);
+  const after = fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8");
+  assert.doesNotMatch(after, /- Always update the changelog/);
+  assert.match(after, /<!-- retired: the `changelog` skill owns this duty\. -->/);
+  // the retirement is a journalled write like any other, on its own stage
+  const retireRows = journalRows(root).filter((r) => r.stage === "retire");
+  assert.deepEqual(retireRows.map((r) => r.event), ["intent", "outcome"]);
+  assert.equal(retireRows[0].preImage, TX_CLAUDE);
+
+  // and reversible: the retirement unwinds before the promotion it followed
+  assert.equal(cli(root, "rollback", "--change", "c-skill").code, 0);
+  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE);
+  assert.equal(fs.existsSync(path.join(root, ".claude", "skills", "changelog", "SKILL.md")), false);
+});
+
+test("clean keeps a journal with an open change and removes a closed one, keeping the plan artifacts", () => {
+  const root = txProject();
+  planDraft(root, { changes: [REWRITE_CHANGE] });
+  assert.equal(cli(root, "scan").code, 0);
+  assert.equal(cli(root, "apply", "--change", "c-rewrite").code, 0);
+
+  const open = cli(root, "clean");
+  assert.equal(open.code, 1);
+  assert.match(open.err, /kept \.assay\/journal\.jsonl: 1 open change\(s\) — c-rewrite/);
+  assert.ok(fs.existsSync(path.join(root, ".assay", "journal.jsonl")), "the pre-image survives a clean");
+  assert.equal(fs.existsSync(path.join(root, ".assay-tmp")), false, "the disposable directory still goes");
+
+  assert.equal(cli(root, "validate", "--change", "c-rewrite").code, 0);
+  const closed = cli(root, "clean");
+  assert.equal(closed.code, 0);
+  assert.match(closed.out, /Removed \.assay-tmp\/ and the closed journal\. Kept 1 plan artifact\(s\)/);
+  assert.equal(fs.existsSync(path.join(root, ".assay", "journal.jsonl")), false);
+  // the plan artifact is the park record, so cleaning never takes it
+  assert.equal(fs.readdirSync(path.join(root, ".assay")).length, 1);
+});
+
+test("a park is recorded in the plan and refused by apply", () => {
+  const root = txProject();
+  const { code, summary } = planDraft(root, {
+    changes: [{ id: "c-park", kind: "park", rationale: "Deferred: this belongs in a pre-commit gate.", patches: [] }],
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(summary.changes[0].files, []);
+  const refused = cli(root, "apply", "--change", "c-park");
+  assert.equal(refused.code, 1);
+  assert.match(refused.err, /is a park: a recorded deferral with nothing to apply/);
+  assert.equal(journalRows(root).length, 0);
+});
+
+test("every transaction command exits 1 on an unknown change id, a missing plan, or a malformed draft", () => {
+  const root = txProject();
+  for (const args of [["apply", "--change", "nope"], ["validate", "--change", "nope"], ["retire", "--change", "nope"]]) {
+    const r = cli(root, ...args);
+    assert.equal(r.code, 1, args.join(" "));
+    assert.match(r.err, /no plan in \.assay\/ defines change nope/);
+  }
+  const rolled = cli(root, "rollback", "--change", "nope");
+  assert.equal(rolled.code, 1);
+  assert.match(rolled.err, /No change nope in \.assay\/journal\.jsonl/);
+
+  const noDraft = cli(root, "plan", "--from", "absent.json");
+  assert.equal(noDraft.code, 1);
+  assert.match(noDraft.err, /No draft plan at absent\.json/);
+
+  assert.equal(cli(root, "plan").code, 1);
+  fs.writeFileSync(path.join(root, "bad.json"), "{not json");
+  const malformed = cli(root, "plan", "--from", "bad.json");
+  assert.equal(malformed.code, 1);
+  assert.match(malformed.err, /bad\.json is not valid JSON/);
+
+  // validate needs a write to validate, not just a planned change
+  planDraft(root, { changes: [REWRITE_CHANGE] });
+  const unapplied = cli(root, "validate", "--change", "c-rewrite");
+  assert.equal(unapplied.code, 1);
+  assert.match(unapplied.err, /has not been applied/);
 });

@@ -1,17 +1,69 @@
 # Applying fixes
 
-Both fix classes edit the user's files. Match every rule by its exact current
-text (`Edit` with the rule's text as `old_string`), never by line number —
-earlier edits shift lines. If a rule's text is no longer found, skip it and
-note that in one line.
+Every fix that touches a file goes through the engine's change transaction, not
+through `Edit`. You assemble one draft plan; `plan` fingerprints it, `apply`
+writes only the change ids you name, `validate` checks the result, and the
+journal makes each write reversible. Your job is the wording and the approval —
+never the write.
+
+## The draft plan
+
+Write one `.assay-tmp/draft-plan.json`. Every fix the user approved is one change
+in its `changes` array:
+
+```json
+{
+  "changes": [
+    {
+      "id": "rewrite-prettier",
+      "kind": "rule-rewrite",
+      "rationale": "The rule names no firing moment, so the duty gets skipped.",
+      "addresses": "<the rule's `key` from the scan, if you have it>",
+      "patches": [{
+        "path": "CLAUDE.md",
+        "old": "- Run prettier before committing.",
+        "new": "- Before committing, run `npx prettier --write .` over every staged file."
+      }],
+      "predicted": "resolves the trigger-distance finding on this rule",
+      "limitations": ["wording only — compliance is not measured here"]
+    }
+  ],
+  "batches": { "fix-batch": ["rewrite-prettier"] }
+}
+```
+
+- `id` — yours to choose, stable and unique within the plan. It is what the user
+  approves and what every later command names.
+- `kind` — `rule-rewrite`, `stale-reference-repair`, `placement-promotion`, or
+  `park`.
+- `rationale` — one sentence on why this change, and why this mechanism fits.
+- `patches[].old` — the **exact** current text, with enough surrounding context
+  to appear exactly once in the file. `plan` refuses an anchor it cannot find and
+  an anchor it finds twice; extend the context rather than arguing with it. Use
+  `"old": null` for a patch that creates a new file — `plan` then refuses if the
+  file already exists.
+- `patches[].new` — the replacement text, verbatim.
+- Never state a source hash yourself. `plan` fingerprints every affected file and
+  stamps the result; a fingerprint is a mechanical fact, not a judgment.
+- `batches` — only for `--fix`: one entry named `fix-batch` listing every rewrite,
+  so `apply --batch fix-batch` still records what was approved.
+
+A `park` change carries `"patches": []` and nothing else is written — see
+"Parking placement candidates" below. A `placement-promotion` needs two more
+fields, `mechanism` and `provenance` — see "Promoting candidates now".
+
+Then run `plan`, preview each change from the plan artifact, and apply only the
+ids the user approved. The sections below say what belongs in each change; the
+transaction says how it lands.
 
 ## Rewriting weak rules
 
-Rewrite each weak rule in place, targeting its dominant weakness from the
-report. A good rewrite has, in one bullet: a concrete trigger (WHEN), an
+One `rule-rewrite` change per weak rule, targeting its dominant weakness from
+the report. A good rewrite has, in one bullet: a concrete trigger (WHEN), an
 explicit action (WHAT), and the specifics Claude needs to comply — file paths,
 API names, thresholds. Keep the author's intent exactly; you are re-phrasing,
-not re-deciding.
+not re-deciding. The engine applies the patch byte for byte, so preserving the
+rule's meaning is entirely your duty and the only part of this no check catches.
 
 Per-factor moves:
 
@@ -27,8 +79,9 @@ Per-factor moves:
   doc sync) need this most — without it they get skipped entirely.
 - **F4 wrong scope** — the fix is location, not wording: recommend moving the
   rule to a `.claude/rules/<topic>.md` with `paths:` frontmatter matching the
-  files it governs. Create the file if the user approved rewrites; verify the
-  glob matches at least one real file with `Glob` before writing it.
+  files it governs. That is two patches in one change — one creating the scoped
+  file, one removing the rule from where it was — so both land or neither does.
+  Verify the glob matches at least one real file with `Glob` before planning it.
 - **F5 buried** — the fix is position, not wording: move the rule into the top
   quarter of its file, or split the long file into scoped `.claude/rules/`
   files. Preserve the text as-is.
@@ -100,8 +153,10 @@ rather than adding a second clause beside it.
 3. `description` alone must end **under 1,536 characters**. If it was already
    over, the rewrite has to remove more than it adds — past the cap the tail
    truncates in the listing and the "Do NOT use" clause is the first thing lost.
-   Apply with `Edit`, matching the exact current text, then re-check against the
-   recipe's refit checklist.
+   Put it in the draft plan as a `rule-rewrite` change whose `old` is the exact
+   current frontmatter block, then re-check against the recipe's refit checklist.
+   `validate` re-parses the frontmatter as YAML after the write, and a patch that
+   breaks it is restored automatically.
 
 Fix only `description`, deleting `when_to_use` for a model-invocable skill when
 it exists. A skill that needs a whole new body, or a brand-new skill, is
@@ -112,8 +167,10 @@ it exists. A skill that needs a whole new body, or a brand-new skill, is
 The "Stale references" section lists each rule citing a path that no longer
 resolves, with the engine's basename search appended:
 
-- **likely moved to `X`** — one file of that name exists elsewhere. Update the
-  reference to `X` in place with `Edit`, keeping the surrounding sentence intact.
+Each is one `stale-reference-repair` change in the draft plan:
+
+- **likely moved to `X`** — one file of that name exists elsewhere. Repoint the
+  reference to `X`, keeping the surrounding sentence intact.
 - **same name lives at: …** — several matches. Pick the one the rule means and
   update it; ask the user only when it's genuinely ambiguous.
 - **no file by that name in the repo** — the target is gone, not moved. Delete
@@ -154,13 +211,32 @@ hook and letting it read as the same guarantee.
 1. Fetch the primitive's doc pages from the table above with `WebFetch` —
    once per primitive per run, not once per candidate.
 2. Compose the artifact at project scope, exactly as the fetched page
-   specifies — never from a remembered format — and show it to the user as a
-   preview before anything is written: the target path, and the full file or
-   settings block it would contain.
+   specifies — never from a remembered format — and put it in the draft plan as
+   one `placement-promotion` change:
+
+   ```json
+   {
+     "id": "promote-changelog",
+     "kind": "placement-promotion",
+     "rationale": "A multi-step changelog duty is a workflow, not a sentence.",
+     "mechanism": { "type": "skill", "name": "changelog" },
+     "provenance": [{ "claim": "SKILL.md frontmatter",
+                      "url": "https://code.claude.com/docs/en/skills.md",
+                      "verified": "<the date you fetched it>" }],
+     "patches": [{ "path": ".claude/skills/changelog/SKILL.md", "old": null, "new": "<the full file>" }],
+     "limitations": ["invocation is probabilistic — a description routes it, nothing guarantees it is reached"]
+   }
+   ```
+
+   `mechanism` and `provenance` are both required for this kind: `validate` uses
+   `mechanism` to ask whether the host profile actually discovers the artifact,
+   and `provenance` is where the fetched page is recorded so the format is never
+   an untraceable dependency. A plan without them is rejected.
    - **hook** — wire the event in `.claude/settings.json`; any check script
-     goes under `.claude/hooks/`. If that file already wires a hook for the
-     same event and matcher, skip this candidate: say a hook for that event and
-     matcher is already configured and leave the rule where it is.
+     goes under `.claude/hooks/` as a second patch in the same change. If that
+     file already wires a hook for the same event and matcher, skip this
+     candidate: say a hook for that event and matcher is already configured and
+     leave the rule where it is.
    - **skill** — create `.claude/skills/<name>/SKILL.md`; the rule text
      becomes the body's first section. Write the frontmatter description per
      `${CLAUDE_PLUGIN_ROOT}/skills/craft-skill/references/recipe.md` — concrete base
@@ -168,46 +244,51 @@ hook and letting it read as the same guarantee.
      routes too weakly to stand in for a rule.
    - **subagent** — create `.claude/agents/<name>.md`; the rule text becomes
      its prompt.
-3. Install only what the user explicitly approves, one preview at a time. No
-   approval, no write. Build hooks one at a time — parallel hook builds can
-   collide on the same settings file. Skills and subagents may build in
-   parallel.
-4. Verify each artifact landed (hook wired, skill directory or agent file
-   present) and **leave the source rule exactly where it is**. An installed
-   artifact is configured, not verified: nothing has yet shown it firing on a
-   real edit.
-5. Anything that failed — fetch refused, artifact invalid — gets parked
-   (below), not retried.
+3. Preview each change from the plan artifact and apply only the ids the user
+   explicitly approves. No approval, no `--change`. One hook per change — two
+   hook changes patching the same settings file would make the second one stale.
+4. `validate --change <id>` each promotion. The host-discovery check is what
+   confirms the artifact landed somewhere the host will find it, and it reports
+   `configured` and nothing above: no file on disk is evidence that a mechanism
+   ran.
+5. Anything that failed — fetch refused, plan rejected, validation failed — gets
+   parked (below), not retried. A failed promotion that was already applied is
+   rolled back first.
 
-Close by telling the user what was installed, that it loads from the next
-session on, and that the rule is still active — so the duty is now stated in
-two places. Say the duplication is deliberate and name it: once the mechanism
-has been seen doing its job, removing or deactivating the prose is a separate
-decision they make then, not part of this pass. Never offer to delete it now,
-and never call a file that exists proof the duty is enforced.
+**The source rule stays exactly where it is.** No apply kind deletes or
+deactivates prose; the engine will not do it and neither will you. Close by
+telling the user what was installed, that it loads from the next session on, and
+that the rule is still active — so the duty is now stated in two places. Say the
+duplication is deliberate: removing or deactivating the prose is `retire`, a
+separate command with its own approval that refuses until validation evidence
+exists, and retaining the prose as documentation is a perfectly good answer.
 
 ## Parking placement candidates
 
 Parking records a deferred plan. The rule stays in its source file, untouched
-and active — parking deletes nothing and moves no text. For each candidate the
-user checked:
+and active — parking deletes nothing and moves no text. Each parked candidate is
+a `park` change in the same draft plan, carrying no patch:
 
-1. Append an entry to `.claude/assay-promotions.md` (create the file with a
-   `# Assay promotions` heading if missing):
+```json
+{
+  "id": "park-format-hook",
+  "kind": "park",
+  "rationale": "PreToolUse hook on Bash(git commit:*) — the check script must exit non-zero when prettier would reformat a staged file.",
+  "patches": [],
+  "predicted": "level 3 guardrail covering the agent's own commits",
+  "limitations": ["a hook covers only its matcher, and nothing outside a session reaches it"]
+}
+```
 
-   ```
-   ## <hook|skill|subagent|compound> — from <file>:<line>
+Put the promotion note in `rationale` — the same sentence the old promotions file
+carried — and the report's evidence names and the primitive's doc URL in
+`limitations` beside it. `apply` refuses a park by design, so nothing can turn
+one into a write by accident, and `clean` never deletes a plan artifact: the
+plan file **is** the park record, and the user promotes from it at their own
+pace by drafting a real change for that entry later.
 
-   > <exact rule text>
-
-   Signals: <evidence names from the report>
-   Promote with: <the primitive's doc URL(s) from the table above>
-   To promote: <one concrete sentence — see below>
-   ```
-
-2. Leave the source file alone. The entry quotes the rule; it does not move it.
-
-"To promote" wording by primitive — one sentence, naming the mechanism:
+"To promote" wording by primitive — one sentence in `rationale`, naming the
+mechanism:
 
 - **hook** — which event fits (a command gate before the matched tool runs, a
   check after edits, or a PostToolUse reminder for keep-file-in-sync duties
@@ -220,9 +301,8 @@ user checked:
 - **subagent** — what the subagent audits and what it must return; note that
   the value is the fresh context, so the rule text becomes its prompt, built
   per the live subagents docs.
-- **compound** — split the sentence at the conjunction and park each half under
-  its own primitive with its own "to promote" line.
+- **compound** — split the sentence at the conjunction and park each half as its
+  own change under its own primitive.
 
-The promotions file is a parking lot, not config — nothing loads it, so the
-parked rule is still doing its work from its own file, unchanged. The user
-promotes entries at their own pace and deletes them as they land.
+A plan artifact is a parking lot, not config — nothing loads it, so the parked
+rule is still doing its work from its own file, unchanged.

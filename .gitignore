@@ -29,6 +29,10 @@ ROADMAP.jsonl
 # assay target-scope contract — local-only, not published
 assay/SCOPE.md
 
+# assay's own working state when audited against this repo
+.assay-tmp/
+.assay/
+
 # This repo's dev config ported to other agent CLIs — local-only, not published
 .agents/
 .codex/

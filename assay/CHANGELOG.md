@@ -4,6 +4,23 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [Unreleased]
+
+### Added
+
+- Fixes are now one reviewable transaction. Everything you approve becomes a written plan first — the exact before-and-after text, every file it touches, why that mechanism fits, and how the result would be checked — and you see the plan before anything is written
+- Only the changes you name get applied. There is no apply-everything shortcut: an approval is a list of changes, and a change you didn't name stays unapplied even when the plan carries it
+- A plan drawn up against a file that has since changed is refused outright, naming the file — assay never patches over an edit it didn't see
+- Every write is recorded with the file exactly as it was beforehand, so any change can be put back with one command: after a failed check, after a run interrupted mid-write, or simply because you changed your mind
+- A write that produces an unreadable file — broken skill frontmatter, invalid hook JSON — is undone automatically and reported, instead of being left on disk
+- Applied changes get checked: the written file re-parses, the analysis re-runs and reports what moved, and a promoted skill or hook is confirmed to be somewhere the host will find it. Your own test suites and fresh-session checks are recorded as results you report, never run by assay
+- Retiring a rule a new mechanism replaced is now its own command, and it refuses to run until the replacement has been checked and passed. It reminds you that keeping the prose as documentation is a legitimate outcome
+- Parking a placement candidate now records it in the plan itself, with its promotion note and its limits, instead of a separate notes file
+
+### Changed
+
+- Cleanup keeps the change record whenever an applied change hasn't been checked, rolled back, or retired yet, and says which ones — the record holds the only copy of your files as they were. It removes the record once everything is resolved, and never removes a parked plan
+
 ## [0.8.0-alpha] — 2026-07-28
 
 ### Added
