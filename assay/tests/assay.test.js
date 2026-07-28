@@ -37,6 +37,42 @@ test("stripMetadata removes frontmatter, fences, tables, and bare links", () => 
   assert.deepEqual(contentLines, ["- Use Vitest for tests.", "- Never commit secrets."]);
 });
 
+test("stripMetadata removes tilde and long-backtick fenced examples", () => {
+  const content = [
+    "~~~md",
+    "- Always run `npm test`.",
+    "~~~",
+    "````md",
+    "```",
+    "- Never commit `secrets.env`.",
+    "```",
+    "````",
+    "- Use `const` for local bindings.",
+  ].join("\n");
+  const { lines } = engine.stripMetadata(content);
+  const contentLines = lines.filter((l) => l.isContent).map((l) => l.text);
+  assert.deepEqual(contentLines, ["- Use `const` for local bindings."]);
+});
+
+test("stripMetadata removes HTML comments Claude never receives", () => {
+  const content = [
+    "<!--",
+    "```",
+    "",
+    "- Always run `npm test` before committing.",
+    "-->",
+    "- Use `const` for local bindings. <!-- maintainer-only explanation -->",
+    "<!-- note --> - Never use `var` — use `let` instead.",
+  ].join("\n");
+  const { lines, excluded } = engine.stripMetadata(content);
+  const contentLines = lines.filter((l) => l.isContent).map((l) => l.text);
+  assert.deepEqual(contentLines, [
+    "- Use `const` for local bindings.",
+    "- Never use `var` — use `let` instead.",
+  ]);
+  assert.ok(excluded.has(1) && excluded.has(2) && excluded.has(3) && excluded.has(4));
+});
+
 test("stripMetadata skips <example>-style tag blocks", () => {
   const content = [
     "- Never commit secrets.",
@@ -137,13 +173,16 @@ test("splitCompound keeps a trailing subordinate clause with its sentence", () =
   assert.equal(engine.splitCompound(midClause).length, 1);
 });
 
-test("verbless bullets under a heading merge with the heading as context", () => {
-  const content = "## Error handling\n\n- All API failures through `handleError`.\n";
+test("verbless bullets retain exact source text and carry heading context separately", () => {
+  const content = "## Error handling\n\n- All API failures through `handleError`.\n- Validation failures: status `400`.\n";
   const { lines } = engine.stripMetadata(content);
   const merged = engine.mergeClarifications(engine.identifyChunks(lines));
   const rules = merged.filter(([, cls]) => cls === "rule");
-  assert.equal(rules.length, 1);
+  assert.equal(rules.length, 2);
   assert.match(rules[0][0].text, /^Error handling:/);
+  assert.equal(rules[0][0].sourceText, "All API failures through `handleError`.");
+  assert.equal(rules[0][0].lineStart, 3);
+  assert.equal(rules[1][0].sourceText, "Validation failures: status `400`.");
 });
 
 // ---------------------------------------------------------------------------
@@ -697,6 +736,18 @@ test("checkStaleness passes a markdown link whose target exists", () => {
   assert.equal(r.gated, false);
 });
 
+test("checkStaleness resolves markdown links relative to a nested rule file", () => {
+  const root = tmpProject({ ".claude/rules/backend/example.md": "x" });
+  const r = engine.checkStaleness(
+    "Follow [the example](example.md) exactly.",
+    root,
+    undefined,
+    ".claude/rules/backend/security.md"
+  );
+  assert.equal(r.gated, false);
+  assert.equal(r.missing.length, 0);
+});
+
 test("checkStaleness names where a referenced file moved to, without gating", () => {
   const root = tmpProject({ "docs/guide/example.md": "x" });
   const r = engine.checkStaleness("See [the example](/example.md) for the format.", root);
@@ -765,6 +816,40 @@ test("scan discovers files, extracts rules, and scores mechanical factors", () =
     assert.ok(r.factors.F2.value !== undefined);
     assert.ok(r.factors.F7.value !== undefined);
   }
+});
+
+test("scan discovers nested rule files recursively", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "# Project rules\n",
+    ".claude/rules/backend/security.md": "- Never log `password` — redact it instead.\n",
+    ".claude/rules/frontend/components/react.md": "- Use functional components in `.tsx` files.\n",
+    ".claude/rules/frontend/notes.txt": "- Never grade this file.\n",
+  });
+  const result = engine.scan(root);
+  assert.deepEqual(result.files.map((f) => f.path), [
+    "CLAUDE.md",
+    ".claude/rules/backend/security.md",
+    ".claude/rules/frontend/components/react.md",
+  ]);
+  assert.equal(result.rules.length, 2);
+});
+
+test("scan keeps source text and source line separate from heading context", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "# Error handling\n\n- All API failures through `handleError`.\n",
+  });
+  const result = engine.scan(root);
+  assert.equal(result.rules.length, 1);
+  assert.equal(result.rules[0].text, "All API failures through `handleError`.");
+  assert.equal(result.rules[0].contextText, "Error handling: All API failures through `handleError`.");
+  assert.equal(result.rules[0].lineStart, 3);
+
+  const audit = engine.composeAudit(result, {
+    [result.rules[0].key]: { F1: 0.7, F3: 0.8, F8: 0.9 },
+  });
+  const report = engine.renderReport(audit, { verbose: true });
+  assert.match(report, /\[R001 "All API failures through `handleError`\."]\(CLAUDE\.md:3\)/);
+  assert.doesNotMatch(report, /R001 "Error handling:/);
 });
 
 test("composeAudit + renderReport produce a graded markdown report", () => {
@@ -1140,6 +1225,7 @@ test("renderArtifact emits self-contained page content with no external assets",
   // page content only — the Artifact tool supplies the document skeleton
   assert.doesNotMatch(html, /<!doctype|<html\b|<head\b|<body\b/i);
   assert.match(html, /id="assay-data"/);
+  assert.match(html, /sortCol = -1[\s\S]*sortBy\(4\); \/\/ default: worst score first/);
 });
 
 test("renderArtifact escapes < so embedded rule text can't break out of the script block", () => {

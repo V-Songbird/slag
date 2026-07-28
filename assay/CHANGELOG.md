@@ -9,6 +9,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 ### Added
 
 - A new **Restructure candidates** section flags files whose grade is dragged down by their shape, not their wording — mostly narrative, most of their rules sitting past the midpoint, or simply too long — and names the restructure each one needs. A per-rule rewrite can't reach any of these, so the report points at the file itself: fence the narrative, move the load-bearing rules up, or split into scoped `.claude/rules/` files
+- An optional `--artifact` view renders the audit as a sortable HTML table; expand a rule to see its full text, factor scores, flags, and suggested fixes
 
 ## [0.5.8-alpha] — 2026-07-24
 

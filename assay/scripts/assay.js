@@ -307,6 +307,51 @@ function countGlobMatches(globs, root) {
   return count;
 }
 
+// Claude Code discovers .md rule files recursively and follows symlinked files
+// and directories. Mirror that loading surface so the audit neither misses a
+// nested policy nor walks forever through a circular link.
+function findRuleMarkdownFiles(rulesDir) {
+  const found = [];
+  const visitedDirs = new Set();
+
+  function walk(absDir, relDir) {
+    let realDir;
+    try {
+      realDir = fs.realpathSync(absDir);
+    } catch {
+      return;
+    }
+    if (visitedDirs.has(realDir)) return;
+    visitedDirs.add(realDir);
+
+    let entries;
+    try {
+      entries = fs.readdirSync(absDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const entry of entries) {
+      const abs = path.join(absDir, entry.name);
+      const rel = relDir ? relDir + "/" + entry.name : entry.name;
+      let stat;
+      try {
+        stat = entry.isSymbolicLink() ? fs.statSync(abs) : null;
+      } catch {
+        continue; // broken link
+      }
+      const isDir = entry.isDirectory() || (stat && stat.isDirectory());
+      const isFile = entry.isFile() || (stat && stat.isFile());
+      if (isDir) walk(abs, rel);
+      else if (isFile && entry.name.endsWith(".md")) found.push({ rel, abs });
+    }
+  }
+
+  walk(rulesDir, "");
+  return found;
+}
+
 function findInstructionFiles(root) {
   const files = [];
   const rootClaude = path.join(root, "CLAUDE.md");
@@ -318,9 +363,12 @@ function findInstructionFiles(root) {
   }
   const rulesDir = path.join(root, ".claude", "rules");
   if (fs.existsSync(rulesDir) && fs.statSync(rulesDir).isDirectory()) {
-    for (const name of fs.readdirSync(rulesDir).sort()) {
-      if (!name.endsWith(".md")) continue;
-      files.push({ path: ".claude/rules/" + name, absPath: path.join(rulesDir, name), alwaysLoaded: false });
+    for (const ruleFile of findRuleMarkdownFiles(rulesDir)) {
+      files.push({
+        path: ".claude/rules/" + ruleFile.rel,
+        absPath: ruleFile.abs,
+        alwaysLoaded: false,
+      });
     }
   }
   for (const f of files) {
@@ -500,15 +548,59 @@ function stripMetadata(content) {
     }
   }
 
+  // Claude Code strips block-level HTML comments before injecting instructions.
+  // Remove them here too, while retaining visible text around an inline comment.
+  // Fence and comment state are tracked together: a fence marker inside a
+  // comment is still a comment, and a comment marker inside a fence is code.
   const fenceRegions = new Set();
-  let inFence = false;
+  const visibleLines = lines.slice();
+  const htmlCommentOnly = new Set();
+  let fence = null;
+  let inHtmlComment = false;
   for (let i = frontmatterEnd; i < lines.length; i++) {
-    if (lines[i].trim().startsWith("```")) {
-      inFence = !inFence;
+    const raw = lines[i];
+    const trimmed = raw.trim();
+    if (fence) {
       fenceRegions.add(i);
-    } else if (inFence) {
-      fenceRegions.add(i);
+      const closer = new RegExp("^" + escapeRe(fence.char) + "{" + fence.length + ",}\\s*$");
+      if (closer.test(trimmed)) fence = null;
+      continue;
     }
+    if (!inHtmlComment) {
+      const opener = trimmed.match(/^(`{3,}|~{3,})/);
+      if (opener) {
+        fence = { char: opener[1][0], length: opener[1].length };
+        fenceRegions.add(i);
+        continue;
+      }
+    }
+
+    let visible = "";
+    let cursor = 0;
+    let removedComment = inHtmlComment;
+    while (cursor < raw.length) {
+      if (inHtmlComment) {
+        const end = raw.indexOf("-->", cursor);
+        if (end === -1) {
+          cursor = raw.length;
+          break;
+        }
+        inHtmlComment = false;
+        cursor = end + 3;
+        continue;
+      }
+      const start = raw.indexOf("<!--", cursor);
+      if (start === -1) {
+        visible += raw.slice(cursor);
+        break;
+      }
+      visible += raw.slice(cursor, start);
+      removedComment = true;
+      inHtmlComment = true;
+      cursor = start + 4;
+    }
+    visibleLines[i] = visible;
+    if (!visible.trim() && (raw.trim() || removedComment)) htmlCommentOnly.add(i);
   }
 
   // <example>…</example>-style tag blocks hold worked-example content, not
@@ -563,12 +655,13 @@ function stripMetadata(content) {
   for (let i = frontmatterEnd; i < lines.length; i++) {
     const lineNum = i + 1;
     if (fenceRegions.has(i) || tableRegions.has(i) || tagRegions.has(i) || ignoreRegions.has(i)) continue;
-    const raw = lines[i];
+    const control = lines[i].trim();
+    const raw = visibleLines[i];
     const stripped = raw.trim();
 
-    const catMatch = stripped.match(/^<!--\s*category:\s*(\w+)\s*-->$/);
+    const catMatch = control.match(/^<!--\s*category:\s*(\w+)\s*-->$/);
     if (catMatch) { annotations[lineNum] = catMatch[1]; continue; }
-    if (/^<!--\s*assay-ignore\s*-->$/.test(stripped)) { ignored.add(lineNum); continue; }
+    if (/^<!--\s*assay-ignore\s*-->$/.test(control)) { ignored.add(lineNum); continue; }
 
     if (/^#{1,6}\s/.test(stripped)) {
       result.push({ lineNum, text: "", isContent: false, isBlank: false, isHeading: true, raw: stripped });
@@ -589,6 +682,7 @@ function stripMetadata(content) {
   const excluded = new Set();
   for (const i of ignoreRegions) excluded.add(i + 1);
   for (const i of tagRegions) excluded.add(i + 1);
+  for (const i of htmlCommentOnly) excluded.add(i + 1);
 
   return { lines: result, annotations, ignored, excluded };
 }
@@ -652,6 +746,8 @@ function mergeTwo(rule, extra) {
   return {
     lineStart: rule.lineStart, lineEnd: extra.lineEnd,
     text: rule.text + " " + extra.text,
+    sourceText: rule.sourceText || rule.text,
+    sourceLineEnd: rule.sourceLineEnd || rule.lineEnd,
     isBullet: rule.isBullet, heading: rule.heading,
   };
 }
@@ -664,24 +760,18 @@ function mergeClarifications(chunks) {
     let [chunk, cls] = classified[i];
     if (cls !== "rule") { merged.push([chunk, cls]); i++; continue; }
 
-    // Verbless bullets under a heading merge into a synthetic "Heading: ..."
-    // parent so conditional blocks keep their directive context.
+    // A verbless convention bullet needs its heading as judgment context, but
+    // the source text must remain exact for clickable locations and rewrites.
+    // Keep sibling bullets separate: they are separate policies and must not be
+    // collapsed into one synthetic rule.
     if (isVerblessBullet(chunk) && chunk.heading) {
-      const heading = chunk.heading;
-      let combined = mergeTwo(
-        { lineStart: chunk.headingLine ?? chunk.lineStart, lineEnd: chunk.lineStart, text: heading + ":", isBullet: false, heading },
-        chunk
-      );
-      let j = i + 1;
-      while (j < classified.length) {
-        const [next, nextCls] = classified[j];
-        if (nextCls === "rule" && isVerblessBullet(next) && next.heading === heading) {
-          combined = mergeTwo(combined, next);
-          j++;
-        } else break;
-      }
-      merged.push([combined, "rule"]);
-      i = j;
+      merged.push([{
+        ...chunk,
+        text: chunk.heading + ": " + chunk.text,
+        sourceText: chunk.text,
+        sourceLineEnd: chunk.lineEnd,
+      }, "rule"]);
+      i++;
       continue;
     }
 
@@ -793,32 +883,39 @@ function linkTargetToPath(target) {
   if (!t) return null;
   if (/^[a-z][a-z0-9+.-]*:/i.test(t)) return null; // scheme: http, mailto, C:, data…
   if (/[<>{}*$]/.test(t) || t.startsWith("~")) return null;
-  if (t.startsWith("/")) t = t.slice(1);
+  const rootRelative = t.startsWith("/");
+  if (rootRelative) t = t.slice(1);
   if (!t) return null;
   if (!t.includes("/") && !/\.[a-zA-Z0-9]+$/.test(t)) return null; // bare word, not a path
-  return t;
+  return { path: t, rootRelative };
 }
 
-function checkStaleness(text, root, findMoved) {
+function checkStaleness(text, root, findMoved, sourceFile = "") {
   const resolve = findMoved || makeBasenameResolver(root);
   const refs = [];
   for (const m of text.matchAll(/`([^`]+)`/g)) {
     const p = backtickToPath(m[1]);
-    if (p) refs.push(p);
+    if (p) refs.push({ ref: p, resolved: p });
   }
   for (const m of text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
-    const p = linkTargetToPath(m[1]);
-    if (p) refs.push(p);
+    const target = linkTargetToPath(m[1]);
+    if (target) {
+      const sourceDir = path.posix.dirname(sourceFile.split(path.sep).join("/"));
+      const resolved = target.rootRelative
+        ? target.path
+        : path.posix.normalize(path.posix.join(sourceDir === "." ? "" : sourceDir, target.path));
+      refs.push({ ref: target.path, resolved });
+    }
   }
   const missing = [];
   const seen = new Set();
-  for (const ref of refs) {
-    const clean = ref.replace(/\/+$/, "");
+  for (const item of refs) {
+    const clean = item.resolved.replace(/\/+$/, "");
     if (seen.has(clean)) continue;
     seen.add(clean);
     if (fs.existsSync(path.join(root, clean))) continue;
     const moved = resolve(path.basename(clean)).filter((c) => c !== clean);
-    missing.push({ ref: clean, moved });
+    missing.push({ ref: item.ref.replace(/\/+$/, ""), moved });
   }
   // A ref whose file merely moved still points at something real — report it
   // as fixable, but only a truly dead ref crushes the score.
@@ -1224,25 +1321,28 @@ function scan(root) {
         for (let ln = part.lineStart - 2; ln < part.lineStart; ln++) {
           if (annotations[ln]) category = annotations[ln];
         }
-        const staleness = checkStaleness(part.text, root, findMoved);
-        const f1 = scoreF1(part.text);
+        const effectiveText = part.text;
+        const sourceText = part.sourceText || effectiveText;
+        const staleness = checkStaleness(effectiveText, root, findMoved, file.path);
+        const f1 = scoreF1(effectiveText);
         const rule = {
           id: "R" + String(counter).padStart(3, "0"),
-          key: ruleKey(file.path, part.text),
+          key: ruleKey(file.path, effectiveText),
           fileIndex,
           file: file.path,
-          text: part.text,
+          text: sourceText,
+          contextText: effectiveText,
           lineStart: part.lineStart,
-          lineEnd: part.lineEnd,
+          lineEnd: part.sourceLineEnd || part.lineEnd,
           category,
           staleness,
-          nonLatin: NON_LATIN_SCRIPT.test(part.text),
+          nonLatin: NON_LATIN_SCRIPT.test(effectiveText),
           factors: {
             F1: f1,
-            F2: scoreF2(part.text),
-            F4: scoreF4({ text: part.text, staleness }, file),
+            F2: scoreF2(effectiveText),
+            F4: scoreF4({ text: effectiveText, staleness }, file),
             F5: scoreF5(effectivePosition(part.lineStart), f5File),
-            F7: scoreF7(part.text),
+            F7: scoreF7(effectiveText),
           },
         };
         rules.push(rule);
@@ -1277,6 +1377,7 @@ function cmdScan(root) {
       id: r.id,
       key: r.key,
       text: r.text,
+      context: r.contextText !== r.text ? r.contextText : undefined,
       needsF1: r.factors.F1.method === "extraction_failed",
     })),
   };
@@ -1343,7 +1444,7 @@ function composeAudit(scanData, judgments) {
     const composed = composeScore(factors, r.staleness.gated);
     const stallRisk = r.factors.F2.stallRisk === true;
     const score = stallRisk ? Math.min(composed.score, STALL_RISK_CAP) : composed.score;
-    const placement = detectPlacement(r.text, j.F8);
+    const placement = detectPlacement(r.contextText || r.text, j.F8);
     const notRule = typeof j.notRule === "string" && j.notRule.trim() ? j.notRule.trim() : null;
     return {
       ...r,
@@ -1826,7 +1927,7 @@ const ARTIFACT_SCRIPT = `<script>
   var tbody = el("tbody"); table.appendChild(tbody); root.appendChild(table);
 
   var rows = data.rules.slice();
-  var sortCol = 4, sortDesc = false; // default: worst score first (ascending)
+  var sortCol = -1, sortDesc = false;
 
   function detailRow(r) {
     var tr = el("tr", "detail"), td = el("td");
@@ -1889,7 +1990,7 @@ const ARTIFACT_SCRIPT = `<script>
     });
     render();
   }
-  sortBy(4);
+  sortBy(4); // default: worst score first (ascending)
 })();
 </script>`;
 
@@ -1980,7 +2081,13 @@ function cmdRemeasure(root, opts) {
       pending: unknown.length,
       judgmentsFile: TMP_DIR + "/judgments.json",
       note: "Judge these reworded rules, merge into judgments.json, then rerun remeasure.",
-      judge: unknown.map((r) => ({ id: r.id, key: r.key, text: r.text, needsF1: r.factors.F1.method === "extraction_failed" })),
+      judge: unknown.map((r) => ({
+        id: r.id,
+        key: r.key,
+        text: r.text,
+        context: r.contextText !== r.text ? r.contextText : undefined,
+        needsF1: r.factors.F1.method === "extraction_failed",
+      })),
     }, null, 2) + "\n");
     return;
   }
@@ -2019,7 +2126,7 @@ function main() {
 }
 
 module.exports = {
-  parseFrontmatter, findInstructionFiles, stripMetadata, identifyChunks, classifyChunk,
+  parseFrontmatter, findRuleMarkdownFiles, findInstructionFiles, stripMetadata, identifyChunks, classifyChunk,
   mergeClarifications, splitCompound, checkStaleness, scoreF1, scoreF2, scoreF4, scoreF5, scoreF7,
   composeScore, grade, detectPlacement, scan, composeAudit, renderReport, loadJudgments,
   looksLikeStatement, hasImperativeVerb, checkSkillDescription, gradeSkill, findSkillFiles,

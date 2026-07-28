@@ -26,6 +26,9 @@ docs/
 ROADMAP.jsonl
 .foreman/
 
+# assay target-scope contract — local-only, not published
+assay/SCOPE.md
+
 # This repo's dev config ported to other agent CLIs — local-only, not published
 .agents/
 .codex/

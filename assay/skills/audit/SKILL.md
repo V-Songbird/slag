@@ -43,6 +43,10 @@ If `ruleCount` and `skillCount` are both 0, tell the user nothing was found and
 stop. If only `ruleCount` is 0, write `{}` to `.assay-tmp/judgments.json`, skip
 step 2, and continue.
 
+A `judge` entry can include `context` when a heading or following clarification
+is needed to interpret the rule. Judge the rule with that context, but keep
+`text` as the exact source wording — report links and rewrites target that text.
+
 ## 2. Judge F3 and F8
 
 Read [references/rubrics.md](references/rubrics.md), then score every rule in
