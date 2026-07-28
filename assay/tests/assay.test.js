@@ -10,6 +10,15 @@ const path = require("path");
 
 const engine = require("../scripts/assay.js");
 
+// [Foreman: 074] The engine now discovers user-scope instruction files too, so
+// every fixture below must see an EMPTY user directory — otherwise whatever is
+// in the developer's own ~/.claude leaks into the fixtures and the suite becomes
+// machine-dependent. Set once, before any scan runs; spawned CLI processes
+// inherit it through process.env. Tests that want a populated user dir override
+// it explicitly.
+const EMPTY_USER_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "assay-userdir-"));
+process.env.ASSAY_USER_DIR = EMPTY_USER_DIR;
+
 function tmpProject(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "assay-test-"));
   for (const [rel, content] of Object.entries(files)) {
@@ -1474,6 +1483,8 @@ test("scan exits 0 and writes a parseable scan.json carrying coverage", () => {
   const scanData = JSON.parse(fs.readFileSync(scanFile, "utf-8"));
   assert.deepEqual(scanData.coverage, {
     filesDiscovered: 1, filesParsed: 1, inaccessible: [], proseChunks: 1, excludedLines: 0,
+    // [Foreman: 074] what the audit saw and did not grade
+    userFilesIncluded: false, userSkills: [], agents: [],
   });
 });
 
@@ -1815,15 +1826,20 @@ test("remeasure discards a prior audit from an older assay and still reports", (
   assert.equal(engine.validateRecord(readJson(root, "audit.json"), "audit"), null);
 });
 
-test("two scans of an unchanged project differ only in analysisTime", () => {
+// [Foreman: 074] hostVersion joins analysisTime as environmental: it is probed
+// from whatever `claude` the machine has on PATH, so it is not a function of the
+// project. Everything else still has to be byte-identical.
+test("two scans of an unchanged project differ only in analysisTime and hostVersion", () => {
   const root = cliFixture();
   assert.equal(cli(root, "scan").code, 0);
   const first = readJson(root, "scan.json");
   assert.equal(cli(root, "scan").code, 0);
   const second = readJson(root, "scan.json");
   assert.ok(!Number.isNaN(Date.parse(first.context.analysisTime)));
-  delete first.context.analysisTime;
-  delete second.context.analysisTime;
+  for (const record of [first, second]) {
+    delete record.context.analysisTime;
+    delete record.context.hostVersion;
+  }
   assert.equal(JSON.stringify(first), JSON.stringify(second));
 });
 
@@ -2151,4 +2167,224 @@ test("setext headings and pipe-less tables are recognized", () => {
 
   const table = engine.stripMetadata("Do | Don't\n--- | ---\nUse `const` | Never use `var`\n");
   assert.deepEqual(table.lines.filter((l) => l.isContent).map((l) => l.text), ["Use `const`", "Never use `var`"]);
+});
+
+// ---------------------------------------------------------------------------
+// Host adapter — [Foreman: 074]
+// ---------------------------------------------------------------------------
+
+const adapter = engine.adapter;
+
+// A user directory of its own, so these tests are not reading EMPTY_USER_DIR.
+function tmpUserDir(files) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "assay-user-"));
+  for (const [rel, content] of Object.entries(files || {})) {
+    const full = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, content);
+  }
+  return dir;
+}
+
+test("detectContext fixes the context from overrides and never probes the host by default", () => {
+  const root = tmpProject({ "CLAUDE.md": "# rules\n" });
+  const userDir = tmpUserDir({});
+
+  const ctx = adapter.detectContext({ root, userDir });
+  assert.equal(ctx.projectRoot, path.resolve(root));
+  assert.equal(ctx.startupDirectory, ctx.projectRoot);
+  assert.equal(ctx.userDir, path.resolve(userDir));
+  assert.equal(ctx.hostVersion, null, "probeHost defaults off");
+
+  // --project-only drops user scope entirely, even with an explicit userDir
+  assert.equal(adapter.detectContext({ root, userDir, projectOnly: true }).userDir, null);
+  // ASSAY_USER_DIR is the fallback when no explicit dir is passed
+  assert.equal(adapter.detectContext({ root }).userDir, path.resolve(process.env.ASSAY_USER_DIR));
+});
+
+test("discoverSources returns the documented Claude surface in load order with precedence", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "- Use `const`.\n",
+    "CLAUDE.local.md": "- Use the staging URL.\n",
+    ".claude/rules/style.md": "- Keep lines short.\n",
+    ".claude/rules/api/errors.md": '---\npaths: ["src/**"]\n---\n\n- Return typed errors.\n',
+  });
+  const userDir = tmpUserDir({ "CLAUDE.md": "- Prefer pnpm.\n" });
+  const { sources, inaccessible } = adapter.discoverSources(adapter.detectContext({ root, userDir }));
+
+  assert.deepEqual(inaccessible, []);
+  assert.deepEqual(sources.map((s) => s.path), [
+    path.join(userDir, "CLAUDE.md"),
+    "CLAUDE.md",
+    "CLAUDE.local.md",
+    ".claude/rules/api/errors.md",
+    ".claude/rules/style.md",
+  ]);
+  assert.deepEqual(sources.map((s) => s.scope), ["user", "project", "project", "project", "project"]);
+  assert.deepEqual(sources.map((s) => s.kind), ["memory", "memory", "memory", "rules", "rules"]);
+  // user memory is read first and outranked by everything in the project
+  assert.deepEqual(sources.map((s) => s.precedence), [1, 2, 3, 2, 2]);
+  assert.ok(sources.every((s) => typeof s.selectionReason === "string" && s.selectionReason));
+
+  // the same-level choice between ./CLAUDE.md and ./.claude/CLAUDE.md says which won
+  const alt = adapter.discoverSources(adapter.detectContext({
+    root: tmpProject({ ".claude/CLAUDE.md": "- Use `const`.\n" }), projectOnly: true,
+  }));
+  assert.equal(alt.sources[0].path, ".claude/CLAUDE.md");
+  assert.match(alt.sources[0].selectionReason, /\.\/CLAUDE\.md absent/);
+});
+
+test("loadsAlways asks the declared scope, not the filename", () => {
+  const memory = { kind: "memory", alwaysLoaded: true };
+  const rules = { kind: "rules", alwaysLoaded: false };
+  assert.equal(adapter.loadsAlways(memory, []), true);
+  assert.equal(adapter.loadsAlways(rules, []), true, "an unscoped rules file loads every session");
+  assert.equal(adapter.loadsAlways(rules, ["src/**"]), false);
+});
+
+test("a user memory file that cannot be read becomes a coverage gap, not a throw", () => {
+  const userDir = tmpUserDir({});
+  // a directory where the user CLAUDE.md should be: discovered, then unreadable
+  fs.mkdirSync(path.join(userDir, "CLAUDE.md"));
+  const root = tmpProject({ "CLAUDE.md": "- Use `const`.\n" });
+
+  const scanData = engine.scan(root, { userDir });
+  assert.equal(scanData.coverage.filesParsed, 1);
+  assert.equal(scanData.coverage.inaccessible.length, 1);
+  assert.equal(scanData.coverage.inaccessible[0].path, path.join(userDir, "CLAUDE.md"));
+  assert.ok(scanData.coverage.inaccessible[0].reason);
+  assert.equal(scanData.coverage.userFilesIncluded, false);
+});
+
+test("user skills and subagents are inventoried, never graded", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "- Use `const`.\n",
+    ".claude/agents/reviewer.md": "---\nname: reviewer\n---\n",
+    ".claude/skills/audit/SKILL.md": "---\nname: audit\ndescription: Use when the user asks to audit `CLAUDE.md`. Do NOT use for code review.\n---\n",
+  });
+  const userDir = tmpUserDir({
+    "skills/mine/SKILL.md": "---\nname: mine\ndescription: personal helper\n---\n",
+    "skills/bare/SKILL.md": "---\nname: bare\n---\n",
+  });
+
+  const scanData = engine.scan(root, { userDir });
+  assert.equal(scanData.skills.length, 1, "only project skills are graded");
+  assert.equal(scanData.skills[0].name, "audit");
+  assert.deepEqual(scanData.coverage.userSkills, [
+    { name: "bare", hasDescription: false },
+    { name: "mine", hasDescription: true },
+  ]);
+  assert.deepEqual(scanData.coverage.agents, ["reviewer"]);
+
+  const report = engine.renderReport(engine.composeAudit(scanData, judgeEvery(scanData)));
+  assert.match(report, /2 user skill\(s\) present — not graded/);
+  assert.match(report, /1 subagent\(s\) defined in `\.claude\/agents\/`/);
+});
+
+// judgments for every rule in a scan, so a report can be rendered from it
+function judgeEvery(scanData, j = { F3: 0.7, F8: 0.9 }) {
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.key] = { ...j };
+  return judgments;
+}
+
+test("user rules are graded in their own section and never move the project grade", () => {
+  const project = { "CLAUDE.md": FIXTURE_CLAUDE };
+  const userDir = tmpUserDir({ "CLAUDE.md": "# Mine\n\n- Write good code.\n- Be careful.\n" });
+
+  const withUser = engine.scan(tmpProject(project), { userDir });
+  const withoutUser = engine.scan(tmpProject(project), { projectOnly: true });
+  const auditWith = engine.composeAudit(withUser, judgeEvery(withUser));
+  const auditWithout = engine.composeAudit(withoutUser, judgeEvery(withoutUser));
+
+  // the user file's rules ARE graded
+  assert.ok(withUser.rules.length > withoutUser.rules.length);
+  assert.equal(auditWith.files.filter((f) => f.scope === "user").length, 1);
+  assert.ok(auditWith.files.find((f) => f.scope === "user").grade);
+  // and the project grade is untouched by them
+  assert.equal(auditWith.corpusScore, auditWithout.corpusScore);
+  assert.equal(auditWith.corpusGrade, auditWithout.corpusGrade);
+
+  const report = engine.renderReport(auditWith);
+  assert.match(report, /## User scope/);
+  assert.match(report, /never move the project grade/);
+  // the user file is out of the project Files table
+  const filesTable = report.slice(report.indexOf("## Files"), report.indexOf("## User scope"));
+  assert.doesNotMatch(filesTable, /Mine|assay-user-/);
+  assert.doesNotMatch(engine.renderReport(auditWithout), /## User scope/);
+});
+
+test("--project-only keeps the audit inside the repo", () => {
+  const userDir = tmpUserDir({ "CLAUDE.md": "# Mine\n\n- Write good code.\n" });
+  const root = cliFixture();
+  const env = { ...process.env, ASSAY_USER_DIR: userDir };
+  const run = (...args) => {
+    const r = spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: "utf-8", env });
+    return { code: r.status, out: r.stdout, err: r.stderr };
+  };
+
+  assert.equal(run("scan", "--project-only").code, 0);
+  const scoped = readJson(root, "scan.json");
+  assert.equal(scoped.context.userDir, null);
+  assert.equal(scoped.coverage.userFilesIncluded, false);
+  assert.deepEqual(scoped.files.map((f) => f.path), ["CLAUDE.md"]);
+
+  assert.equal(run("scan").code, 0);
+  const wide = readJson(root, "scan.json");
+  assert.equal(wide.context.userDir, path.resolve(userDir));
+  assert.equal(wide.coverage.userFilesIncluded, true);
+  assert.deepEqual(wide.files.map((f) => f.scope), ["user", "project"]);
+
+  // and the flag survives to the report, which groups what it graded
+  const judgments = {};
+  for (const r of wide.rules) judgments[r.key] = { F3: 0.7, F8: 0.9 };
+  fs.writeFileSync(path.join(root, ".assay-tmp", "judgments.json"), JSON.stringify(judgments));
+  assert.match(run("report").out, /## User scope/);
+
+  assert.equal(cli(root, "scan", "--nope").code, 1);
+});
+
+// The seam itself: scan() must work against an adapter describing a surface
+// this engine has never heard of. Nothing below the adapter may recognize a
+// filename — if something did, "AGENTS.override.md" would grade as zero rules.
+test("scan runs on a stub adapter describing a made-up host surface", () => {
+  const root = tmpProject({ "AGENTS.override.md": "# House rules\n\n- Never use `var` — use `const` instead.\n" });
+  const stub = {
+    name: "made-up", profileVersion: 9,
+    detectContext: ({ root: r }) => ({ projectRoot: path.resolve(r), startupDirectory: path.resolve(r), userDir: null, hostVersion: "1.2.3" }),
+    discoverSources: (ctx) => ({
+      sources: [{
+        path: "AGENTS.override.md",
+        absPath: path.join(ctx.projectRoot, "AGENTS.override.md"),
+        scope: "project", kind: "memory", alwaysLoaded: true,
+        precedence: 7, selectionReason: "override file wins at this level",
+      }],
+      inaccessible: [],
+    }),
+    loadsAlways: () => true,
+    discoverSkills: () => ({ project: [], user: [] }),
+    discoverAgents: () => [],
+    discoverHooks: () => [],
+  };
+
+  const scanData = engine.scan(root, { adapter: stub });
+  assert.equal(scanData.context.hostVersion, "1.2.3");
+  assert.deepEqual(scanData.files.map((f) => f.path), ["AGENTS.override.md"]);
+  assert.equal(scanData.sources[0].precedence, 7);
+  assert.equal(scanData.sources[0].selectionReason, "override file wins at this level");
+  assert.equal(scanData.rules.length, 1);
+  assert.match(scanData.rules[0].text, /Never use `var`/);
+
+  const report = engine.renderReport(engine.composeAudit(scanData, judgeEvery(scanData)));
+  assert.match(report, /AGENTS\.override\.md/);
+});
+
+test("the adapter reports no documented byte budget and cites its sources", () => {
+  assert.deepEqual(adapter.budgets(), { documented: null });
+  const provenance = adapter.docs();
+  assert.ok(provenance.length >= 4);
+  for (const d of provenance) {
+    assert.ok(d.claim && /^https:\/\//.test(d.url), d.claim);
+    assert.match(d.verified, /^\d{4}-\d{2}-\d{2}$/);
+  }
 });

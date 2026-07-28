@@ -13,6 +13,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - Frontmatter that isn't valid YAML is reported with the reason and the lines it covers, instead of being half-read into guesses
 - Every line of every instruction file is accounted for in the report's **Coverage** block: graded, set aside as content, explicitly ignored, excluded, or named as something assay could not read. An unclosed code fence or an unclosed HTML comment is counted there rather than silently swallowing the rest of the file
 - The JSON record carries a per-file inventory — content hash, line count, and the span counts those lines fall into — and every rule carries its exact source range, line and column and character offset
+- The audit now sees the whole documented Claude surface for a project: `CLAUDE.local.md`, your user-level `CLAUDE.md` — graded under its own section, never moving the project grade — and a count of the user skills and subagents that exist alongside them. `--project-only` keeps the audit inside the repo
 
 ### Changed
 

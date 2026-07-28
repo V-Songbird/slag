@@ -5,24 +5,27 @@
 // .claude/skills/*/SKILL.md frontmatter descriptions.
 //
 // Commands (run from the project root being audited):
-//   node assay.js scan [--root <path>]   discover + extract + mechanical scores;
+//   node assay.js scan [--root <path>] [--project-only]
+//                                        discover + extract + mechanical scores;
 //                                        writes .assay-tmp/scan.json, prints a
 //                                        JSON summary with the judgment worklist
 //   node assay.js report [--verbose] [--json] [--root <path>]
 //                                        merges .assay-tmp/judgments.json, computes
 //                                        composite scores + placement candidates,
 //                                        prints the finished markdown report
-//   node assay.js remeasure [--verbose] [--json] [--root <path>]
+//   node assay.js remeasure [--verbose] [--json] [--root <path>] [--project-only]
 //                                        re-scans after fixes, reuses cached
 //                                        judgments (re-judging only reworded
 //                                        rules), prints a before/after report
 //   node assay.js clean [--root <path>]  removes .assay-tmp/
 //
+// --project-only skips user-scope discovery; ASSAY_USER_DIR overrides where the
+// user's own instruction files are looked for (default ~/.claude).
+//
 // Everything mechanical happens here; the only model-judged inputs are F3
 // (trigger-action distance) and F8 (enforceability), supplied via judgments.json.
 
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 
@@ -32,6 +35,13 @@ const crypto = require("crypto");
 // still has no package.json and nothing for a user to install.
 const MarkdownIt = require("./vendor/markdown-it.js");
 const yaml = require("./vendor/js-yaml.js");
+
+// [Foreman: 074] The host adapter owns every "where does Claude load this from"
+// question — source discovery, precedence, skills, subagents, hooks, budgets,
+// documentation provenance. Nothing below infers loading from a filename; it
+// reads what the adapter returned. Swapping this require is what a second host
+// profile costs.
+const claudeAdapter = require("./adapters/claude.js");
 
 // CommonMark plus GFM tables (markdown-it's "default" preset), with raw HTML
 // recognized so comments and tag blocks arrive as their own tokens.
@@ -62,8 +72,10 @@ const PARSER_NAME = "assay-markdown";
 // 1 was the handwritten line scanner; a record naming version 1 was produced by
 // a different parser and its spans are not comparable.
 const PARSER_VERSION = 2;
-const PROFILE_HOST = "claude-code";
-const PROFILE_VERSION = 1;
+// [Foreman: 074] Host identity and profile version come from the adapter, so a
+// record always names the profile that actually produced it.
+const PROFILE_HOST = claudeAdapter.name;
+const PROFILE_VERSION = claudeAdapter.profileVersion;
 
 const RECORD_SCHEMA = {
   version: SCHEMA_VERSION,
@@ -122,19 +134,22 @@ function validateRecord(record, kind) {
 }
 
 function makeRecord(kind, payload, root) {
-  const { coverage = null, ...rest } = payload;
+  const { coverage = null, context = null, ...rest } = payload;
   const projectRoot = path.resolve(root);
   return {
     schemaVersion: SCHEMA_VERSION,
     analyzer: { name: "assay", version: ANALYZER_VERSION },
     parser: { name: PARSER_NAME, version: PARSER_VERSION },
     profile: { host: PROFILE_HOST, version: PROFILE_VERSION },
+    // [Foreman: 074] The context the adapter fixed for this analysis, carried
+    // through unchanged. `userDir` null means user scope was off; `hostVersion`
+    // null means the host was not probed or did not answer. Both are additive:
+    // an older reader ignores them, and neither is required by the schema.
     context: {
-      projectRoot,
-      // razor: assay analyzes one root, so the startup directory is that root.
-      // A startup directory that differs from the project root arrives with the
-      // host-adapter work, which is what makes the distinction observable.
-      startupDirectory: projectRoot,
+      projectRoot: (context && context.projectRoot) || projectRoot,
+      startupDirectory: (context && context.startupDirectory) || projectRoot,
+      userDir: context ? context.userDir : null,
+      hostVersion: context ? context.hostVersion : null,
       analysisTime: new Date().toISOString(),
     },
     coverage,
@@ -475,108 +490,47 @@ function countGlobMatches(globs, root) {
   return count;
 }
 
-// Claude Code discovers .md rule files recursively and follows symlinked files
-// and directories. Mirror that loading surface so the audit neither misses a
-// nested policy nor walks forever through a circular link.
+// [Foreman: 074] Reading and parsing is shared; *which* files exist and how
+// they load is the adapter's answer, arriving as `sources`. This function opens
+// each one and does nothing host-specific with it except ask the adapter the one
+// loading question that depends on parsed content (see adapter.loadsAlways).
 //
-// [Foreman: 070] A source the walk cannot open — an unreadable directory, a
-// broken link — used to drop out with no trace, so the report counted what it
-// graded and said nothing about what it never saw. Every swallowed error is
-// recorded into `inaccessible` instead; paths are relative to `rulesDir` and the
-// caller prefixes them.
-function findRuleMarkdownFiles(rulesDir, inaccessible = []) {
-  const found = [];
-  const visitedDirs = new Set();
-
-  function walk(absDir, relDir) {
-    let realDir;
-    try {
-      realDir = fs.realpathSync(absDir);
-    } catch (err) {
-      inaccessible.push({ path: relDir || ".", reason: err.code || err.message });
-      return;
-    }
-    if (visitedDirs.has(realDir)) return;
-    visitedDirs.add(realDir);
-
-    let entries;
-    try {
-      entries = fs.readdirSync(absDir, { withFileTypes: true });
-    } catch (err) {
-      inaccessible.push({ path: relDir || ".", reason: err.code || err.message });
-      return;
-    }
-    entries.sort((a, b) => a.name.localeCompare(b.name));
-
-    for (const entry of entries) {
-      const abs = path.join(absDir, entry.name);
-      const rel = relDir ? relDir + "/" + entry.name : entry.name;
-      let stat;
-      try {
-        stat = entry.isSymbolicLink() ? fs.statSync(abs) : null;
-      } catch (err) {
-        inaccessible.push({ path: rel, reason: err.code || err.message });
-        continue; // broken link
-      }
-      const isDir = entry.isDirectory() || (stat && stat.isDirectory());
-      const isFile = entry.isFile() || (stat && stat.isFile());
-      if (isDir) walk(abs, rel);
-      else if (isFile && entry.name.endsWith(".md")) found.push({ rel, abs });
-    }
-  }
-
-  walk(rulesDir, "");
-  return found;
-}
-
-function findInstructionFiles(root, inaccessible = []) {
-  const files = [];
-  const rootClaude = path.join(root, "CLAUDE.md");
-  const altClaude = path.join(root, ".claude", "CLAUDE.md");
-  if (fs.existsSync(rootClaude)) {
-    files.push({ path: "CLAUDE.md", absPath: rootClaude, alwaysLoaded: true });
-  } else if (fs.existsSync(altClaude)) {
-    files.push({ path: ".claude/CLAUDE.md", absPath: altClaude, alwaysLoaded: true });
-  }
-  const rulesDir = path.join(root, ".claude", "rules");
-  if (fs.existsSync(rulesDir) && fs.statSync(rulesDir).isDirectory()) {
-    const walkIssues = [];
-    for (const ruleFile of findRuleMarkdownFiles(rulesDir, walkIssues)) {
-      files.push({
-        path: ".claude/rules/" + ruleFile.rel,
-        absPath: ruleFile.abs,
-        alwaysLoaded: false,
-      });
-    }
-    for (const issue of walkIssues) {
-      inaccessible.push({ path: issue.path === "." ? ".claude/rules" : ".claude/rules/" + issue.path, reason: issue.reason });
-    }
-  }
-  // [Foreman: 070] A file that is discovered but unreadable leaves the corpus
-  // and is reported, not thrown on: one locked file must not take the whole
-  // audit down, and it must not vanish either.
+// [Foreman: 070] A file that is discovered but unreadable leaves the corpus
+// and is reported, not thrown on: one locked file must not take the whole
+// audit down, and it must not vanish either.
+function readSources(sources, root, inaccessible = [], adapter = claudeAdapter) {
   const parsed = [];
-  for (const f of files) {
+  for (const source of sources) {
     let content;
     try {
-      content = fs.readFileSync(f.absPath, "utf-8");
+      content = fs.readFileSync(source.absPath, "utf-8");
     } catch (err) {
-      inaccessible.push({ path: f.path, reason: err.code || err.message });
+      inaccessible.push({ path: source.path, reason: err.code || err.message });
       continue;
     }
     const fm = parseFrontmatter(content);
     let globs = fm.paths || [];
     if (typeof globs === "string") globs = globs ? [globs] : [];
-    f.content = content;
+    const f = { ...source, content };
     f.globs = globs;
     f.globMatchCount = globs.length ? countGlobMatches(globs, root) : null;
     f.defaultCategory = fm["default-category"] || "mandate";
     f.lineCount = content.split("\n").length;
-    // an unscoped .claude/rules file loads every session, same as CLAUDE.md
-    if (!f.alwaysLoaded && globs.length === 0) f.alwaysLoaded = true;
+    f.alwaysLoaded = adapter.loadsAlways(source, globs);
     parsed.push(f);
   }
   return parsed;
+}
+
+// Kept for callers that only want the project's parsed instruction files. User
+// scope is off here: a caller passing nothing but a root is asking about a
+// project, and picking up the developer's own ~/.claude behind its back would be
+// a surprise.
+function findInstructionFiles(root, inaccessible = []) {
+  const ctx = claudeAdapter.detectContext({ root, projectOnly: true });
+  const found = claudeAdapter.discoverSources(ctx);
+  inaccessible.push(...found.inaccessible);
+  return readSources(found.sources, ctx.projectRoot, inaccessible);
 }
 
 // ---------------------------------------------------------------------------
@@ -668,14 +622,18 @@ function gradeSkill(router, whenToUse, modelInvocable, userInvocable) {
   return { mode: "user-only", missing: [], redundant: false, overCap: length > DESCRIPTION_CAP, length, overSpecified, empty: length === 0 };
 }
 
-function findSkillFiles(root) {
-  const skillsDir = path.join(root, ".claude", "skills");
+// [Foreman: 074] Skill locations come from the adapter; reading the frontmatter
+// and grading it stays here.
+function readSkills(found) {
   const skills = [];
-  if (!fs.existsSync(skillsDir) || !fs.statSync(skillsDir).isDirectory()) return skills;
-  for (const name of fs.readdirSync(skillsDir).sort()) {
-    const skillMd = path.join(skillsDir, name, "SKILL.md");
-    if (!fs.existsSync(skillMd)) continue;
-    const fm = parseFrontmatter(fs.readFileSync(skillMd, "utf-8"));
+  for (const s of found) {
+    let raw;
+    try {
+      raw = fs.readFileSync(s.absPath, "utf-8");
+    } catch {
+      continue;
+    }
+    const fm = parseFrontmatter(raw);
     const descText = typeof fm.description === "string" ? fm.description : "";
     const whenToUse = typeof fm.when_to_use === "string" ? fm.when_to_use : "";
     // when_to_use carries trigger text in some skills; the router reads both
@@ -684,8 +642,8 @@ function findSkillFiles(root) {
     const modelInvocable = !(fm["disable-model-invocation"] === "true" || fm["disable-model-invocation"] === true);
     const userInvocable = !(fm["user-invocable"] === "false" || fm["user-invocable"] === false);
     skills.push({
-      path: ".claude/skills/" + name + "/SKILL.md",
-      name: typeof fm.name === "string" && fm.name ? fm.name : name,
+      path: s.path,
+      name: typeof fm.name === "string" && fm.name ? fm.name : s.name,
       description,
       modelInvocable,
       userInvocable,
@@ -693,6 +651,10 @@ function findSkillFiles(root) {
     });
   }
   return skills;
+}
+
+function findSkillFiles(root) {
+  return readSkills(claudeAdapter.discoverSkills(claudeAdapter.detectContext({ root, projectOnly: true })).project);
 }
 
 // ---------------------------------------------------------------------------
@@ -1660,67 +1622,6 @@ function detectPlacement(ruleText, f8) {
 }
 
 // ---------------------------------------------------------------------------
-// Hook inventory — what's already mechanically enforced
-// ---------------------------------------------------------------------------
-
-// The last path-shaped token of a hook command line names the script; the
-// interpreter and env-var prefixes around it are noise.
-function hookCommandLabel(cmd) {
-  const clean = String(cmd).replace(/["']/g, "");
-  const pathy = clean.split(/\s+/).filter((t) => /[\\/]/.test(t));
-  const token = pathy.length ? pathy[pathy.length - 1] : clean.split(/\s+/)[0];
-  return token.split(/[\\/]/).pop();
-}
-
-function readHookConfig(file, source, entries) {
-  let cfg;
-  try {
-    cfg = JSON.parse(fs.readFileSync(file, "utf-8"));
-  } catch {
-    return; // absent or malformed — no inventory from this file
-  }
-  for (const [event, groups] of Object.entries(cfg.hooks || {})) {
-    if (!Array.isArray(groups)) continue;
-    for (const g of groups) {
-      for (const h of g.hooks || []) {
-        if (!h || !h.command) continue;
-        entries.push({ event, matcher: g.matcher || "*", command: hookCommandLabel(h.command), source });
-      }
-    }
-  }
-}
-
-// Hooks that already run for this project: project + user settings, plus every
-// installed plugin's hooks.json. A rule the audit flags as a hook candidate may
-// already be enforced by one of these — the report lists them so the candidate
-// can be checked instead of rebuilt.
-function collectHooks(root) {
-  const entries = [];
-  readHookConfig(path.join(root, ".claude", "settings.json"), "project", entries);
-  readHookConfig(path.join(root, ".claude", "settings.local.json"), "project", entries);
-  readHookConfig(path.join(os.homedir(), ".claude", "settings.json"), "user", entries);
-  try {
-    const reg = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json"), "utf-8"));
-    for (const [key, installs] of Object.entries(reg.plugins || {})) {
-      const name = key.split("@")[0];
-      for (const inst of Array.isArray(installs) ? installs : []) {
-        if (!inst || !inst.installPath) continue;
-        readHookConfig(path.join(inst.installPath, "hooks", "hooks.json"), "plugin: " + name, entries);
-      }
-    }
-  } catch {
-    // no plugin registry — nothing to add
-  }
-  const seen = new Set();
-  return entries.filter((e) => {
-    const k = e.event + "|" + e.matcher + "|" + e.command + "|" + e.source;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-}
-
-// ---------------------------------------------------------------------------
 // scan
 // ---------------------------------------------------------------------------
 
@@ -1776,9 +1677,22 @@ function sourceRange(lines, offsets, startLine, endLine, text) {
   };
 }
 
-function scan(root) {
-  const inaccessible = [];
-  const files = findInstructionFiles(root, inaccessible);
+// [Foreman: 074] `options.adapter` is the seam: scan does not know it is looking
+// at Claude Code, only that something handed it sources, skills, agents and
+// hooks. `userDir` / `projectOnly` / `probeHost` are passed straight through to
+// the adapter's own context detection.
+function scan(root, options = {}) {
+  const adapter = options.adapter || claudeAdapter;
+  const context = adapter.detectContext({
+    root,
+    userDir: options.userDir,
+    projectOnly: options.projectOnly === true,
+    probeHost: options.probeHost === true,
+  });
+  const discovered = adapter.discoverSources(context);
+  const inaccessible = [...(discovered.inaccessible || [])];
+  const files = readSources(discovered.sources, context.projectRoot, inaccessible, adapter);
+  const skillsFound = adapter.discoverSkills(context);
   const rules = [];
   const sources = [];
   let counter = 0;
@@ -1878,6 +1792,11 @@ function scan(root) {
     for (const cls of classes) spans[cls]++;
     sources.push({
       path: file.path,
+      // [Foreman: 074] how the host loads this file, straight from the adapter
+      scope: file.scope,
+      kind: file.kind,
+      precedence: file.precedence,
+      selectionReason: file.selectionReason,
       sourceHash: crypto.createHash("sha1").update(file.content).digest("hex"),
       lineCount: file.lineCount,
       spans,
@@ -1885,13 +1804,19 @@ function scan(root) {
     });
   });
 
+  const userSkills = (skillsFound.user || []).map((s) => ({
+    name: s.name,
+    hasDescription: hasSkillDescription(s.absPath),
+  }));
+
   return {
-    root: path.resolve(root),
+    root: context.projectRoot,
+    context,
     files: files.map(({ content, absPath, ...rest }) => rest),
     sources,
     rules,
-    skills: findSkillFiles(root),
-    hookInventory: collectHooks(root),
+    skills: readSkills(skillsFound.project || []),
+    hookInventory: adapter.discoverHooks(context),
     // [Foreman: 070] What the audit did and did not look at. The report prints
     // this so a number is never read as covering more than it measured.
     coverage: {
@@ -1900,12 +1825,29 @@ function scan(root) {
       inaccessible,
       proseChunks,
       excludedLines,
+      // [Foreman: 074] Surfaces the audit saw but did not grade. User files are
+      // graded, but under their own heading and outside the project grade, so
+      // the marker says which corpus the numbers above cover.
+      userFilesIncluded: files.some((f) => f.scope === "user"),
+      userSkills,
+      agents: adapter.discoverAgents(context),
     },
   };
 }
 
-function cmdScan(root) {
-  const result = scan(root);
+// Inventory-grade check: does this skill declare a description at all? User
+// skills are counted and named, never scored — see the adapter.
+function hasSkillDescription(absPath) {
+  try {
+    const fm = parseFrontmatter(fs.readFileSync(absPath, "utf-8"));
+    return typeof fm.description === "string" && fm.description.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function cmdScan(root, opts = {}) {
+  const result = scan(root, { projectOnly: opts.projectOnly, probeHost: true });
   const tmpDir = path.join(root, TMP_DIR);
   fs.mkdirSync(tmpDir, { recursive: true });
   writeRecord(path.join(tmpDir, "scan.json"), "scan", result, root);
@@ -2021,11 +1963,15 @@ function composeAudit(scanData, judgments) {
     return { ...f, ruleCount: own.length, score: mean === null ? null : round3(mean), grade: mean === null ? null : grade(mean) };
   });
 
-  const mandates = counted.filter((r) => r.category === "mandate");
+  // [Foreman: 074] The corpus grade is the PROJECT's grade. A user-scope file is
+  // graded and shown, but it belongs to the machine, not the repo — folding it in
+  // would move a number the project's own authors cannot fix.
+  const mandates = counted.filter((r) => r.category === "mandate" && (files[r.fileIndex] || {}).scope !== "user");
   const corpus = mandates.length ? round3(mandates.reduce((s, r) => s + r.score, 0) / mandates.length) : null;
 
   return {
-    root: scanData.root, files, rules, skills: scanData.skills || [],
+    root: scanData.root, context: scanData.context || null,
+    files, rules, skills: scanData.skills || [],
     hookInventory: scanData.hookInventory || [],
     // [Foreman: 073] the inventory travels with the audit, unchanged
     sources: scanData.sources || [],
@@ -2182,6 +2128,26 @@ function pushRestructureSection(out, candidates) {
   out.push("");
 }
 
+// [Foreman: 074]
+// Files Claude loads for this project that do not live in it. Graded on the same
+// rubric and kept in their own table, because the fix for one of these is in the
+// reader's own setup, not in this repo.
+function pushUserScopeSection(out, files) {
+  const userFiles = files.filter((f) => f.scope === "user");
+  if (!userFiles.length) return;
+  out.push("## User scope");
+  out.push("");
+  out.push("These load for every project on this machine. They are graded here but left out of the project grade — fix them in your own setup, or rerun with `--project-only` to leave them out entirely.");
+  out.push("");
+  out.push("| File | Rules | Grade |");
+  out.push("|---|---|---|");
+  for (const f of userFiles) {
+    const g = f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`;
+    out.push(`| ${f.path} | ${f.ruleCount} | ${g} |`);
+  }
+  out.push("");
+}
+
 // [Foreman: 070]
 // Every count above is over what the audit actually parsed, and until this block
 // existed nothing said what that excluded. It prints on every report, not just
@@ -2211,6 +2177,11 @@ function pushCoverageSection(out, audit, rules, suppressed) {
   // becomes an inferred non-rule.
   const unsupported = (audit.sources || []).reduce((n, s) => n + (s.unsupported || []).length, 0);
   if (unsupported) out.push(`- ${unsupported} unsupported construct(s) — inventoried, not graded`);
+  // [Foreman: 074] Surfaces that exist and shape behavior but are not scored.
+  const userSkills = (cov.userSkills || []).length;
+  if (userSkills) out.push(`- ${userSkills} user skill(s) present — not graded`);
+  const agents = (cov.agents || []).length;
+  if (agents) out.push(`- ${agents} subagent(s) defined in \`.claude/agents/\` — inventoried, not graded`);
   for (const s of cov.inaccessible || []) {
     out.push(`- could not read \`${s.path}\` (${s.reason}) — nothing in it was graded`);
   }
@@ -2258,6 +2229,12 @@ function renderReport(audit, opts = {}) {
     : `corpus grade **${audit.corpusGrade} (${fmt(audit.corpusScore)})**, mandate rules only`;
   out.push(`**${rules.length} rules across ${files.filter((f) => f.ruleCount > 0).length} file(s)** — ${corpusBit}.`);
   out.push("");
+  // [Foreman: 074] Said once, where the number is, so nobody reads the grade as
+  // covering files that live outside the repo.
+  if (files.some((f) => f.scope === "user")) {
+    out.push("User-scope files are graded under their own section and never move the project grade.");
+    out.push("");
+  }
   out.push("Grades measure structural hygiene — how a rule is written, scoped, and placed — not whether Claude will comply. They assume the least forgiving reader: small models, subagents, headless runs. If only large models in interactive sessions read this corpus, treat severity one notch softer.");
   out.push("");
   pushCoverageSection(out, audit, rules, suppressed);
@@ -2268,12 +2245,13 @@ function renderReport(audit, opts = {}) {
   out.push("");
   out.push("| File | Rules | Grade | Loading |");
   out.push("|---|---|---|---|");
-  for (const f of files) {
+  for (const f of files.filter((x) => x.scope !== "user")) {
     const loading = f.globs && f.globs.length ? "scoped: " + f.globs.join(", ") : "always loaded";
     const g = f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`;
     out.push(`| ${f.path} | ${f.ruleCount} | ${g} | ${loading} |`);
   }
   out.push("");
+  pushUserScopeSection(out, files);
 
   const weak = rules.filter((r) => r.weak).sort((a, b) => a.score - b.score);
   if (weak.length) {
@@ -2685,7 +2663,7 @@ function cmdRemeasure(root, opts) {
     }
   }
 
-  const scanData = scan(root);
+  const scanData = scan(root, { projectOnly: opts.projectOnly, probeHost: true });
   writeRecord(path.join(tmp, "scan.json"), "scan", scanData, root);
 
   let judgments;
@@ -2735,8 +2713,8 @@ function cmdRemeasure(root, opts) {
 // [Foreman: 070] One exit-code contract: 0 on success, 1 on any expected
 // failure — a missing input, a malformed judgments file, a usage error.
 const COMMANDS = ["scan", "report", "remeasure", "artifact", "clean"];
-const FLAGS = new Set(["--verbose", "--json"]);
-const USAGE = "Usage: assay.js <" + COMMANDS.join("|") + "> [--root <path>] [--verbose] [--json]";
+const FLAGS = new Set(["--verbose", "--json", "--project-only"]);
+const USAGE = "Usage: assay.js <" + COMMANDS.join("|") + "> [--root <path>] [--verbose] [--json] [--project-only]";
 
 function usageError(message) {
   process.stderr.write(message + "\n" + USAGE + "\n");
@@ -2761,9 +2739,14 @@ function main() {
   }
   const rootIdx = args.indexOf("--root");
   const root = rootIdx !== -1 ? args[rootIdx + 1] : process.cwd();
-  const opts = { verbose: args.includes("--verbose"), json: args.includes("--json") };
+  const opts = {
+    verbose: args.includes("--verbose"),
+    json: args.includes("--json"),
+    // [Foreman: 074] Keep the audit inside the repo: no user-scope discovery.
+    projectOnly: args.includes("--project-only"),
+  };
 
-  if (command === "scan") cmdScan(root);
+  if (command === "scan") cmdScan(root, opts);
   else if (command === "report") cmdReport(root, opts);
   else if (command === "remeasure") cmdRemeasure(root, opts);
   else if (command === "artifact") cmdArtifact(root); // [Foreman: 054]
@@ -2772,7 +2755,11 @@ function main() {
 
 module.exports = {
   parseFrontmatter, parseFrontmatterBlock, lineOffsets, sourceRange,
-  findRuleMarkdownFiles, findInstructionFiles, stripMetadata, identifyChunks, classifyChunk,
+  // [Foreman: 074] discovery lives in the adapter; re-exported so callers and
+  // tests keep one import
+  adapter: claudeAdapter, findRuleMarkdownFiles: claudeAdapter.findRuleMarkdownFiles,
+  readSources, readSkills,
+  findInstructionFiles, stripMetadata, identifyChunks, classifyChunk,
   mergeClarifications, splitCompound, checkStaleness, scoreF1, scoreF2, scoreF4, scoreF5, scoreF7,
   composeScore, grade, detectPlacement, scan, composeAudit, renderReport, loadJudgments,
   looksLikeStatement, hasImperativeVerb, checkSkillDescription, gradeSkill, findSkillFiles,

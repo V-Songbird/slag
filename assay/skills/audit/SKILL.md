@@ -13,7 +13,7 @@ description: >-
   files", "which rules are weak or vague", "audit my rules", "which rules should
   be hooks" — or invokes /assay:audit with any flags. Do NOT use to review code,
   PRs, or non-Claude config like eslint.
-argument-hint: "[--fix] [--verbose] [--json] [--no-verify] [--artifact]"
+argument-hint: "[--fix] [--verbose] [--json] [--no-verify] [--artifact] [--project-only]"
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent, Artifact
 ---
 
@@ -23,11 +23,11 @@ The script measures everything mechanical; you judge two factors and present the
 result. Never re-derive by hand what the script already computed. Flags in
 `$ARGUMENTS`: `--fix` (apply rewrites without the menu), `--verbose` (full factor
 table), `--json` (machine-readable report), `--no-verify` (skip step 2b, which
-otherwise runs).
+otherwise runs), `--project-only` (skip the user's own instruction files).
 
 ## 1. Scan
 
-From the project root:
+From the project root — pass `--project-only` through if `$ARGUMENTS` has it:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" scan
@@ -124,6 +124,9 @@ fixes, stall risks, buried rules, stale references, hook opportunities,
 placement candidates, weak skill descriptions. It opens with a **Coverage**
 block — what was parsed, graded, set aside, excluded, suppressed, or unreadable —
 so a drop is never silent and you never have to restate those counts yourself.
+A **User scope** section appears when the user's own `CLAUDE.md` was graded; its
+rules are fixed in the user's setup, not in this repo, and they never move the
+project grade — do not fold them into the project's numbers when you summarize.
 With `--verbose` it also lists everything step 2b suppressed, each with its
 reason quoted.
 

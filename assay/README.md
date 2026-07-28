@@ -18,7 +18,7 @@
 
 ## What is this?
 
-"Write clean, maintainable code" is not a rule — it's a wish. assay reads the instruction files Claude Code loads for your project, `CLAUDE.md` and `.claude/rules/`, and grades each rule on the parts you control: does it name *when it fires* and *what to do*, is it specific, and does it sit where the file gets read. Then it offers to rewrite the ones that grade badly.
+"Write clean, maintainable code" is not a rule — it's a wish. assay reads the instruction files Claude Code loads for your project — `CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules/`, and your own user-level `CLAUDE.md` — and grades each rule on the parts you control: does it name *when it fires* and *what to do*, is it specific, and does it sit where the file gets read. Then it offers to rewrite the ones that grade badly.
 
 It also spots the rules that were never meant to be prose at all — "run prettier before committing" is a hook pretending to be a sentence — and offers to build that mechanism, or to note the plan for later. Either way the rule itself stays put and keeps working.
 
@@ -43,6 +43,8 @@ Almost all of the scoring is a plain Node script — deterministic, the same inp
 Before the report, one more question gets asked of each doubtful entry: is this a rule at all? A file of notes or history would otherwise arrive graded as a page of mandates. The answer can only drop an entry from the report — nothing is ever rescored or reworded — and `--verbose` lists every drop with the reason. It costs one model call per audit; `--no-verify` skips it.
 
 Every report opens by saying what it actually looked at — and names any file it couldn't read. Every line of every file it did read is accounted for: graded, set aside, ignored on purpose, or named as something assay couldn't parse. A number in the report never covers more than that.
+
+Your user-level `CLAUDE.md` loads for this project too, so it gets graded — but under its own **User scope** heading, and never inside the project's grade. The fix for one of those rules lives in your setup, not in the repo. `--project-only` leaves them out.
 
 | Moment | What happens |
 | --- | --- |
@@ -70,6 +72,7 @@ Nothing to configure. Works at the next session.
 | Same, but apply rewrites without the menu | `/assay:audit --fix` |
 | See every factor score per rule | `/assay:audit --verbose` |
 | Open a sortable, expandable HTML report | `/assay:audit --artifact` |
+| Grade the repo's files only, not your own | `/assay:audit --project-only` |
 | Build a skill that reliably triggers | `/assay:craft-skill` |
 | Fix a skill Claude keeps ignoring | `/assay:craft-skill <skill name>` |
 | Write a new rule that sticks | `/assay:craft-rules` |
