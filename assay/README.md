@@ -20,7 +20,7 @@
 
 "Write clean, maintainable code" is not a rule — it's a wish. assay reads the instruction files Claude Code loads for your project, `CLAUDE.md` and `.claude/rules/`, and grades each rule on the parts you control: does it name *when it fires* and *what to do*, is it specific, and does it sit where the file gets read. Then it offers to rewrite the ones that grade badly.
 
-It also spots the rules that were never meant to be prose at all — "run prettier before committing" is a hook pretending to be a sentence — and offers to park them for promotion into the mechanism that would actually enforce them.
+It also spots the rules that were never meant to be prose at all — "run prettier before committing" is a hook pretending to be a sentence — and offers to build that mechanism, or to note the plan for later. Either way the rule itself stays put and keeps working.
 
 And when the problem is a skill instead of a rule, `/assay:craft-skill` builds one whose description reads as a trigger instead of a summary of itself, or refits a skill that never seems to fire. A skill that must always run gets a rule backing it up — and, when even that isn't promise enough, a hook.
 
@@ -46,7 +46,7 @@ Before the report, one more question gets asked of each doubtful entry: is this 
 | --- | --- |
 | You run the audit | Every rule is extracted, scored, and graded |
 | The report lands | Weakest rules first, each with its suggested fix — every rule is a clickable link that opens it at its line |
-| You check what to apply | Rewrites happen in place; placement candidates get built from the live official docs, or parked with promotion notes |
+| You check what to apply | Rewrites happen in place; placement candidates get previewed and built on your say-so, or parked with promotion notes |
 | You're done | Temp files are cleaned up; `git diff` shows exactly what changed |
 
 ## Install
@@ -80,7 +80,8 @@ One scoring script and three skills — the audit with its two rubrics, craft-sk
 
 - The grade measures **structural hygiene** — whether a rule is parseable, triggerable, specific, and placed where it will be seen. It is not a prediction that Claude will comply; a perfectly clear rule can still lose to the model's habits. Structure is the part you control.
 - Scoring is English-only. Rules in other languages will grade wrong; the report counts the ones in a non-Latin script so their numbers aren't mistaken for real grades.
-- Promoted rules are built at project scope, straight from the current official docs — fetched at promotion time, so the formats are never stale. Nothing else gets installed.
+- Promotions are built at project scope, straight from the current official docs — fetched at promotion time, so the formats are never stale. You see each one before it's written, and nothing else gets installed.
+- Nothing assay does takes a rule away from you. A promotion adds the mechanism and leaves the prose active; parking only writes down the plan. The duty is then stated twice on purpose — assay says so rather than quietly deleting one copy. A new file is configured, not proven: retiring the prose is your call, later, once you've watched the mechanism work.
 - Some files score low because of their shape, not their wording — too much narrative, most of their rules buried low, or just too long. Those land under **Restructure candidates**, which names the fix a per-rule rewrite can't reach: fence the narrative, move the load-bearing rules up, or split the file into scoped rule files.
 - Skip a rule you like as-is by putting `<!-- assay-ignore -->` on the line above it. To fence off a whole block of prose that reads like rules but isn't — a motivating story, a pasted requirement, a glossary — wrap it in `<!-- assay-ignore-start -->` and `<!-- assay-ignore-end -->`. Those lines leave the grade entirely, and a real rule below the block is no longer counted as buried under it.
 - Dead-glob detection (a scoped rules file whose file patterns match nothing) needs Node 22+; everything else runs on older Node.

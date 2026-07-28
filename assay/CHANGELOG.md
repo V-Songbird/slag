@@ -9,6 +9,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 ### Changed
 
 - The docs, the plugin description, and the report itself now say plainly what a grade measures: how a rule is written, scoped, and placed — structural hygiene, not a prediction that Claude will follow it
+- Promoting or parking a placement candidate no longer removes the rule. A promotion shows you the hook, skill, or subagent before writing it, installs it only if you approve, and leaves the prose active; parking just records the plan. Retiring the now-duplicated rule is a separate decision you make once you've seen the new mechanism working
 
 ## [0.5.9-alpha] — 2026-07-24
 

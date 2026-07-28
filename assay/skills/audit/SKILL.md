@@ -152,7 +152,7 @@ Present it as-is, with one exception. The scan output carries a
 the user's, and installed plugins. It is yours to work from, not the user's to
 read: never print it. Use it on the hook-candidates list only. Where a
 candidate is plainly covered by a wired hook (same trigger, same action), mark
-it "already enforced by `<command>`" next to the entry and drop it from the
+it "already wired to `<command>`" next to the entry and drop it from the
 promote/park counts in step 4.
 
 Then add at most 3 sentences of your own: the single most valuable fix and
@@ -198,11 +198,11 @@ header `"Fix menu"`), including only options that have evidence:
   descriptions" section. Description: "Rewrite each skill's frontmatter
   description to the trigger recipe in place; you review via git diff."
 - `Promote [N] candidates now` — only if placement candidates exist. Description:
-  "Build each hook, skill, or subagent at project scope, straight from the
-  live official docs."
+  "Preview each hook, skill, or subagent built from the live official docs, and
+  install the ones you approve; the rules stay active."
 - `Park [N] placement candidates` — only if placement candidates exist.
-  Description: "Move them out of the rule files into .claude/assay-promotions.md
-  with instructions to promote each into its hook/skill/subagent."
+  Description: "Record a deferred plan for each in .claude/assay-promotions.md;
+  the rules stay where they are, untouched."
 
 Apply what was checked, per [references/fixes.md](references/fixes.md). If both
 promote and park are checked, promotion wins and parking covers the remainder.
@@ -212,8 +212,8 @@ user to review with `git diff`.
 ## 4b. Remeasure — once, only if a rewrite was applied
 
 Skip this step unless step 4 rewrote at least one weak rule or skill description.
-Promotions and parks move rules out of the graded files, so they need no
-remeasure; a rewrite changes a rule in place and its effect is exactly what this
+Promotions and parks leave every graded rule where it was, so they change no
+grade; a rewrite changes a rule in place and its effect is exactly what this
 step shows. Do not clean between step 4 and here — the cached judgments and the
 prior `audit.json` are what make the before/after possible.
 

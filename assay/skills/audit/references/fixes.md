@@ -137,38 +137,50 @@ If a fetch fails, park that candidate instead of building from memory.
 
 ## Promoting candidates now
 
-Promotion is automated end to end — checking the menu option is the user's
-only manual step. For each candidate the user checked:
+Promotion never touches the source rule. It writes a new mechanism beside the
+rule, on approval, and leaves the prose active. For each candidate the user
+checked:
 
 1. Fetch the primitive's doc pages from the table above with `WebFetch` —
    once per primitive per run, not once per candidate.
-2. Build the artifact at project scope, exactly as the fetched page
-   specifies — never from a remembered format:
+2. Compose the artifact at project scope, exactly as the fetched page
+   specifies — never from a remembered format — and show it to the user as a
+   preview before anything is written: the target path, and the full file or
+   settings block it would contain.
    - **hook** — wire the event in `.claude/settings.json`; any check script
      goes under `.claude/hooks/`. If that file already wires a hook for the
-     same event and matcher, skip this candidate: say the duty is already
-     enforced and leave the rule where it is.
+     same event and matcher, skip this candidate: say a hook for that event and
+     matcher is already configured and leave the rule where it is.
    - **skill** — create `.claude/skills/<name>/SKILL.md`; the rule text
      becomes the body's first section. Write the frontmatter description per
      `${CLAUDE_PLUGIN_ROOT}/skills/craft-skill/references/recipe.md` — concrete base
      sentence, quoted trigger phrases, exclusion clause — a plain description
-     routes too weakly to replace a rule.
+     routes too weakly to stand in for a rule.
    - **subagent** — create `.claude/agents/<name>.md`; the rule text becomes
      its prompt.
-3. Build hooks one at a time — parallel hook builds can collide on the same
-   settings file. Skills and subagents may build in parallel.
+3. Install only what the user explicitly approves, one preview at a time. No
+   approval, no write. Build hooks one at a time — parallel hook builds can
+   collide on the same settings file. Skills and subagents may build in
+   parallel.
 4. Verify each artifact landed (hook wired, skill directory or agent file
-   present), then remove the promoted rule's bullet from its source file with
-   `Edit`.
+   present) and **leave the source rule exactly where it is**. An installed
+   artifact is configured, not verified: nothing has yet shown it firing on a
+   real edit.
 5. Anything that failed — fetch refused, artifact invalid — gets parked
    (below), not retried.
 
-Close by telling the user the built artifacts load from the next session on,
-but the promotions themselves are already done.
+Close by telling the user what was installed, that it loads from the next
+session on, and that the rule is still active — so the duty is now stated in
+two places. Say the duplication is deliberate and name it: once the mechanism
+has been seen doing its job, removing or deactivating the prose is a separate
+decision they make then, not part of this pass. Never offer to delete it now,
+and never call a file that exists proof the duty is enforced.
 
 ## Parking placement candidates
 
-For each candidate the user checked:
+Parking records a deferred plan. The rule stays in its source file, untouched
+and active — parking deletes nothing and moves no text. For each candidate the
+user checked:
 
 1. Append an entry to `.claude/assay-promotions.md` (create the file with a
    `# Assay promotions` heading if missing):
@@ -183,7 +195,7 @@ For each candidate the user checked:
    To promote: <one concrete sentence — see below>
    ```
 
-2. Remove the rule's bullet from its source file with `Edit`.
+2. Leave the source file alone. The entry quotes the rule; it does not move it.
 
 "To promote" wording by primitive — one sentence, naming the mechanism:
 
@@ -201,5 +213,6 @@ For each candidate the user checked:
 - **compound** — split the sentence at the conjunction and park each half under
   its own primitive with its own "to promote" line.
 
-The promotions file is a parking lot, not config — nothing loads it. The user
+The promotions file is a parking lot, not config — nothing loads it, so the
+parked rule is still doing its work from its own file, unchanged. The user
 promotes entries at their own pace and deletes them as they land.
