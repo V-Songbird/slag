@@ -178,6 +178,11 @@ function discoverSources(ctx) {
 
   // Same-level selection: the project memory file is ./CLAUDE.md OR
   // ./.claude/CLAUDE.md, never both.
+  //
+  // [Foreman: 076] The variant that loses the selection is still returned, marked
+  // `selected: false`. It exists, it reads like live policy, and the host ignores
+  // it — so the audit parses it and reports its rules as shadowed rather than
+  // leaving the file invisible and the author believing it applies.
   const rootClaude = path.join(root, "CLAUDE.md");
   const altClaude = path.join(root, ".claude", "CLAUDE.md");
   if (exists(rootClaude)) {
@@ -186,6 +191,14 @@ function discoverSources(ctx) {
       alwaysLoaded: true, precedence: PRECEDENCE.projectMemory,
       selectionReason: "project memory",
     });
+    if (exists(altClaude)) {
+      sources.push({
+        path: ".claude/CLAUDE.md", absPath: altClaude, scope: "project", kind: "memory",
+        alwaysLoaded: false, precedence: PRECEDENCE.projectMemory,
+        selected: false, shadowedBy: "CLAUDE.md",
+        selectionReason: "same-level variant — CLAUDE.md was selected",
+      });
+    }
   } else if (exists(altClaude)) {
     sources.push({
       path: ".claude/CLAUDE.md", absPath: altClaude, scope: "project", kind: "memory",
@@ -234,6 +247,9 @@ function discoverSources(ctx) {
 // CLAUDE.md. The engine parses the frontmatter and asks here, so the rule stays
 // host knowledge instead of leaking into shared scoring code.
 function loadsAlways(source, declaredGlobs) {
+  // [Foreman: 076] A source the host did not select never loads, whatever its
+  // frontmatter says.
+  if (source.selected === false) return false;
   if (source.alwaysLoaded) return true;
   return source.kind === "rules" && (declaredGlobs || []).length === 0;
 }

@@ -13,7 +13,7 @@ description: >-
   files", "which rules are weak or vague", "audit my rules", "which rules should
   be hooks" — or invokes /assay:audit with any flags. Do NOT use to review code,
   PRs, or non-Claude config like eslint.
-argument-hint: "[--fix] [--verbose] [--json] [--no-verify] [--deterministic] [--artifact] [--project-only]"
+argument-hint: "[--fix] [--verbose] [--json] [--no-verify] [--deterministic] [--semantic] [--artifact] [--project-only]"
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent, Artifact
 ---
 
@@ -24,8 +24,9 @@ result. Never re-derive by hand what the script already computed. Flags in
 `$ARGUMENTS`: `--fix` (apply rewrites without the menu), `--verbose` (full factor
 table), `--json` (machine-readable report), `--no-verify` (skip step 2b, which
 otherwise runs), `--deterministic` (skip every model step — steps 2 and 2b — and
-report what the script alone can see), `--project-only` (skip the user's own
-instruction files).
+report what the script alone can see), `--semantic` (while judging, also propose
+paraphrased duplicates and indirect conflicts the script cannot see),
+`--project-only` (skip the user's own instruction files).
 
 ## 1. Scan
 
@@ -100,6 +101,30 @@ hash; the rubric is the axis a hash cannot see, so the report prints a one-line
 warning when these judgments were made under an older rubric than the engine
 ships.
 
+### When `$ARGUMENTS` contains `--semantic`
+
+The script already finds duplicates and conflicts by token overlap and polarity.
+It cannot see two rules that state one duty in unrelated words, or two that only
+collide once you know what each is for. While you are judging — you are reading
+every rule anyway — collect those, and write them to one more top-level key,
+`_candidates`, beside `_provenance`:
+
+```json
+{ "_candidates": [
+  { "kind": "paraphrase-duplicate", "keys": ["a1b2c3d4e5f6", "9f8e7d6c5b4a"], "summary": "Both require input validation at the API edge.", "reason": "Different words, one duty.", "accepted": null }
+] }
+```
+
+- `kind` — `paraphrase-duplicate` or `indirect-conflict`. Any other kind the
+  engine does not know fails the run.
+- `keys` — the rules involved, by their `key` from the `judge` list.
+- `summary` — one sentence, your own words.
+- `reason` — one sentence on why you propose it.
+- `accepted` — always `null` here. It is the user's answer, not yours.
+
+Propose only what you would defend. Without the flag, write no `_candidates` key
+at all; a proposal nobody asked for costs the report more than it adds.
+
 ## 2b. Verify
 
 Run this step by default. Skip it when `$ARGUMENTS` contains `--no-verify` or
@@ -159,9 +184,9 @@ markdown report, findings first, in this order:
   restate those counts yourself;
 - a headline counting the findings by kind, which is the report's verdict;
 - **Hard gates** — rules the host cannot apply at all;
-- **Operational findings** — loaded rules that carry a risk: weak rules with
-  suggested fixes, stall risks, buried rules, stale references, unknown category
-  annotations;
+- **Operational findings** — loaded rules that carry a risk: conflicting pairs,
+  weak rules with suggested fixes, stall risks, buried rules, stale references,
+  duplicates, overlapping scopes, unknown category annotations;
 - **Policy placement** — hook opportunities, placement candidates, restructure
   candidates, and the count of rules that appropriately stay prose;
 - **Structural hygiene (secondary)** — the corpus grade, the per-file grades,
@@ -175,6 +200,15 @@ Every finding line carries a bracketed evidence tag — `[mechanical]`,
 `[heuristic]`, `[model-inferred]`, `[experiment-supported: …]`. Keep them: they
 are what stops a heuristic from reading as a fact. With `--verbose` the report
 also lists everything step 2b suppressed, each with its reason quoted.
+
+A conflict names both rules and neither winner. Do not resolve it for the user:
+say which two rules disagree, and ask which one they meant.
+
+Anything you proposed in step 2 prints under **Model-proposed relationships**,
+labelled `[model-inferred]` and marked `proposed`. Ask the user about each one in
+the same message, then record their answer back into `_candidates[].accepted` —
+`true` or `false` — before you clean up. An accepted proposal is still a
+proposal: it never changes a rule's state, its score, or the grade.
 
 The report is this skill's deliverable and the user must have read it before
 the step 4 menu asks them to choose anything. Length limits from an output

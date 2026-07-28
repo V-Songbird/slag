@@ -1668,6 +1668,330 @@ test("the report leads with the risk topology and carries an evidence tag on eve
 });
 
 // ---------------------------------------------------------------------------
+// Corpus relationships — [Foreman: 076]
+// ---------------------------------------------------------------------------
+
+const PIN_YES = "- Always pin dependencies to exact versions in `package.json`.";
+const PIN_NO = "- Never pin dependencies to exact versions in `package.json`.";
+
+const findingsOfType = (audit, type) => audit.findings.filter((f) => f.type === type);
+const relsOfKind = (audit, kind) => (audit.relationships || []).filter((r) => r.kind === kind);
+
+test("two rules that ban and command the same action are a conflict, and both say so", () => {
+  const audit = auditOf({
+    "CLAUDE.md": "# Rules\n\n" + PIN_YES + "\n",
+    ".claude/rules/deps.md": "# Deps\n\n" + PIN_NO + "\n",
+  });
+  // both rules take the state — neither is the winner
+  const states = audit.findings.filter((f) => f.state).map((f) => f.state);
+  assert.deepEqual(states, ["conflicting", "conflicting"]);
+  assert.equal(primaryState(audit).severity, "high");
+  assert.equal(primaryState(audit).evidence.level, "heuristic");
+  assert.match(primaryState(audit).evidence.basis, /opposite-polarity wording on one topic/);
+
+  // one corpus finding names the pair with both spans
+  const conflicts = findingsOfType(audit, "conflict");
+  assert.equal(conflicts.length, 1);
+  assert.deepEqual(conflicts[0].sources, [
+    { path: "CLAUDE.md", lineStart: 3, lineEnd: 3 },
+    { path: ".claude/rules/deps.md", lineStart: 3, lineEnd: 3 },
+  ]);
+  assert.match(conflicts[0].summary, /bans `pin`/);
+  assert.match(conflicts[0].explanation, /does not decide which policy is correct/);
+  // these two sources load at the same documented priority, so no order is named
+  assert.doesNotMatch(conflicts[0].explanation, /load order/);
+
+  // the pair is a conflict OR a duplicate, never both
+  assert.deepEqual(findingsOfType(audit, "duplicate"), []);
+  assert.equal(relsOfKind(audit, "conflict").length, 1);
+  assert.equal(relsOfKind(audit, "duplicate").length, 0);
+
+  const report = engine.renderReport(audit);
+  assert.match(report, /### Conflicts/);
+  assert.match(report, /neither rule is edited and neither is called the winner/);
+  assert.match(report, /\[CLAUDE\.md:3\]\(CLAUDE\.md:3\) ↔ \[\.claude\/rules\/deps\.md:3\]\(\.claude\/rules\/deps\.md:3\)/);
+});
+
+test("a conflict across two precedence levels names the load order, and calls it nothing more", () => {
+  const audit = auditOf({
+    "CLAUDE.md": "# Rules\n\n" + PIN_YES + "\n",
+    "CLAUDE.local.md": "# Local\n\n" + PIN_NO + "\n",
+  });
+  const conflict = findingsOfType(audit, "conflict")[0];
+  assert.ok(conflict, "no conflict across precedence levels");
+  assert.match(conflict.explanation, /The host reads `CLAUDE\.md` before `CLAUDE\.local\.md`/);
+  assert.match(conflict.explanation, /that is the order, not a decision about which policy is correct/);
+  assert.match(conflict.explanation, /assay does not decide which policy is correct/);
+});
+
+test("conflicting outranks the state the same rule would take on its own", () => {
+  const alone = auditOf({ ".claude/rules/deps.md": "# Deps\n\n" + PIN_NO + "\n" });
+  // a bare prohibition on its own is a stall risk
+  assert.equal(primaryState(alone).state, "at-risk");
+
+  const paired = auditOf({
+    "CLAUDE.md": "# Rules\n\n" + PIN_YES + "\n",
+    ".claude/rules/deps.md": "# Deps\n\n" + PIN_NO + "\n",
+  });
+  assert.equal(primaryState(paired, "R002").state, "conflicting");
+  assert.ok(engine.FINDING_STATES.indexOf("conflicting") < engine.FINDING_STATES.indexOf("at-risk"));
+});
+
+test("a prohibition beside its named alternative is not a conflict", () => {
+  // the ALTERNATIVE pattern spelled out: the ban names what to do instead
+  const spelled = auditOf({
+    "CLAUDE.md": "# Rules\n\n" + PIN_YES + "\n",
+    ".claude/rules/deps.md": "# Deps\n\n- Never pin dependencies to exact versions in `package.json` — use a caret range instead.\n",
+  });
+  assert.deepEqual(findingsOfType(spelled, "conflict"), []);
+  assert.deepEqual(relsOfKind(spelled, "conflict"), []);
+
+  // and the pattern without the marker: same subject, a DIFFERENT action, so the
+  // second rule is the replacement for the first rather than an argument with it
+  const replacement = auditOf({
+    "CLAUDE.md": "# Rules\n\n- Always pin the Docker base image digest in every Dockerfile.\n",
+    ".claude/rules/docker.md": "# Docker\n\n- Never float the Docker base image digest in any Dockerfile.\n",
+  });
+  assert.deepEqual(findingsOfType(replacement, "conflict"), []);
+});
+
+test("a variant the host never selected is shadowed, not graded as live policy", () => {
+  const files = {
+    "CLAUDE.md": "# Rules\n\n- Validate every request body at the handler boundary.\n",
+    ".claude/CLAUDE.md": "# Older rules\n\n- Write clean, maintainable code.\n",
+  };
+  const scanData = engine.scan(tmpProject(files), { projectOnly: true });
+  // the adapter returns the loser, marked unselected, and it is parsed
+  const shadowed = scanData.files.find((f) => f.path === ".claude/CLAUDE.md");
+  assert.equal(shadowed.selected, false);
+  assert.equal(shadowed.alwaysLoaded, false);
+  assert.equal(shadowed.shadowedBy, "CLAUDE.md");
+  assert.match(shadowed.selectionReason, /same-level variant — CLAUDE\.md was selected/);
+
+  const audit = engine.composeAudit(scanData, judgeEvery(scanData));
+  const finding = primaryState(audit, "R002");
+  assert.equal(finding.state, "shadowed");
+  assert.equal(finding.severity, "medium");
+  assert.equal(finding.evidence.level, "mechanical");
+  assert.equal(finding.evidence.basis, "same-level source selection");
+
+  // out of the corpus grade: it grades exactly as it would without the file
+  const live = engine.composeAudit(
+    engine.scan(tmpProject({ "CLAUDE.md": files["CLAUDE.md"] }), { projectOnly: true }),
+    { ...judgeEvery(scanData) },
+  );
+  assert.equal(audit.corpusScore, live.corpusScore);
+  // and its bytes are not always-loaded bytes
+  assert.equal(audit.sources.find((s) => s.path === ".claude/CLAUDE.md").alwaysLoaded, false);
+
+  assert.deepEqual(relsOfKind(audit, "shadows").map((r) => r.between), [["CLAUDE.md", ".claude/CLAUDE.md"]]);
+
+  const report = engine.renderReport(audit);
+  const gates = report.slice(report.indexOf("## Hard gates"), report.indexOf("## Operational findings"));
+  assert.match(gates, /\*\*shadowed\*\*/);
+  assert.match(gates, /same-level variant — CLAUDE\.md was selected/);
+  // the weak rule inside it never reaches the weak-rules table
+  assert.doesNotMatch(report, /### Weak rules/);
+  assert.match(report, /\| \.claude\/CLAUDE\.md \| 1 \| [^|]+ \| not loaded — shadowed \|/);
+});
+
+test("a shadowed rule is never paired with a live one", () => {
+  const audit = auditOf({
+    "CLAUDE.md": "# Rules\n\n" + DUP_RULE + "\n",
+    ".claude/CLAUDE.md": "# Older\n\n" + DUP_RULE + "\n",
+  });
+  assert.deepEqual(duplicateFindings(audit), []);
+  assert.deepEqual(findingsOfType(audit, "conflict"), []);
+});
+
+test("overlapping scopes are silent until the two files already collide", () => {
+  const shared = {
+    "src/api/handler.ts": "export {};\n",
+    ".claude/rules/api.md": '---\npaths: ["src/**/*.ts"]\n---\n\n',
+    ".claude/rules/ts.md": '---\npaths: ["src/api/*.ts"]\n---\n\n',
+  };
+  const quiet = auditOf({
+    ...shared,
+    ".claude/rules/api.md": shared[".claude/rules/api.md"] + DUP_RULE + "\n",
+    ".claude/rules/ts.md": shared[".claude/rules/ts.md"] + "- Validate every request body at the handler boundary.\n",
+  });
+  // the globs DO overlap — bare overlap is normal and reports nothing
+  assert.equal(quiet.scopeOverlaps.length, 1);
+  assert.deepEqual(findingsOfType(quiet, "scope-overlap"), []);
+  assert.doesNotMatch(engine.renderReport(quiet), /### Scope overlap/);
+
+  const colliding = auditOf({
+    ...shared,
+    ".claude/rules/api.md": shared[".claude/rules/api.md"] + DUP_RULE + "\n",
+    ".claude/rules/ts.md": shared[".claude/rules/ts.md"] + DUP_RULE + "\n",
+  });
+  const overlaps = findingsOfType(colliding, "scope-overlap");
+  assert.equal(overlaps.length, 1);
+  assert.equal(overlaps[0].severity, "info");
+  assert.equal(overlaps[0].evidence.level, "mechanical");
+  assert.match(overlaps[0].summary, /src\/\*\*\/\*\.ts.*src\/api\/\*\.ts.*1 shared file\(s\)/);
+  assert.match(engine.renderReport(colliding), /### Scope overlap/);
+});
+
+test("a rule whose moment a wired hook already fires on is named, and only then", () => {
+  const wired = (event, matcher) => JSON.stringify({
+    hooks: { [event]: [{ matcher, hooks: [{ type: "command", command: "node .claude/hooks/pretest.js" }] }] },
+  });
+  const mechanical = () => ({ F3: 0.7, F8: 0.15 });
+  const NAMED_EVENT = "# Rules\n\n- Always run the full test suite before committing.\n";
+
+  const covered = auditOf({ "CLAUDE.md": NAMED_EVENT, ".claude/settings.json": wired("PreToolUse", "Bash") }, mechanical);
+  const hits = findingsOfType(covered, "redundant-enforcement");
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].severity, "low");
+  assert.equal(hits[0].evidence.level, "heuristic");
+  assert.match(hits[0].evidence.limits, /configured, not observed/);
+  assert.match(hits[0].summary, /`PreToolUse` hook \(`pretest\.js`, project\) is already wired/);
+  assert.deepEqual(relsOfKind(covered, "covers").map((r) => r.between[0]), ["project:pretest.js"]);
+  assert.match(engine.renderReport(covered), /### Already wired/);
+
+  // a hook on another event covers nothing
+  const other = auditOf({ "CLAUDE.md": NAMED_EVENT, ".claude/settings.json": wired("PostToolUse", "Edit|Write") }, mechanical);
+  assert.deepEqual(findingsOfType(other, "redundant-enforcement"), []);
+
+  // a rule naming no moment infers no event, so the check stays silent
+  const eventless = auditOf({
+    "CLAUDE.md": "# Rules\n\n- Record every release in `docs/releases.md`.\n",
+    "docs/releases.md": "# Releases\n",
+    ".claude/settings.json": wired("PostToolUse", "Edit|Write"),
+  }, mechanical);
+  assert.equal(eventless.rules[0].placement.hookEvent, null);
+  assert.deepEqual(findingsOfType(eventless, "redundant-enforcement"), []);
+});
+
+test("the always-loaded byte count always prints; only real heft is a finding", () => {
+  const small = auditOf({ "CLAUDE.md": "# Rules\n\n- Validate every request body at the handler boundary.\n" });
+  assert.match(engine.renderReport(small), /- \d+ bytes of always-loaded instructions \(user \+ project memory, unscoped rules\)/);
+  assert.deepEqual(findingsOfType(small, "context-pressure"), []);
+
+  const bulk = "# Big\n\n" + Array.from({ length: 900 }, (_, i) =>
+    "- Validate every request body at the handler boundary number " + i + ".").join("\n") + "\n";
+  assert.ok(Buffer.byteLength(bulk) > engine.CONTEXT_PRESSURE_BYTES, "fixture is under the threshold");
+  const heavy = auditOf({ "CLAUDE.md": bulk });
+  const pressure = findingsOfType(heavy, "context-pressure");
+  assert.equal(pressure.length, 1);
+  assert.equal(pressure[0].severity, "low");
+  assert.equal(pressure[0].evidence.level, "heuristic");
+  assert.match(pressure[0].evidence.limits, /the host documents no byte cap/);
+  assert.match(pressure[0].summary, /largest: `CLAUDE\.md`/);
+  assert.ok(pressure[0].sources.length <= 3);
+  assert.match(engine.renderReport(heavy), /bytes of instructions load before every session/);
+});
+
+// [Foreman: 076] The proposal channel is additive: it renders, and it moves
+// nothing the deterministic layer decided.
+test("model-proposed relationships render, labelled, and change nothing", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n- Validate every request body at the handler boundary.\n",
+    ".claude/rules/api.md": "# API\n\n- Check incoming payloads before the controller runs.\n",
+  });
+  const scanData = engine.scan(root, { projectOnly: true });
+  const base = judgeEvery(scanData);
+  const withCandidates = {
+    ...base,
+    _candidates: [
+      { kind: "paraphrase-duplicate", keys: scanData.rules.map((r) => r.key), summary: "Both ask for input validation at the edge.", reason: "Different words, one duty.", accepted: null },
+      { kind: "indirect-conflict", keys: [scanData.rules[0].key], summary: "Reads against the payload rule.", reason: "Only in combination.", accepted: false },
+      { kind: "ambiguous-meaning", keys: [scanData.rules[1].key], summary: "Two readings of `payloads`.", reason: "Confirmed in conversation.", accepted: true },
+    ],
+  };
+  const proposed = engine.composeAudit(scanData, withCandidates);
+  const plain = engine.composeAudit(scanData, base);
+
+  // the invariant: states, scores, grade, and the deterministic graph are untouched
+  assert.deepEqual(proposed.findings, plain.findings);
+  assert.deepEqual(proposed.relationships, plain.relationships);
+  assert.equal(proposed.corpusScore, plain.corpusScore);
+  assert.deepEqual(proposed.rules.map((r) => r.score), plain.rules.map((r) => r.score));
+  // proposals land in the semantic block, never in relationships[]
+  assert.equal(proposed.semantic.candidates.length, 3);
+  assert.equal(plain.semantic.candidates.length, 0);
+  assert.equal((proposed.relationships || []).some((r) => r.kind === "paraphrase-duplicate"), false);
+
+  const report = engine.renderReport(proposed);
+  assert.match(report, /### Model-proposed relationships/);
+  assert.match(report, /\[model-inferred\]/);
+  assert.match(report, /\*\*paraphrase-duplicate\*\* — proposed — \[CLAUDE\.md:3\]\(CLAUDE\.md:3\) ↔ \[\.claude\/rules\/api\.md:3\]\(\.claude\/rules\/api\.md:3\)/);
+  assert.match(report, /\*\*ambiguous-meaning\*\* — accepted —/);
+  // a rejected proposal is verbose-only
+  assert.doesNotMatch(report, /Reads against the payload rule/);
+  assert.match(engine.renderReport(proposed, { verbose: true }), /\*\*indirect-conflict\*\* — rejected —/);
+});
+
+test("a candidate naming an unknown kind is a malformed judgments file", () => {
+  const root = cliFixture();
+  judgeAll(root);
+  const judgeFile = path.join(root, ".assay-tmp", "judgments.json");
+  const judgments = JSON.parse(fs.readFileSync(judgeFile, "utf-8"));
+
+  fs.writeFileSync(judgeFile, JSON.stringify({
+    ...judgments,
+    _candidates: [{ kind: "vibes", keys: [], summary: "x", reason: "y", accepted: null }],
+  }));
+  const bad = cli(root, "report");
+  assert.equal(bad.code, 1);
+  assert.match(bad.err, /_candidates\[0\]\.kind \(unknown kind: vibes\)/);
+
+  // every documented kind is accepted, and so is an absent channel
+  fs.writeFileSync(judgeFile, JSON.stringify({
+    ...judgments,
+    _candidates: engine.SEMANTIC_CANDIDATE_KINDS.map((kind) => ({ kind, keys: [], summary: "s", reason: "r", accepted: null })),
+  }));
+  assert.equal(cli(root, "report").code, 0);
+});
+
+test("relationships are emitted, sorted by kind, and schema-shaped", () => {
+  const audit = auditOf({
+    "CLAUDE.md": "# Rules\n\n" + PIN_YES + "\n\n" + DUP_RULE + "\n",
+    ".claude/rules/deps.md": "# Deps\n\n" + PIN_NO + "\n\n" + DUP_RULE + "\n",
+    ".claude/CLAUDE.md": "# Older\n\n- Write clean, maintainable code.\n",
+  });
+  const rels = audit.relationships;
+  assert.ok(rels.length >= 3, "fixture produced too few relationships");
+  assert.deepEqual(rels.map((r) => r.kind), [...rels.map((r) => r.kind)].sort());
+  const ids = new Set();
+  const byKey = new Map(audit.rules.map((r) => [r.key, r]));
+  const paths = new Set(audit.files.map((f) => f.path));
+  for (const rel of rels) {
+    assert.match(rel.id, /^REL\d{3}$/);
+    assert.equal(ids.has(rel.id), false, "duplicate relationship id " + rel.id);
+    ids.add(rel.id);
+    assert.ok(["duplicate", "conflict", "shadows", "covers"].includes(rel.kind), rel.kind);
+    assert.equal(rel.between.length, 2);
+    for (const site of rel.between) {
+      assert.equal(typeof site, "string");
+      assert.ok(byKey.has(site) || paths.has(site) || site.includes(":"), "site names nothing in the record: " + site);
+    }
+    assert.ok(rel.explanation && rel.evidence && rel.evidence.level && rel.evidence.basis);
+  }
+  // 066's duplicate pairs each emit a relationship as well as their finding
+  assert.equal(relsOfKind(audit, "duplicate").length, duplicateFindings(audit).length);
+  assert.equal(relsOfKind(audit, "conflict").length, findingsOfType(audit, "conflict").length);
+});
+
+test("two audits of one corpus derive the same relationships and findings", () => {
+  const files = {
+    "CLAUDE.md": "# Rules\n\n" + PIN_YES + "\n\n" + DUP_RULE + "\n",
+    ".claude/rules/deps.md": "# Deps\n\n" + PIN_NO + "\n\n" + DUP_RULE + "\n",
+    ".claude/CLAUDE.md": "# Older\n\n- Write clean, maintainable code.\n",
+  };
+  const root = tmpProject(files);
+  const first = engine.scan(root, { projectOnly: true });
+  const second = engine.scan(root, { projectOnly: true });
+  const a = engine.composeAudit(first, judgeEvery(first));
+  const b = engine.composeAudit(second, judgeEvery(second));
+  assert.deepEqual(a.relationships, b.relationships);
+  assert.deepEqual(a.findings, b.findings);
+  assert.deepEqual(a.scopeOverlaps, b.scopeOverlaps);
+  assert.equal(engine.renderReport(a), engine.renderReport(b));
+});
+
+// ---------------------------------------------------------------------------
 // artifact — self-contained interactive HTML report
 // ---------------------------------------------------------------------------
 
@@ -2137,6 +2461,8 @@ test("judgments carry provenance, which the record embeds and per-key validation
     provenance,
     judged: summary.judge.length,
     suppressed: 0,
+    // [Foreman: 076] no `_candidates` in this file, so the proposal channel is empty
+    candidates: [],
   });
   // a model-judged run is never labelled deterministic
   assert.doesNotMatch(out, /deterministic only/);

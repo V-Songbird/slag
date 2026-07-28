@@ -115,8 +115,11 @@ const RECORD_SCHEMA = {
   // only loses its finding deltas. A scan record carries no findings — nothing
   // is derived before the model judgments land.
   // [Foreman: 071] `semantic` left it too — see the block below.
+  // [Foreman: 076] `relationships` left it as well: an audit record emits the
+  // deterministic relationship graph. Still not required, so an audit written
+  // before 076 stays readable.
   reserved: [
-    "instructions", "mechanisms", "relationships",
+    "instructions", "mechanisms",
     "evidence", "plans", "changes", "validation", "proofLinks",
   ],
 };
@@ -437,6 +440,24 @@ const PLACEMENT_SIGNALS = {
 };
 const COMPOUND_CONJUNCTION = /(,\s+and\s+|\s+—\s+|\s+--\s+|;\s+|\s+while\s+also\s+|\s+plus\s+)/;
 
+// [Foreman: 076] The hook event a rule's own wording names, and the tool matcher
+// that event implies. Only explicit lifecycle phrasing infers one: a rule that
+// never says when it fires leaves this null, and the check that reads it — "a
+// hook is already wired for this moment" — stays silent rather than guessing at
+// an event and calling a policy covered.
+const HOOK_EVENT_SIGNALS = [
+  { pattern: /\bpre[-\s]?commit\b|\bbefore\s+(?:you\s+|the\s+|each\s+|every\s+|any\s+)?(?:commit|committing|push|pushing)\b/i, event: "PreToolUse", matcher: "Bash" },
+  { pattern: /\bon\s+save\b|\bafter\s+(?:each\s+|every\s+|any\s+|the\s+)?(?:edit|write|save)\b|\bafter\s+editing\b/i, event: "PostToolUse", matcher: "Edit|Write" },
+  { pattern: /\bsession\s+start\b|\bat\s+the\s+start\s+of\s+(?:each\s+|every\s+)?session\b/i, event: "SessionStart", matcher: null },
+];
+
+function inferHookEvent(ruleText) {
+  for (const s of HOOK_EVENT_SIGNALS) {
+    if (s.pattern.test(ruleText)) return { event: s.event, matcher: s.matcher };
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
@@ -529,19 +550,23 @@ function parseFrontmatter(content) {
   return parseFrontmatterBlock(content).data;
 }
 
-function countGlobMatches(globs, root) {
-  // razor: fs.globSync needs Node 22+; on older Node the count is unknown
+// The project files a scoped rules file's globs actually resolve to, sorted and
+// deduplicated, or null when this Node cannot glob. [Foreman: 076] The paths
+// themselves — not just their count — are what lets two scoped files be compared
+// for a shared target.
+function globMatchPaths(globs, root) {
+  // razor: fs.globSync needs Node 22+; on older Node the match set is unknown
   // and dead-glob detection is skipped rather than reimplementing a matcher.
   if (typeof fs.globSync !== "function") return null;
-  let count = 0;
+  const matched = new Set();
   for (const pattern of globs) {
     try {
-      count += fs.globSync(pattern, { cwd: root }).length;
+      for (const hit of fs.globSync(pattern, { cwd: root })) matched.add(hit.split("\\").join("/"));
     } catch {
-      // malformed pattern counts as zero matches
+      // malformed pattern matches nothing
     }
   }
-  return count;
+  return [...matched].sort();
 }
 
 // [Foreman: 074] Reading and parsing is shared; *which* files exist and how
@@ -567,7 +592,10 @@ function readSources(sources, root, inaccessible = [], adapter = claudeAdapter) 
     if (typeof globs === "string") globs = globs ? [globs] : [];
     const f = { ...source, content };
     f.globs = globs;
-    f.globMatchCount = globs.length ? countGlobMatches(globs, root) : null;
+    // [Foreman: 076] `globMatched` is working state for scope-overlap detection;
+    // scan drops it before the record is written, the way `content` is dropped.
+    f.globMatched = globs.length ? globMatchPaths(globs, root) : null;
+    f.globMatchCount = f.globMatched === null ? null : f.globMatched.length;
     f.defaultCategory = fm["default-category"] || "mandate";
     f.lineCount = content.split("\n").length;
     f.alwaysLoaded = adapter.loadsAlways(source, globs);
@@ -1694,7 +1722,10 @@ function detectPlacement(ruleText, f8) {
   if (!candidates.length && !compound) return null;
   let bestFit = compound ? "compound" : null;
   if (!bestFit) bestFit = candidates.reduce((a, b) => (a[1].confidence >= b[1].confidence ? a : b))[0];
-  return { bestFit, detections, compound };
+  // [Foreman: 076] Null unless hook signals fired AND the wording names a
+  // lifecycle moment — see HOOK_EVENT_SIGNALS.
+  const hookEvent = detections.hook ? inferHookEvent(ruleText) : null;
+  return { bestFit, detections, compound, hookEvent };
 }
 
 // ---------------------------------------------------------------------------
@@ -1873,12 +1904,36 @@ function scan(root, options = {}) {
       kind: file.kind,
       precedence: file.precedence,
       selectionReason: file.selectionReason,
+      // [Foreman: 076] what the host actually loads every session, and how much
+      // of the window it costs — the two inputs the context-pressure line needs
+      alwaysLoaded: file.alwaysLoaded === true,
+      bytes: Buffer.byteLength(file.content, "utf-8"),
       sourceHash: crypto.createHash("sha1").update(file.content).digest("hex"),
       lineCount: file.lineCount,
       spans,
       unsupported,
     });
   });
+
+  // [Foreman: 076] Two scoped rules files that both claim the same project file.
+  // Computed here because the glob resolution lives here; bare overlap is normal,
+  // so the finding that reads this stays silent until the two files also share a
+  // duplicate or a conflict.
+  const scopeOverlaps = [];
+  const scoped = files.filter((f) => (f.globMatched || []).length);
+  for (let i = 0; i < scoped.length; i++) {
+    for (let j = i + 1; j < scoped.length; j++) {
+      const other = new Set(scoped[j].globMatched);
+      const shared = scoped[i].globMatched.filter((p) => other.has(p)).length;
+      if (shared) {
+        scopeOverlaps.push({
+          a: scoped[i].path, b: scoped[j].path,
+          globs: { a: scoped[i].globs, b: scoped[j].globs },
+          shared,
+        });
+      }
+    }
+  }
 
   const userSkills = (skillsFound.user || []).map((s) => ({
     name: s.name,
@@ -1888,8 +1943,9 @@ function scan(root, options = {}) {
   return {
     root: context.projectRoot,
     context,
-    files: files.map(({ content, absPath, ...rest }) => rest),
+    files: files.map(({ content, absPath, globMatched, ...rest }) => rest),
     sources,
+    scopeOverlaps,
     rules,
     skills: readSkills(skillsFound.project || []),
     hookInventory: adapter.discoverHooks(context),
@@ -1978,6 +2034,28 @@ function loadJudgments(root, rules) {
         if (prov[k] !== undefined && typeof prov[k] !== "string") problems.push("_provenance." + k);
       }
     }
+  }
+  // [Foreman: 076] `_candidates` is the second non-rule top-level key: the
+  // semantic pass's proposals. Types are checked loosely — a proposal is prose
+  // the model wrote — but an unrecognized `kind` is fatal, because a kind
+  // nothing renders would be a proposal that silently disappeared.
+  const candidates = judgments._candidates;
+  if (candidates !== undefined) {
+    if (!Array.isArray(candidates)) problems.push("_candidates (not an array)");
+    else candidates.forEach((c, i) => {
+      const at = "_candidates[" + i + "]";
+      if (!isRecordObject(c)) return problems.push(at + " (not an object)");
+      if (!SEMANTIC_CANDIDATE_KINDS.includes(c.kind)) {
+        problems.push(at + ".kind (unknown kind: " + c.kind + ")");
+      }
+      if (!Array.isArray(c.keys) || !c.keys.every((k) => typeof k === "string")) problems.push(at + ".keys");
+      for (const k of ["summary", "reason"]) {
+        if (c[k] !== undefined && typeof c[k] !== "string") problems.push(at + "." + k);
+      }
+      if (c.accepted !== undefined && c.accepted !== null && typeof c.accepted !== "boolean") {
+        problems.push(at + ".accepted");
+      }
+    });
   }
   for (const rule of rules) {
     // [Foreman: 059] keyed by the stable content hash, not the R### display id
@@ -2069,7 +2147,10 @@ function composeAudit(scanData, judgments) {
   // [Foreman: 074] The corpus grade is the PROJECT's grade. A user-scope file is
   // graded and shown, but it belongs to the machine, not the repo — folding it in
   // would move a number the project's own authors cannot fix.
-  const mandates = counted.filter((r) => r.category === "mandate" && (files[r.fileIndex] || {}).scope !== "user");
+  // [Foreman: 076] A shadowed file's rules never take effect, so grading the
+  // project on them would score policy the host never reads.
+  const mandates = counted.filter((r) => r.category === "mandate" &&
+    (files[r.fileIndex] || {}).scope !== "user" && (files[r.fileIndex] || {}).selected !== false);
   const corpus = mandates.length ? round3(mandates.reduce((s, r) => s + r.score, 0) / mandates.length) : null;
 
   const audit = {
@@ -2078,6 +2159,9 @@ function composeAudit(scanData, judgments) {
     hookInventory: scanData.hookInventory || [],
     // [Foreman: 073] the inventory travels with the audit, unchanged
     sources: scanData.sources || [],
+    // [Foreman: 076] resolved in scan, where the globs are; read by the
+    // scope-overlap finding
+    scopeOverlaps: scanData.scopeOverlaps || [],
     coverage: scanData.coverage || null,
     corpusScore: corpus, corpusGrade: corpus === null ? null : grade(corpus),
   };
@@ -2088,11 +2172,17 @@ function composeAudit(scanData, judgments) {
       provenance: isRecordObject(judgments._provenance) ? judgments._provenance : null,
       judged,
       suppressed: rules.filter((r) => r.suppressed).length,
+      // [Foreman: 076] The model's proposals, carried verbatim. They are
+      // rendered and labelled; they never enter `findings` or `relationships`,
+      // and nothing below reads them back into a score or a state.
+      candidates: Array.isArray(judgments._candidates) ? judgments._candidates : [],
     };
   }
   // [Foreman: 075] Findings are the product's primary output, so they are part
   // of the composed audit, not something a renderer invents on the way out.
   audit.findings = deriveFindings(audit);
+  // [Foreman: 076] The deterministic relationship graph beside them.
+  audit.relationships = deriveRelationships(audit);
   return audit;
 }
 
@@ -2176,10 +2266,29 @@ function jaccard(a, b) {
   return union ? shared / union : 0;
 }
 
+// [Foreman: 076] The population every corpus comparison runs over: rules the
+// host actually applies. A suppressed entry was judged not to be a rule, and a
+// shadowed one sits in a file the host never selected — pairing either with a
+// live rule would report a relationship that does not exist in the session.
+function comparableRules(audit) {
+  const files = audit.files || [];
+  return (audit.rules || []).filter((r) => !r.suppressed && (files[r.fileIndex] || {}).selected !== false);
+}
+
+function byPairPosition(p, q) {
+  return p.a.file.localeCompare(q.a.file) || p.a.lineStart - q.a.lineStart ||
+    p.b.file.localeCompare(q.b.file) || p.b.lineStart - q.b.lineStart;
+}
+
 // Sorted by file then line on both sides, so two runs over one corpus emit the
 // same pairs in the same order.
+// [Foreman: 076] A pair the conflict analyzer claims is never also a duplicate:
+// two rules of opposite polarity are not one duty stated twice, however far
+// their content tokens overlap, and reporting both would name the same pair
+// twice with contradictory advice.
 function duplicatePairs(audit) {
-  const graded = (audit.rules || []).filter((r) => !r.suppressed).map((r) => {
+  const conflicting = new Set(conflictPairs(audit).map((p) => p.a.id + "|" + p.b.id));
+  const graded = comparableRules(audit).map((r) => {
     const text = r.contextText || r.text;
     return { rule: r, normalized: text.trim().toLowerCase().replace(/\s+/g, " "), tokens: contentTokens(text) };
   });
@@ -2187,6 +2296,7 @@ function duplicatePairs(audit) {
   for (let i = 0; i < graded.length; i++) {
     for (let j = i + 1; j < graded.length; j++) {
       const a = graded[i], b = graded[j];
+      if (conflicting.has(a.rule.id + "|" + b.rule.id)) continue;
       let tier = null;
       if (a.normalized === b.normalized) tier = "exact";
       else if (a.tokens.size >= DUPLICATE_MIN_TOKENS && b.tokens.size >= DUPLICATE_MIN_TOKENS &&
@@ -2194,9 +2304,102 @@ function duplicatePairs(audit) {
       if (tier) pairs.push({ tier, a: a.rule, b: b.rule });
     }
   }
-  return pairs.sort((p, q) =>
-    p.a.file.localeCompare(q.a.file) || p.a.lineStart - q.a.lineStart ||
-    p.b.file.localeCompare(q.b.file) || p.b.lineStart - q.b.lineStart);
+  return pairs.sort(byPairPosition);
+}
+
+// [Foreman: 076]
+// A direct conflict is a wording-level judgment and nothing more: two rules on
+// one subject that ban and command the SAME action. Every gate below exists to
+// keep a normal corpus quiet, because a fabricated conflict costs more trust
+// than a missed one is worth:
+//
+//   1. opposite polarity — exactly one side is a prohibition, the other a
+//      positive imperative;
+//   2. same subject — token-set Jaccard over contentTokens() at or above
+//      CONFLICT_JACCARD, both sides carrying CONFLICT_MIN_TOKENS content tokens;
+//   3. same action — the verb the ban forbids is the verb the mandate commands.
+//      This is the gate that separates a contradiction from the ALTERNATIVE
+//      pattern: "Never float the base image" beside "Always pin the base image"
+//      shares its subject but names a DIFFERENT action, so the second rule is
+//      the replacement for the first, not an argument with it;
+//   4. neither side already carries an alternative clause ("… instead", "rather
+//      than …"), which is that same pattern spelled out.
+//
+// razor: `resolvesProhibition` is the token machinery behind gate 3, but it
+// cannot be called directly — it fires on plain subject overlap, which a real
+// conflict has in full, so it would veto every true pair. Gate 3 is its
+// verb-level half, which is the discriminating one. See docs/foreman/076.md.
+const CONFLICT_JACCARD = 0.6;
+const CONFLICT_MIN_TOKENS = 4;
+// The words that carry polarity rather than action; the action verb is whatever
+// leads the directive once one of these is stepped over.
+const POLARITY_LEADS = new Set([
+  "never", "do not", "don't", "must not", "must", "cannot", "forbidden",
+  "always", "should", "required", "avoid",
+]);
+
+function stripLead(text, verb) {
+  return text.toLowerCase().replace(/^[^a-z]+/, "").slice(verb.length).replace(/^[^a-z]+/, "");
+}
+
+// The action a directive commands or bans — "Never pin X" and "Always pin X"
+// both answer "pin". Null when no verb from the table leads it.
+function commandedAction(text) {
+  let rest = text;
+  for (let step = 0; step < 2; step++) {
+    const verb = leadingVerb(rest);
+    if (verb === null) return null;
+    if (!POLARITY_LEADS.has(verb)) return verb;
+    rest = stripLead(rest, verb);
+  }
+  return null;
+}
+
+function carriesAlternative(rule) {
+  const text = (rule.contextText || rule.text).toLowerCase();
+  return ALTERNATIVE_MARKERS.some((m) => text.includes(m.trim())) || hasContrastNot(rule.text);
+}
+
+function conflictPairs(audit) {
+  const graded = comparableRules(audit).map((r) => {
+    const text = r.contextText || r.text;
+    return {
+      rule: r, text,
+      prohibition: isProhibitionText(text),
+      positive: hasPositiveImperative(text),
+      action: commandedAction(text),
+      alternative: carriesAlternative(r),
+      tokens: contentTokens(text),
+    };
+  });
+  const pairs = [];
+  for (let i = 0; i < graded.length; i++) {
+    for (let j = i + 1; j < graded.length; j++) {
+      const a = graded[i], b = graded[j];
+      if (a.prohibition === b.prohibition) continue;
+      const ban = a.prohibition ? a : b;
+      const mandate = a.prohibition ? b : a;
+      if (!mandate.positive) continue;
+      if (ban.alternative || mandate.alternative) continue;
+      if (ban.action === null || ban.action !== mandate.action) continue;
+      if (a.tokens.size < CONFLICT_MIN_TOKENS || b.tokens.size < CONFLICT_MIN_TOKENS) continue;
+      if (jaccard(a.tokens, b.tokens) < CONFLICT_JACCARD) continue;
+      pairs.push({ a: a.rule, b: b.rule, ban: ban.rule, mandate: mandate.rule, action: ban.action });
+    }
+  }
+  return pairs.sort(byPairPosition);
+}
+
+// The host's documented load order for the two sides, stated as a fact about
+// loading and never as a resolution: which policy is right is not a question
+// load order answers. Empty when the adapter ranks the two sources equally —
+// there is no order to name, and inventing one would be the resolution this
+// analyzer must not make.
+function precedenceNote(fileA, fileB) {
+  const pa = (fileA || {}).precedence, pb = (fileB || {}).precedence;
+  if (!Number.isInteger(pa) || !Number.isInteger(pb) || pa === pb) return "";
+  const [later, earlier] = pa > pb ? [fileA, fileB] : [fileB, fileA];
+  return ` The host reads \`${earlier.path}\` before \`${later.path}\`, so \`${later.path}\` is the later word in the documented load order — that is the order, not a decision about which policy is correct.`;
 }
 
 // Which copy looks worth keeping — advisory, never an instruction to delete.
@@ -2216,7 +2419,8 @@ function keepSuggestion(pair, files) {
 }
 
 // One primary state for one rule, first match wins.
-function deriveRuleState(rule, file) {
+// [Foreman: 076] `conflicted` maps a rule id to the rule it contradicts.
+function deriveRuleState(rule, file, conflicted = new Map()) {
   const factors = rule.factors || {};
   const values = rule.factorValues || {};
   const globs = (file && file.globs) || [];
@@ -2228,6 +2432,27 @@ function deriveRuleState(rule, file) {
       explanation: "The host loads a scoped rules file only for paths matching its `paths:` frontmatter, and nothing in the project matches. No wording change reaches this rule while the glob stays dead.",
       evidence: { level: "mechanical", basis: "dead-glob resolution against the project tree" },
       safeActions: ["repair the glob", "move the rule to an always-loaded file", "retire the rule"],
+    };
+  }
+  // [Foreman: 076] The file exists and reads like live policy; the host picked
+  // its sibling and never loads this one. No wording change reaches it.
+  if (file && file.selected === false) {
+    return {
+      state: "shadowed", severity: "medium", analyzer: "source-selection",
+      summary: "`" + rule.file + "` is not the variant the host selected — " + (file.selectionReason || "another file was selected"),
+      explanation: "Two files compete for the same slot and the host loads exactly one of them. This rule sits in the copy that lost, so it takes no effect at all — it is graded here only so nothing in the file goes unreported.",
+      evidence: { level: "mechanical", basis: "same-level source selection" },
+      safeActions: ["move the rule into the selected file", "delete the unselected variant"],
+    };
+  }
+  if (conflicted.has(rule.id)) {
+    const { other, note } = conflicted.get(rule.id);
+    return {
+      state: "conflicting", severity: "high", analyzer: "conflict-detection",
+      summary: "it contradicts " + other.file + ":" + other.lineStart + " — one bans what the other commands",
+      explanation: "Two loaded rules ban and command the same action on the same subject. assay does not decide which policy is correct: both are reported, neither is edited, and the choice is yours." + note,
+      evidence: { level: "heuristic", basis: "opposite-polarity wording on one topic" },
+      safeActions: ["retire one of the two", "narrow one rule's scope so they stop overlapping"],
     };
   }
   if (rule.staleness && rule.staleness.gated) {
@@ -2336,6 +2561,49 @@ function deriveRuleState(rule, file) {
   };
 }
 
+function byPathOf(files, wanted) {
+  return files.find((f) => f.path === wanted) || { path: wanted };
+}
+
+// [Foreman: 076]
+// Everything the host loads before the session reads anything: user memory,
+// project memory, local memory, and every unscoped rules file. The adapter
+// documents no byte cap — `budgets()` returns `{ documented: null }` — so the
+// number below is assay's own heuristic line and every finding built on it says
+// so. It is not a limit Claude Code enforces.
+const CONTEXT_PRESSURE_BYTES = 40_000;
+
+function alwaysLoadedBytes(audit) {
+  const loaded = (audit.sources || []).filter((s) => s.alwaysLoaded && Number.isInteger(s.bytes));
+  return {
+    total: loaded.reduce((n, s) => n + s.bytes, 0),
+    largest: [...loaded].sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path)).slice(0, 3),
+  };
+}
+
+// A wired hook covers a rule's moment when it fires on the same event and its
+// matcher admits the tool the rule implies. `*` (or an absent matcher) admits
+// everything; a rule that implies no tool is covered by any hook on its event.
+function matcherCovers(wiredMatcher, impliedMatcher) {
+  if (!impliedMatcher) return true;
+  const wired = wiredMatcher || "*";
+  if (wired === "*" || wired === "") return true;
+  const admitted = wired.split("|");
+  return impliedMatcher.split("|").some((tool) => admitted.includes(tool));
+}
+
+function hookCoverage(audit) {
+  const wired = audit.hookInventory || [];
+  const covered = [];
+  for (const rule of comparableRules(audit)) {
+    const inferred = (rule.placement || {}).hookEvent;
+    if (!inferred) continue;
+    const hook = wired.find((h) => h.event === inferred.event && matcherCovers(h.matcher, inferred.matcher));
+    if (hook) covered.push({ rule, hook, event: inferred.event });
+  }
+  return covered;
+}
+
 // Every finding in the audit, rule states first, then the findings that belong
 // to a file, an annotation, or the corpus rather than to one rule. Pure: two
 // derivations over the same audit produce the same list in the same order.
@@ -2346,8 +2614,18 @@ function deriveFindings(audit) {
   const rules = all.filter((r) => !r.suppressed);
   const files = audit.files || [];
 
+  // [Foreman: 076] Both sides of a conflict take the state; the pair itself is
+  // named once, below, with both spans.
+  const conflicts = conflictPairs(audit);
+  const conflicted = new Map();
+  for (const pair of conflicts) {
+    const note = precedenceNote(files[pair.a.fileIndex], files[pair.b.fileIndex]);
+    conflicted.set(pair.a.id, { other: pair.b, note });
+    conflicted.set(pair.b.id, { other: pair.a, note });
+  }
+
   for (const rule of rules) {
-    push({ ...deriveRuleState(rule, files[rule.fileIndex]), rule: rule.id, sources: ruleSpan(rule) });
+    push({ ...deriveRuleState(rule, files[rule.fileIndex], conflicted), rule: rule.id, sources: ruleSpan(rule) });
   }
   for (const rule of rules.filter((r) => r.nonLatin)) {
     push({
@@ -2372,9 +2650,69 @@ function deriveFindings(audit) {
       safeActions: ["fix the spelling", "drop the annotation"],
     });
   }
+  // [Foreman: 076] One corpus finding per conflicting pair, naming both spans.
+  for (const pair of conflicts) {
+    const note = precedenceNote(files[pair.a.fileIndex], files[pair.b.fileIndex]);
+    push({
+      type: "conflict", severity: "high", analyzer: "conflict-detection",
+      summary: `\`${pair.ban.file}:${pair.ban.lineStart}\` bans \`${pair.action}\` and \`${pair.mandate.file}:${pair.mandate.lineStart}\` commands it`,
+      explanation: "The two rules are about one subject and take opposite positions on the same action, so whichever one Claude reaches for, it breaks the other. assay does not decide which policy is correct — it names the pair and leaves the intent to you." + note,
+      evidence: { level: "heuristic", basis: "opposite-polarity wording on one topic" },
+      sources: [...ruleSpan(pair.a), ...ruleSpan(pair.b)],
+      safeActions: [`retire ${pair.ban.file}:${pair.ban.lineStart}`, `retire ${pair.mandate.file}:${pair.mandate.lineStart}`, "scope one of the two so they no longer overlap"],
+    });
+  }
+  const duplicates = duplicatePairs(audit);
+  // [Foreman: 076] Two scoped files claiming the same project file is ordinary
+  // and stays silent; it becomes a finding only once their rules already
+  // duplicate or contradict each other, which is when the shared scope is the
+  // thing that made the collision possible.
+  const relatedFiles = new Set([...conflicts, ...duplicates].map((p) => [p.a.file, p.b.file].sort().join("\0")));
+  for (const overlap of audit.scopeOverlaps || []) {
+    if (!relatedFiles.has([overlap.a, overlap.b].sort().join("\0"))) continue;
+    push({
+      type: "scope-overlap", severity: "info", analyzer: "scope-resolution",
+      summary: `\`${overlap.a}\` (${overlap.globs.a.join(", ")}) and \`${overlap.b}\` (${overlap.globs.b.join(", ")}) both load for ${overlap.shared} shared file(s)`,
+      explanation: "Both files load together for those paths, which is why their rules can collide. Overlapping scopes are normal on their own; this is reported because these two already state something twice or contradict each other.",
+      evidence: { level: "mechanical", basis: "glob resolution against the project tree" },
+      sources: [fileSpan(byPathOf(files, overlap.a))[0], fileSpan(byPathOf(files, overlap.b))[0]],
+      safeActions: ["narrow one of the two glob sets", "merge the two files"],
+    });
+  }
+  // [Foreman: 076] A policy a wired hook already covers. "Configured", never
+  // "verified": assay reads the settings, it does not watch the hook run.
+  for (const covered of hookCoverage(audit)) {
+    push({
+      type: "redundant-enforcement", severity: "low", analyzer: "mechanism-coverage", rule: covered.rule.id,
+      summary: `a \`${covered.event}\` hook (\`${covered.hook.command}\`, ${covered.hook.source}) is already wired for the moment this rule names`,
+      explanation: "The rule asks Claude to remember something a configured hook already fires on. assay read the hook out of the settings files; it has not watched it run, so treat this as configured, not verified.",
+      evidence: {
+        level: "heuristic", basis: "a wired hook already covers this event",
+        limits: "the hook is configured, not observed — assay never checks that it fires or that it enforces this rule",
+      },
+      sources: ruleSpan(covered.rule),
+      safeActions: ["confirm the hook covers this rule", "retire the prose once the hook is confirmed"],
+    });
+  }
+  // [Foreman: 076] The window cost of everything loaded before the session
+  // starts. The line always prints; only real heft becomes a finding.
+  const pressure = alwaysLoadedBytes(audit);
+  if (pressure.total > CONTEXT_PRESSURE_BYTES) {
+    push({
+      type: "context-pressure", severity: "low", analyzer: "context-pressure",
+      summary: `${pressure.total} bytes of instructions load before every session — largest: ${pressure.largest.map((s) => "`" + s.path + "` (" + s.bytes + ")").join(", ")}`,
+      explanation: "Every session pays for these bytes before it reads a single file of yours. Nothing here is broken; it is a cost worth knowing, and scoping the largest file to the paths it applies to is what reduces it.",
+      evidence: {
+        level: "heuristic", basis: "summed bytes of always-loaded sources against assay's own threshold",
+        limits: "the host documents no byte cap, so this threshold is assay's line, not a limit the host enforces",
+      },
+      sources: pressure.largest.map((s) => ({ path: s.path, lineStart: 1, lineEnd: s.lineCount || 1 })),
+      safeActions: ["scope the largest file with `paths:` frontmatter", "split it into scoped rules files"],
+    });
+  }
   // [Foreman: 066] One finding per pair. Neither rule loses its own state — both
   // copies are real rules, and the duplication is a property of the pair.
-  for (const pair of duplicatePairs(audit)) {
+  for (const pair of duplicates) {
     const exact = pair.tier === "exact";
     const { keep, drop } = keepSuggestion(pair, files);
     const crossScope = (files[pair.a.fileIndex] || {}).scope !== (files[pair.b.fileIndex] || {}).scope;
@@ -2439,6 +2777,57 @@ function deriveFindings(audit) {
     });
   }
   return findings;
+}
+
+// [Foreman: 076]
+// The relationship graph: what the deterministic analyzers found BETWEEN two
+// things in the corpus, rather than about either one of them. Findings are what
+// a report shows a human; relationships are the edges a later consumer walks.
+// Every edge is built from the pairs the findings were built from — nothing is
+// detected a second time here.
+//
+// `between` names two sites: a rule by its content key, a source by its path.
+// Ordering is kind first, then the site order each analyzer already emits (the
+// sort is stable), so two runs over one corpus produce identical ids.
+function deriveRelationships(audit) {
+  const rels = [];
+  const files = audit.files || [];
+  const site = (rule) => rule.key || rule.id;
+
+  for (const pair of conflictPairs(audit)) {
+    rels.push({
+      kind: "conflict", between: [site(pair.a), site(pair.b)],
+      explanation: `${pair.a.file}:${pair.a.lineStart} and ${pair.b.file}:${pair.b.lineStart} take opposite positions on \`${pair.action}\`. assay does not decide which policy is correct.` +
+        precedenceNote(files[pair.a.fileIndex], files[pair.b.fileIndex]),
+      evidence: { level: "heuristic", basis: "opposite-polarity wording on one topic" },
+    });
+  }
+  for (const covered of hookCoverage(audit)) {
+    rels.push({
+      kind: "covers", between: [covered.hook.source + ":" + covered.hook.command, site(covered.rule)],
+      explanation: `a wired \`${covered.event}\` hook covers the moment ${covered.rule.file}:${covered.rule.lineStart} names — configured, not verified`,
+      evidence: { level: "heuristic", basis: "a wired hook already covers this event" },
+    });
+  }
+  for (const pair of duplicatePairs(audit)) {
+    rels.push({
+      kind: "duplicate", between: [site(pair.a), site(pair.b)],
+      explanation: `${pair.a.file}:${pair.a.lineStart} and ${pair.b.file}:${pair.b.lineStart} state one duty twice (${pair.tier} copy)`,
+      evidence: pair.tier === "exact"
+        ? { level: "mechanical", basis: "identical normalized rule text" }
+        : { level: "heuristic", basis: "content-token overlap between two rules" },
+    });
+  }
+  for (const file of files.filter((f) => f.selected === false && f.shadowedBy)) {
+    rels.push({
+      kind: "shadows", between: [file.shadowedBy, file.path],
+      explanation: `${file.shadowedBy} was selected at this level, so ${file.path} never loads`,
+      evidence: { level: "mechanical", basis: "same-level source selection" },
+    });
+  }
+  return rels
+    .sort((a, b) => a.kind.localeCompare(b.kind))
+    .map((rel, i) => ({ id: "REL" + String(i + 1).padStart(3, "0"), ...rel }));
 }
 
 function fmt(x) {
@@ -2661,7 +3050,7 @@ function pushUserScopeSection(out, files) {
 // thing the verification pass must never do, so its count belongs here.
 // razor: counts and one line per unreadable source — not a per-file table. The
 // per-file breakdown already exists under "## Files".
-function pushCoverageSection(out, audit, rules, suppressed) {
+function pushCoverageSection(out, audit, rules, suppressed, findings) {
   const cov = audit.coverage || {};
   const parsed = cov.filesParsed != null ? cov.filesParsed : audit.files.length;
   const discovered = cov.filesDiscovered != null ? cov.filesDiscovered : parsed;
@@ -2669,6 +3058,12 @@ function pushCoverageSection(out, audit, rules, suppressed) {
   out.push("");
   out.push(`- ${parsed} of ${discovered} instruction file(s) parsed, ${rules.length} rule(s) graded, ${cov.proseChunks || 0} prose chunk(s) set aside`);
   out.push(`- ${cov.excludedLines || 0} line(s) excluded from grading (assay-ignore spans, tag bodies, comment-only lines)`);
+  // [Foreman: 076] What every session pays before it reads anything. The count
+  // always prints; it only becomes a finding above assay's own threshold, and
+  // the finding says the host documents no cap of its own.
+  out.push(`- ${alwaysLoadedBytes(audit).total} bytes of always-loaded instructions (user + project memory, unscoped rules)`);
+  const pressure = (findings || []).find((f) => f.type === "context-pressure");
+  if (pressure) out.push(`  - ${pressure.summary} ${evidenceTag(pressure.evidence)} — ${pressure.evidence.limits}`);
   // [Foreman: 071] The coverage gap the deterministic default opens, named where
   // every other gap is named. What did not run is part of what the audit covered.
   if (!audit.semantic) {
@@ -2750,7 +3145,7 @@ function renderReport(audit, opts = {}) {
   if (!rules.length) {
     out.push("No rules found in CLAUDE.md or .claude/rules/.");
     out.push("");
-    pushCoverageSection(out, audit, rules, suppressed);
+    pushCoverageSection(out, audit, rules, suppressed, findings);
     if (weakSkills.length) {
       pushWeakSkillSection(out, weakSkills);
     }
@@ -2760,7 +3155,7 @@ function renderReport(audit, opts = {}) {
     }
     return out.join("\n");
   }
-  pushCoverageSection(out, audit, rules, suppressed);
+  pushCoverageSection(out, audit, rules, suppressed, findings);
 
   // 2. Headline — the risk topology, not a mean.
   const counts = stateCounts(findings);
@@ -2800,13 +3195,34 @@ function renderReport(audit, opts = {}) {
   const stale = rules.filter((r) => r.staleness && r.staleness.missing.length);
   const badCategories = rules.filter((r) => r.invalidCategory);
   const duplicates = duplicatePairs(audit);
+  // [Foreman: 076] Corpus findings the renderer lists rather than re-derives.
+  const conflicts = findings.filter((f) => f.type === "conflict");
+  const overlaps = findings.filter((f) => f.type === "scope-overlap");
+  const proposals = ((audit.semantic || {}).candidates) || [];
   out.push("## Operational findings");
   out.push("");
-  if (!weak.length && !stalls.length && !buried.length && !stale.length && !badCategories.length && !duplicates.length) {
+  if (!weak.length && !stalls.length && !buried.length && !stale.length && !badCategories.length &&
+      !duplicates.length && !conflicts.length && !overlaps.length && !proposals.length) {
     out.push("None — no loaded rule carries a risk the analyzers can see.");
     out.push("");
   } else {
     out.push("Rules the host loads that carry a risk to how reliably they act. Each line names the kind of evidence behind it.");
+    out.push("");
+  }
+
+  // [Foreman: 076] Conflicts lead the section: a pair that contradicts itself
+  // outranks any single weak rule, and it is the one finding here that no
+  // rewrite of either rule alone can settle.
+  if (conflicts.length) {
+    out.push("### Conflicts");
+    out.push("");
+    out.push("Two loaded rules that ban and command the same action. assay names the pair and stops: which policy is correct is a decision about your project, not about wording, so neither rule is edited and neither is called the winner. [heuristic]");
+    out.push("");
+    for (const f of conflicts) {
+      const [a, b] = f.sources;
+      out.push(`- [${a.path}:${a.lineStart}](${a.path}:${a.lineStart}) ↔ [${b.path}:${b.lineStart}](${b.path}:${b.lineStart}) — ${f.summary}`);
+      out.push(`  - ${f.explanation}`);
+    }
     out.push("");
   }
 
@@ -2868,6 +3284,36 @@ function renderReport(audit, opts = {}) {
 
   if (duplicates.length) pushDuplicateSection(out, duplicates, files, loc);
 
+  if (overlaps.length) {
+    out.push("### Scope overlap");
+    out.push("");
+    out.push("These scoped files load together for the same paths, which is how their rules ended up colliding. Overlapping globs are normal by themselves — this lists only the pairs that already state something twice or contradict each other. [mechanical]");
+    out.push("");
+    for (const f of overlaps) out.push(`- ${f.summary}`);
+    out.push("");
+  }
+
+  // [Foreman: 076] The semantic proposal channel. Labelled on every line and
+  // walled off from everything above it: a proposal never changes a state, a
+  // score, the grade, or the deterministic relationship graph.
+  if (proposals.length) {
+    const byKey = new Map((audit.rules || []).map((r) => [r.key, r]));
+    const acceptanceOf = (c) => (c.accepted === true ? "accepted" : c.accepted === false ? "rejected" : "proposed");
+    const shown = proposals.filter((c) => opts.verbose || acceptanceOf(c) !== "rejected");
+    if (shown.length) {
+      out.push("### Model-proposed relationships");
+      out.push("");
+      out.push("The model proposed these while judging. They are proposals, not measurements: nothing here moved a rule's state, its score, the corpus grade, or the relationships assay derived deterministically. Accept or reject each one in conversation. [model-inferred]");
+      out.push("");
+      for (const c of shown) {
+        const sites = (c.keys || []).map((k) => byKey.get(k)).filter(Boolean).map(loc);
+        const where = sites.length ? sites.join(" ↔ ") : "(no rule in this scan matches its keys)";
+        out.push(`- **${c.kind}** — ${acceptanceOf(c)} — ${where} — ${c.summary || ""}${c.reason ? " (" + c.reason + ")" : ""}`);
+      }
+      out.push("");
+    }
+  }
+
   if (badCategories.length) {
     out.push("### Unknown category annotations");
     out.push("");
@@ -2884,12 +3330,13 @@ function renderReport(audit, opts = {}) {
   const hooks = rules.filter((r) => r.hookOpportunity);
   const placed = rules.filter((r) => r.placement);
   const restructure = restructureCandidates(audit);
+  const redundant = findings.filter((f) => f.type === "redundant-enforcement");
   const advisory = findings.filter((f) => f.state === "advisory");
   const advisoryByCategory = advisory.filter((f) => f.evidence.level === "mechanical").length;
   const advisoryByModel = advisory.length - advisoryByCategory;
   out.push("## Policy placement");
   out.push("");
-  if (!hooks.length && !placed.length && !restructure.length && !advisory.length) {
+  if (!hooks.length && !placed.length && !restructure.length && !advisory.length && !redundant.length) {
     out.push("None — nothing here is better owned by another mechanism.");
     out.push("");
   } else {
@@ -2904,6 +3351,21 @@ function renderReport(audit, opts = {}) {
       out.push(`- ${advisoryByModel} rule(s) need judgment no mechanism can supply — they appropriately stay prose [model-inferred]`);
     }
     if (advisory.length) out.push("");
+  }
+
+  // [Foreman: 076] A rule whose moment a wired hook already fires on. The hook
+  // is read out of the settings files, never watched — so this says "already
+  // wired", not "already enforced".
+  if (redundant.length) {
+    out.push("### Already wired");
+    out.push("");
+    out.push("A hook is already configured for the moment each of these rules names. assay read that out of the settings files and has not watched it run, so confirm the hook actually covers the rule before retiring any prose. [heuristic]");
+    out.push("");
+    for (const f of redundant) {
+      const r = rulesById.get(f.rule);
+      out.push(`- ${r ? ruleLink(r, 60) : f.rule} — ${f.summary}`);
+    }
+    out.push("");
   }
 
   if (hooks.length) {
@@ -2968,7 +3430,9 @@ function renderReport(audit, opts = {}) {
   out.push("| File | Rules | Grade | Loading |");
   out.push("|---|---|---|---|");
   for (const f of files.filter((x) => x.scope !== "user")) {
-    const loading = f.globs && f.globs.length ? "scoped: " + f.globs.join(", ") : "always loaded";
+    // [Foreman: 076] An unselected variant is listed, never described as loading.
+    const loading = f.selected === false ? "not loaded — shadowed"
+      : f.globs && f.globs.length ? "scoped: " + f.globs.join(", ") : "always loaded";
     const g = f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`;
     out.push(`| ${f.path} | ${f.ruleCount} | ${g} | ${loading} |`);
   }
@@ -3410,6 +3874,8 @@ module.exports = {
   composeScore, grade, detectPlacement, scan, composeAudit, renderReport, loadJudgments,
   // [Foreman: 075] the finding contract
   deriveFindings, evidenceTag, FINDING_STATES,
+  // [Foreman: 076] the corpus relationship contract
+  deriveRelationships, conflictPairs, duplicatePairs, CONTEXT_PRESSURE_BYTES,
   looksLikeStatement, hasImperativeVerb, checkSkillDescription, gradeSkill, findSkillFiles,
   renderArtifact, artifactRuleData,
   // [Foreman: 072] the record contract
