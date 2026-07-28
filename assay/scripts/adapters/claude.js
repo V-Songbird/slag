@@ -374,6 +374,56 @@ function discoverRepoChecks(ctx) {
 }
 
 // ---------------------------------------------------------------------------
+// Supported mutation targets — [Foreman: 082]
+// ---------------------------------------------------------------------------
+
+// The slot SCOPE.md's host adapter contract names ("supported mutation targets")
+// and nothing filled until the authoring skills became clients of this profile.
+// Where a NEW rule or a NEW skill may be written is host knowledge exactly like
+// where an existing one is discovered — and discovery cannot answer it, because
+// a file that does not exist yet is not in discoverSources' output. So the
+// declaration is static, like `policy` and `nouns`, and rides the record beside
+// them: an authoring flow reads its write targets off the record instead of
+// learning a host name.
+//
+// `docs` is the page the format came from, so a generated artifact's
+// `placement-promotion` provenance names a URL this profile vouches for rather
+// than one a model recalled.
+const TARGETS = {
+  rule: {
+    docs: "https://code.claude.com/docs/en/memory.md",
+    places: [
+      {
+        path: "CLAUDE.md",
+        scope: "project",
+        kind: "memory",
+        scoping: "loads every session; a new rule belongs in the top quarter of the file",
+      },
+      {
+        path: ".claude/rules/<topic>.md",
+        scope: "project",
+        kind: "rules",
+        scoping: "`paths:` frontmatter binds it to the files it governs — the glob must match at least one real file; with no `paths:` it loads every session",
+      },
+    ],
+  },
+  skill: {
+    docs: "https://code.claude.com/docs/en/skills.md",
+    dir: ".claude/skills/<name>/",
+    file: "SKILL.md",
+    // Frontmatter the host documents as required for a project skill. The
+    // trigger recipe is a separate question and lives in `policy.skillRecipe`.
+    requires: ["description"],
+    // No separate invocation or UI metadata file: the frontmatter carries it.
+    metadata: [],
+  },
+  hook: {
+    docs: "https://code.claude.com/docs/en/hooks.md",
+    path: ".claude/settings.json",
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Budgets and provenance
 // ---------------------------------------------------------------------------
 
@@ -401,6 +451,7 @@ function docs() {
 module.exports = {
   name: NAME,
   profileVersion: PROFILE_VERSION,
+  targets: TARGETS, // [Foreman: 082]
   detectContext,
   discoverSources,
   loadsAlways,

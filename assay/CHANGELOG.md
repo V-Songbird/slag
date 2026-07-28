@@ -16,10 +16,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - Applied changes get checked: the written file re-parses, the analysis re-runs and reports what moved, and a promoted skill or hook is confirmed to be somewhere the host will find it. Your own test suites and fresh-session checks are recorded as results you report, never run by assay
 - Retiring a rule a new mechanism replaced is now its own command, and it refuses to run until the replacement has been checked and passed. It reminds you that keeping the prose as documentation is a legitimate outcome
 - Parking a placement candidate now records it in the plan itself, with its promotion note and its limits, instead of a separate notes file
+- `/assay:craft-rules` and `/assay:craft-skill` build for either host. Add `--host codex` and they write to that host's own instruction files and skill directories, ask about the scope that host actually has, and require the metadata that host actually documents
+- A drafted rule is checked against the rules already active before it is offered. One that bans what an active rule commands is shown to you with both texts and their exact lines, and is not written until you say which policy you meant — assay never picks the winner. A draft that only restates an existing rule is named as the duplicate it is
+- A crafted skill is checked after it lands: the file parses, its frontmatter carries what the host requires, every file it references exists, any metadata sidecar parses with its declared tool dependencies named in the preview, and the host profile is asked whether it actually finds the skill
+- Where a host has no measured evidence for the trigger recipe, a crafted skill is no longer written to it or scored against it. It gets that host's own required metadata, its explicit-versus-implicit invocation setting, and its tool dependencies instead — and the skill says plainly that no recipe score exists there
 
 ### Changed
 
 - Cleanup keeps the change record whenever an applied change hasn't been checked, rolled back, or retired yet, and says which ones — the record holds the only copy of your files as they were. It removes the record once everything is resolved, and never removes a parked plan
+- Neither craft command writes a file directly any more. A rule, a skill, its metadata, a companion rule, a hook — each is planned first, shown to you as exact text, applied only for the changes you name, checked afterwards, and reversible with one command
+- A skill metadata sidecar that isn't valid YAML is now undone automatically after the write, the way broken frontmatter already was, instead of being left on disk
 
 ## [0.8.0-alpha] — 2026-07-28
 

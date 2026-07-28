@@ -1,5 +1,11 @@
 # The description recipe
 
+**Where it applies.** This recipe was measured against one host's skill router,
+and it governs a profile only while the scan record's `profile.policy.skillRecipe`
+is not `false`. A profile that sets it false grades no description against any
+part of this file — write that host's own required metadata instead, and never
+report a recipe score the engine did not produce.
+
 A skill's frontmatter `description` is a router, not documentation: Claude reads
 it when deciding whether to invoke the skill, and recall tracks how much of the
 user's actual phrasing the description covers. Every part below is there because
@@ -75,8 +81,8 @@ says a skill must ALWAYS run, climb the ladder; each step is additive:
    skip description-routed skills more often, not less. Never promise
    "always" from a description alone.
 
-2. **Companion rule.** One bullet, shaped exactly like this, placed in the top
-   quarter of `CLAUDE.md`:
+2. **Companion rule.** One bullet, shaped exactly like this, placed in the
+   always-loaded target from `profile.targets.rule.places[]`, near the top:
 
    ```
    When the user asks <trigger in plain words>, ALWAYS use the <name> skill —
@@ -87,14 +93,16 @@ says a skill must ALWAYS run, climb the ladder; each step is additive:
    paired never-clause are each load-bearing; keep all four.
 
 3. **Scoped companion rule.** When the skill is bound to a file type, put the
-   same rule in `.claude/rules/<name>-rule.md` with `paths:` frontmatter
-   (e.g. `- "*.csv"`) instead of CLAUDE.md. It performs identically where the
-   globs match and keeps CLAUDE.md short. Verify the glob matches at least one
-   real project file before writing it.
+   same rule in the scoped target from `profile.targets.rule.places[]` instead,
+   with the scoping frontmatter its `scoping` line names (e.g. `- "*.csv"`). It
+   performs identically where the globs match and keeps the always-loaded file
+   short. Verify the glob matches at least one real project file before writing
+   it. On a host whose targets carry no scoped entry, use the always-loaded one.
 
 4. **Hook.** The only true guarantee. If skipping the skill even once is a
    real failure — formatting gates, safety checks — the ask is a hook, not a
-   skill description; say so and offer to build it per the live hooks docs.
+   skill description; say so and offer to build it per the live hooks docs at
+   `profile.targets.hook.docs`.
 
 ## Refitting an existing description
 

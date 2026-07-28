@@ -3978,11 +3978,16 @@ test("--host names the profile discovery runs under, and an unknown one is a usa
   assert.equal(scanned.code, 0, scanned.err);
   const record = readJson(root, "scan.json");
   assert.equal(engine.validateRecord(record, "scan"), null);
-  assert.deepEqual(record.profile, {
+  // [Foreman: 082] `targets` joined the declaration; its content is asserted in
+  // the authoring section, so what this test still owns is that nothing ELSE
+  // rides the profile block.
+  const { targets, ...profile } = record.profile;
+  assert.deepEqual(profile, {
     host: "codex", version: 2,
     policy: { wordingRubric: false, skillRecipe: false },
     nouns: { primitive: "Codex primitive", scopedRules: "narrower `AGENTS.md` files further down the chain" },
   });
+  assert.equal(targets.skill.dir, ".agents/skills/<name>/");
   assert.deepEqual(record.files.map((f) => f.path), ["AGENTS.md"]);
   assert.equal(record.coverage.budget.amount, 32768);
   assert.equal(record.coverage.skillBudget.amount, 8000);
@@ -4001,9 +4006,12 @@ test("no --host is the Claude profile, and the record it writes is the one it al
   assert.equal(cli(root, "scan", "--host", "claude-code").code, 0);
   const explicit = readJson(root, "scan.json");
 
-  // the profile that declares no policy adds no key: same envelope, same
-  // context, same coverage as before the registry existed
-  assert.deepEqual(implicit.profile, { host: "claude-code", version: 2 });
+  // the profile that declares no policy adds no policy key: same envelope, same
+  // context, same coverage as before the registry existed. [Foreman: 082]
+  // `targets` is declared by every profile and is checked separately.
+  const { targets, ...profile } = implicit.profile;
+  assert.deepEqual(profile, { host: "claude-code", version: 2 });
+  assert.equal(targets.rule.places[0].path, "CLAUDE.md");
   assert.deepEqual(Object.keys(implicit.context), ["projectRoot", "startupDirectory", "userDir", "hostVersion", "analysisTime"]);
   assert.equal("budget" in implicit.coverage, false);
   assert.equal("profileNotes" in implicit.coverage, false);
@@ -5007,4 +5015,204 @@ test("every transaction command exits 1 on an unknown change id, a missing plan,
   const unapplied = cli(root, "validate", "--change", "c-rewrite");
   assert.equal(unapplied.code, 1);
   assert.match(unapplied.err, /has not been applied/);
+});
+
+// ---------------------------------------------------------------------------
+// Host-aware authoring — [Foreman: 082]
+// ---------------------------------------------------------------------------
+
+// What can be tested mechanically about an interview is not the interview: it
+// is the contract around it. These check that both craft skills still pass the
+// audit assay runs on everyone else's skills, that every file they point at
+// exists, that their write path is the transaction and nothing else, and that
+// the one engine seam they lean on is real.
+
+const SKILLS_ROOT = path.join(__dirname, "..", "skills");
+const CRAFT_SKILLS = ["craft-rules", "craft-skill"];
+
+function skillSource(name) {
+  return fs.readFileSync(path.join(SKILLS_ROOT, name, "SKILL.md"), "utf-8");
+}
+
+// Everything after the frontmatter block. The description legitimately names
+// host paths as examples of what the skill builds; the INSTRUCTIONS may not.
+function skillBody(text) {
+  const parts = text.split(/^---$/m);
+  return parts.slice(2).join("---");
+}
+
+test("both craft skills still pass the trigger recipe their own audit applies", () => {
+  for (const name of CRAFT_SKILLS) {
+    const fm = engine.parseFrontmatter(skillSource(name));
+    assert.equal(fm.name, name);
+    const checks = engine.checkSkillDescription(fm.description || "");
+    assert.deepEqual(checks.missing, [], name + " is missing a recipe part");
+    assert.equal(checks.redundant, false, name + " carries a duplicated clause");
+    assert.equal(checks.overCap, false, name + " is over the listing cap");
+    assert.equal(fm.when_to_use, undefined, name + " is model-invocable and must not carry when_to_use");
+    // the host flag is part of the contract, so it is part of the hint
+    assert.match(String(fm["argument-hint"]), /--host codex/, name);
+    // no in-place editing tool at all: the write path is the transaction, and
+    // this is the structural half of that promise
+    assert.doesNotMatch(String(fm["allowed-tools"]), /\bEdit\b/, name + " still allows Edit");
+    assert.match(String(fm["allowed-tools"]), /\bBash\b/, name + " needs Bash to reach the engine");
+  }
+});
+
+test("every file the craft skills point at exists", () => {
+  for (const name of CRAFT_SKILLS) {
+    const text = skillSource(name);
+    const referenced = [
+      // in-skill markdown links, e.g. [references/recipe.md](references/recipe.md)
+      ...[...text.matchAll(/\]\((references\/[^)]+)\)/g)].map((m) => path.join(SKILLS_ROOT, name, m[1])),
+      // cross-skill paths written the way the plugin writes them
+      ...[...text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/([\w./-]+\.md)/g)]
+        .map((m) => path.join(SKILLS_ROOT, m[1])),
+    ];
+    assert.ok(referenced.length, name + " points at nothing, which cannot be right");
+    for (const file of referenced) {
+      assert.ok(fs.existsSync(file), name + " points at a missing file: " + file);
+    }
+    // and every reference file the skill ships is actually pointed at
+    for (const ref of fs.readdirSync(path.join(SKILLS_ROOT, name, "references"))) {
+      assert.ok(text.includes("references/" + ref), name + " ships an unreferenced " + ref);
+    }
+  }
+});
+
+test("the craft skills write only through the transaction, never a host path of their own", () => {
+  for (const name of CRAFT_SKILLS) {
+    const body = skillBody(skillSource(name));
+    for (const command of [/plan --from \.assay-tmp\/draft-plan\.json/, /apply --change/, /validate --change/, /rollback --change/]) {
+      assert.match(body, command, name + " is missing " + command);
+    }
+    // every host write target comes off the record, so none is spelled out in
+    // the instructions
+    for (const hardcoded of [/\.claude\/rules\//, /\.claude\/skills\//, /\.agents\/skills/, /AGENTS\.md/]) {
+      assert.doesNotMatch(body, hardcoded, name + " hardcodes a host write target: " + hardcoded);
+    }
+    // the record is where the target menu comes from
+    assert.match(body, /profile\.targets/, name);
+    // and the promise is stated, not merely implied by the tool list
+    assert.match(body, /[Nn]ever write or edit/, name);
+  }
+});
+
+test("both craft skills read the host policy that decides what they may claim", () => {
+  // craft-rules must not report a wording grade under a profile that withdraws
+  // the rubric; craft-skill must not write to the trigger recipe under one that
+  // withdraws the recipe. Each names the policy key it reads.
+  assert.match(skillBody(skillSource("craft-rules")), /policy\.wordingRubric/);
+  assert.match(skillBody(skillSource("craft-skill")), /policy\.skillRecipe/);
+  // and the recipes they load say where they were measured
+  assert.match(fs.readFileSync(path.join(SKILLS_ROOT, "craft-rules", "references", "recipe.md"), "utf-8"),
+    /policy\.wordingRubric/);
+  assert.match(fs.readFileSync(path.join(SKILLS_ROOT, "craft-skill", "references", "recipe.md"), "utf-8"),
+    /policy\.skillRecipe/);
+});
+
+test("every profile declares its supported mutation targets, and they ride the record", () => {
+  for (const [host, adapter] of Object.entries(engine.ADAPTERS)) {
+    const t = adapter.targets;
+    assert.ok(t, host + " declares no mutation targets");
+    assert.ok(t.rule.places.length, host + " names no place a rule may go");
+    for (const place of t.rule.places) {
+      for (const key of ["path", "scope", "kind", "scoping"]) {
+        assert.equal(typeof place[key], "string", host + " place is missing " + key);
+        assert.ok(place[key].length, host + " place has an empty " + key);
+      }
+    }
+    for (const [group, keys] of [["rule", ["docs"]], ["skill", ["docs", "dir", "file"]], ["hook", ["docs", "path"]]]) {
+      for (const key of keys) assert.ok(t[group][key], host + "." + group + "." + key);
+    }
+    assert.ok(t.skill.requires.includes("description"), host + " must require a description");
+    assert.ok(Array.isArray(t.skill.metadata), host + ".skill.metadata");
+    for (const url of [t.rule.docs, t.skill.docs, t.hook.docs]) assert.match(url, /^https:\/\//);
+  }
+
+  // the two profiles answer differently, which is the whole reason this is not
+  // a constant in a skill file
+  const claude = engine.ADAPTERS["claude-code"].targets;
+  const codex = engine.ADAPTERS.codex.targets;
+  assert.equal(claude.skill.dir, ".claude/skills/<name>/");
+  assert.equal(codex.skill.dir, ".agents/skills/<name>/");
+  assert.deepEqual(claude.skill.metadata, []);
+  assert.deepEqual(codex.skill.metadata, ["agents/openai.yaml"]);
+  assert.deepEqual(codex.skill.requires, ["name", "description"]);
+  assert.ok(claude.rule.places.some((p) => p.path === "CLAUDE.md"));
+  assert.ok(codex.rule.places.some((p) => p.path === "AGENTS.md"));
+  assert.ok(codex.rule.places.some((p) => p.path === "AGENTS.override.md"));
+
+  // and a scan record carries the declaration, which is how a skill reads it
+  const root = tmpProject({ "CLAUDE.md": "# Rules\n\n- Never use `var` — use `const` instead.\n" });
+  assert.equal(cli(root, "scan").code, 0);
+  const record = readJson(root, "scan.json");
+  assert.deepEqual(engine.profileTargets(record), claude);
+  assert.equal(engine.validateRecord(record, "scan"), null);
+
+  assert.equal(cli(root, "scan", "--host", "codex").code, 0);
+  assert.deepEqual(engine.profileTargets(readJson(root, "scan.json")), codex);
+
+  // a profile that declares none gets null, not a guessed filename
+  assert.equal(engine.profileTargets({ profile: { host: "x", version: 1 } }), null);
+  assert.equal(engine.profileTargets(null), null);
+});
+
+// A crafted Codex skill writes agents/openai.yaml beside its SKILL.md, and that
+// sidecar is where implicit invocation and the tool dependencies live. It gets
+// the same post-write parse — and therefore the same automatic restore — that
+// SKILL.md frontmatter has had since 081.
+const CODEX_SKILL_MD = [
+  "---", "name: deploy", "description: Ships the service.", "---", "", "# deploy", "",
+].join("\n");
+
+function codexSkillPromotion(sidecar) {
+  return {
+    id: "c-codex-skill",
+    kind: "placement-promotion",
+    rationale: "A multi-step deploy is a workflow, not a sentence.",
+    mechanism: { type: "skill", name: "deploy" },
+    provenance: [{ claim: "SKILL.md frontmatter and the openai.yaml sidecar", url: "https://learn.chatgpt.com/docs/build-skills", verified: "2026-07-28" }],
+    patches: [
+      { path: ".agents/skills/deploy/SKILL.md", old: null, new: CODEX_SKILL_MD },
+      { path: ".agents/skills/deploy/agents/openai.yaml", old: null, new: sidecar },
+    ],
+  };
+}
+
+test("a skill metadata sidecar that is not valid YAML is restored, and a valid one validates", () => {
+  const broken = tmpProject({ "AGENTS.md": "# Rules\n\n- Never use `var` — use `const` instead.\n" });
+  assert.equal(planDraft(broken, { changes: [codexSkillPromotion("policy: [unclosed\n")] }).code, 0);
+  const refused = cli(broken, "apply", "--change", "c-codex-skill", "--host", "codex");
+  assert.equal(refused.code, 1);
+  assert.match(refused.err, /agents\/openai\.yaml is not valid YAML/);
+  assert.match(refused.err, /was restored/);
+  // both patches go back, so a half-written skill is never left behind
+  assert.equal(fs.existsSync(path.join(broken, ".agents", "skills", "deploy", "SKILL.md")), false);
+  assert.equal(fs.existsSync(path.join(broken, ".agents", "skills", "deploy")), false);
+
+  const ok = tmpProject({ "AGENTS.md": "# Rules\n\n- Never use `var` — use `const` instead.\n" });
+  const sidecar = ["interface:", "  display_name: Deploy", "policy:", "  allow_implicit_invocation: false",
+    "dependencies:", "  tools:", "    - type: command", "      value: kubectl", ""].join("\n");
+  assert.equal(planDraft(ok, { changes: [codexSkillPromotion(sidecar)] }).code, 0);
+  assert.equal(cli(ok, "apply", "--change", "c-codex-skill", "--host", "codex").code, 0);
+
+  // validate under the SELECTED profile: reparse covers both files, and
+  // host-discovery asks the Codex profile whether it finds the skill at all
+  const validated = cli(ok, "validate", "--change", "c-codex-skill", "--host", "codex");
+  assert.equal(validated.code, 0, validated.err);
+  const evidence = JSON.parse(validated.out).evidence;
+  const discovery = evidence.find((e) => e.kind === "host-discovery");
+  assert.equal(discovery.result, "pass");
+  assert.match(discovery.detail, /configured, not enabled, trusted or verified/);
+
+  // and what the skill reads back afterwards: required metadata, no recipe score
+  assert.equal(cli(ok, "scan", "--host", "codex").code, 0);
+  const entry = readJson(ok, "scan.json").skills.find((s) => s.name === "deploy");
+  assert.equal(entry.checks.mode, "required-metadata");
+  assert.deepEqual(entry.checks.missing, []);
+  assert.equal(entry.metadata.allowImplicitInvocation, false);
+  assert.deepEqual(entry.metadata.toolDependencies, [{ type: "command", value: "kubectl" }]);
+  assert.equal("metadataIssue" in entry, false);
+  assert.equal("quotedPhrases" in entry.checks, false, "no trigger-recipe grade belongs on this profile");
 });

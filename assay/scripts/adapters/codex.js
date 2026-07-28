@@ -706,6 +706,61 @@ function discoverRepoChecks(ctx) {
 }
 
 // ---------------------------------------------------------------------------
+// Supported mutation targets — [Foreman: 082]
+// ---------------------------------------------------------------------------
+
+// Same declaration the Claude profile makes, and a different answer on every
+// line — which is the point. An authoring flow reads this off the record; it
+// never learns that "codex" means AGENTS.md. The chain is what makes a target
+// choice a real decision here: a rule in the root file reaches every session,
+// and the same rule one directory down reaches only sessions started there.
+//
+// `AGENTS.override.md` is listed because it is a documented, supported target —
+// with the consequence stated, since writing one silences the `AGENTS.md` beside
+// it entirely.
+const TARGETS = {
+  rule: {
+    docs: "https://learn.chatgpt.com/docs/agent-configuration/agents-md",
+    places: [
+      {
+        path: "AGENTS.md",
+        scope: "project",
+        kind: "memory",
+        scoping: "the chain root — read by a session started anywhere in the repository",
+      },
+      {
+        path: "<subdirectory>/AGENTS.md",
+        scope: "project",
+        kind: "memory",
+        scoping: "read only by a session started in that directory or below it, and read after the root file, so it is the later word",
+      },
+      {
+        path: "AGENTS.override.md",
+        scope: "project",
+        kind: "memory",
+        scoping: "wins same-directory selection — the `AGENTS.md` beside it is then never read at all",
+      },
+    ],
+  },
+  skill: {
+    docs: "https://learn.chatgpt.com/docs/build-skills",
+    dir: ".agents/skills/<name>/",
+    file: "SKILL.md",
+    // Both are documented as required frontmatter here; the Claude profile
+    // requires only one of them.
+    requires: ["name", "description"],
+    // The sidecar carrying UI metadata, the implicit-invocation switch, and the
+    // skill's tool dependencies. Optional to the host, so it is a target rather
+    // than a requirement — but nothing else can express those three things.
+    metadata: ["agents/openai.yaml"],
+  },
+  hook: {
+    docs: "https://learn.chatgpt.com/docs/hooks",
+    path: ".codex/hooks.json",
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Budgets and provenance
 // ---------------------------------------------------------------------------
 
@@ -805,6 +860,7 @@ module.exports = {
   profileVersion: PROFILE_VERSION,
   policy: POLICY,
   nouns: NOUNS,
+  targets: TARGETS, // [Foreman: 082]
   detectContext,
   discoverSources,
   loadsAlways,

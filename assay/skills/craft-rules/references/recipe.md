@@ -1,7 +1,14 @@
 # The rule recipe
 
-A rule is one bullet Claude reads mid-task, long after the file loaded. Every
+A rule is one bullet the agent reads mid-task, long after the file loaded. Every
 part below maps to a factor the audit grades; nothing here is style.
+
+**Where it was measured.** These levers were measured on the Claude Code
+profile, and a host profile that sets `policy.wordingRubric: false` in the scan
+record withdraws them along with the grade they sum to. Under such a profile
+the anatomy below is still good authoring advice — write to it — but it is not
+a graded contract, and the engine produces no wording score to report. Say that
+plainly instead of implying a rule was scored.
 
 ## Anatomy
 
@@ -39,13 +46,21 @@ Ceiling: one bullet, under ~30 words, one duty. Two duties are two rules.
 
 ## Placement
 
+The candidate files are `profile.targets.rule.places[]` in the scan record —
+one entry per file this host lets a new rule be written into, each carrying the
+`scoping` sentence that says what it reaches. Read the menu off the record;
+never assume a filename from the host's name.
+
 | The rule is | It goes |
 | --- | --- |
-| Bound to a file type or path | `.claude/rules/<topic>.md` with `paths:` frontmatter — verify the glob matches at least one real file first |
-| Universal | Top quarter of `CLAUDE.md` |
+| Bound to a file type or path | The scoped target, if the host has one — with the scoping frontmatter its `scoping` line names, and only after the glob is verified to match at least one real file |
+| Bound to where the session started | The chain target for that directory, on a host whose instruction system is a directory chain — and say plainly that a session started elsewhere never reads it |
+| Universal | The always-loaded target, near the top |
 
-Never add a rule below the halfway line of a long file — position alone
-grades it down, and buried rules lose force.
+Never add a rule below the halfway line of a long file — on the profile where
+position is graded it grades the rule down, and on every profile a buried rule
+loses force. Never write into a source the record marks `selected: false`, or
+past a `truncatedAtLine`: the host does not read there.
 
 ## When the ask is not a rule
 

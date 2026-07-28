@@ -26,6 +26,8 @@ And when the problem is a skill instead of a rule, `/assay:craft-skill` builds o
 
 Rules get the same treatment: `/assay:craft-rules` grills you — when should it fire, what replaces the thing you're banning, what does a violation actually look like — then writes one bullet that would survive its own audit, placed where Claude will actually read it. If what you asked for was never a rule at all, it says so instead of writing you a wish.
 
+Both build for whichever host you name — add `--host codex` and they write to that host's own files, with that host's required metadata, and claim only what that host has evidence for. Either way, nothing lands unreviewed: what they write goes through the same previewed, reversible transaction as the audit's fixes, and a draft that contradicts a rule you already have is shown to you as a question, not resolved behind your back.
+
 ## Why you'd want it
 
 - **You stop guessing which rules are weak.** Every rule gets one finding at its exact line, with the kind of evidence behind it stated plainly — and a hygiene grade that never overrules a rule the host can't apply.
@@ -98,6 +100,7 @@ rubric carries no evidence for this host.
 | Build a skill that reliably triggers | `/assay:craft-skill` |
 | Fix a skill Claude keeps ignoring | `/assay:craft-skill <skill name>` |
 | Write a new rule that sticks | `/assay:craft-rules` |
+| Build either one for Codex instead | `/assay:craft-rules --host codex` |
 
 ## Under the hood
 

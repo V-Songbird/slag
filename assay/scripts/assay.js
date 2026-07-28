@@ -285,6 +285,16 @@ function profileNouns(record) {
   return isRecordObject(declared) ? { ...DEFAULT_NOUNS, ...declared } : DEFAULT_NOUNS;
 }
 
+// [Foreman: 082] Where this profile's host lets a NEW rule, skill or hook be
+// written — the third fact that rides the record so an authoring flow never
+// infers a host surface from a host name. There is deliberately NO default: a
+// write path is not a thing to fall back on, and a profile that declares none
+// gets an authoring flow that says so instead of one that guesses a filename.
+function profileTargets(record) {
+  const declared = record && record.profile && record.profile.targets;
+  return isRecordObject(declared) ? declared : null;
+}
+
 function isRecordObject(x) {
   return Boolean(x) && typeof x === "object" && !Array.isArray(x);
 }
@@ -2224,6 +2234,10 @@ function scan(root, options = {}) {
       // [Foreman: 080] The mechanism nouns this profile's advice uses, when it
       // declares any. A profile that declares none keeps the record it had.
       ...(adapter.nouns ? { nouns: adapter.nouns } : {}),
+      // [Foreman: 082] Where this host lets a new rule, skill or hook be
+      // written. Discovery answers where existing sources are; this answers
+      // where a new one may go, which no discovery of an absent file can.
+      ...(adapter.targets ? { targets: adapter.targets } : {}),
     },
     files: files.map(({ content, absPath, globMatched, ...rest }) => rest),
     sources,
@@ -5497,6 +5511,17 @@ function postWriteProblems(root, paths) {
       const fm = parseFrontmatterBlock(text);
       if (fm.error) problems.push(rel + " frontmatter is not valid YAML: " + fm.error);
       try { md.parse(text, {}); } catch (err) { problems.push(rel + " no longer parses as Markdown: " + err.message); }
+    } else if (ext === ".yaml" || ext === ".yml") {
+      // [Foreman: 082] A crafted Codex skill writes `agents/openai.yaml` beside
+      // its SKILL.md, and that sidecar is where implicit invocation and the tool
+      // dependencies are declared. A sidecar the host cannot parse is exactly as
+      // broken as frontmatter it cannot parse — so it gets the same check, and
+      // therefore the same automatic restore.
+      try {
+        yaml.load(text);
+      } catch (err) {
+        problems.push(rel + " is not valid YAML: " + String(err.message).split("\n")[0].trim());
+      }
     }
   }
   return problems;
@@ -6119,6 +6144,9 @@ module.exports = {
   // [Foreman: 079] the host-profile contract: the registry `--host` selects
   // from, and the policy every analyzer consults instead of a host name
   ADAPTERS, DEFAULT_POLICY, profilePolicy, DEFAULT_NOUNS, profileNouns, readSkillMetadata,
+  // [Foreman: 082] the authoring seam: where each profile's host lets a new
+  // rule, skill or hook be written
+  profileTargets,
   // [Foreman: 071] the semantic contract: rubric axis + the candidate kinds a
   // later entry's semantic pass may propose
   RUBRIC_VERSION, SEMANTIC_CANDIDATE_KINDS,
