@@ -40,6 +40,14 @@
 //                                        mechanism replaced — refused without
 //                                        validation evidence
 //
+// [Foreman: 083] Behavior evidence, linked and never converted:
+//   node assay.js link --proof <pointer> --rule <key|R###> | --skill <name>
+//                      | --finding <F###|type@path:line> | --change <id>
+//                                        attaches ONE saved Proof record to ONE
+//                                        anchor and stores the behavioral-
+//                                        evidence key read out of that record
+//   node assay.js link --list            every stored link, with its key
+//
 // --project-only skips user-scope discovery; ASSAY_USER_DIR overrides where the
 // user's own instruction files are looked for (default ~/.claude).
 //
@@ -162,9 +170,12 @@ const RECORD_SCHEMA = {
   // before 076 stays readable.
   // [Foreman: 077] `mechanisms` left it too — see the block below. Still
   // optional: an audit written before 077 loses its ladder and nothing else.
+  // [Foreman: 083] `proofLinks` left it as well, and stays optional in the
+  // strongest sense: it is emitted only when links exist, so a project that
+  // never linked a Proof record writes exactly the record it wrote before.
   reserved: [
     "instructions",
-    "evidence", "plans", "changes", "validation", "proofLinks",
+    "evidence", "plans", "changes", "validation",
   ],
 };
 
@@ -4382,6 +4393,12 @@ function renderReport(audit, opts = {}) {
 
   if (restructure.length) pushRestructureSection(out, restructure);
 
+  // [Foreman: 083] What was actually measured, beside what was analyzed. Present
+  // only when links exist, and walled off from everything above and below it:
+  // the section reads `audit.proofLinks`, which is attached after the whole
+  // derivation has already finished.
+  if ((audit.proofLinks || []).length) pushProofSection(out, audit.proofLinks, opts);
+
   // 6. Structural hygiene — the score, demoted to what it is.
   const corpusBit = audit.corpusScore === null
     ? "no mandate rules left to grade"
@@ -4973,6 +4990,24 @@ function renderArtifact(audit) {
     body.push(...placement);
   }
 
+  // [Foreman: 083] Behavior evidence, in the section idiom every other block
+  // here uses and off the same line builder the markdown report reads — so a
+  // linked record cannot appear in one view and not the other. Each anchor is a
+  // heading item, its records the sub-lines under it.
+  const proofItems = [];
+  for (const g of proofGroups(audit.proofLinks || [])) {
+    proofItems.push(artifactItem(null, plainText(proofGroupHeading(g)),
+      g.anchorFound ? [] : ["the anchor this evidence was linked to is not in the current analysis — the link is kept and shown rather than dropped"]));
+    for (const l of g.links) {
+      for (const line of proofLinkLines(l, { verbose: true })) {
+        proofItems.push(artifactItem(null, "↳ " + plainText(line.text), line.subs));
+      }
+    }
+  }
+  body.push(artifactSection("proof", 2, "Behavior evidence",
+    "What a separate Proof run measured about these instructions — linked by hand, shown as recorded. Nothing here moves a state, a score, a grade or a threshold: it is evidence beside the finding, not a weight inside it.",
+    proofItems));
+
   // Structural hygiene.
   // [Foreman: 079] A profile without the rubric gets the same sentence the
   // markdown report puts where the grade would be, not an empty grade cell.
@@ -5089,10 +5124,20 @@ function cmdReport(root, opts) {
     process.stderr.write(error + "\n");
     process.exit(1);
   }
-  const audit = makeRecord("audit", composeAudit(scanData, judgments), root);
+  const audit = attachProofLinks(root, makeRecord("audit", composeAudit(scanData, judgments), root));
   fs.writeFileSync(path.join(root, TMP_DIR, "audit.json"), JSON.stringify(audit, null, 2));
   if (opts.json) process.stdout.write(JSON.stringify(audit, null, 2) + "\n");
   else process.stdout.write(renderReport(audit, opts) + "\n");
+}
+
+// [Foreman: 083] The attachment point, and the neutrality proof: links arrive
+// AFTER composeAudit has derived every state, score, grade and relationship, so
+// no derivation in this engine can read one. Absent when the store is empty, so
+// a project that never linked anything writes the record it always wrote.
+function attachProofLinks(root, audit) {
+  const links = resolveProofLinks(root, audit);
+  if (links.length) audit.proofLinks = links;
+  return audit;
 }
 
 // [Foreman: 061]
@@ -5161,7 +5206,7 @@ function cmdRemeasure(root, opts) {
     process.stderr.write(error + "\n");
     process.exit(1);
   }
-  const audit = makeRecord("audit", composeAudit(scanData, valid), root);
+  const audit = attachProofLinks(root, makeRecord("audit", composeAudit(scanData, valid), root));
   fs.writeFileSync(auditFile, JSON.stringify(audit, null, 2));
   if (opts.json) process.stdout.write(JSON.stringify({ ...audit, previous: prev }, null, 2) + "\n");
   else process.stdout.write(renderReport(audit, { ...opts, prev }) + "\n");
@@ -5997,6 +6042,505 @@ function cmdRetire(root, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// Proof links — [Foreman: 083]
+// ---------------------------------------------------------------------------
+
+// SCOPE.md splits truth three ways and gives behavioral truth to Proof. This is
+// the seam, and it is deliberately thin: a link attaches ONE saved Proof record
+// to ONE anchor assay already has a stable key for, so a report can show what
+// was measured beside what was analyzed. Nothing here runs Proof, nothing here
+// runs a model, and nothing here MATCHES a record to a rule — assay never
+// infers that a Proof run was about a particular rule, because the record does
+// not say so and a similarity guess would be exactly the "universal weight"
+// the evidence contract forbids. A link exists because a person wrote it.
+//
+// Display only. The resolved links are attached AFTER composeAudit has finished,
+// so no number below can reach a state, a score, a grade or a threshold: the
+// derivation never sees them. That is the neutrality proof made structural
+// rather than promised.
+//
+// Where it lives: `.assay/links.jsonl`, beside the journal and not inside
+// `.assay-tmp/`. A link is curated state like a parked plan — it names evidence
+// that cost money to produce and that no rerun regenerates — so `clean` keeps it.
+const LINKS_FILE = "links.jsonl";
+
+// The anchors a link may name. `ref` is stored in its STABLE form: a rule's
+// content-hash key, a skill's name, a finding's state/type plus its first source
+// span, a plan's change id. The display id (`R###`, `F###`) is accepted as input
+// because that is what a report prints, and resolved to the stable form here —
+// a positional counter must never become a durable reference.
+const LINK_ANCHOR_FLAGS = { "--rule": "rule", "--skill": "skill", "--finding": "finding", "--change": "change" };
+
+// The behavioral-evidence key SCOPE.md requires:
+//     host × host version × model × harness × repository fixture × date
+const PROOF_KEY_PARTS = ["host", "hostVersion", "model", "harness", "fixture", "date"];
+const PROOF_KEY_LABELS = {
+  host: "host", hostVersion: "host version", model: "model",
+  harness: "harness", fixture: "repository fixture", date: "date",
+};
+
+// What a saved Proof record actually is, read out of its own fields. Two shapes
+// ship today and this reads both mechanically:
+//
+//   paired A/B — what `proof run --json` prints (`analyze` in proof/lib/runner.js,
+//     decorated in proof/bin/proof.js): { id, model, seed, cells, usable,
+//     totalCostUsd, arms: { baseline: {n, ran, mean, costUsd},
+//     <arm>: {n, ran, mean, costUsd, lift, ci: [lo,hi], verdict} },
+//     disclosure, explanations }. Verdicts are CONFIRMED+ / CONFIRMED- / NULL /
+//     INCONCLUSIVE (proof/lib/stats.js `verdictFor`).
+//
+//   fingerprint — what `proof watch save` stores, one JSON per (agent, model,
+//     probe) under $PROOF_HOME/fingerprints (proof/lib/watch.js `saveFingerprint`,
+//     `fpDir`): { key, probeId, agent, model, version, n, rate, ci, scores,
+//     savedAt }.
+//
+// What is NOT in either, and is therefore never invented: the A/B record names
+// no host, no host version and no date; neither names a repository fixture; and
+// neither hashes the configuration it measured. `absent` says which parts of the
+// key came back empty, and the report prints that sentence instead of a guess.
+function parseProofRecord(record) {
+  if (!isRecordObject(record)) return { problem: "not a JSON object" };
+  const ab = isRecordObject(record.arms);
+  const fp = typeof record.probeId === "string" && Array.isArray(record.ci);
+  if (!ab && !fp) return { problem: "no `arms` and no `probeId` — not a Proof run or fingerprint record" };
+  const key = {
+    host: typeof record.agent === "string" ? record.agent : null,
+    hostVersion: typeof record.version === "string" ? record.version : null,
+    model: typeof record.model === "string" ? record.model : null,
+    // The one part read from the record's SHAPE rather than one of its fields:
+    // which Proof measurement wrote this file. No Proof record carries a harness
+    // field, and the shape is the fact — an `arms` object is a paired run, a
+    // `probeId` with a band is a drift fingerprint.
+    harness: ab ? "proof run (paired A/B)" : "proof watch (fingerprint)",
+    // The spec names the fixture tree; the saved record does not carry it, and a
+    // spec is not the record that was saved.
+    fixture: null,
+    date: typeof record.savedAt === "string" ? record.savedAt : null,
+  };
+  const results = [];
+  if (ab) {
+    const base = isRecordObject(record.arms.baseline) ? record.arms.baseline : null;
+    for (const arm of Object.keys(record.arms)) {
+      const d = record.arms[arm];
+      if (arm === "baseline" || !isRecordObject(d)) continue;
+      results.push({
+        arm,
+        verdict: typeof d.verdict === "string" ? d.verdict : null,
+        lift: typeof d.lift === "number" ? d.lift : null,
+        rate: null,
+        ci: Array.isArray(d.ci) ? d.ci : null,
+        n: typeof d.n === "number" ? d.n : null,
+        baseline: base && typeof base.mean === "number" ? base.mean : null,
+        costUsd: typeof record.totalCostUsd === "number" ? record.totalCostUsd : null,
+      });
+    }
+  } else {
+    // A fingerprint is a saved rate with a band, not a lift over a baseline, and
+    // it carries no verdict at all — `watch check` computes one against a FRESH
+    // run. Printing "—" for the verdict is the honest cell.
+    results.push({
+      arm: record.probeId, verdict: null, lift: null,
+      rate: typeof record.rate === "number" ? record.rate : null,
+      ci: record.ci, n: typeof record.n === "number" ? record.n : null,
+      baseline: null, costUsd: null,
+    });
+  }
+  return {
+    recordId: String(ab ? record.id : record.probeId),
+    key,
+    absent: PROOF_KEY_PARTS.filter((k) => key[k] == null),
+    // No Proof record hashes the configuration it measured. Read one if a later
+    // Proof ever writes it; until then the analyzer fingerprint below is the
+    // only hash a mismatch can honestly be stated against.
+    configFingerprint: typeof record.configHash === "string" ? record.configHash : null,
+    limits: typeof record.disclosure === "string" ? record.disclosure : null,
+    results,
+  };
+}
+
+// A pointer is a path to a saved record — project-relative or absolute, because
+// `proof watch` stores its fingerprints under the user's home, not the repo.
+// Read-only: this file never writes through a pointer.
+function proofPointerPath(root, pointer) {
+  return path.isAbsolute(pointer) ? pointer : path.resolve(root, pointer);
+}
+
+function readProofRecordAt(file) {
+  let raw;
+  try {
+    raw = fs.readFileSync(file, "utf-8");
+  } catch {
+    return { problem: "the pointer no longer resolves" };
+  }
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch (err) {
+    return { problem: "the record no longer parses: " + err.message };
+  }
+  const parsed = parseProofRecord(json);
+  return parsed.problem ? { problem: "the record is not a Proof record — " + parsed.problem } : { parsed };
+}
+
+function readProofLinks(root) {
+  const file = statePath(root, LINKS_FILE);
+  if (!fs.existsSync(file)) return [];
+  const rows = [];
+  for (const line of fs.readFileSync(file, "utf-8").split("\n")) {
+    if (!line.trim()) continue;
+    // Same discipline as the journal: a torn last line is an interrupted append,
+    // not a lie about what was linked.
+    try { rows.push(JSON.parse(line)); } catch { /* skip */ }
+  }
+  return rows;
+}
+
+function appendProofLink(root, row) {
+  const file = statePath(root, LINKS_FILE);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(row) + "\n");
+}
+
+// A finding's stable address: what it is, and where it starts. The `F###` id is
+// an emission counter and moves when a finding above it appears or goes.
+function findingRef(f) {
+  const s = (f.sources || [])[0] || {};
+  return (f.state || f.type) + "@" + (s.path || "?") + ":" + (s.lineStart == null ? "?" : s.lineStart);
+}
+
+// Exact lookup against the current analysis. Never a similarity match: an anchor
+// resolves by the key assay itself assigned, or it does not resolve.
+function findAnchor(audit, anchor) {
+  if (!isRecordObject(anchor)) return null;
+  if (anchor.kind === "rule") return (audit.rules || []).find((r) => r.key === anchor.ref) || null;
+  if (anchor.kind === "skill") return (audit.skills || []).find((s) => s.name === anchor.ref) || null;
+  if (anchor.kind === "finding") return (audit.findings || []).find((f) => findingRef(f) === anchor.ref) || null;
+  // A change anchor lives in a plan artifact, not in the audit record.
+  return null;
+}
+
+// The analyzer artifact a link was made against, as text to hash. A rule's key is
+// its NORMALIZED text (`ruleKey`: trimmed, lowercased, whitespace-collapsed), so
+// a rule can keep its key while its exact wording moves — and Proof measured the
+// exact wording. That gap is the whole of "measured an earlier wording".
+function anchorText(anchor, target) {
+  if (!target) return null;
+  if (anchor.kind === "rule") return target.text;
+  if (anchor.kind === "skill") return target.description || "";
+  if (anchor.kind === "finding") return target.summary || "";
+  return null;
+}
+
+function anchorWhere(anchor, target) {
+  if (!target) return null;
+  if (anchor.kind === "rule") {
+    return { path: target.file, line: target.lineStart, label: target.id + ' "' + truncate(target.text, 60) + '"' };
+  }
+  if (anchor.kind === "skill") return { path: target.path, line: 1, label: "skill `" + target.name + "`" };
+  if (anchor.kind === "finding") {
+    const s = (target.sources || [])[0] || {};
+    return { path: s.path, line: s.lineStart, label: (target.state || target.type) + ": " + target.summary };
+  }
+  return null;
+}
+
+function anchorId(anchor) {
+  return (isRecordObject(anchor) ? anchor.kind + ":" + anchor.ref : "?");
+}
+
+// Read time, and fail-open by contract. A pointer that no longer resolves and a
+// record that no longer parses are BOTH disclosed as stale rows rather than
+// crashing or vanishing: the link is a fact the user recorded, and a report that
+// silently drops it would be quieter and less true. Same for an anchor that is
+// no longer in the analysis — the row stays and says so.
+function resolveProofLinks(root, audit) {
+  const stored = readProofLinks(root);
+  if (!stored.length) return [];
+  const rows = stored.map((link) => {
+    const anchor = isRecordObject(link.anchor) ? link.anchor : { kind: "?", ref: "?" };
+    const target = findAnchor(audit, anchor);
+    const now = anchorText(anchor, target);
+    const row = {
+      anchor,
+      pointer: String(link.pointer || ""),
+      recordId: link.recordId == null ? null : String(link.recordId),
+      linkedAt: link.linkedAt || null,
+      key: isRecordObject(link.key) ? link.key : {},
+      absent: Array.isArray(link.absent) ? link.absent : [],
+      anchorHash: link.anchorHash == null ? null : String(link.anchorHash),
+      configFingerprint: link.configFingerprint == null ? null : String(link.configFingerprint),
+      // A change anchor is answered by the plan artifact, so the audit not
+      // holding it is not a miss.
+      anchorFound: Boolean(target) || anchor.kind === "change",
+      where: anchorWhere(anchor, target),
+      // The mismatch the entry names: this link was made against a wording that
+      // is no longer the one on disk. Stated, never used to hide the row.
+      wordingMoved: Boolean(link.anchorHash && now != null && hashContent(now) !== link.anchorHash),
+      stale: null, results: [], limits: null,
+    };
+    const { parsed, problem } = readProofRecordAt(proofPointerPath(root, row.pointer));
+    if (problem) {
+      row.stale = problem;
+      return row;
+    }
+    row.results = parsed.results;
+    row.limits = parsed.limits;
+    return row;
+  });
+  // Grouped by anchor, then date-ordered inside it — the drift story reads
+  // oldest first. A record with no date falls back to when the link was made,
+  // and the pointer breaks any remaining tie so two runs order identically.
+  const at = (l) => (l.key.date || l.linkedAt || "") + " " + l.pointer;
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  return rows.sort((a, b) => cmp(anchorId(a.anchor), anchorId(b.anchor)) || cmp(at(a), at(b)));
+}
+
+// ---------------------------------------------------------------------------
+// Rendering the evidence — display, never a weight
+// ---------------------------------------------------------------------------
+
+function fmtSigned(x) {
+  return x == null ? "—" : (x >= 0 ? "+" : "") + x.toFixed(2);
+}
+
+function fmtBand(ci) {
+  return Array.isArray(ci) && ci[0] != null && ci[1] != null
+    ? "[" + Number(ci[0]).toFixed(2) + ", " + Number(ci[1]).toFixed(2) + "]"
+    : "—";
+}
+
+function proofKeyLine(key) {
+  return PROOF_KEY_PARTS.filter((k) => key[k] != null).map((k) => PROOF_KEY_LABELS[k] + " " + key[k]).join(" · ");
+}
+
+function andList(words) {
+  return words.length < 2 ? words.join("") : words.slice(0, -1).join(", ") + " or " + words[words.length - 1];
+}
+
+function proofAbsentLine(absent) {
+  if (!absent.length) return null;
+  return "the record names no " + andList(absent.map((k) => PROOF_KEY_LABELS[k])) +
+    " — stored as absent, not guessed";
+}
+
+// The day, not the timestamp: a row is a date-ordered history and the clock time
+// belongs with the rest of the key under --verbose.
+function proofDay(date) {
+  return typeof date === "string" && date.length >= 10 ? date.slice(0, 10) : date;
+}
+
+// One measurement, as the record states it. Nothing is recomputed, rescaled or
+// combined: a lift stays a lift over that run's own baseline.
+function proofResultText(l, r) {
+  const head = r.verdict
+    ? "**" + r.verdict + "** " + r.arm + " lift " + fmtSigned(r.lift)
+    : r.rate != null
+      ? r.arm + " rate " + r.rate.toFixed(2)
+      : r.arm;
+  const bits = [head, "95% CI " + fmtBand(r.ci)];
+  if (r.n != null) bits.push("n=" + r.n);
+  if (r.costUsd != null) bits.push("$" + r.costUsd.toFixed(4));
+  bits.push(proofDay(l.key.date) || "no date recorded");
+  return bits.join(", ") + " — record `" + (l.recordId || "?") + "` " + evidenceTag(BEHAVIOR_EVIDENCE);
+}
+
+// The evidence level this whole section carries. It is the contract's own row —
+// produced by Proof from actual agent executions — and the limits sentence is
+// what stops it reading as a general claim.
+const BEHAVIOR_EVIDENCE = {
+  level: "behavior-observed",
+  basis: "a saved Proof record, linked by hand and read as written",
+  limits: "measured on the host, model, harness and tasks the record names, on the date it names — never converted into a score, a state or a threshold here",
+};
+
+function proofSubLines(l, opts) {
+  const subs = [];
+  if (l.wordingMoved) {
+    subs.push("measured an earlier wording — the anchor's text changed after this link was made, so read the numbers against that older text");
+  }
+  if (l.limits) subs.push(redactSecrets(l.limits));
+  const absent = proofAbsentLine(l.absent);
+  if (absent) subs.push(absent);
+  if (opts && opts.verbose) {
+    const key = proofKeyLine(l.key);
+    if (key) subs.push(redactSecrets(key));
+    subs.push("linked " + (l.linkedAt || "at an unrecorded time") + " from `" + l.pointer + "`");
+  }
+  return subs;
+}
+
+// Every line this section prints, as {text, subs} — one builder, both renderers,
+// so neither view can carry a row the other drops.
+function proofLinkLines(l, opts) {
+  const lines = [];
+  if (l.stale) {
+    const stored = proofKeyLine(l.key);
+    lines.push({
+      text: "evidence unavailable — " + l.stale + " (`" + l.pointer + "`) " + evidenceTag(BEHAVIOR_EVIDENCE),
+      subs: ["this link recorded: " + (stored || "no key at all") + " — the numbers are not readable, so none are shown"],
+    });
+    return lines;
+  }
+  if (!l.results.length) {
+    lines.push({ text: "record `" + (l.recordId || "?") + "` carries no measured arm " + evidenceTag(BEHAVIOR_EVIDENCE), subs: proofSubLines(l, opts) });
+    return lines;
+  }
+  for (const r of l.results) lines.push({ text: proofResultText(l, r), subs: proofSubLines(l, opts) });
+  return lines;
+}
+
+function proofGroups(links) {
+  const groups = [];
+  for (const l of links) {
+    const id = anchorId(l.anchor);
+    const last = groups[groups.length - 1];
+    if (last && last.id === id) last.links.push(l);
+    else groups.push({ id, anchor: l.anchor, where: l.where, anchorFound: l.anchorFound, links: [l] });
+  }
+  // A later link may resolve the anchor a earlier one could not (the pointer
+  // differs, the anchor does not) — take the first resolved address in the group.
+  for (const g of groups) {
+    const resolved = g.links.find((l) => l.where);
+    if (resolved) { g.where = resolved.where; g.anchorFound = true; }
+  }
+  return groups;
+}
+
+function proofGroupHeading(g) {
+  if (g.where && g.where.path) {
+    return "`" + g.where.path + ":" + g.where.line + "` — " + g.where.label;
+  }
+  if (g.anchor.kind === "change") return "plan change `" + g.anchor.ref + "`";
+  return g.anchor.kind + " `" + g.anchor.ref + "` — not in this analysis";
+}
+
+// razor: one section, addressed to each anchor by its own clickable source line,
+// rather than an evidence cell repeated inside all six tables and lists a rule
+// can appear in. A reader gets the finding, then the measurement beside its
+// address. Upgrade path when a corpus routinely carries links: a marker column
+// in the rules table pointing at the anchor's heading here.
+function pushProofSection(out, links, opts) {
+  out.push("## Behavior evidence");
+  out.push("");
+  out.push("What a separate Proof run measured about these instructions — linked by hand, shown as recorded. " +
+    "Nothing here moves a state, a score, a grade or a threshold anywhere in this report: it is evidence beside the finding, not a weight inside it. " +
+    "A record covers only the host, model and tasks it names, on the date it names. " +
+    "Records come from the `/proof:proof` skill; assay never runs one.");
+  out.push("");
+  for (const g of proofGroups(links)) {
+    out.push("### " + proofGroupHeading(g));
+    out.push("");
+    if (!g.anchorFound) {
+      out.push("The anchor this evidence was linked to is not in the current analysis. The link is kept and shown rather than dropped.");
+      out.push("");
+    }
+    for (const l of g.links) {
+      for (const line of proofLinkLines(l, opts)) {
+        out.push("- " + line.text);
+        for (const sub of line.subs) out.push("  - " + sub);
+      }
+    }
+    out.push("");
+  }
+  if (!opts || !opts.verbose) {
+    out.push("Rerun with `--verbose` for each record's full evidence key.");
+    out.push("");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// link
+// ---------------------------------------------------------------------------
+
+// Resolving an anchor at link time against the audit the reader is looking at.
+// The `R###` / `F###` display ids are accepted and converted; the stored ref is
+// always the stable one.
+function resolveLinkAnchor(root, kind, ref) {
+  if (kind === "change") {
+    const found = findChange(root, ref);
+    if (found.problem) return { problem: found.problem };
+    // A plan is content-addressed, so its id IS the fingerprint of what this
+    // link was made against.
+    return { anchor: { kind, ref }, anchorHash: found.plan.planId };
+  }
+  const auditFile = path.join(root, TMP_DIR, "audit.json");
+  if (!fs.existsSync(auditFile)) {
+    return { problem: "No " + TMP_DIR + "/audit.json — run `report` first so the anchor can be resolved against a real analysis." };
+  }
+  const { record: audit, problem } = readRecord(auditFile, "audit");
+  if (problem) return { problem: staleRecordError(TMP_DIR + "/audit.json", "audit", problem) };
+  let target = null;
+  if (kind === "rule") {
+    target = (audit.rules || []).find((r) => r.key === ref) || (audit.rules || []).find((r) => r.id === ref) || null;
+  } else if (kind === "skill") {
+    target = (audit.skills || []).find((s) => s.name === ref) || null;
+  } else {
+    target = (audit.findings || []).find((f) => f.id === ref) || (audit.findings || []).find((f) => findingRef(f) === ref) || null;
+  }
+  if (!target) {
+    return { problem: "No " + kind + " " + JSON.stringify(ref) + " in " + TMP_DIR + "/audit.json. " +
+      "An anchor is matched exactly, never by similarity — check the " +
+      (kind === "rule" ? "content-hash key or R### id" : kind === "skill" ? "skill name" : "F### id or type@path:line") + "." };
+  }
+  const anchor = {
+    kind,
+    ref: kind === "rule" ? target.key : kind === "skill" ? target.name : findingRef(target),
+  };
+  const text = anchorText(anchor, target);
+  return { anchor, anchorHash: text == null ? null : hashContent(text) };
+}
+
+function cmdLink(root, opts) {
+  const named = Object.entries(LINK_ANCHOR_FLAGS).filter(([flag]) => opts.anchorArgs[flag] != null);
+  if (opts.list) {
+    if (named.length || opts.proof.length) fail("link --list takes no other argument — it prints the store as it stands.");
+    const stored = readProofLinks(root);
+    process.stdout.write(JSON.stringify({
+      links: stored,
+      store: STATE_DIR + "/" + LINKS_FILE,
+      note: stored.length
+        ? "Each row is one saved Proof record attached to one anchor. Evidence is displayed, never converted into a score."
+        : "No links yet. Measure a change with the `/proof:proof` skill, then attach its saved record with `assay.js link --proof <pointer> --rule <key>`.",
+    }, null, 2) + "\n");
+    return;
+  }
+  if (opts.proof.length !== 1) fail("link takes exactly one --proof <pointer> naming a saved Proof record.");
+  if (named.length !== 1) {
+    fail("link takes exactly one anchor: " + Object.keys(LINK_ANCHOR_FLAGS).join(", ") +
+      ". One record, one anchor — assay never matches a Proof record to a rule for you.");
+  }
+  const [flag, kind] = named[0];
+  const resolved = resolveLinkAnchor(root, kind, opts.anchorArgs[flag]);
+  if (resolved.problem) fail(resolved.problem);
+
+  // The record must be readable NOW: the evidence key is read out of it, and a
+  // key that cannot be read is a key that would have to be invented.
+  const pointer = opts.proof[0];
+  const { parsed, problem } = readProofRecordAt(proofPointerPath(root, pointer));
+  if (problem) fail("Cannot link " + pointer + ": " + problem + ".");
+
+  const row = {
+    anchor: resolved.anchor,
+    anchorHash: resolved.anchorHash,
+    pointer,
+    recordId: parsed.recordId,
+    key: parsed.key,
+    absent: parsed.absent,
+    configFingerprint: parsed.configFingerprint,
+    linkedAt: new Date().toISOString(),
+  };
+  appendProofLink(root, row);
+  process.stdout.write(JSON.stringify({
+    linked: row,
+    store: STATE_DIR + "/" + LINKS_FILE,
+    note: "Behavior evidence is displayed beside this anchor in the next report. It never moves a score, a state or a grade — " +
+      (parsed.absent.length
+        ? "and the record names no " + andList(parsed.absent.map((k) => PROOF_KEY_LABELS[k])) + ", which the report states rather than filling in."
+        : "and the full evidence key came out of the record."),
+  }, null, 2) + "\n");
+}
+
+// ---------------------------------------------------------------------------
 // clean
 // ---------------------------------------------------------------------------
 
@@ -6012,9 +6556,16 @@ function cmdClean(root) {
   }
   fs.rmSync(journal, { force: true });
   const kept = planFiles(root).length;
-  if (!kept) fs.rmSync(statePath(root), { recursive: true, force: true });
+  // [Foreman: 083] The link store is curated state like a parked plan: it names
+  // evidence a rerun cannot regenerate, so `clean` never takes it and says so.
+  const links = readProofLinks(root).length;
+  if (!kept && !links) fs.rmSync(statePath(root), { recursive: true, force: true });
+  const keptBits = [
+    kept ? kept + " plan artifact(s)" : null,
+    links ? links + " Proof link(s)" : null,
+  ].filter(Boolean);
   process.stdout.write("Removed " + TMP_DIR + "/ and the closed journal." +
-    (kept ? " Kept " + kept + " plan artifact(s) in " + STATE_DIR + "/." : "") + "\n");
+    (keptBits.length ? " Kept " + keptBits.join(" and ") + " in " + STATE_DIR + "/." : "") + "\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -6025,9 +6576,11 @@ function cmdClean(root) {
 // failure — a missing input, a malformed judgments file, a usage error.
 // [Foreman: 081] The transaction commands join it unchanged: a stale plan, an
 // unknown change id, a failed validation and a refused retirement all exit 1.
+// [Foreman: 083] `link` joins the same contract: an unknown anchor, an
+// unreadable Proof record and a missing audit all exit 1.
 const COMMANDS = ["scan", "report", "remeasure", "artifact", "clean",
-  "plan", "apply", "validate", "rollback", "retire"];
-const FLAGS = new Set(["--verbose", "--json", "--project-only"]);
+  "plan", "apply", "validate", "rollback", "retire", "link"];
+const FLAGS = new Set(["--verbose", "--json", "--project-only", "--list"]);
 // [Foreman: 079] Flags that take a value, mapped to what that value is, so the
 // parser skips the argument instead of rejecting it as an unknown flag and the
 // error says what was missing.
@@ -6037,6 +6590,8 @@ const VALUE_FLAGS = new Map([
   // repetition IS the approval boundary — every id written out by hand.
   ["--from", "draft plan path"], ["--change", "change id"], ["--batch", "batch id"],
   ["--transaction", "transaction id"], ["--external", '"<kind>: <result>"'], ["--proof", "record pointer"],
+  // [Foreman: 083] the anchors a Proof link may name
+  ["--rule", "rule key or R### id"], ["--skill", "skill name"], ["--finding", "F### id or type@path:line"],
 ]);
 const USAGE = [
   "Usage: assay.js <" + COMMANDS.join("|") + "> [--root <path>]",
@@ -6048,6 +6603,8 @@ const USAGE = [
   "  validate        --change <id> [--external \"<kind>: <result>\"] [--proof <pointer>]",
   "  rollback        --change <id> [--change <id> …] | --transaction <id>",
   "  retire          --change <id>",
+  "  link            --proof <pointer> --rule <key> | --skill <name> | --finding <ref> | --change <id>",
+  "  link            --list",
 ].join("\n");
 
 // Every occurrence of a repeatable value flag, in the order they were given.
@@ -6102,6 +6659,10 @@ function main() {
     transaction: args.includes("--transaction") ? args[args.indexOf("--transaction") + 1] : null,
     external: valuesOf(args, "--external"),
     proof: valuesOf(args, "--proof"),
+    // [Foreman: 083] the link command's own arguments
+    list: args.includes("--list"),
+    anchorArgs: Object.fromEntries(Object.keys(LINK_ANCHOR_FLAGS)
+      .map((flag) => [flag, args.includes(flag) ? args[args.indexOf(flag) + 1] : null])),
   };
 
   if (command === "scan") cmdScan(root, opts);
@@ -6113,6 +6674,7 @@ function main() {
   else if (command === "validate") cmdValidate(root, opts);
   else if (command === "rollback") cmdRollback(root, opts);
   else if (command === "retire") cmdRetire(root, opts);
+  else if (command === "link") cmdLink(root, opts); // [Foreman: 083]
   else cmdClean(root);
 }
 
@@ -6141,6 +6703,10 @@ module.exports = {
   // replay, and where transaction state lives
   CHANGE_KINDS, VALIDATION_STEPS, validatePlanChanges, planFromDraft,
   readJournal, replayJournal, openChangeIds, postWriteProblems, STATE_DIR, JOURNAL_FILE,
+  // [Foreman: 083] the Proof link store: what a saved record yields, where the
+  // links live, and how they resolve against an analysis they never enter
+  LINKS_FILE, PROOF_KEY_PARTS, BEHAVIOR_EVIDENCE,
+  parseProofRecord, readProofLinks, resolveProofLinks, attachProofLinks, findingRef,
   // [Foreman: 079] the host-profile contract: the registry `--host` selects
   // from, and the policy every analyzer consults instead of a host name
   ADAPTERS, DEFAULT_POLICY, profilePolicy, DEFAULT_NOUNS, profileNouns, readSkillMetadata,

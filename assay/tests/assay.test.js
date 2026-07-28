@@ -3012,7 +3012,7 @@ test("an unknown command, an unknown flag, or a bare --root prints usage and exi
   const noCommand = cli(root);
   assert.equal(noCommand.code, 1);
   assert.match(noCommand.err, /No command given\./);
-  assert.match(noCommand.err, /Usage: assay\.js <scan\|report\|remeasure\|artifact\|clean\|plan\|apply\|validate\|rollback\|retire>/);
+  assert.match(noCommand.err, /Usage: assay\.js <scan\|report\|remeasure\|artifact\|clean\|plan\|apply\|validate\|rollback\|retire\|link>/);
 
   const badCommand = cli(root, "frobnicate");
   assert.equal(badCommand.code, 1);
@@ -5215,4 +5215,370 @@ test("a skill metadata sidecar that is not valid YAML is restored, and a valid o
   assert.deepEqual(entry.metadata.toolDependencies, [{ type: "command", value: "kubectl" }]);
   assert.equal("metadataIssue" in entry, false);
   assert.equal("quotedPhrases" in entry.checks, false, "no trigger-recipe grade belongs on this profile");
+});
+
+// ---------------------------------------------------------------------------
+// Proof links — [Foreman: 083]
+// ---------------------------------------------------------------------------
+
+// The two record shapes Proof actually saves today, copied from the plugin's own
+// code so these fixtures cannot drift into wishful thinking:
+//
+//   PROOF_AB — what `proof run --json` prints: the object `analyze` builds in
+//     proof/lib/runner.js plus the `disclosure` proof/bin/proof.js attaches.
+//   PROOF_FP — what `proof watch save` writes into $PROOF_HOME/fingerprints,
+//     field for field from `saveFingerprint` in proof/lib/watch.js.
+//
+// The asymmetry between them is the point of half these tests: the A/B record
+// names no host, no host version and no date; the fingerprint names all three
+// but carries no verdict; and NEITHER names a repository fixture.
+const PROOF_AB = {
+  id: "prettier-trigger",
+  model: "haiku",
+  seed: 42,
+  cells: 16,
+  usable: 16,
+  totalCostUsd: 0.0412,
+  arms: {
+    baseline: { n: 8, ran: 8, mean: 0.25, costUsd: 0.0203 },
+    treatment: { n: 8, ran: 8, mean: 0.875, costUsd: 0.0209, lift: 0.625, ci: [0.31, 0.88], verdict: "CONFIRMED+" },
+  },
+  disclosure: "This verdict covers 1 task of type file_exists; it is directional for this task type, not general.",
+  explanations: {},
+};
+
+const PROOF_FP = {
+  key: "claude__haiku__prettier-probe",
+  probeId: "prettier-probe",
+  agent: "claude",
+  model: "haiku",
+  version: "2.1.0 (Claude Code)",
+  n: 4,
+  rate: 1,
+  ci: [0.5, 1],
+  scores: [1, 1, 1, 1],
+  savedAt: "2026-07-20T10:00:00.000Z",
+};
+
+const LINK_CLAUDE = [
+  "# Project rules",
+  "",
+  "- Never use `var` — use `const` instead.",
+  "- Run prettier before committing.",
+  "",
+].join("\n");
+
+// A project with an audit already on disk, which is what `link` resolves an
+// anchor against, plus both Proof records written where a pointer can reach them.
+function linkProject(extra) {
+  const root = tmpProject({ "CLAUDE.md": LINK_CLAUDE, ...(extra || {}) });
+  fs.writeFileSync(path.join(root, "ab.json"), JSON.stringify(PROOF_AB, null, 2));
+  fs.writeFileSync(path.join(root, "fp.json"), JSON.stringify(PROOF_FP, null, 2));
+  assert.equal(cli(root, "scan").code, 0);
+  assert.equal(cli(root, "report").code, 0);
+  return root;
+}
+
+function storedLinks(root) {
+  return engine.readProofLinks(root);
+}
+
+test("a link stores the behavioral-evidence key it read out of the Proof record", () => {
+  const root = linkProject();
+  const { code, out } = cli(root, "link", "--proof", "fp.json", "--rule", "R002");
+  assert.equal(code, 0);
+  const { linked } = JSON.parse(out);
+
+  // The anchor is stored in its STABLE form: R002 is a positional counter, the
+  // content hash is not.
+  assert.equal(linked.anchor.kind, "rule");
+  assert.match(linked.anchor.ref, /^[0-9a-f]{12}$/);
+  assert.notEqual(linked.anchor.ref, "R002");
+  assert.equal(linked.recordId, "prettier-probe");
+
+  // Five of the six key parts come straight out of the fingerprint; the sixth is
+  // the one no Proof record carries.
+  assert.equal(linked.key.host, "claude");
+  assert.equal(linked.key.hostVersion, "2.1.0 (Claude Code)");
+  assert.equal(linked.key.model, "haiku");
+  assert.equal(linked.key.harness, "proof watch (fingerprint)");
+  assert.equal(linked.key.date, "2026-07-20T10:00:00.000Z");
+  assert.equal(linked.key.fixture, null);
+  assert.deepEqual(linked.absent, ["fixture"]);
+  assert.deepEqual(Object.keys(linked.key).sort(), [...engine.PROOF_KEY_PARTS].sort());
+
+  // The analyzer artifact fingerprint is the rule's VERBATIM text at link time —
+  // the rule key is its normalized form, so the two are different hashes.
+  const audit = readJson(root, "audit.json");
+  const rule = audit.rules.find((r) => r.id === "R002");
+  assert.equal(linked.anchorHash, engine.hashContent(rule.text));
+  assert.notEqual(linked.anchorHash, rule.key);
+  // Nothing invented a configuration hash: no Proof record writes one.
+  assert.equal(linked.configFingerprint, null);
+
+  assert.deepEqual(storedLinks(root).map((l) => l.recordId), ["prettier-probe"]);
+});
+
+test("a Proof record missing part of the key stores what exists and names what is absent", () => {
+  const root = linkProject();
+  const { code, out } = cli(root, "link", "--proof", "ab.json", "--rule", "R002");
+  assert.equal(code, 0);
+  const parsed = JSON.parse(out);
+  const { linked } = parsed;
+
+  // A paired A/B record names its model and nothing else about where it ran.
+  assert.equal(linked.key.model, "haiku");
+  assert.equal(linked.key.harness, "proof run (paired A/B)");
+  assert.deepEqual(linked.absent, ["host", "hostVersion", "fixture", "date"]);
+  for (const part of linked.absent) assert.equal(linked.key[part], null, part + " must be absent, never invented");
+  assert.match(parsed.note, /names no host, host version, repository fixture or date/);
+
+  // The parser reads the same facts off the record directly.
+  const direct = engine.parseProofRecord(PROOF_AB);
+  assert.equal(direct.recordId, "prettier-trigger");
+  assert.deepEqual(direct.results.map((r) => [r.arm, r.verdict, r.lift]), [["treatment", "CONFIRMED+", 0.625]]);
+  assert.deepEqual(direct.results[0].ci, [0.31, 0.88]);
+  assert.equal(direct.results[0].n, 8);
+  assert.equal(direct.results[0].costUsd, 0.0412);
+  assert.match(direct.limits, /directional for this task type/);
+  // A fingerprint has a rate and a band but no verdict — `watch check` computes
+  // one against a fresh run, so there is none saved to show.
+  const fp = engine.parseProofRecord(PROOF_FP);
+  assert.equal(fp.results[0].verdict, null);
+  assert.equal(fp.results[0].rate, 1);
+  assert.deepEqual(fp.results[0].ci, [0.5, 1]);
+  assert.equal(fp.limits, null);
+});
+
+test("link lists the store, and an unknown anchor or an unreadable record exits 1", () => {
+  const root = linkProject({
+    ".claude/skills/changelog/SKILL.md": [
+      "---", "name: changelog",
+      'description: Updates CHANGELOG.md when a public API changes. Use when "update the changelog". Do NOT use for internal refactors.',
+      "---", "", "# changelog", "",
+    ].join("\n"),
+  });
+  assert.equal(cli(root, "scan").code, 0);
+  assert.equal(cli(root, "report").code, 0);
+
+  const empty = JSON.parse(cli(root, "link", "--list").out);
+  assert.deepEqual(empty.links, []);
+  assert.match(empty.note, /\/proof:proof/);
+  assert.equal(empty.store, ".assay/links.jsonl");
+
+  assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R001").code, 0);
+  assert.equal(cli(root, "link", "--proof", "ab.json", "--skill", "changelog").code, 0);
+  const listed = JSON.parse(cli(root, "link", "--list").out).links;
+  assert.deepEqual(listed.map((l) => l.anchor.kind), ["rule", "skill"]);
+  assert.equal(listed[1].anchor.ref, "changelog");
+
+  // An anchor is matched exactly or not at all — assay never guesses which rule a
+  // Proof record was about.
+  const unknown = cli(root, "link", "--proof", "ab.json", "--rule", "not-a-key");
+  assert.equal(unknown.code, 1);
+  assert.match(unknown.err, /matched exactly, never by similarity/);
+
+  const missing = cli(root, "link", "--proof", "absent.json", "--rule", "R001");
+  assert.equal(missing.code, 1);
+  assert.match(missing.err, /the pointer no longer resolves/);
+
+  fs.writeFileSync(path.join(root, "junk.json"), '{"not":"a proof record"}');
+  const junk = cli(root, "link", "--proof", "junk.json", "--rule", "R001");
+  assert.equal(junk.code, 1);
+  assert.match(junk.err, /not a Proof run or fingerprint record/);
+
+  // One record, one anchor.
+  const two = cli(root, "link", "--proof", "ab.json", "--rule", "R001", "--skill", "changelog");
+  assert.equal(two.code, 1);
+  assert.match(two.err, /exactly one anchor/);
+  assert.equal(cli(root, "link", "--rule", "R001").code, 1);
+
+  // The fourth anchor kind answers from a plan artifact, not from the audit, and
+  // a plan is content-addressed — its id IS the fingerprint it was linked at.
+  const { summary } = planDraft(root, { changes: [REWRITE_CHANGE] });
+  assert.equal(cli(root, "link", "--proof", "fp.json", "--change", "c-rewrite").code, 0);
+  assert.equal(storedLinks(root).at(-1).anchorHash, summary.planId);
+  assert.match(cli(root, "link", "--proof", "fp.json", "--change", "nope").err, /no plan in \.assay\/ defines change nope/);
+
+  // Nothing above added a row beyond the three that succeeded.
+  assert.equal(storedLinks(root).length, 3);
+});
+
+test("linked behavior evidence renders beside its anchor in both views, date-ordered", () => {
+  const root = linkProject();
+  assert.equal(cli(root, "link", "--proof", "ab.json", "--rule", "R002").code, 0);
+  assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R002").code, 0);
+  assert.equal(cli(root, "report").code, 0);
+
+  const audit = readJson(root, "audit.json");
+  assert.equal(audit.proofLinks.length, 2);
+  // The drift story reads oldest first: the dated fingerprint precedes the
+  // undated A/B, which falls back to when it was linked.
+  assert.deepEqual(audit.proofLinks.map((l) => l.recordId), ["prettier-probe", "prettier-trigger"]);
+  assert.equal(audit.proofLinks[0].stale, null);
+  assert.equal(audit.proofLinks[0].anchorFound, true);
+
+  const report = cli(root, "report").out;
+  const section = report.slice(report.indexOf("## Behavior evidence"), report.indexOf("## Structural hygiene"));
+  // The anchor's own address is the heading, so the evidence sits beside the rule.
+  assert.match(section, /### `CLAUDE\.md:4` — R002 "Run prettier before committing\."/);
+  // Verdict, lift, interval, reps, cost, limits and the exact record id.
+  assert.match(section, /\*\*CONFIRMED\+\*\* treatment lift \+0\.63, 95% CI \[0\.31, 0\.88\], n=8, \$0\.0412/);
+  assert.match(section, /record `prettier-trigger` \[behavior-observed\]/);
+  assert.match(section, /directional for this task type/);
+  assert.match(section, /prettier-probe rate 1\.00, 95% CI \[0\.50, 1\.00\], n=4, 2026-07-20/);
+  // Default hides the full key; --verbose shows it.
+  assert.doesNotMatch(section, /host version 2\.1\.0/);
+  const verbose = cli(root, "report", "--verbose").out;
+  assert.match(verbose, /host claude · host version 2\.1\.0 \(Claude Code\) · model haiku · harness proof watch \(fingerprint\)/);
+
+  // Both views, off one builder — the HTML carries the same two rows.
+  assert.equal(cli(root, "artifact").code, 0);
+  const html = fs.readFileSync(path.join(root, ".assay-tmp", "report.html"), "utf-8");
+  assert.match(html, /id="assay-proof"/);
+  assert.match(html, /CONFIRMED\+ treatment lift \+0\.63/);
+  assert.match(html, /prettier-probe rate 1\.00/);
+  assert.match(html, /CLAUDE\.md:4 — R002/);
+  // and no finding was orphaned by the new section
+  assert.doesNotMatch(html, /id="assay-other"/);
+});
+
+test("a stale pointer is disclosed as unavailable evidence, and the row stays", () => {
+  const root = linkProject();
+  assert.equal(cli(root, "link", "--proof", "ab.json", "--rule", "R002").code, 0);
+  fs.rmSync(path.join(root, "ab.json"));
+  // and a second link whose record is still there but no longer parses
+  assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R001").code, 0);
+  fs.writeFileSync(path.join(root, "fp.json"), "{ truncated mid-write");
+
+  const report = cli(root, "report");
+  // Fail-open: a broken pointer is a disclosure, never a crash.
+  assert.equal(report.code, 0);
+  const section = report.out.slice(report.out.indexOf("## Behavior evidence"), report.out.indexOf("## Structural hygiene"));
+  assert.match(section, /evidence unavailable — the pointer no longer resolves \(`ab\.json`\)/);
+  assert.match(section, /evidence unavailable — the record no longer parses/);
+  // The row survives and still says what it once measured.
+  assert.match(section, /this link recorded: model haiku · harness proof run \(paired A\/B\)/);
+  assert.match(section, /host claude · host version 2\.1\.0/);
+
+  const audit = readJson(root, "audit.json");
+  assert.equal(audit.proofLinks.length, 2);
+  for (const l of audit.proofLinks) {
+    assert.ok(l.stale, "a broken pointer is flagged");
+    assert.deepEqual(l.results, [], "no numbers are shown for evidence that cannot be read");
+  }
+
+  // An anchor that left the corpus is also disclosed rather than dropped.
+  fs.writeFileSync(path.join(root, "CLAUDE.md"), "# Project rules\n\n- Never use `var` — use `const` instead.\n");
+  assert.equal(cli(root, "remeasure").code, 0);
+  const after = readJson(root, "audit.json");
+  const orphan = after.proofLinks.find((l) => l.anchor.ref !== after.rules[0].key);
+  assert.equal(orphan.anchorFound, false);
+  assert.match(cli(root, "report").out, /not in this analysis/);
+});
+
+test("a link made against an earlier wording says so, and keeps its row", () => {
+  const root = linkProject();
+  assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R002").code, 0);
+
+  // The rule keeps its content-hash key (`ruleKey` normalizes whitespace) while
+  // the exact wording Proof measured has moved. That is the mismatch to state.
+  const before = readJson(root, "audit.json").rules.find((r) => r.id === "R002").key;
+  fs.writeFileSync(path.join(root, "CLAUDE.md"),
+    LINK_CLAUDE.replace("- Run prettier before committing.", "-   Run  prettier before committing."));
+  assert.equal(cli(root, "remeasure").code, 0);
+  const audit = readJson(root, "audit.json");
+  assert.equal(audit.rules.find((r) => r.id === "R002").key, before, "the key survives a whitespace edit");
+
+  assert.equal(audit.proofLinks[0].wordingMoved, true);
+  assert.equal(audit.proofLinks[0].anchorFound, true);
+  const report = cli(root, "report").out;
+  assert.match(report, /measured an earlier wording — the anchor's text changed after this link was made/);
+  // Stated, not hidden: the numbers are still there.
+  assert.match(report, /prettier-probe rate 1\.00/);
+});
+
+test("links move no state, no score and no grade — evidence beside a finding, never a weight inside it", () => {
+  const root = linkProject();
+  assert.equal(cli(root, "report").code, 0);
+  const before = readJson(root, "audit.json");
+
+  assert.equal(cli(root, "link", "--proof", "ab.json", "--rule", "R002").code, 0);
+  assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R001").code, 0);
+  assert.equal(cli(root, "report").code, 0);
+  const after = readJson(root, "audit.json");
+
+  // Every derived thing is identical. This is the SCOPE contract made mechanical:
+  // a host or model result is never converted into a weight.
+  const strip = (a) => {
+    const { context, proofLinks, ...rest } = a;
+    return JSON.stringify(rest);
+  };
+  assert.equal(strip(after), strip(before), "composing an audit with links present must change nothing derived");
+  assert.deepEqual(after.findings.map((f) => [f.id, f.state || f.type, f.severity, f.evidence.level]),
+    before.findings.map((f) => [f.id, f.state || f.type, f.severity, f.evidence.level]));
+  assert.deepEqual(after.rules.map((r) => [r.score, r.grade, r.weak]), before.rules.map((r) => [r.score, r.grade, r.weak]));
+  assert.equal(after.corpusScore, before.corpusScore);
+  assert.equal(after.corpusGrade, before.corpusGrade);
+
+  // The only difference in either rendered view is the evidence display itself.
+  const cut = (text, from, to) => text.slice(0, text.indexOf(from)) + text.slice(text.indexOf(to));
+  const withLinks = cli(root, "report").out;
+  assert.match(withLinks, /## Behavior evidence/);
+  const withoutSection = cut(withLinks, "## Behavior evidence", "## Structural hygiene");
+  fs.rmSync(path.join(root, ".assay", "links.jsonl"));
+  assert.equal(cli(root, "report").code, 0);
+  assert.equal(withoutSection, cli(root, "report").out);
+
+  // And the derivation genuinely never sees them: composeAudit takes no links at
+  // all, so the record's own field is added afterwards.
+  const scanData = engine.scan(root, { projectOnly: true });
+  assert.equal("proofLinks" in engine.composeAudit(scanData, null), false);
+});
+
+test("proofLinks validates additively, and resolving it is deterministic", () => {
+  const root = linkProject();
+  const recordless = readJson(root, "audit.json");
+  // A project that never linked anything writes exactly the record it always did.
+  assert.equal("proofLinks" in recordless, false);
+  assert.equal(engine.RECORD_SCHEMA.reserved.includes("proofLinks"), false);
+  assert.equal(engine.RECORD_SCHEMA.payload.audit.includes("proofLinks"), false);
+  assert.equal(engine.validateRecord(recordless, "audit"), null);
+
+  assert.equal(cli(root, "link", "--proof", "ab.json", "--rule", "R002").code, 0);
+  assert.equal(cli(root, "report").code, 0);
+  const linked = readJson(root, "audit.json");
+  assert.equal(engine.validateRecord(linked, "audit"), null, "the field is additive, not a schema break");
+  assert.equal(engine.validateRecord({ ...recordless, proofLinks: [] }, "audit"), null);
+  // and it is an audit-record field: a scan record still has none
+  assert.equal("proofLinks" in readJson(root, "scan.json"), false);
+
+  // Two resolutions of one store over one audit are byte-identical.
+  assert.equal(JSON.stringify(engine.resolveProofLinks(root, linked)),
+    JSON.stringify(engine.resolveProofLinks(root, linked)));
+  assert.equal(cli(root, "report").out, cli(root, "report").out);
+
+  // The evidence level is the contract's own row, and it discloses its limits.
+  assert.equal(engine.BEHAVIOR_EVIDENCE.level, "behavior-observed");
+  assert.match(engine.BEHAVIOR_EVIDENCE.limits, /never converted into a score, a state or a threshold/);
+});
+
+test("clean keeps the Proof link store, which no rerun can regenerate", () => {
+  const root = linkProject();
+  assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R002").code, 0);
+
+  // With no journal at all, clean takes the disposable directory and nothing else.
+  assert.equal(cli(root, "clean").code, 0);
+  assert.equal(fs.existsSync(path.join(root, ".assay-tmp")), false);
+  assert.equal(storedLinks(root).length, 1);
+
+  // And with a closed journal beside it, the store is named as kept.
+  assert.equal(cli(root, "scan").code, 0);
+  planDraft(root, { changes: [REWRITE_CHANGE] });
+  assert.equal(cli(root, "apply", "--change", "c-rewrite").code, 0);
+  assert.equal(cli(root, "validate", "--change", "c-rewrite").code, 0);
+  const closed = cli(root, "clean");
+  assert.equal(closed.code, 0);
+  assert.match(closed.out, /Kept 1 plan artifact\(s\) and 1 Proof link\(s\) in \.assay\//);
+  assert.equal(storedLinks(root).length, 1);
 });

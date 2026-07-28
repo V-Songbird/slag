@@ -4,6 +4,17 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [Unreleased]
+
+### Added
+
+- A saved [proof](../proof) result can now be attached to the exact rule, skill, finding, or planned change it measured, and the report shows it beside that anchor: verdict, lift, confidence interval, how many runs, what they cost, the tasks they covered, and the date. It is evidence next to the finding — it never moves a score, a state, or a grade
+- Each link records the conditions the measurement ran under — host, host version, model, which measurement produced it, and when — read straight out of the saved result. Whatever the result doesn't state is named as missing instead of filled in
+- Several results for the same rule are listed oldest first, so a behavior that moved over time reads as a history rather than a single number
+- A result measured against wording you have since edited still appears, labelled as having measured the earlier text
+- A link whose saved result has moved or gone unreadable is reported as unavailable evidence, along with what it once recorded — never silently dropped
+- Links are attached by hand and only by hand: assay never decides on its own that a measurement was about a particular rule. Cleanup keeps them, because no rerun regenerates a measurement
+
 ## [0.9.0-alpha] — 2026-07-28
 
 ### Added
