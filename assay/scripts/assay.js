@@ -2152,6 +2152,69 @@ function fileSpan(file) {
   return [{ path: file.path, lineStart: 1, lineEnd: file.lineCount || 1 }];
 }
 
+// [Foreman: 066]
+// Every rule is graded on its own, so the same duty stated in CLAUDE.md and
+// again in a scoped rules file used to be graded twice and named never. Two
+// tiers, both computed without a model: identical normalized text (the same
+// normalization the judgment key uses, so two rules that share a key across
+// files are exactly the pairs this catches), and a token-set overlap for
+// wording that drifted. The near tier needs both sides to carry a few content
+// tokens — a three-token rule shares all of them with anything on its subject,
+// and without the floor every short rule reads as a copy of every other.
+// Advisory like Restructure candidates: a pair never moves a score or the
+// corpus grade, because which copy survives is the developer's policy call.
+// razor: findings only, and a pair, not a cluster — three copies of one duty
+// emit three pairs. 076 owns the relationship model; when it lands it builds
+// `relationships` from these same pairs rather than re-detecting them.
+const DUPLICATE_JACCARD = 0.75;
+const DUPLICATE_MIN_TOKENS = 4;
+
+function jaccard(a, b) {
+  let shared = 0;
+  for (const t of a) if (b.has(t)) shared++;
+  const union = a.size + b.size - shared;
+  return union ? shared / union : 0;
+}
+
+// Sorted by file then line on both sides, so two runs over one corpus emit the
+// same pairs in the same order.
+function duplicatePairs(audit) {
+  const graded = (audit.rules || []).filter((r) => !r.suppressed).map((r) => {
+    const text = r.contextText || r.text;
+    return { rule: r, normalized: text.trim().toLowerCase().replace(/\s+/g, " "), tokens: contentTokens(text) };
+  });
+  const pairs = [];
+  for (let i = 0; i < graded.length; i++) {
+    for (let j = i + 1; j < graded.length; j++) {
+      const a = graded[i], b = graded[j];
+      let tier = null;
+      if (a.normalized === b.normalized) tier = "exact";
+      else if (a.tokens.size >= DUPLICATE_MIN_TOKENS && b.tokens.size >= DUPLICATE_MIN_TOKENS &&
+        jaccard(a.tokens, b.tokens) >= DUPLICATE_JACCARD) tier = "near";
+      if (tier) pairs.push({ tier, a: a.rule, b: b.rule });
+    }
+  }
+  return pairs.sort((p, q) =>
+    p.a.file.localeCompare(q.a.file) || p.a.lineStart - q.a.lineStart ||
+    p.b.file.localeCompare(q.b.file) || p.b.lineStart - q.b.lineStart);
+}
+
+// Which copy looks worth keeping — advisory, never an instruction to delete.
+// A scoped `.claude/rules/` file is a more specific home than a memory file;
+// between two of the same kind the higher-scoring copy; a tie goes to the one
+// that comes first. `a` is always the earlier-positioned rule.
+function keepSuggestion(pair, files) {
+  const rank = (r) => [((files[r.fileIndex] || {}).kind === "rules" ? 1 : 0), r.score == null ? 0 : r.score];
+  const ra = rank(pair.a), rb = rank(pair.b);
+  for (let i = 0; i < ra.length; i++) {
+    if (ra[i] !== rb[i]) {
+      const why = i === 0 ? "a scoped rules file" : "the higher-scoring copy";
+      return ra[i] > rb[i] ? { keep: pair.a, drop: pair.b, why } : { keep: pair.b, drop: pair.a, why };
+    }
+  }
+  return { keep: pair.a, drop: pair.b, why: "stated first" };
+}
+
 // One primary state for one rule, first match wins.
 function deriveRuleState(rule, file) {
   const factors = rule.factors || {};
@@ -2307,6 +2370,30 @@ function deriveFindings(audit) {
       evidence: { level: "mechanical", basis: "category annotation vocabulary" },
       sources: [{ path: rule.file, lineStart: line, lineEnd: line }],
       safeActions: ["fix the spelling", "drop the annotation"],
+    });
+  }
+  // [Foreman: 066] One finding per pair. Neither rule loses its own state — both
+  // copies are real rules, and the duplication is a property of the pair.
+  for (const pair of duplicatePairs(audit)) {
+    const exact = pair.tier === "exact";
+    const { keep, drop } = keepSuggestion(pair, files);
+    const crossScope = (files[pair.a.fileIndex] || {}).scope !== (files[pair.b.fileIndex] || {}).scope;
+    push({
+      type: "duplicate", severity: exact ? "medium" : "low", analyzer: "duplicate-detection",
+      summary: `the same duty is stated at ${pair.a.file}:${pair.a.lineStart} and at ${pair.b.file}:${pair.b.lineStart}`,
+      explanation: (exact
+        ? "The two are identical once whitespace and case are normalized."
+        : "The two share most of their content words, so they read as one duty said twice.") +
+        (crossScope ? " They sit in different scopes — the duty is stated in your own setup and in this project both." : "") +
+        " Both copies are graded and neither is edited: which one survives is a policy call.",
+      evidence: exact
+        ? { level: "mechanical", basis: "identical normalized rule text" }
+        : {
+          level: "heuristic", basis: "content-token overlap between two rules",
+          limits: "token overlap, not meaning — two rules about one subject can overlap heavily without stating the same duty",
+        },
+      sources: [...ruleSpan(pair.a), ...ruleSpan(pair.b)],
+      safeActions: [`keep ${keep.file}:${keep.lineStart}`, `retire ${drop.file}:${drop.lineStart}`],
     });
   }
   const byPath = new Map(files.map((f) => [f.path, f]));
@@ -2518,6 +2605,23 @@ function restructureCandidates(audit) {
   return candidates;
 }
 
+// [Foreman: 066] One line per pair: both sites clickable, the tier's evidence
+// tag, and which copy looks worth keeping. The wording stays a suggestion —
+// assay names the removal candidate and edits nothing.
+function pushDuplicateSection(out, pairs, files, loc) {
+  out.push("### Duplicates");
+  out.push("");
+  out.push("The same duty stated twice. Both copies are graded — a duplicate never moves a score or the corpus grade — and assay edits neither: pick which one survives.");
+  out.push("");
+  for (const pair of pairs) {
+    const exact = pair.tier === "exact";
+    const { keep, drop, why } = keepSuggestion(pair, files);
+    const tag = exact ? "[mechanical]" : "[heuristic]";
+    out.push(`- ${loc(pair.a)} ↔ ${loc(pair.b)} — ${exact ? "exact" : "near"} copy ${tag} — consider keeping ${loc(keep)} (${why}); ${loc(drop)} is the removal candidate`);
+  }
+  out.push("");
+}
+
 function pushRestructureSection(out, candidates) {
   out.push("### Restructure candidates");
   out.push("");
@@ -2695,9 +2799,10 @@ function renderReport(audit, opts = {}) {
   const buried = rules.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD);
   const stale = rules.filter((r) => r.staleness && r.staleness.missing.length);
   const badCategories = rules.filter((r) => r.invalidCategory);
+  const duplicates = duplicatePairs(audit);
   out.push("## Operational findings");
   out.push("");
-  if (!weak.length && !stalls.length && !buried.length && !stale.length && !badCategories.length) {
+  if (!weak.length && !stalls.length && !buried.length && !stale.length && !badCategories.length && !duplicates.length) {
     out.push("None — no loaded rule carries a risk the analyzers can see.");
     out.push("");
   } else {
@@ -2760,6 +2865,8 @@ function renderReport(audit, opts = {}) {
     }
     out.push("");
   }
+
+  if (duplicates.length) pushDuplicateSection(out, duplicates, files, loc);
 
   if (badCategories.length) {
     out.push("### Unknown category annotations");

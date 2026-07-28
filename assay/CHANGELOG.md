@@ -8,6 +8,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
+- The audit flags the same rule stated twice — exact copies and near-copies — naming both places and which copy looks worth keeping. A duplicate never moves the grade
+
 - The JSON assay writes is a versioned record: it names the analyzer and its version, the parser, the host profile, and the context the analysis ran in — project root, startup directory, and the time it ran. Everything in it but the timestamp is identical between two runs over an unchanged project
 - assay reads your files with a real CommonMark parser and a real YAML parser, both bundled with the plugin — nothing to install. Setext headings, tables without leading pipes, indented code blocks, fences inside list items, and frontmatter arrays wrapped across lines are all read the way any other Markdown tool reads them
 - Frontmatter that isn't valid YAML is reported with the reason and the lines it covers, instead of being half-read into guesses

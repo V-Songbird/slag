@@ -1113,6 +1113,112 @@ test("a short, rule-dense file is not a restructure candidate", () => {
   assert.doesNotMatch(report, /## Restructure candidates/);
 });
 
+// [Foreman: 066]
+const DUP_RULE = "- Always run the full test suite before every commit.";
+
+function duplicateFindings(audit) {
+  return audit.findings.filter((f) => f.type === "duplicate");
+}
+
+test("the same rule in CLAUDE.md and a rules file is reported as one exact duplicate", () => {
+  const audit = auditOf({
+    "CLAUDE.md": "# Rules\n\n" + DUP_RULE + "\n",
+    ".claude/rules/testing.md": "# Testing\n\n" + DUP_RULE + "\n",
+  });
+  const dups = duplicateFindings(audit);
+  assert.equal(dups.length, 1);
+  assert.equal(dups[0].severity, "medium");
+  assert.equal(dups[0].evidence.level, "mechanical");
+  assert.match(dups[0].summary, /CLAUDE\.md:3 and at \.claude\/rules\/testing\.md:3/);
+  assert.deepEqual(dups[0].sources, [
+    { path: "CLAUDE.md", lineStart: 3, lineEnd: 3 },
+    { path: ".claude/rules/testing.md", lineStart: 3, lineEnd: 3 },
+  ]);
+  // neither rule loses its own state to the pair
+  assert.equal(audit.findings.filter((f) => f.state).length, 2);
+
+  const report = engine.renderReport(audit);
+  assert.match(report, /### Duplicates/);
+  assert.match(report, /exact copy \[mechanical\]/);
+  // the scoped rules file is the more specific home, so it is the keeper
+  assert.match(report, /consider keeping \[\.claude\/rules\/testing\.md:3\]\(\.claude\/rules\/testing\.md:3\) \(a scoped rules file\); \[CLAUDE\.md:3\]\(CLAUDE\.md:3\) is the removal candidate/);
+});
+
+test("reworded copies above the overlap threshold are a near duplicate, below it nothing", () => {
+  const above = auditOf({
+    "CLAUDE.md": "# Rules\n\n- Always validate request bodies at the handler boundary using Zod schemas.\n",
+    ".claude/rules/api.md": "# API\n\n- Always check request bodies at the handler boundary against Zod schemas.\n",
+  });
+  const dups = duplicateFindings(above);
+  assert.equal(dups.length, 1);
+  assert.equal(dups[0].severity, "low");
+  assert.equal(dups[0].evidence.level, "heuristic");
+  assert.match(engine.renderReport(above), /near copy \[heuristic\]/);
+
+  const below = auditOf({
+    "CLAUDE.md": "# Rules\n\n- Always validate request bodies at the handler boundary using Zod schemas.\n",
+    ".claude/rules/api.md": "# API\n\n- Always validate request bodies at the handler boundary before the database call.\n",
+  });
+  assert.deepEqual(duplicateFindings(below), []);
+  assert.doesNotMatch(engine.renderReport(below), /### Duplicates/);
+});
+
+test("two short rules that share every content word are not a near duplicate", () => {
+  const audit = auditOf({
+    "CLAUDE.md": "# Rules\n\n- Always pin the Docker base image.\n",
+    ".claude/rules/docker.md": "# Docker\n\n- Never float the Docker base image.\n",
+  });
+  assert.deepEqual(duplicateFindings(audit), []);
+});
+
+test("the same rule twice in one file is a duplicate, and the first copy is the keeper", () => {
+  const audit = auditOf({
+    "CLAUDE.md": "# Rules\n\n" + DUP_RULE + "\n\n## Also\n\n" + DUP_RULE + "\n",
+  });
+  const dups = duplicateFindings(audit);
+  assert.equal(dups.length, 1);
+  assert.deepEqual(dups[0].sources.map((s) => s.lineStart), [3, 7]);
+  assert.deepEqual(dups[0].safeActions, ["keep CLAUDE.md:3", "retire CLAUDE.md:7"]);
+});
+
+test("a duplicate across user and project scope says the duty is stated in both", () => {
+  const userDir = tmpUserDir({ "CLAUDE.md": "# Mine\n\n" + DUP_RULE + "\n" });
+  const scanData = engine.scan(tmpProject({ "CLAUDE.md": "# Rules\n\n" + DUP_RULE + "\n" }), { userDir });
+  const dups = duplicateFindings(engine.composeAudit(scanData, judgeEvery(scanData)));
+  assert.equal(dups.length, 1);
+  assert.match(dups[0].explanation, /different scopes/);
+  assert.match(dups[0].explanation, /your own setup and in this project/);
+});
+
+test("a suppressed entry is not paired with anything", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n" + DUP_RULE + "\n",
+    ".claude/rules/testing.md": "# Testing\n\n" + DUP_RULE + "\n",
+  });
+  const scanData = engine.scan(root, { projectOnly: true });
+  const judgments = judgeEvery(scanData);
+  judgments[scanData.rules[1].key] = { F3: 0.7, F8: 0.9, notRule: "Narration, not a directive." };
+  const audit = engine.composeAudit(scanData, judgments);
+  assert.equal(audit.rules.filter((r) => r.suppressed).length, 1);
+  assert.deepEqual(duplicateFindings(audit), []);
+});
+
+test("a duplicate never moves a rule's score or the corpus grade", () => {
+  const withDup = auditOf({
+    "CLAUDE.md": "# Rules\n\n" + DUP_RULE + "\n",
+    ".claude/rules/style.md": "# Style\n\n" + DUP_RULE + "\n",
+  });
+  const without = auditOf({
+    "CLAUDE.md": "# Rules\n\n" + DUP_RULE + "\n",
+    ".claude/rules/style.md": "# Style\n\n- Always sort import statements alphabetically inside each group.\n",
+  });
+  assert.equal(duplicateFindings(withDup).length, 1);
+  assert.equal(withDup.rules[0].score, without.rules[0].score, "being a duplicate costs the rule nothing");
+  // the corpus grade is still the plain mean of the mandate scores — no penalty
+  const mean = (withDup.rules[0].score + withDup.rules[1].score) / 2;
+  assert.equal(withDup.corpusScore, Math.round(mean * 1000) / 1000);
+});
+
 test("scan collects wired hooks and the report never prints the inventory", () => {
   const root = tmpProject({
     ...FIXTURE,
