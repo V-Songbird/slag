@@ -185,32 +185,32 @@ line count and span classification of its file are unchanged.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" report
 ```
 
-Add `--verbose` or `--json` if the user asked. The command prints the finished
-markdown report, findings first, in this order:
+Bare, this prints the **short report** — the default, and what the user reads:
 
-- a **Coverage** block — what was parsed, graded, set aside, excluded,
-  suppressed, or unreadable — so a drop is never silent and you never have to
-  restate those counts yourself;
-- a headline counting the findings by kind, which is the report's verdict;
-- **Hard gates** — rules the host cannot apply at all;
-- **Operational findings** — loaded rules that carry a risk: conflicting pairs,
-  weak rules with suggested fixes, stall risks, buried rules, stale references,
-  duplicates, overlapping scopes, unknown category annotations;
-- **Policy placement** — hook opportunities, placement candidates, restructure
-  candidates, and the count of rules that appropriately stay prose;
-- **Structural hygiene (secondary)** — the corpus grade, the per-file grades,
-  and **User scope** when the user's own `CLAUDE.md` was graded. Those user rules
-  are fixed in the user's setup, not in this repo, and they never move the
-  project grade — do not fold them into the project's numbers when you
-  summarize;
-- **Weak skill descriptions**, and **Weak subagent descriptions** when
-  `.claude/agents/` files grade weak — a subagent rewrite patches that file's
-  frontmatter description through the same transaction as a skill's.
+- one line saying what was looked at and what needs doing;
+- **Fix these first** — a table of rules that never load, pairs that disagree,
+  dead paths, and weak wording, each with the problem and the fix in plain
+  words;
+- **Could be automatic instead** — rules a script could own;
+- **Also worth a look** — file shape, buried rules, weak skill and subagent
+  descriptions, and any weak rules of the user's own that load from outside this
+  repository;
+- one closing line pointing at `--fix` and `--verbose`.
 
-Every finding line carries a bracketed evidence tag — `[mechanical]`,
-`[heuristic]`, `[model-inferred]`, `[experiment-supported: …]`. Keep them: they
-are what stops a heuristic from reading as a fact. With `--verbose` the report
-also lists everything step 2b suppressed, each with its reason quoted.
+Add a flag only when `$ARGUMENTS` carried it: `--json` for the record instead of
+the report, `--verbose` for the full report described below.
+
+It names each rule **once**, in the section for its worst problem, and carries
+no score, factor code, or evidence tag. That is deliberate and gated: a release
+test fails if the short report grows past 40 lines, repeats a rule, or uses a
+word that needs Claude Code internals to read.
+
+**`--verbose` prints the full report instead** — Coverage, hard gates, every
+operational finding with its evidence tag, the enforcement ladder, structural
+hygiene, per-file grades, User scope, weak skill and subagent descriptions, and
+everything step 2b suppressed. Pass it when the user asks for detail, when they
+ask about a specific finding, or when they want the grades. Nothing is missing
+from the short report that is not in this one.
 
 A conflict names both rules and neither winner. Do not resolve it for the user:
 say which two rules disagree, and ask which one they meant.
@@ -221,9 +221,10 @@ the same message, then record their answer back into `_candidates[].accepted` �
 `true` or `false` — before you clean up. An accepted proposal is still a
 proposal: it never changes a rule's state, its score, or the grade.
 
-The report is this skill's deliverable, and it is a document rather than a
-summary: every table belongs in it in full, and the user needs to have read it
-before the step 4 menu asks them to choose anything.
+The report is this skill's deliverable. Print its markdown **verbatim** — every
+location is a clickable `[path:line](path:line)` link, so do not reword a cell,
+rebuild the table, or replace a link with a bare line number. Do not summarize
+it either; it is already the summary.
 
 Where the report lands depends on whether this run can put text in front of the
 user ahead of a tool call:
@@ -231,52 +232,29 @@ user ahead of a tool call:
 - If it can, print the report now, then go to step 4 and ask the menu
   underneath it.
 - If it cannot, **skip step 4 entirely**, go to step 5, and make the report the
-  final message. Close it with one line: rerun with `--fix` to apply every
-  rewrite, or name what to rewrite. A menu with no report behind it asks the
-  user to choose blind, so the menu waits for a run that can show one first.
-
-Print its markdown **verbatim** — each rule cell is a clickable
-`[rule](file:line)` link, so do not rebuild the tables as an artifact, reword
-the cells, or replace a link with a bare line number.
+  final message. A menu with no report behind it asks the user to choose blind,
+  so the menu waits for a run that can show one first.
 
 Present it as-is, with one exception. The scan output carries a
 `hookInventory` — every hook already wired for this project, from its settings,
 the user's, and installed plugins. It is yours to work from, not the user's to
 read: never print it. Use it on the hook-candidates list only. Where a
-candidate is plainly covered by a wired hook (same trigger, same action), mark
-it "already wired to `<command>`" next to the entry and drop it from the
-promote/park counts in step 4.
+candidate is plainly covered by a wired hook (same trigger, same action), say so
+beside the entry and drop it from the promote/park counts in step 4.
 
-Then add at most 3 sentences of your own: the single most valuable fix and
-anything project-specific the numbers can't see. Never present a grade as a
+Then add at most 2 sentences of your own: the single most valuable fix, and
+anything project-specific the report cannot see. Never present a grade as a
 prediction that Claude will or won't follow a rule — it measures how the rule is
-written, scoped, and placed. If the project visibly runs subagents or headless automation, one
-of those sentences should say the grades apply at full severity there; if it
-clearly does neither, say severity reads one notch softer. If it errors about
-judgments, fix `.assay-tmp/judgments.json` and rerun.
+written, scoped, and placed. If it errors about judgments, fix
+`.assay-tmp/judgments.json` and rerun.
 
 ## 3a. Interactive HTML report — only with `--artifact`
 
-Skip this whole step unless `$ARGUMENTS` contains `--artifact`. The markdown
-tables above still print in full either way — this is an extra view of the same
-`audit.json`, never a replacement for them.
-
-When `--artifact` was passed, after the report, build the clickable HTML version:
-
-```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" artifact
-```
-
-It writes `.assay-tmp/report.html` — a self-contained page (no external assets,
-the audit record embedded as inline JSON) carrying the whole report: coverage,
-hard gates, every operational finding, the enforcement ladder, structural
-hygiene and the suppressed entries. The rule table sorts hard gates first, then
-worst score, and a row opens to that rule's full untruncated text, every factor
-score, its grade, and the suggested fix. A filter box and state, severity and
-evidence chips narrow it; a button downloads the record as `assay-audit.json`.
-Secrets in hook commands are masked in the page. Publish it with the `Artifact`
-tool, passing that file's path: the file is already page content only, so the
-Artifact skeleton wraps it unchanged. Give the reader the returned URL.
+Skip this whole step unless `$ARGUMENTS` contains `--artifact`. Then run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" artifact`, which writes
+`.assay-tmp/report.html` — a self-contained page carrying the full report.
+Publish it with the `Artifact` tool, passing that file's path, and give the
+reader the returned URL.
 
 ## 4. Offer fixes
 
@@ -292,12 +270,16 @@ header `"Fix menu"`), including only options that have evidence:
 
 - `Rewrite [N] weak rules` — only if weak rules exist. Description: "Rewrite the
   rules below their quality floor; you approve each patch and every write is
-  reversible."
-- `Rewrite [N] weak skill descriptions` — only if the report has a "Weak skill
-  descriptions" section. Description: "Rewrite each skill's frontmatter
-  description to the trigger recipe; you approve each patch." Count weak
-  subagent descriptions here too — same recipe, same patch shape, different
-  file.
+  reversible." N is the count of rules whose problem is **wording**. The short
+  report's "N rules need work" also counts dead references, which a rewrite does
+  not fix — take the wording count from the rows whose problem is a wording one,
+  or from `--verbose`'s Weak rules table.
+- `Rewrite [N] weak skill descriptions` — only if any skill or subagent
+  description is weak. Both reports name them: the short one under **Also worth
+  a look**, `--verbose` under its own sections. Description: "Rewrite each
+  skill's frontmatter description to the trigger recipe; you approve each patch."
+  Count weak subagent descriptions here too — same recipe, same patch shape,
+  different file.
 - `Promote [N] candidates now` — only if placement candidates exist. Description:
   "Preview each hook, skill, or subagent built from the live official docs, and
   install the ones you approve; the rules stay active."
@@ -386,33 +368,23 @@ the plan artifact: recorded with its signals, its target primitive and its
 promotion note, with no patch and nothing written to the rules. `apply` refuses
 a park by design. The plan file is the park record and `clean` never deletes it.
 
-## 4b. Remeasure — once, only if a rewrite was applied
+## 4b. Remeasure — only when the user asks for a before/after
 
-Skip this step unless step 4a applied at least one weak-rule or skill-description
-rewrite.
-Promotions and parks leave every graded rule where it was, so they change no
-grade; a rewrite changes a rule in place and its effect is exactly what this
-step shows. Do not clean between step 4a and here — the cached judgments and the
-prior `audit.json` are what make the before/after possible.
+Not part of the default run. `git diff` already shows what changed, and the
+patches were approved one at a time in step 4a, so a second scoring pass adds
+numbers nobody asked for.
 
-```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" remeasure
-```
-
-It re-scans the rewritten files and reuses every cached judgment whose rule is
-unchanged. A rewrite gives a rule new text, so its content hash is new and its
-old judgment no longer applies: `remeasure` prints those rules as a `judge`
-worklist and a `pending` count instead of a report. When that happens, judge
-only the listed rules exactly as in step 2 (and step 2b if not `--no-verify`),
-**merge** them into `.assay-tmp/judgments.json` without disturbing the existing
-entries, and run `remeasure` once more. The second run finds every hash known and
-prints the report, which now leads with a **Since last audit** section: the
-finding counts before → after, then corpus grade before → after, then each
-file's before/after.
-
-Run `remeasure` at most twice — once to surface the reworded rules, once to
-report. Do not loop further: one rewrite-and-remeasure, then done. Show the
-before/after section to the user; it is the evidence the fixes landed.
+If the user does ask what the fixes did to the grades, run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" remeasure`. It prints the **full**
+report, not the short one — a before/after is a detail question by definition, so
+it answers at that level. It re-scans and reuses
+every cached judgment whose rule is unchanged; a reworded rule has a new content
+hash, so `remeasure` prints those rules as a `judge` worklist instead of a
+report. Judge only those, exactly as in step 2, **merge** them into
+`.assay-tmp/judgments.json` without disturbing the existing entries, and run
+`remeasure` once more. Run it at most twice, then stop. Do not `clean` before
+this — the cached judgments and the prior `audit.json` are what make the
+before/after possible.
 
 ## 5. Clean up
 

@@ -4,6 +4,27 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.6.0] — 2026-07-29
+
+### Added
+
+- Weak subagent descriptions now appear in the report beside weak skill descriptions
+- Weak rules of your own, from files that load from outside the repository, are named rather than left out — the fix for those lives in your setup, so the report points at them instead of listing them for rewriting
+
+### Changed
+
+- `/assay:assay` now gives you a short report in plain English: what needs fixing, what a script could handle instead, and what's worth a look — each problem at its exact line with the fix beside it. Scores, letter grades, evidence labels and factor codes are gone from it
+- Each rule is reported **once**, under its worst problem, instead of once per section with something to say about it
+- `--verbose` prints the full report that used to be the default — coverage, evidence labels, grades, the enforcement ladder, and everything already wired in the project. Nothing was removed, and the JSON record is unchanged
+- An empty section no longer prints. A report with nothing to fix says so in one line
+- `remeasure` prints the full report
+
+### Fixed
+
+- A `|` in a rule, a path, or the reason a rule cannot load no longer breaks the report table, and a path containing `|`, `(`, `)`, a space or `]` still opens as a link
+- A truncated list now says how many entries it withheld, counting all of them
+- A subagent description over the listing cap is now flagged, and one with no `description:` line at all is named in plain words instead of by its field name
+
 ## [1.5.0] — 2026-07-28
 
 ### Added

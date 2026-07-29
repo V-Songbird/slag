@@ -130,7 +130,7 @@ const TMP_DIR = ".assay-tmp";
 // A release cut keeps ANALYZER_VERSION in step with assay's version in
 // .claude-plugin/marketplace.json, which owns the published number.
 const SCHEMA_VERSION = 1;
-const ANALYZER_VERSION = "1.5.0";
+const ANALYZER_VERSION = "1.6.0";
 const PARSER_NAME = "assay-markdown";
 // [Foreman: 073] 2 = markdown-it 14.1.0 + js-yaml 4.1.0 behind assay's adapter.
 // 1 was the handwritten line scanner; a record naming version 1 was produced by
@@ -1012,6 +1012,10 @@ const SKILL_CHECK_LABELS = {
   whenToUse: "model-invocable — drop when_to_use, fold any trigger phrases into description",
   empty: "no description",
   dead: "no model or user invocation — recommend removing the skill",
+  // [Foreman: 095] The frontmatter key itself can be the missing thing — a
+  // subagent file with no `description:` line at all. Without a label the row
+  // said the field name, or nothing.
+  description: "no `description` in the frontmatter",
 };
 
 function checkSkillDescription(description) {
@@ -4114,6 +4118,32 @@ const SKILL_FINDING_TYPES = new Set([
   "skill-metadata", "skill-metadata-unreadable", "skill-name-collision", "skill-listing-budget",
 ]);
 
+// [Foreman: 095] What is actually wrong with one description, in the labels the
+// checks already carry. Both report views read this, so the short one can never
+// tell a different story about a skill than the full one does.
+function skillIssues(s) {
+  // A subagent whose file would not read has no checks at all — it carries the
+  // reason instead, and that reason is the finding.
+  if (!s.checks) return [s.issue || "unreadable"];
+  const c = s.checks;
+  if (c.mode === "dead") return [SKILL_CHECK_LABELS.dead];
+  const issues = [];
+  if (c.mode === "user-only") {
+    if (c.empty) issues.push(SKILL_CHECK_LABELS.empty);
+    if (c.overSpecified) issues.push(SKILL_CHECK_LABELS.overSpecified);
+    if (c.overCap) issues.push(SKILL_CHECK_LABELS.overCap);
+    return issues;
+  }
+  // `|| k` is load-bearing: a subagent with no `description` at all reports the
+  // field name, which has no label of its own. Without the fallback the row
+  // renders blank and says a description is weak without saying why.
+  issues.push(...(c.missing || []).map((k) => SKILL_CHECK_LABELS[k] || k));
+  if (c.redundant) issues.push(SKILL_CHECK_LABELS.redundant);
+  if (c.overCap) issues.push(SKILL_CHECK_LABELS.overCap);
+  if (c.hasWhenToUse) issues.push(SKILL_CHECK_LABELS.whenToUse);
+  return issues;
+}
+
 function isWeakSkill(s) {
   const c = s.checks || {};
   if (c.mode === "required-metadata") return false;
@@ -4136,20 +4166,7 @@ function pushWeakSkillSection(out, weakSkills) {
   out.push("|---|---|---|---|");
   for (const s of weakSkills) {
     const c = s.checks;
-    let issues;
-    if (c.mode === "dead") {
-      issues = [SKILL_CHECK_LABELS.dead];
-    } else if (c.mode === "user-only") {
-      issues = [];
-      if (c.empty) issues.push(SKILL_CHECK_LABELS.empty);
-      if (c.overSpecified) issues.push(SKILL_CHECK_LABELS.overSpecified);
-      if (c.overCap) issues.push(SKILL_CHECK_LABELS.overCap);
-    } else {
-      issues = c.missing.map((k) => SKILL_CHECK_LABELS[k]);
-      if (c.redundant) issues.push(SKILL_CHECK_LABELS.redundant);
-      if (c.overCap) issues.push(SKILL_CHECK_LABELS.overCap);
-      if (c.hasWhenToUse) issues.push(SKILL_CHECK_LABELS.whenToUse);
-    }
+    const issues = skillIssues(s);
     out.push(`| ${s.name} | [${s.path}](${s.path}) | ${c.length}/${DESCRIPTION_CAP} | ${issues.join(", ")} |`);
   }
   out.push("");
@@ -4167,8 +4184,9 @@ function pushWeakAgentSection(out, weakAgents) {
   out.push("|---|---|---|---|");
   for (const a of weakAgents) {
     const c = a.checks;
-    const issues = c ? c.missing.map((k) => SKILL_CHECK_LABELS[k] || k).concat(c.redundant ? [SKILL_CHECK_LABELS.redundant] : []) : [a.issue || "unreadable"];
-    out.push(`| ${a.name} | [${a.path}](${a.path}) | ${c ? c.length : "—"}/${DESCRIPTION_CAP} | ${issues.join(", ")} |`);
+    // [Foreman: 095] Shared with the short report, so the two views can never
+    // tell different stories about one description.
+    out.push(`| ${a.name} | [${a.path}](${a.path}) | ${c ? c.length : "—"}/${DESCRIPTION_CAP} | ${skillIssues(a).join(", ")} |`);
   }
   out.push("");
 }
@@ -4656,6 +4674,267 @@ function pushLadderSection(out, audit, mechanisms, activeRules, opts, findings) 
   out.push("");
 }
 
+// ---------------------------------------------------------------------------
+// renderBrief — the default report
+// ---------------------------------------------------------------------------
+
+// [Foreman: 095]
+// The report a person actually reads. Three properties define it, and each one
+// is asserted by a release gate rather than left to taste:
+//
+//   G1  it fits on a screen                    (BRIEF_MAX_LINES)
+//   G2  a rule is named once, never twice      (the `claim` bucketing below)
+//   G3  no word in it needs host internals     (BRIEF_BANNED_WORDS)
+//
+// It derives nothing. Every list here is a filter over the same audit record
+// renderReport reads; this function only chooses what a reader sees first and
+// says it in words they had before they installed anything.
+//
+// razor: a filter, NOT a second report. --verbose routes to renderReport
+// unchanged, and nothing is removed from the record — so the upgrade path from
+// any line cut here is one flag, and there is no second rendering of a finding
+// to keep in step with the first.
+
+const BRIEF_MAX_LINES = 40;
+const BRIEF_FIX_ROWS = 8;
+const BRIEF_LIST_ITEMS = 4;
+
+// The six wording factors said out loud. FACTOR_LABELS and FRIENDLY_FIXES stay
+// exactly as they are for --verbose — these are the same findings in the
+// vocabulary the gate is checking for, not a different judgment.
+const PLAIN_PROBLEMS = {
+  F1: "no clear action",
+  F2: "says what not to do, never what to do",
+  F3: "no clear moment it applies",
+  F4: "applies too broadly",
+  F5: "buried near the bottom",
+  F7: "too vague to act on",
+};
+const PLAIN_FIXES = {
+  F1: "Start with Use, Always, Never, or Run",
+  F2: "Add what to do instead",
+  F3: 'Say when it applies: "When editing X…"',
+  F4: "Move it to a rules file that lists the paths",
+  F5: "Move it nearer the top, or split the file",
+  F7: "Name a path, or show an example",
+};
+
+// [Foreman: 095] G3's list. Every one of these is precise and every one of them
+// asks the reader to know how the host loads files, what an evidence level is,
+// or what the rubric measures. They all keep working in --verbose and in the
+// JSON record; this is about the default view only.
+const BRIEF_BANNED_WORDS = [
+  "corpus", "mandate", "renormalized", "heuristic", "model-inferred",
+  "experiment-supported", "evidence mix", "state chain", "configured, not verified",
+  "enforcement ladder", "always-loaded", "unscoped", "advisory prose",
+  "hygiene", "schema", "profile", "coverage", "provenance", "rubric",
+];
+
+function renderBrief(audit) {
+  const out = [];
+  const files = audit.files || [];
+  const rules = (audit.rules || []).filter((r) => !r.suppressed);
+  const findings = audit.findings || [];
+  const rulesById = new Map(rules.map((r) => [r.id, r]));
+  // A finding's source span carries the rule's own file and start line
+  // (`ruleSpan`), so this is how a corpus finding — a conflict names a pair of
+  // places, not a pair of ids — gets back to the rules it is about.
+  const ruleAt = new Map(rules.map((r) => [r.file + ":" + r.lineStart, r]));
+
+  const home = os.homedir();
+  const linkPath = (p) => String(p).replace(/\\/g, "/");
+  const showPath = (p) => {
+    const s = String(p);
+    return s.startsWith(home) ? "~" + s.slice(home.length).replace(/\\/g, "/") : linkPath(s);
+  };
+  // A pipe in ANY cell splits the row into a phantom column, and the text in a
+  // cell is not always the author's — a gate's reason and a stale reference are
+  // built from paths, and a path may carry one. `truncate` gives the rule text
+  // this guarantee; `cell` gives it to everything else in a row.
+  const cell = escapeTableCell;
+  // A `]` closes a markdown link label, so a path carrying one renders as
+  // literal text instead of a clickable location.
+  const label = (s) => String(s).replace(/([[\]])/g, "\\$1");
+  // A link target ends at a space or a `)`, a `#` starts a fragment and a `?` a
+  // query, and a `|` would still split the table row the link sits in. None of
+  // them survives as a raw byte. The LABEL beside it keeps the real path, so a
+  // terminal that reads `path:line` out of the visible text still sees it.
+  const TARGET_ESCAPES = { "(": "%28", ")": "%29", " ": "%20", "|": "%7C", "#": "%23", "?": "%3F" };
+  const target = (s) => String(s).replace(/[()| #?]/g, (c) => TARGET_ESCAPES[c]);
+  // `cell` first, then `label`: the brackets `label` adds are for the link and
+  // must not themselves be escaped again for the table.
+  const where = (p, line) => `[${label(cell(showPath(p)))}:${line}](${target(linkPath(p))}:${line})`;
+  const at = (r) => where(r.file, r.lineStart);
+  // A newline in a list item would end the item and break the section's shape.
+  const oneLine = (s) => cell(String(s).replace(/\s*\n\s*/g, " "));
+  // Brackets would break the link label the rule text sits in.
+  const quote = (r, n) => '"' + truncate(r.text, n).replace(/[[\]]/g, "") + '"';
+
+  // G2, mechanically. A rule lands in the first bucket that claims it and is
+  // invisible to every bucket after — so "one rule, one line" is a property of
+  // the data here, not a discipline the sections below have to remember.
+  const claimed = new Set();
+  const claim = (candidates) => {
+    const kept = [];
+    for (const r of candidates) {
+      if (!r || claimed.has(r.id)) continue;
+      claimed.add(r.id);
+      kept.push(r);
+    }
+    return kept;
+  };
+
+  // The reader can only fix what lives in this repository. A rule of their own
+  // that loads from outside it is real, and it is not this report's business.
+  const outside = new Set(files.filter((f) => f.scope === "user" || f.scope === "ancestor").map((f) => f.path));
+  const mine = rules.filter((r) => !outside.has(r.file));
+
+  // Bucket 1 — the host never applies it. Nothing else about the rule matters
+  // until that is fixed, so this claims before anything else.
+  const gateFindings = findings.filter((f) => HARD_GATE_STATES.has(f.state));
+  const gateWhy = new Map(gateFindings.map((f) => [f.rule, f.summary]));
+  const gated = claim(gateFindings.map((f) => rulesById.get(f.rule)).filter((r) => r && !outside.has(r.file)));
+
+  // Bucket 2 — two rules that argue. Both sides are claimed by the pair,
+  // because it is one problem with one decision behind it and neither half can
+  // be edited alone.
+  const conflictRows = [];
+  for (const f of findings) {
+    if (f.type !== "conflict" && f.type !== "conditional-conflict") continue;
+    const [a, b] = f.sources || [];
+    if (!a || !b) continue;
+    claim([ruleAt.get(a.path + ":" + a.lineStart), ruleAt.get(b.path + ":" + b.lineStart)]);
+    conflictRows.push({ a, b });
+  }
+
+  // Bucket 3 — points at a file that is not there. Mechanical and certain, so
+  // it outranks anything about wording.
+  const stale = claim(mine.filter((r) => r.staleness && r.staleness.missing.length));
+
+  // Bucket 4 — the wording itself. This is what `--fix` repairs.
+  const weak = claim(mine.filter((r) => r.weak).sort((a, b) => a.score - b.score));
+
+  // Bucket 5 — a script could do this instead of asking the model to remember.
+  const mechanical = claim(mine.filter((r) => r.hookOpportunity || r.placement));
+
+  // Bucket 6 — sound, but sitting where it gets skimmed.
+  const buried = claim(mine.filter((r) => (r.factorValues || {}).F5 <= BURIED_F5_THRESHOLD));
+
+  const shapes = findings.filter((f) => f.type === "file-shape" && (f.sources || []).length);
+  const weakDescriptions = (audit.skills || []).filter(isWeakSkill)
+    .map((s) => ({ kind: "skill", name: s.name, issues: skillIssues(s) }))
+    .concat((((audit.coverage || {}).agents) || []).filter(isWeakAgent)
+      .map((a) => ({ kind: "subagent", name: a.name, issues: skillIssues(a) })));
+  // Rules of the reader's own that load from outside this repository. They are
+  // real and they are not fixable here, so they get a pointer rather than a
+  // place in the fix list — but never silence, which would read as "clean".
+  const weakOutside = rules.filter((r) => outside.has(r.file) && r.weak).length;
+
+  // --- the report -----------------------------------------------------------
+
+  out.push("# assay — " + path.basename(audit.root || "."));
+  out.push("");
+
+  // A conflict is one row but two rules, so it gets its own clause rather than
+  // being counted as a rule and quietly halving itself.
+  const needWork = stale.length + weak.length;
+  const fixCount = gated.length + conflictRows.length + needWork;
+  const headline = [];
+  if (gated.length) headline.push(`**${gated.length} ${gated.length === 1 ? "rule never loads" : "rules never load"}.**`);
+  if (conflictRows.length) headline.push(`**${conflictRows.length} ${conflictRows.length === 1 ? "pair of rules disagrees" : "pairs of rules disagree"}.**`);
+  if (needWork) headline.push(`**${needWork} ${needWork === 1 ? "rule needs" : "rules need"} work.**`);
+  if (mechanical.length) headline.push(`${mechanical.length} could be handled by a script instead.`);
+  if (!fixCount && !mechanical.length) {
+    // Only the rules this repository owns can be called clean here, and only
+    // when nothing else below has something to say.
+    headline.push(weakOutside || weakDescriptions.length || shapes.length || buried.length
+      ? "**Nothing in this repo's rules needs fixing.**"
+      : "**Nothing here needs fixing.**");
+  }
+  // The denominator is the project's own rules, so it can never disagree with
+  // the buckets underneath it.
+  const nFiles = new Set(mine.map((r) => r.file)).size;
+  out.push(`Looked at ${mine.length} ${mine.length === 1 ? "rule" : "rules"} in ${nFiles} ${nFiles === 1 ? "file" : "files"}. ` + headline.join(" "));
+  out.push("");
+
+  if (fixCount) {
+    out.push("## Fix these first");
+    out.push("");
+    out.push("| Rule | Where | Problem | Fix |");
+    out.push("|---|---|---|---|");
+    const rows = [];
+    // Order matches `claim()`: a rule the host never reads outranks a pair that
+    // argues, which outranks a dead path, which outranks wording. The cap below
+    // cuts from the bottom, so it can only ever drop the least urgent rows.
+    for (const r of gated) {
+      rows.push(`| ${quote(r, 46)} | ${at(r)} | never reaches the assistant — ${cell(gateWhy.get(r.id) || "it is not loaded")} | Move it to a file that gets read, or fix the paths it is filed under |`);
+    }
+    for (const { a, b } of conflictRows) {
+      rows.push(`| two rules disagree | ${where(a.path, a.lineStart)} and ${where(b.path, b.lineStart)} | one bans what the other asks for | Decide which one you meant, then drop or narrow the other |`);
+    }
+    for (const r of stale) {
+      const missing = (r.staleness && r.staleness.missing) || [];
+      const refs = missing.slice(0, 2).map((m) => cell("`" + m.ref + "`")).join(", ");
+      const rest = missing.length > 2 ? ` and ${missing.length - 2} more` : "";
+      rows.push(`| ${quote(r, 46)} | ${at(r)} | points at ${refs}${rest}, which is not there | Fix the path, or drop the mention |`);
+    }
+    for (const r of weak) {
+      const names = rowWeaknesses(r);
+      const problems = names.map((n) => PLAIN_PROBLEMS[n] || FACTOR_LABELS[n] || n).join("; ");
+      const fixes = names.map((n) => PLAIN_FIXES[n] || FRIENDLY_FIXES[n]).filter(Boolean).join("; ");
+      rows.push(`| ${quote(r, 46)} | ${at(r)} | ${cell(problems)} | ${cell(fixes)} |`);
+    }
+    for (const row of rows.slice(0, BRIEF_FIX_ROWS)) out.push(row);
+    out.push("");
+    if (rows.length > BRIEF_FIX_ROWS) {
+      out.push(`${rows.length - BRIEF_FIX_ROWS} more not shown here — run with \`--verbose\` for the full list.`);
+      out.push("");
+    }
+  }
+
+  if (mechanical.length) {
+    out.push("## Could be automatic instead");
+    out.push("");
+    out.push("A script could check these on every run, instead of counting on them being remembered:");
+    out.push("");
+    for (const r of mechanical.slice(0, BRIEF_LIST_ITEMS)) out.push(`- ${at(r)} — ${quote(r, 66)}`);
+    if (mechanical.length > BRIEF_LIST_ITEMS) out.push(`- …and ${mechanical.length - BRIEF_LIST_ITEMS} more`);
+    out.push("");
+  }
+
+  // Everything that belongs here is collected before the cap is applied, so the
+  // "…and N more" line counts every entry withheld and not just some of them.
+  const also = [];
+  for (const f of shapes) {
+    const p = f.sources[0].path;
+    also.push(`- [${label(cell(showPath(p)))}](${target(linkPath(p))}) — ${oneLine((f.safeActions || [])[0] || "reshape this file")}`);
+  }
+  if (buried.length) {
+    also.push(`- ${buried.length} ${buried.length === 1 ? "rule sits" : "rules sit"} near the bottom of a long file, where they get skimmed — move the important ones up.`);
+  }
+  for (const d of weakDescriptions) {
+    also.push(`- The \`${d.name}\` ${d.kind} may never get picked: ${oneLine(d.issues.join("; ")) || "its description needs work"}.`);
+  }
+  if (weakOutside) {
+    // "1 of your own rules needs work" — the noun is partitive and stays plural
+    // while the verb agrees with the count.
+    also.push(`- ${weakOutside} of your own rules ${weakOutside === 1 ? "needs" : "need"} work, from files outside this repo — fix those in your own setup.`);
+  }
+  if (also.length) {
+    out.push("## Also worth a look");
+    out.push("");
+    for (const line of also.slice(0, BRIEF_LIST_ITEMS)) out.push(line);
+    if (also.length > BRIEF_LIST_ITEMS) out.push(`- …and ${also.length - BRIEF_LIST_ITEMS} more`);
+    out.push("");
+  }
+
+  out.push(weak.length
+    ? "Run `/assay:assay --fix` to rewrite the weak ones, or `--verbose` to see everything assay found."
+    : "Run `/assay:assay --verbose` to see everything assay found.");
+
+  return out.join("\n");
+}
+
 // [Foreman: 075]
 // The report leads with findings and ends with the hygiene grade. Four sections
 // carry the whole diagnosis — hard gates, operational findings, policy
@@ -4663,6 +4942,8 @@ function pushLadderSection(out, audit, mechanisms, activeRules, opts, findings) 
 // print at the top level still prints, one level down, inside the section it
 // belongs to. Every finding line carries a bracketed evidence tag, because the
 // one thing the interface must never do is let a heuristic read as a fact.
+//
+// [Foreman: 095] Reached by --verbose now. The default is renderBrief above.
 function renderReport(audit, opts = {}) {
   const out = [];
   const { files } = audit;
@@ -5182,8 +5463,34 @@ function renderReport(audit, opts = {}) {
   return out.join("\n");
 }
 
+// [Foreman: 095] Only a backslash that IMMEDIATELY PRECEDES a pipe is doubled.
+// Escaping the pipe alone would turn a rule's own `\|` into `\\|` — an escaped
+// backslash followed by a live pipe — and split the row it sits in. Escaping
+// every backslash instead corrupts the far more common ones: a regex in a code
+// span, a Windows path. Backslash escapes do not even apply inside a code span,
+// so there the doubling is visible damage. This touches exactly the sequence
+// that breaks a table and nothing else.
+//
+// razor: markdown table escaping only. The result also reaches the HTML view and
+// the record's `where.label`, so it must stay faithful to the source text.
+//
+// Split rather than `/(\\*)\|/g`: a greedy run backtracks from every position in
+// a long line of backslashes, which turns a shared helper quadratic. This walks
+// the string once.
+function escapeTableCell(s) {
+  const parts = String(s).split("|");
+  if (parts.length === 1) return parts[0];
+  let out = parts[0];
+  for (let i = 1; i < parts.length; i++) {
+    let run = 0;
+    while (run < out.length && out[out.length - 1 - run] === "\\") run++;
+    out += "\\".repeat(run) + "\\|" + parts[i];
+  }
+  return out;
+}
+
 function truncate(text, n) {
-  const clean = text.replace(/\|/g, "\\|").replace(/\s+/g, " ");
+  const clean = escapeTableCell(text).replace(/\s+/g, " ");
   return clean.length > n ? clean.slice(0, n - 1) + "…" : clean;
 }
 
@@ -5837,8 +6144,11 @@ function cmdReport(root, opts) {
   }
   const audit = attachProofLinks(root, makeRecord("audit", composeAudit(scanData, judgments), root));
   fs.writeFileSync(path.join(root, TMP_DIR, "audit.json"), JSON.stringify(audit, null, 2));
+  // [Foreman: 095] The default is the short report; --verbose is the full one,
+  // unchanged. One line, so reverting the default is one line too.
   if (opts.json) process.stdout.write(JSON.stringify(audit, null, 2) + "\n");
-  else process.stdout.write(renderReport(audit, opts) + "\n");
+  else if (opts.verbose) process.stdout.write(renderReport(audit, opts) + "\n");
+  else process.stdout.write(renderBrief(audit) + "\n");
 }
 
 // [Foreman: 083] The attachment point, and the neutrality proof: links arrive
@@ -7768,6 +8078,9 @@ module.exports = {
   findInstructionFiles, stripMetadata, identifyChunks, classifyChunk,
   mergeClarifications, splitCompound, checkStaleness, scoreF1, scoreF2, scoreF4, scoreF5, scoreF7,
   composeScore, grade, detectPlacement, scan, composeAudit, renderReport, loadJudgments,
+  // [Foreman: 095] the default report, the three limits its gates assert, and
+  // the one escape both renderers share
+  renderBrief, BRIEF_MAX_LINES, BRIEF_BANNED_WORDS, escapeTableCell,
   // [Foreman: 075] the finding contract
   deriveFindings, evidenceTag, FINDING_STATES,
   // [Foreman: 076] the corpus relationship contract

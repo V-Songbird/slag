@@ -1920,7 +1920,7 @@ test("a corpus past the pairwise cap says so instead of failing", () => {
   // it completes, through the public surface, with no record too large to write
   const scanned = cli(root, "scan");
   assert.equal(scanned.code, 0, scanned.err);
-  const reported = cli(root, "report");
+  const reported = cli(root, "report", "--verbose");
   assert.equal(reported.code, 0, reported.err);
   assert.equal(reported.err, "");
 
@@ -2021,7 +2021,7 @@ test("a candidate naming an unknown kind is a malformed judgments file", () => {
     ...judgments,
     _candidates: [{ kind: "vibes", keys: [], summary: "x", reason: "y", accepted: null }],
   }));
-  const bad = cli(root, "report");
+  const bad = cli(root, "report", "--verbose");
   assert.equal(bad.code, 1);
   assert.match(bad.err, /_candidates\[0\]\.kind \(unknown kind: vibes\)/);
 
@@ -2030,7 +2030,7 @@ test("a candidate naming an unknown kind is a malformed judgments file", () => {
     ...judgments,
     _candidates: engine.SEMANTIC_CANDIDATE_KINDS.map((kind) => ({ kind, keys: [], summary: "s", reason: "r", accepted: null })),
   }));
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
 });
 
 test("relationships are emitted, sorted by kind, and schema-shaped", () => {
@@ -2686,7 +2686,7 @@ test("scan on a project with no instruction files reports zero and still exits 0
 test("report exits 0 and prints the header and the Coverage block", () => {
   const root = cliFixture();
   judgeAll(root);
-  const { code, out } = cli(root, "report");
+  const { code, out } = cli(root, "report", "--verbose");
   assert.equal(code, 0);
   assert.match(out, /^# Rule audit — /m);
   assert.match(out, /## Coverage/);
@@ -2699,7 +2699,7 @@ test("report exits 0 and prints the header and the Coverage block", () => {
 test("the report prints the four findings-first sections and the headline counts", () => {
   const root = cliFixture();
   judgeAll(root);
-  const { code, out } = cli(root, "report");
+  const { code, out } = cli(root, "report", "--verbose");
   assert.equal(code, 0);
   for (const header of ["## Hard gates", "## Operational findings", "## Policy placement", "## Structural hygiene (secondary)"]) {
     assert.ok(out.includes(header), "missing " + header);
@@ -2717,7 +2717,7 @@ test("the report prints the four findings-first sections and the headline counts
 test("remeasure prints finding deltas beside the grade movement", () => {
   const root = cliFixture();
   judgeAll(root);
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
 
   // the rewrite trades an advisory rule for a bare prohibition, so a state
   // count moves in both directions
@@ -2748,21 +2748,24 @@ test("the Coverage block counts suppressed entries even though the rows stay ver
   for (const j of summary.judge) judgments[j.key] = { F3: 0.7, F8: 0.9 };
   judgments[summary.judge[1].key].notRule = "Describes an aspiration; asks for nothing.";
   fs.writeFileSync(path.join(root, ".assay-tmp", "judgments.json"), JSON.stringify(judgments));
-  const plain = cli(root, "report");
-  assert.equal(plain.code, 0);
-  assert.match(plain.out, /1 entry suppressed by the verification pass/);
-  assert.doesNotMatch(plain.out, /## Suppressed/);
   const verbose = cli(root, "report", "--verbose");
   assert.equal(verbose.code, 0);
   assert.match(verbose.out, /## Suppressed/);
   assert.match(verbose.out, /asks for nothing/);
+  // [Foreman: 095] --verbose is the CLI's only door to the full report now, so
+  // the plain/verbose split inside it is exercised at the function level. The
+  // subject is unchanged: Coverage counts the drop, the rows stay verbose-only.
+  const audit = JSON.parse(fs.readFileSync(path.join(root, ".assay-tmp", "audit.json"), "utf-8"));
+  const plain = engine.renderReport(audit, {});
+  assert.match(plain, /1 entry suppressed by the verification pass/);
+  assert.doesNotMatch(plain, /## Suppressed/);
 });
 
 // [Foreman: 071]
 test("report without a judgments file lands a deterministic-only audit", () => {
   const root = cliFixture();
   assert.equal(cli(root, "scan").code, 0);
-  const { code, out } = cli(root, "report");
+  const { code, out } = cli(root, "report", "--verbose");
   assert.equal(code, 0);
   // the banner, the coverage gap, and the score's evidence mix all say it
   assert.match(out, /· deterministic only$/m);
@@ -2789,13 +2792,13 @@ test("report on malformed judgments exits 1 and names the problem", () => {
   const judgeFile = path.join(root, ".assay-tmp", "judgments.json");
 
   fs.writeFileSync(judgeFile, "{ not json");
-  const broken = cli(root, "report");
+  const broken = cli(root, "report", "--verbose");
   assert.equal(broken.code, 1);
   assert.match(broken.err, /judgments\.json is not valid JSON/);
 
   // schema-invalid: a score outside [0,1]
   fs.writeFileSync(judgeFile, JSON.stringify({ [summary.judge[0].key]: { F3: 5, F8: 0.9 } }));
-  const outOfRange = cli(root, "report");
+  const outOfRange = cli(root, "report", "--verbose");
   assert.equal(outOfRange.code, 1);
   assert.match(outOfRange.err, /out of range \[0,1\]/);
   assert.match(outOfRange.err, new RegExp(summary.judge[0].key));
@@ -2805,14 +2808,14 @@ test("report on malformed judgments exits 1 and names the problem", () => {
     [summary.judge[0].key]: { F3: 0.7, F8: 0.9, notRule: "" },
     [summary.judge[1].key]: { F3: 0.7, F8: 0.9 },
   }));
-  const badNotRule = cli(root, "report");
+  const badNotRule = cli(root, "report", "--verbose");
   assert.equal(badNotRule.code, 1);
   assert.match(badNotRule.err, /\.notRule/);
 });
 
 test("report before scan exits 1 and says to run scan first", () => {
   const root = cliFixture();
-  const { code, err } = cli(root, "report");
+  const { code, err } = cli(root, "report", "--verbose");
   assert.equal(code, 1);
   assert.match(err, /No \.assay-tmp\/scan\.json — run scan first/);
 });
@@ -2824,7 +2827,7 @@ test("artifact writes report.html from audit.json, and exits 1 without one", () 
   assert.match(missing.err, /No \.assay-tmp\/audit\.json — run report first/);
 
   judgeAll(root);
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
   const { code, out } = cli(root, "artifact");
   assert.equal(code, 0);
   assert.match(out, /report\.html/);
@@ -2835,7 +2838,7 @@ test("artifact writes report.html from audit.json, and exits 1 without one", () 
 test("remeasure lists reworded rules first, then composes a before/after report", () => {
   const root = cliFixture();
   judgeAll(root);
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
 
   // rewording a rule changes its content hash, so its cached judgment is gone
   fs.writeFileSync(
@@ -2865,7 +2868,7 @@ test("remeasure lists reworded rules first, then composes a before/after report"
 test("remeasure without judgments stays deterministic instead of demanding a model pass", () => {
   const root = cliFixture();
   assert.equal(cli(root, "scan").code, 0);
-  const first = cli(root, "report");
+  const first = cli(root, "report", "--verbose");
   assert.equal(first.code, 0);
 
   fs.writeFileSync(
@@ -2941,7 +2944,7 @@ test("judgments carry provenance, which the record embeds and per-key validation
   const scanData = engine.scan(root);
   assert.equal(engine.loadJudgments(root, scanData.rules).error, undefined);
 
-  const { code, out } = cli(root, "report");
+  const { code, out } = cli(root, "report", "--verbose");
   assert.equal(code, 0);
   const audit = readJson(root, "audit.json");
   assert.deepEqual(audit.semantic, {
@@ -2959,12 +2962,12 @@ test("judgments carry provenance, which the record embeds and per-key validation
 
   // judgments with no provenance still compose; the field is simply null
   fs.writeFileSync(judgeFile, JSON.stringify(judgments));
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
   assert.equal(readJson(root, "audit.json").semantic.provenance, null);
 
   // a provenance of the wrong shape is a malformed file, which stays fatal
   fs.writeFileSync(judgeFile, JSON.stringify({ _provenance: { model: 7 }, ...judgments }));
-  const bad = cli(root, "report");
+  const bad = cli(root, "report", "--verbose");
   assert.equal(bad.code, 1);
   assert.match(bad.err, /_provenance\.model/);
 });
@@ -2979,7 +2982,7 @@ test("the report warns when the judgments predate the engine's rubric version", 
   const judgments = JSON.parse(fs.readFileSync(judgeFile, "utf-8"));
   fs.writeFileSync(judgeFile, JSON.stringify({ _provenance: { promptVersion: "1" }, ...judgments }));
 
-  const { code, out } = cli(root, "report");
+  const { code, out } = cli(root, "report", "--verbose");
   assert.equal(code, 0);
   assert.match(out, new RegExp(`Judgments were made under rubric v1; this engine ships rubric v${engine.RUBRIC_VERSION} — rerun step 2 to refresh\\.`));
   // it is a warning, not a gate: the report is complete underneath it
@@ -3057,7 +3060,7 @@ test("deterministic findings are identical with and without judgments", () => {
 test("semantic is optional payload: an audit without it stays schema-valid", () => {
   const root = cliFixture();
   assert.equal(cli(root, "scan").code, 0);
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
   const deterministic = readJson(root, "audit.json");
   assert.equal("semantic" in deterministic, false);
   assert.equal(engine.validateRecord(deterministic, "audit"), null);
@@ -3126,7 +3129,7 @@ test("installation to report: a fresh project runs scan, judge, report and artif
   for (const j of summary.judge) judgments[j.key] = { F3: 0.7, F8: 0.9 };
   fs.writeFileSync(path.join(root, ".assay-tmp", "judgments.json"), JSON.stringify(judgments));
 
-  const reported = cli(root, "report");
+  const reported = cli(root, "report", "--verbose");
   assert.equal(reported.code, 0, reported.err);
   assert.match(reported.out, /# Rule audit — /);
   assert.match(reported.out, /2 of 2 instruction file\(s\) parsed, 3 rule\(s\) graded/);
@@ -3150,7 +3153,7 @@ test("scan, report, artifact and remeasure write nothing outside .assay-tmp", ()
   });
   const before = snapshotTree(root);
   judgeAll(root);
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
   assert.equal(cli(root, "artifact").code, 0);
   assert.equal(cli(root, "remeasure").code, 0);
   assert.deepEqual(snapshotTree(root), before);
@@ -3217,7 +3220,7 @@ test("validateRecord accepts a record and names what a broken one is missing", (
 test("every artifact the CLI writes is a schema 1 record, and the report says so", () => {
   const root = cliFixture();
   judgeAll(root);
-  const reported = cli(root, "report");
+  const reported = cli(root, "report", "--verbose");
   assert.equal(reported.code, 0, reported.err);
   assert.match(reported.out, /^assay \S+ · claude-code profile · schema 1$/m);
 
@@ -3242,7 +3245,7 @@ test("every artifact the CLI writes is a schema 1 record, and the report says so
 test("report and artifact reject a pre-schema artifact and say to rerun scan", () => {
   const root = cliFixture();
   judgeAll(root);
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
 
   const auditFile = path.join(root, ".assay-tmp", "audit.json");
   fs.writeFileSync(auditFile, JSON.stringify(stripEnvelope(readJson(root, "audit.json"))));
@@ -3252,13 +3255,13 @@ test("report and artifact reject a pre-schema artifact and say to rerun scan", (
 
   const scanFile = path.join(root, ".assay-tmp", "scan.json");
   fs.writeFileSync(scanFile, JSON.stringify(stripEnvelope(readJson(root, "scan.json"))));
-  const stale = cli(root, "report");
+  const stale = cli(root, "report", "--verbose");
   assert.equal(stale.code, 1);
   assert.match(stale.err, /scan\.json is not a schema 1 scan record \(found schema pre-1\) — rerun `scan`\./);
 
   // a future schema is named by the version found, not silently misread
   fs.writeFileSync(scanFile, JSON.stringify({ ...readJson(root, "scan.json"), schemaVersion: 2 }));
-  const future = cli(root, "report");
+  const future = cli(root, "report", "--verbose");
   assert.equal(future.code, 1);
   assert.match(future.err, /found schema 2/);
 });
@@ -3266,7 +3269,7 @@ test("report and artifact reject a pre-schema artifact and say to rerun scan", (
 test("remeasure discards a prior audit from an older assay and still reports", () => {
   const root = cliFixture();
   judgeAll(root);
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
   const auditFile = path.join(root, ".assay-tmp", "audit.json");
   fs.writeFileSync(auditFile, JSON.stringify(stripEnvelope(readJson(root, "audit.json"))));
 
@@ -3942,7 +3945,7 @@ test("--project-only keeps the audit inside the repo", () => {
   const judgments = {};
   for (const r of wide.rules) judgments[r.key] = { F3: 0.7, F8: 0.9 };
   fs.writeFileSync(path.join(root, ".assay-tmp", "judgments.json"), JSON.stringify(judgments));
-  assert.match(run("report").out, /## User scope/);
+  assert.match(run("report", "--verbose").out, /## User scope/);
 
   assert.equal(cli(root, "scan", "--nope").code, 1);
 });
@@ -4221,7 +4224,7 @@ test("--host names the profile discovery runs under, and an unknown one is a usa
   assert.equal(record.coverage.skillBudget.amount, 8000);
   assert.ok(record.coverage.profileNotes.some((n) => /no live Codex host was probed/.test(n)));
 
-  const reported = cli(root, "report", "--host", "codex");
+  const reported = cli(root, "report", "--verbose", "--host", "codex");
   assert.equal(reported.code, 0, reported.err);
   assert.match(reported.out, /codex profile · schema 1/);
   assert.equal(cli(root, "artifact").code, 0);
@@ -5503,7 +5506,7 @@ function linkProject(extra) {
   fs.writeFileSync(path.join(root, "ab.json"), JSON.stringify(PROOF_AB, null, 2));
   fs.writeFileSync(path.join(root, "fp.json"), JSON.stringify(PROOF_FP, null, 2));
   assert.equal(cli(root, "scan").code, 0);
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
   return root;
 }
 
@@ -5587,7 +5590,7 @@ test("link lists the store, and an unknown anchor or an unreadable record exits 
     ].join("\n"),
   });
   assert.equal(cli(root, "scan").code, 0);
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
 
   const empty = JSON.parse(cli(root, "link", "--list").out);
   assert.deepEqual(empty.links, []);
@@ -5636,7 +5639,7 @@ test("linked behavior evidence renders beside its anchor in both views, date-ord
   const root = linkProject();
   assert.equal(cli(root, "link", "--proof", "ab.json", "--rule", "R002").code, 0);
   assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R002").code, 0);
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
 
   const audit = readJson(root, "audit.json");
   assert.equal(audit.proofLinks.length, 2);
@@ -5646,7 +5649,7 @@ test("linked behavior evidence renders beside its anchor in both views, date-ord
   assert.equal(audit.proofLinks[0].stale, null);
   assert.equal(audit.proofLinks[0].anchorFound, true);
 
-  const report = cli(root, "report").out;
+  const report = cli(root, "report", "--verbose").out;
   const section = report.slice(report.indexOf("## Behavior evidence"), report.indexOf("## Structural hygiene"));
   // The anchor's own address is the heading, so the evidence sits beside the rule.
   assert.match(section, /### `CLAUDE\.md:4` — R002 "Run prettier before committing\."/);
@@ -5655,10 +5658,13 @@ test("linked behavior evidence renders beside its anchor in both views, date-ord
   assert.match(section, /record `prettier-trigger` \[behavior-observed\]/);
   assert.match(section, /directional for this task type/);
   assert.match(section, /prettier-probe rate 1\.00, 95% CI \[0\.50, 1\.00\], n=4, 2026-07-20/);
-  // Default hides the full key; --verbose shows it.
-  assert.doesNotMatch(section, /host version 2\.1\.0/);
-  const verbose = cli(root, "report", "--verbose").out;
-  assert.match(verbose, /host claude · host version 2\.1\.0 \(Claude Code\) · model haiku · harness proof watch \(fingerprint\)/);
+  assert.match(report, /host claude · host version 2\.1\.0 \(Claude Code\) · model haiku · harness proof watch \(fingerprint\)/);
+  // [Foreman: 095] The full report without --verbose still hides the host key.
+  // --verbose is the CLI's only door to that report now, so the split inside it
+  // is asserted at the function level; the subject is unchanged.
+  const plainReport = engine.renderReport(readJson(root, "audit.json"), {});
+  const plainSection = plainReport.slice(plainReport.indexOf("## Behavior evidence"), plainReport.indexOf("## Structural hygiene"));
+  assert.doesNotMatch(plainSection, /host version 2\.1\.0/);
 
   // Both views, off one builder — the HTML carries the same two rows.
   assert.equal(cli(root, "artifact").code, 0);
@@ -5679,7 +5685,7 @@ test("a stale pointer is disclosed as unavailable evidence, and the row stays", 
   assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R001").code, 0);
   fs.writeFileSync(path.join(root, "fp.json"), "{ truncated mid-write");
 
-  const report = cli(root, "report");
+  const report = cli(root, "report", "--verbose");
   // Fail-open: a broken pointer is a disclosure, never a crash.
   assert.equal(report.code, 0);
   const section = report.out.slice(report.out.indexOf("## Behavior evidence"), report.out.indexOf("## Structural hygiene"));
@@ -5702,7 +5708,7 @@ test("a stale pointer is disclosed as unavailable evidence, and the row stays", 
   const after = readJson(root, "audit.json");
   const orphan = after.proofLinks.find((l) => l.anchor.ref !== after.rules[0].key);
   assert.equal(orphan.anchorFound, false);
-  assert.match(cli(root, "report").out, /not in this analysis/);
+  assert.match(cli(root, "report", "--verbose").out, /not in this analysis/);
 });
 
 test("a link made against an earlier wording says so, and keeps its row", () => {
@@ -5720,7 +5726,7 @@ test("a link made against an earlier wording says so, and keeps its row", () => 
 
   assert.equal(audit.proofLinks[0].wordingMoved, true);
   assert.equal(audit.proofLinks[0].anchorFound, true);
-  const report = cli(root, "report").out;
+  const report = cli(root, "report", "--verbose").out;
   assert.match(report, /measured an earlier wording — the anchor's text changed after this link was made/);
   // Stated, not hidden: the numbers are still there.
   assert.match(report, /prettier-probe rate 1\.00/);
@@ -5728,12 +5734,12 @@ test("a link made against an earlier wording says so, and keeps its row", () => 
 
 test("links move no state, no score and no grade — evidence beside a finding, never a weight inside it", () => {
   const root = linkProject();
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
   const before = readJson(root, "audit.json");
 
   assert.equal(cli(root, "link", "--proof", "ab.json", "--rule", "R002").code, 0);
   assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R001").code, 0);
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
   const after = readJson(root, "audit.json");
 
   // Every derived thing is identical. This is the SCOPE contract made mechanical:
@@ -5751,12 +5757,12 @@ test("links move no state, no score and no grade — evidence beside a finding, 
 
   // The only difference in either rendered view is the evidence display itself.
   const cut = (text, from, to) => text.slice(0, text.indexOf(from)) + text.slice(text.indexOf(to));
-  const withLinks = cli(root, "report").out;
+  const withLinks = cli(root, "report", "--verbose").out;
   assert.match(withLinks, /## Behavior evidence/);
   const withoutSection = cut(withLinks, "## Behavior evidence", "## Structural hygiene");
   fs.rmSync(path.join(root, ".assay", "links.jsonl"));
-  assert.equal(cli(root, "report").code, 0);
-  assert.equal(withoutSection, cli(root, "report").out);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
+  assert.equal(withoutSection, cli(root, "report", "--verbose").out);
 
   // And the derivation genuinely never sees them: composeAudit takes no links at
   // all, so the record's own field is added afterwards.
@@ -5774,7 +5780,7 @@ test("proofLinks validates additively, and resolving it is deterministic", () =>
   assert.equal(engine.validateRecord(recordless, "audit"), null);
 
   assert.equal(cli(root, "link", "--proof", "ab.json", "--rule", "R002").code, 0);
-  assert.equal(cli(root, "report").code, 0);
+  assert.equal(cli(root, "report", "--verbose").code, 0);
   const linked = readJson(root, "audit.json");
   assert.equal(engine.validateRecord(linked, "audit"), null, "the field is additive, not a schema break");
   assert.equal(engine.validateRecord({ ...recordless, proofLinks: [] }, "audit"), null);
@@ -5784,7 +5790,7 @@ test("proofLinks validates additively, and resolving it is deterministic", () =>
   // Two resolutions of one store over one audit are byte-identical.
   assert.equal(JSON.stringify(engine.resolveProofLinks(root, linked)),
     JSON.stringify(engine.resolveProofLinks(root, linked)));
-  assert.equal(cli(root, "report").out, cli(root, "report").out);
+  assert.equal(cli(root, "report", "--verbose").out, cli(root, "report", "--verbose").out);
 
   // The evidence level is the contract's own row, and it discloses its limits.
   assert.equal(engine.BEHAVIOR_EVIDENCE.level, "behavior-observed");
@@ -6643,4 +6649,263 @@ test("the chain table's # column counts read order, matching the Why column's ch
   assert.deepEqual(rows.map((l) => l.split("|")[1].trim()), ["1", "2", "3"],
     "the # column must be 1..N in read order, not the precedence numbers");
   assert.match(report, /chain position 2 of 3/);
+});
+
+// ---------------------------------------------------------------------------
+// [Foreman: 095] renderBrief — the default report
+// ---------------------------------------------------------------------------
+
+// The bucketing is the whole design: a rule lands in the first list that claims
+// it, so "one rule, one line" is a property of the data rather than a discipline
+// each section has to remember. These tests pin that order and the words.
+
+function brief(files, opts) {
+  const root = tmpProject(files);
+  return engine.renderBrief(engine.composeAudit(engine.scan(root, opts || {}), null));
+}
+
+test("the brief report says what it looked at and what needs doing, in plain words", () => {
+  const out = brief({ "CLAUDE.md": "# Rules\n\n- Keep things tidy.\n- Always run `npm test` before you open a pull request.\n" });
+  assert.match(out, /^# assay — /m);
+  assert.match(out, /Looked at 2 rules in 1 file\./);
+  assert.match(out, /\*\*1 rule needs work\.\*\*/);
+  assert.match(out, /## Fix these first/);
+  assert.match(out, /too vague to act on/);
+  assert.match(out, /Name a path, or show an example/);
+  // the reader is told where to go next, never left with a bare table
+  assert.match(out, /--fix/);
+  assert.match(out, /--verbose/);
+});
+
+test("a clean corpus says so instead of printing empty sections", () => {
+  const out = brief({ "CLAUDE.md": "# Rules\n\n- Always run `npm test` before you open a pull request.\n" });
+  assert.match(out, /\*\*Nothing here needs fixing\.\*\*/);
+  assert.doesNotMatch(out, /## Fix these first/);
+  assert.doesNotMatch(out, /## Could be automatic instead/);
+  assert.doesNotMatch(out, /## Also worth a look/);
+  // and it never invites a rewrite when there is nothing to rewrite
+  assert.doesNotMatch(out, /--fix/);
+});
+
+test("a rule that cannot load is named once, and outranks anything about its wording", () => {
+  const out = brief({
+    "CLAUDE.md": "# Rules\n\n- Keep things tidy.\n",
+    ".claude/rules/orphan.md": "---\npaths:\n  - '**/*.no-such-extension'\n---\n\n- Be careful out there.\n",
+  });
+  assert.match(out, /\*\*1 rule never loads\.\*\*/);
+  assert.match(out, /never reaches the assistant/);
+  const hits = out.split("\n").filter((l) => l.includes("orphan.md:6"));
+  assert.equal(hits.length, 1, "a rule that cannot load must be reported once:\n" + out);
+});
+
+test("two rules that argue are one row naming both, and neither is graded separately", () => {
+  const out = brief({ "CLAUDE.md": "# Rules\n\n- Never push to `origin` without review.\n- Always push to `origin` without review.\n" });
+  assert.match(out, /\*\*1 pair of rules disagrees\.\*\*/);
+  assert.match(out, /two rules disagree/);
+  assert.match(out, /one bans what the other asks for/);
+  // assay names the pair and stops — it never picks a winner
+  assert.match(out, /Decide which one you meant/);
+  assert.equal(out.split("\n").filter((l) => l.includes("CLAUDE.md:3")).length, 1);
+  assert.equal(out.split("\n").filter((l) => l.includes("CLAUDE.md:4")).length, 1);
+});
+
+test("a rule pointing at a file that is not there says so", () => {
+  const out = brief({ "CLAUDE.md": "# Rules\n\n- Read `docs/handbook.md` before you start.\n" });
+  assert.match(out, /docs\/handbook\.md/);
+});
+
+test("a long fix list is capped and says how many it left out", () => {
+  const rules = [];
+  for (let i = 0; i < 14; i++) rules.push("- Keep thing " + i + " tidy.");
+  const out = brief({ "CLAUDE.md": "# Rules\n\n" + rules.join("\n") + "\n" });
+  const rows = out.split("\n").filter((l) => l.startsWith("| \""));
+  assert.equal(rows.length, 8, "the table is capped at 8 rows");
+  assert.match(out, /more not shown here — run with `--verbose`/);
+});
+
+test("the brief report never carries a factor code, an evidence tag or a grade", () => {
+  const out = brief({ "CLAUDE.md": "# Rules\n\n- Keep things tidy.\n- Never use `var`.\n- Do the right thing.\n" });
+  assert.doesNotMatch(out, /\bF[1-8]\b/);
+  assert.doesNotMatch(out, /\[(mechanical|heuristic|model-inferred|experiment-supported)/);
+  assert.doesNotMatch(out, /\b[A-F] \(0\.\d\d\)/);
+});
+
+test("--verbose is the CLI's door to the full report; the default is the brief one", () => {
+  const root = tmpProject({ "CLAUDE.md": "# Rules\n\n- Keep things tidy.\n" });
+  assert.equal(cli(root, "scan").code, 0);
+  const plain = cli(root, "report");
+  assert.equal(plain.code, 0);
+  assert.match(plain.out, /^# assay — /m);
+  assert.doesNotMatch(plain.out, /## Coverage/);
+  const full = cli(root, "report", "--verbose");
+  assert.equal(full.code, 0);
+  assert.match(full.out, /^# Rule audit — /m);
+  assert.match(full.out, /## Coverage/);
+});
+
+// [Foreman: 095] What the adversarial pass found, kept honest here.
+
+test("a pipe in a rule, a path or a gate's reason never breaks the table", () => {
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "# Rules",
+      "",
+      "- Read `docs/a|b.md` before you start.",
+      "- Keep [things] **tidy** | always.",
+      "- Never do a|b without c|d.",
+      // a rule whose own text carries a BACKSLASH before the pipe: escaping the
+      // pipe alone turns this into an escaped backslash and a live delimiter
+      "- Follow `docs/x\\|y.md` and check it on every change you make here.",
+      "",
+    ].join("\n"),
+    ".claude/rules/a]b.md": "# Scoped\n\n- Keep the generated output tidy.\n",
+  });
+  const out = engine.renderBrief(engine.composeAudit(engine.scan(root), null));
+  for (const line of out.split("\n")) {
+    if (!line.startsWith("|") || line.startsWith("|---")) continue;
+    // Only a pipe with an EVEN number of backslashes in front of it is a real
+    // delimiter; count those rather than stripping `\|`, which would call an
+    // escaped backslash an escaped pipe and hide the bug this test is for.
+    const cells = (line.match(/(?<!\\)(?:\\\\)*\|/g) || []).length;
+    assert.equal(cells, 5, "a row must have exactly four cells:\n" + line);
+  }
+  // and a `]` in a path does not close the link label early
+  assert.doesNotMatch(out, /\[[^\]\\]*[^\\]\][^(]/, "a link label must not close early:\n" + out);
+});
+
+test("escaping a table cell never touches a backslash that is not before a pipe", () => {
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "# Rules",
+      "",
+      "- Always match the tag against `\\d+` before you publish the package.",
+      "- Never hardcode `C:\\Users\\x` in any config file you add here.",
+      "- Keep the a|b column aligned in every table you add to the docs.",
+      "",
+    ].join("\n"),
+  });
+  const audit = engine.composeAudit(engine.scan(root), null);
+  const brief = engine.renderBrief(audit);
+  const full = engine.renderReport(audit, { verbose: true });
+  // A backslash escape does not apply inside a code span, so doubling one there
+  // is visible damage to the user's own text. The full report lists every rule,
+  // so it is where both survivors are asserted present.
+  assert.match(full, /`\\d\+`/, "a regex in a code span must survive verbatim:\n" + full);
+  assert.match(full, /C:\\Users\\x/, "a Windows path must survive verbatim:\n" + full);
+  for (const [name, out] of [["brief", brief], ["full", full]]) {
+    assert.doesNotMatch(out, /\\\\d\+/, name + " doubled a backslash that no table needed:\n" + out);
+    assert.doesNotMatch(out, /C:\\\\Users/, name + " doubled a backslash that no table needed:\n" + out);
+    // ...while a bare pipe is still escaped, which is the whole point
+    assert.match(out, /a\\\|b/, name + " must escape a pipe in rule text:\n" + out);
+  }
+});
+
+test("a path carrying a pipe, a paren, a space or a bracket still links and still fits its row", () => {
+  const root = tmpProject({ "CLAUDE.md": "# Rules\n\n- Always run `npm test` before you open a pull request.\n" });
+  const audit = engine.composeAudit(engine.scan(root), null);
+  const template = audit.rules[0];
+  for (const p of [".claude/rules/a|b.md", ".claude/rules/c(d).md", ".claude/rules/g h.md",
+                   ".claude/rules/x]y.md", ".claude/rules/h#h.md", ".claude/rules/q?q.md"]) {
+    const clone = JSON.parse(JSON.stringify(audit));
+    clone.rules.push({
+      ...JSON.parse(JSON.stringify(template)),
+      id: "R900", file: p, lineStart: 3, lineEnd: 3, text: "Keep things tidy.",
+      weak: true, score: 0.1, grade: "F", factorValues: { F1: 0.4, F7: 0.2 }, dominantWeakness: "F7",
+    });
+    const row = engine.renderBrief(clone).split("\n").find((l) => l.includes("Keep things tidy"));
+    assert.ok(row, "no row rendered for " + p);
+    const cells = (row.match(/(?<!\\)(?:\\\\)*\|/g) || []).length;
+    assert.equal(cells, 5, "a path containing " + p + " broke its row:\n" + row);
+    // the target survives as one unbroken token that resolves back to the path
+    const href = /\]\(([^)]*)\)/.exec(row);
+    assert.ok(href, "the link target must not be cut short:\n" + row);
+    assert.doesNotMatch(href[1], /[ |#?]/, "the link target must not carry a raw space, pipe, hash or query:\n" + row);
+    assert.equal(decodeURIComponent(href[1]), p + ":3", "the target must decode back to the real path:\n" + row);
+  }
+});
+
+test("escaping a cell walks the string once, whatever the backslashes do", () => {
+  // A shared helper with a greedy backslash run backtracks from every position,
+  // which is quadratic. This is the shape that would show it.
+  const run = "\\".repeat(200000);
+  const started = process.hrtime.bigint();
+  const out = engine.escapeTableCell(run + "x");
+  const ms = Number(process.hrtime.bigint() - started) / 1e6;
+  assert.equal(out, run + "x", "a run with no pipe is left alone");
+  assert.ok(ms < 250, `escaping 200k backslashes took ${ms.toFixed(0)}ms — the helper is not linear`);
+});
+
+test("an escaped cell renders back to exactly what the rule said", () => {
+  // The contract is not "contains no bare pipe" — it is that a reader sees the
+  // author's text. These are the parities that break if the doubling is wrong.
+  // Every case carries a pipe: that is the sequence this helper exists for, and
+  // the only one it changes. A cell with no pipe is passed through untouched,
+  // asserted separately below.
+  const cases = ["|", "\\|", "\\\\|", "\\\\\\|", "a|b|c", "|lead", "trail|"];
+  for (const original of cases) {
+    const escaped = engine.escapeTableCell(original);
+    // undo what a GFM table cell does: an escaped pipe becomes a pipe, and a
+    // doubled backslash becomes one
+    const rendered = escaped.replace(/\\\\/g, " ").replace(/\\\|/g, "|").replace(/ /g, "\\");
+    assert.equal(rendered, original, `escaping changed the text: ${JSON.stringify(original)} → ${JSON.stringify(escaped)}`);
+    // and no bare pipe survives to split the row
+    assert.doesNotMatch(escaped, /(?<!\\)(?:\\\\)*\|(?<!\\\|)/, `a bare pipe survived: ${JSON.stringify(escaped)}`);
+  }
+  // A cell with no pipe is returned exactly as given — a regex, a Windows path,
+  // an empty string, a run of backslashes.
+  for (const untouched of ["", "\\d+", "C:\\Users\\x", "\\\\\\\\", "plain text"]) {
+    assert.equal(engine.escapeTableCell(untouched), untouched, "a cell with no pipe must pass through");
+  }
+  // and it never throws on what a hand-built record might hold
+  for (const odd of [null, undefined, 42, {}]) assert.equal(typeof engine.escapeTableCell(odd), "string");
+});
+
+test("a rule the reader cannot fix here is pointed at, never counted as clean", () => {
+  const userDir = tmpUserDir({ "CLAUDE.md": "# Mine\n\n- Keep things tidy.\n- Prefer clarity.\n" });
+  const root = tmpProject({ "CLAUDE.md": "# Rules\n\n- Always run `npm test` before you open a pull request.\n" });
+  const out = engine.renderBrief(engine.composeAudit(engine.scan(root, { userDir }), null));
+  // the denominator is the project's own rules, so it never disagrees with the
+  // lists underneath it
+  assert.match(out, /Looked at 1 rule in 1 file\./);
+  // and the reader's own weak rules are named rather than silently dropped
+  assert.doesNotMatch(out, /\*\*Nothing here needs fixing\.\*\*/);
+  assert.match(out, /\*\*Nothing in this repo's rules needs fixing\.\*\*/);
+  assert.match(out, /2 of your own rules need work, from files outside this repo/);
+});
+
+test("a weak subagent description reaches the short report, described the same way as in the full one", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n- Always run `npm test` before you open a pull request.\n",
+    ".claude/agents/mute.md": "---\nname: mute\ndescription: Reviews things.\n---\n\nReviews things.\n",
+  });
+  const audit = engine.composeAudit(engine.scan(root), null);
+  const short = engine.renderBrief(audit);
+  const full = engine.renderReport(audit);
+  assert.match(short, /The `mute` subagent may never get picked/);
+  assert.match(short, /no "Use when" trigger clause/);
+  // one derivation behind both views, so they can never tell different stories
+  assert.match(full, /no "Use when" trigger clause/);
+});
+
+test("the withheld count covers every entry a list dropped, not just some", () => {
+  const files = { "CLAUDE.md": "# Rules\n\n- Always run `npm test` before you open a pull request.\n" };
+  for (const name of ["a", "b", "c", "d", "e", "f"]) {
+    files[`.claude/agents/${name}.md`] = `---\nname: ${name}\ndescription: Reviews things.\n---\n\nReviews.\n`;
+  }
+  const out = engine.renderBrief(engine.composeAudit(engine.scan(tmpProject(files)), null));
+  const shown = out.split("\n").filter((l) => /may never get picked/.test(l)).length;
+  const more = /…and (\d+) more/.exec(out);
+  assert.ok(more, "a truncated list must say how many it withheld:\n" + out);
+  assert.equal(shown + Number(more[1]), 6, "shown + withheld must equal the total:\n" + out);
+});
+
+test("a rule the host never loads is listed above a pair that argues", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n- Never push to `origin` without review.\n- Always push to `origin` without review.\n",
+    ".claude/rules/orphan.md": "---\npaths:\n  - '**/*.no-such-extension'\n---\n\n- Always double-check the output.\n",
+  });
+  const out = engine.renderBrief(engine.composeAudit(engine.scan(root), null));
+  const rows = out.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Rule") && !l.startsWith("|---"));
+  assert.match(rows[0], /never reaches the assistant/, "a rule that cannot load must come first:\n" + out);
+  assert.match(rows[1], /two rules disagree/, "a conflicting pair comes after the hard gates:\n" + out);
 });

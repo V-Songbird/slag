@@ -40,6 +40,11 @@ const EMPTY_USER_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "assay-gate-userdir
 const EMPTY_CODEX_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "assay-gate-codexhome-"));
 process.env.ASSAY_USER_DIR = EMPTY_USER_DIR;
 process.env.CODEX_HOME = EMPTY_CODEX_HOME;
+// [Foreman: 095] And the same stop the main suite takes: without it a gate that
+// counts rules counts whatever CLAUDE.md happens to sit above the temp
+// directory on this machine, and its numbers stop being a property of the
+// fixture.
+process.env.ASSAY_ANCESTOR_STOP = os.tmpdir();
 
 const CLI = path.join(__dirname, "..", "scripts", "assay.js");
 const PLUGIN_ROOT = path.join(__dirname, "..");
@@ -161,7 +166,7 @@ test("release gate: unsupported and inaccessible sources are disclosed", () => {
   assert.equal(unsupported.length, 1);
   assert.match(unsupported[0].reason, /^malformed frontmatter: /);
 
-  const report = cli(root, ["report"]);
+  const report = cli(root, ["report", "--verbose"]);
   assert.equal(report.code, 0, report.err);
   assert.match(report.out, /could not read `CLAUDE\.md`/);
   assert.match(report.out, /unsupported construct\(s\) — inventoried, not graded/);
@@ -180,7 +185,7 @@ test("release gate: hard gates run before prose heuristics", () => {
     ".claude/rules/dead.md": '---\npaths: ["nope/**/*.ts"]\n---\n\n- Never use `var` in `src/api/handler.ts`.\n',
   });
   assert.equal(cli(root, ["scan"]).code, 0);
-  assert.equal(cli(root, ["report"]).code, 0);
+  assert.equal(cli(root, ["report", "--verbose"]).code, 0);
   const audit = readJson(root, "audit.json");
   const rule = audit.rules[0];
 
@@ -197,7 +202,7 @@ test("release gate: hard gates run before prose heuristics", () => {
 
   // the report puts the gate above every heuristic section, and never prints a
   // grade beside it
-  const md = cli(root, ["report"]).out;
+  const md = cli(root, ["report", "--verbose"]).out;
   const gatesAt = md.indexOf("## Hard gates");
   assert.ok(gatesAt !== -1);
   assert.ok(gatesAt < md.indexOf("## Operational findings"));
@@ -295,9 +300,9 @@ test("release gate: Markdown, JSON and HTML agree on findings", () => {
   fs.writeFileSync(path.join(root, "fp.json"), JSON.stringify(PROOF_FP));
 
   assert.equal(cli(root, ["scan"]).code, 0);
-  assert.equal(cli(root, ["report"]).code, 0);
+  assert.equal(cli(root, ["report", "--verbose"]).code, 0);
   assert.equal(cli(root, ["link", "--proof", "fp.json", "--rule", "R001"]).code, 0);
-  assert.equal(cli(root, ["report"]).code, 0);
+  assert.equal(cli(root, ["report", "--verbose"]).code, 0);
   assert.equal(cli(root, ["artifact"]).code, 0);
 
   const audit = readJson(root, "audit.json");
@@ -387,7 +392,7 @@ test("release gate: semantic analysis is optional and additive", () => {
   const withRoot = tmpProject(files);
 
   assert.equal(cli(withoutRoot, ["scan"]).code, 0);
-  assert.equal(cli(withoutRoot, ["report"]).code, 0);
+  assert.equal(cli(withoutRoot, ["report", "--verbose"]).code, 0);
 
   const scanned = cli(withRoot, ["scan"]);
   assert.equal(scanned.code, 0);
@@ -401,7 +406,7 @@ test("release gate: semantic analysis is optional and additive", () => {
     summary: "Proposed.", reason: "Different words, one duty.", accepted: null,
   }];
   fs.writeFileSync(path.join(withRoot, ".assay-tmp", "judgments.json"), JSON.stringify(judgments));
-  assert.equal(cli(withRoot, ["report"]).code, 0);
+  assert.equal(cli(withRoot, ["report", "--verbose"]).code, 0);
 
   const findingsOf = (root) => readJson(root, "audit.json").findings
     .map((f) => [f.type, f.state, f.severity, f.summary, JSON.stringify(f.sources)]);
@@ -619,6 +624,171 @@ test("release gate: public language does not imply static compliance prediction"
 });
 
 // ---------------------------------------------------------------------------
+// "the default report fits a screen, names a rule once, and needs no internals"
+// ---------------------------------------------------------------------------
+
+// [Foreman: 095] G1, G2 and G3 — the three properties that make the default
+// report readable by someone who has never opened the host's documentation.
+//
+// They exist because taste does not survive a release cycle. Every section this
+// report used to carry was added for a good reason and each one was individually
+// right; together they turned an 18-rule project into a 140-line document. A
+// budget is the only thing that makes the next finding compete for space instead
+// of appending a section to the bottom.
+//
+// The fixture is deliberately noisy — rules that cannot load, pairs that argue,
+// dead paths, many vague rules, several a script should own, buried ones, a file
+// whose shape is the problem, a skill nobody can invoke and a subagent whose
+// description says nothing. A gate measured on a quiet corpus guards nothing, so
+// EVERY section of the report must render: `briefReport` asserts that before it
+// hands the text to a gate.
+
+const VAGUE = [
+  "- Keep things tidy.", "- Be careful with the build.", "- Prefer clarity.",
+  "- Do the right thing.", "- Try to keep functions small where you can.",
+  "- Write clean, maintainable code.", "- Aim for good coverage.",
+  "- Stay consistent.", "- Use sensible defaults.", "- Avoid surprises.",
+];
+
+const BRIEF_FIXTURE = {
+  "CLAUDE.md": [
+    "# Team rules",
+    "",
+    "- Never push to `origin` without review.",
+    "- Always push to `origin` without review.",
+    "- Never force-push to `release` without review.",
+    "- Always force-push to `release` without review.",
+    "- Read `docs/handbook.md` before you start.",
+    "- Follow `docs/style-guide.md` on every change.",
+    // Well-formed rules whose job belongs to a mechanism, not to prose — each
+    // points at a file that exists, so nothing claims them before placement does.
+    "- Run the `doc-reviewer` agent on every pull request before you merge it.",
+    "- Run the `release-checker` agent on every tag before you publish it.",
+    "- Before releasing, record the change in `CHANGELOG.md`.",
+    "- Before publishing, note the new version in `docs/versions.md`.",
+    "- Before merging, list the affected modules in `docs/impact.md`.",
+    "- Follow the conventions in `docs/conventions.md` when you add a module.",
+    ...VAGUE,
+    "",
+  ].join("\n"),
+  "CHANGELOG.md": "# Changelog\n",
+  "docs/conventions.md": "# Conventions\n",
+  "docs/versions.md": "# Versions\n",
+  "docs/impact.md": "# Impact\n",
+  // `docs/handbook.md` above is cited but gone, and this is where it went — a
+  // reference that merely MOVED is reported as fixable rather than as a rule the
+  // host cannot apply, which is the one shape that reaches the stale bucket.
+  "guides/handbook.md": "# Handbook\n",
+  // A long file whose rules all sit in the bottom half — file shape, not wording.
+  ".claude/rules/shape.md": [
+    "# Background",
+    "",
+    ...new Array(30).fill("Some narrative about why this project exists and how it grew."),
+    "",
+    ...VAGUE.slice(0, 6),
+    "",
+  ].join("\n"),
+  ".claude/rules/orphan.md": [
+    "---",
+    "paths:",
+    "  - '**/*.nothing-matches-this'",
+    "---",
+    "",
+    "- Always double-check the generated output.",
+    "- Always review the generated report.",
+    "",
+  ].join("\n"),
+  ".claude/skills/ghost/SKILL.md":
+    "---\nname: ghost\ndescription: Does a thing.\ndisable-model-invocation: true\nuser-invocable: false\n---\n",
+  ".claude/agents/mute.md":
+    "---\nname: mute\ndescription: Reviews things.\n---\n\nReviews things.\n",
+  ".claude/agents/quiet.md":
+    "---\nname: quiet\ndescription: Handles the build.\n---\n\nHandles the build.\n",
+  ".claude/agents/still.md":
+    "---\nname: still\ndescription: Looks at code.\n---\n\nLooks at code.\n",
+};
+
+function briefReport() {
+  const root = tmpProject(BRIEF_FIXTURE);
+  const scan = cli(root, ["scan"]);
+  assert.equal(scan.code, 0, scan.err);
+  // No judgments file on purpose: the default run is deterministic, and the
+  // gates must hold on the report a user gets without spending a model call.
+  const report = cli(root, ["report"]);
+  assert.equal(report.code, 0, report.err);
+  const out = report.out.replace(/\n$/, "");
+  // [Foreman: 095] The anti-vacuity check. A gate that passes because a section
+  // never rendered is worse than no gate, so the fixture must exercise all of
+  // them, and this fails loudly the day one stops firing.
+  for (const section of ["## Fix these first", "## Could be automatic instead", "## Also worth a look"]) {
+    assert.ok(out.includes(section), `gate fixture no longer renders "${section}" — the gates below would be vacuous:\n` + out);
+  }
+  assert.match(out, /never reaches the assistant/, "gate fixture no longer produces a rule that cannot load:\n" + out);
+  assert.match(out, /two rules disagree/, "gate fixture no longer produces a conflicting pair:\n" + out);
+  assert.match(out, /which is not there/, "gate fixture no longer produces a dead reference:\n" + out);
+  assert.match(out, /more not shown here/, "gate fixture no longer overflows the fix table:\n" + out);
+  // Each cap is asserted where it lives. One shared "…and N more" match would be
+  // satisfied by whichever list happened to overflow, which is how a fixture
+  // stops measuring the worst case without anything going red.
+  for (const name of ["Could be automatic instead", "Also worth a look"]) {
+    const body = out.split("## " + name)[1].split("\n## ")[0];
+    assert.match(body, /…and \d+ more/, `gate fixture no longer overflows the "${name}" list, so G1 is measuring less than the worst case:\n` + out);
+  }
+  return out;
+}
+
+test("release gate G1: the default report fits on a screen", () => {
+  const lines = briefReport().split("\n");
+  assert.ok(
+    lines.length <= engine.BRIEF_MAX_LINES,
+    `default report is ${lines.length} lines, budget is ${engine.BRIEF_MAX_LINES}:\n` + lines.join("\n"),
+  );
+  // Every section renders and all three caps overflow — `briefReport` asserts
+  // both — so this is the structural maximum for the sections that exist today,
+  // and the slack below is what a new section would have to fit inside. The
+  // bound is a backstop; the per-cap assertions above are the real guard.
+  assert.ok(
+    lines.length >= engine.BRIEF_MAX_LINES - 6,
+    `the gate fixture only reaches ${lines.length} of ${engine.BRIEF_MAX_LINES} lines, so it no longer measures the worst case — a new section could be added without G1 noticing:\n` + lines.join("\n"),
+  );
+});
+
+test("release gate G2: the default report names a rule once", () => {
+  const out = briefReport();
+  // A rule is addressed as `path:line` in every view. Section headings split the
+  // report; a location appearing under two of them is the repetition this gate
+  // exists to stop. A bare file link carries no line and is a file, not a rule.
+  const seen = new Map();
+  const offenders = [];
+  let section = "(top)";
+  for (const line of out.split("\n")) {
+    const heading = /^#{2,3} (.+)/.exec(line);
+    if (heading) { section = heading[1]; continue; }
+    for (const m of line.matchAll(/\]\(([^)\s]+):(\d+)\)/g)) {
+      const at = m[1] + ":" + m[2];
+      const first = seen.get(at);
+      if (first === undefined) seen.set(at, section);
+      else if (first !== section) offenders.push(`${at} appears under "${first}" and "${section}"`);
+    }
+  }
+  assert.deepEqual(offenders, [], "a rule is reported twice:\n" + offenders.join("\n"));
+});
+
+test("release gate G3: the default report uses no word that needs host internals", () => {
+  const out = briefReport();
+  const offenders = [];
+  for (const word of engine.BRIEF_BANNED_WORDS) {
+    const re = new RegExp("\\b" + word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i");
+    if (re.test(out)) offenders.push(word);
+  }
+  // The factor codes are the rubric's own vocabulary and never the reader's.
+  if (/\bF[1-8]\b/.test(out)) offenders.push("F1-F8 factor codes");
+  // Evidence tags are the full report's contract, not the short one's.
+  if (/\[(mechanical|heuristic|model-inferred|experiment-supported)/.test(out)) offenders.push("evidence tags");
+  assert.deepEqual(offenders, [], "default report needs host internals:\n" + out);
+});
+
+// ---------------------------------------------------------------------------
 // "installation and fresh-session end-to-end tests pass"
 // ---------------------------------------------------------------------------
 
@@ -653,7 +823,7 @@ test("release gate: installation and fresh-session end-to-end", () => {
   for (const j of summary.judge) judgments[j.key] = { F3: 0.7, F8: 0.9 };
   fs.writeFileSync(path.join(project, ".assay-tmp", "judgments.json"), JSON.stringify(judgments));
 
-  const reported = run("report");
+  const reported = run("report", "--verbose");
   assert.equal(reported.code, 0, reported.err);
   assert.match(reported.out, /# Rule audit — /);
   assert.match(reported.out, /Write clean, maintainable code\./);
@@ -748,7 +918,7 @@ test("release gate: every public command and its exit codes", () => {
 test("release gate: schema versioning rejects an older record by name and round-trips the current one", () => {
   const root = tmpProject({ "CLAUDE.md": CLEAN_CLAUDE });
   assert.equal(cli(root, ["scan"]).code, 0);
-  assert.equal(cli(root, ["report"]).code, 0);
+  assert.equal(cli(root, ["report", "--verbose"]).code, 0);
 
   // the current record round-trips: written, re-read, still valid, same schema
   for (const [name, kind] of [["scan.json", "scan"], ["audit.json", "audit"]]) {
@@ -763,12 +933,12 @@ test("release gate: schema versioning rejects an older record by name and round-
   const current = readJson(root, "scan.json");
   const { schemaVersion, analyzer, parser, profile, context, ...payload } = current;
   fs.writeFileSync(scanFile, JSON.stringify(payload));
-  const preOne = cli(root, ["report"]);
+  const preOne = cli(root, ["report", "--verbose"]);
   assert.equal(preOne.code, 1);
   assert.match(preOne.err, /scan\.json is not a schema 1 scan record \(found schema pre-1\) — rerun `scan`\./);
 
   fs.writeFileSync(scanFile, JSON.stringify({ ...current, schemaVersion: 0 }));
-  const zero = cli(root, ["report"]);
+  const zero = cli(root, ["report", "--verbose"]);
   assert.equal(zero.code, 1);
   assert.match(zero.err, /found schema 0/);
 });
@@ -786,7 +956,7 @@ test("release gate: an interrupted run leaves a partial artifact that fails clea
   const scanFile = path.join(root, ".assay-tmp", "scan.json");
   const whole = fs.readFileSync(scanFile, "utf-8");
   fs.writeFileSync(scanFile, whole.slice(0, Math.floor(whole.length * 0.6)));
-  const partial = cli(root, ["report"]);
+  const partial = cli(root, ["report", "--verbose"]);
   assert.equal(partial.code, 1);
   assert.match(partial.err, /\.assay-tmp\/scan\.json is not a schema 1 scan record \(not valid JSON/);
   assert.match(partial.err, /rerun `scan`/);

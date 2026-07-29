@@ -9,7 +9,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
 
-> **TL;DR** — assay analyzes the instruction files Claude Code loads for your project: what's vague, what's stale, what's buried, what belongs in a hook instead of a paragraph. Each finding lands at its exact line, labelled with the kind of evidence behind it, and the weak rules get offered rewrites. A structural-hygiene grade follows as a secondary summary, never a prediction that the model will comply.
+> **TL;DR** — assay analyzes the instruction files Claude Code loads for your project: what's vague, what's stale, what's buried, what belongs in a hook instead of a paragraph. You get a screen of plain English — each problem at its exact line, with the fix beside it — and the weak rules get offered rewrites. `--verbose` opens the full analysis behind it: evidence levels, grades, and everything already wired in your project.
 
 ---
 
@@ -49,14 +49,15 @@ The model steps are optional. `--deterministic` runs the audit offline: the full
 
 Before the report, one more question gets asked of each doubtful entry: is this a rule at all? A file of notes or history would otherwise arrive graded as a page of mandates. The answer can only drop an entry from the report — nothing is ever rescored or reworded — and `--verbose` lists every drop with the reason. It costs one model call per audit; `--no-verify` skips it.
 
-Every report opens by saying what it actually looked at — and names any file it couldn't read. Every line of every file it did read is accounted for: graded, set aside, ignored on purpose, or named as something assay couldn't parse. A number in the report never covers more than that.
+Every report opens by saying what it actually looked at. Under `--verbose` that becomes a full coverage account: every line of every file it read is graded, set aside, ignored on purpose, or named as something assay couldn't parse — and any file it couldn't read at all is named. A number in the report never covers more than that.
 
 Your user-level `CLAUDE.md` and `~/.claude/rules/` load for this project too, so they get graded — but under their own **User scope** heading, and never inside the project's grade. The fix for one of those rules lives in your setup, not in the repo. The same goes for `CLAUDE.md` files in directories above your project: they load in full at launch, so they're graded under **Above the project root**, apart from the project's numbers. `--project-only` leaves all of them out.
 
 | Moment | What happens |
 | --- | --- |
 | You run the audit | Every rule is extracted, scored, and graded |
-| The report lands | Findings first — what can't load, what's risky, what belongs in another mechanism — each a clickable link that opens the rule at its line; the hygiene grade follows at the bottom |
+| The report lands | One screen: what needs fixing, what a script could own, what's worth a look — each line a clickable link that opens the rule where it lives, with the fix beside it |
+| You want the detail | `--verbose` prints the full analysis: coverage, evidence levels, grades, and every mechanism already wired in the project |
 | You check what to fix | Every fix becomes a written plan first: the exact old-to-new text, the file it touches, and how it would be checked |
 | You approve | Only the changes you name get applied, each one journalled with the file as it was before — then checked, and offered back for rollback if you don't want it |
 | You're done | Temp files are cleaned up; `git diff` shows exactly what changed |
@@ -101,17 +102,25 @@ preview.
 
 | You want to… | Command |
 | --- | --- |
-| Grade your rules and get the fix list | `/assay:assay` |
-| Same, but apply rewrites without the menu | `/assay:assay --fix` |
-| See every factor score per rule | `/assay:assay --verbose` |
-| Open the whole report as HTML, with search and filters | `/assay:assay --artifact` |
-| Grade the repo's files only, not your own | `/assay:assay --project-only` |
-| Audit what Codex loads instead | `/assay:assay --host codex` |
-| Audit a Codex session started in a subdirectory | `/assay:assay --host codex --startup <path>` |
+| See what's wrong with your rules | `/assay:assay` |
+| Apply the rewrites without the menu | `/assay:assay --fix` |
+| See the full analysis behind the short report | `/assay:assay --verbose` |
+| Write a new rule that sticks | `/assay:craft-rules` |
 | Build a skill that reliably triggers | `/assay:craft-skill` |
 | Fix a skill Claude keeps ignoring | `/assay:craft-skill <skill name>` |
-| Write a new rule that sticks | `/assay:craft-rules` |
-| Build either one for Codex instead | `/assay:craft-rules --host codex` |
+| Audit what Codex loads instead | `/assay:assay --host codex` |
+
+<details>
+<summary>Less common flags</summary>
+
+| You want to… | Command |
+| --- | --- |
+| Grade the repo's files only, not your own | `/assay:assay --project-only` |
+| Open the whole report as HTML, with search and filters | `/assay:assay --artifact` |
+| Audit a Codex session started in a subdirectory | `/assay:assay --host codex --startup <path>` |
+| Author a rule or skill for Codex instead | `/assay:craft-rules --host codex` |
+
+</details>
 
 ## Under the hood
 
@@ -119,7 +128,8 @@ One scoring script and three skills — the audit with its two rubrics, craft-sk
 
 ## Good to know
 
-- The grade is a **secondary** summary of structural hygiene, printed under the findings. It is not a prediction that Claude will comply; a perfectly clear rule can still lose to the model's habits. Structure is the part you control.
+- The default report is short on purpose, and mechanically so: a release test fails the build if it runs past 40 lines, names one rule in two places, or uses a word you'd need the Claude Code docs to read. Every number, score, evidence level and grade still exists — `--verbose` prints them, and the JSON record carries all of it either way.
+- The grade lives in `--verbose`, as a **secondary** summary of structural hygiene printed under the findings. It is not a prediction that Claude will comply; a perfectly clear rule can still lose to the model's habits. Structure is the part you control.
 - Scoring is English-only, and assay says so rule by rule. A rule or skill description in another script — or in Spanish, Portuguese, French, Italian, or German — is set aside from the wording checks and from every grade, named as the language it reads as, and counted that way in coverage. Everything that doesn't depend on the language still applies to it: stale references, duplicates, conflicts, what the host loads, the byte budgets. Scoring the wording of a new language would take an analyzer validated for that language; assay detects and discloses instead of guessing.
 - `assay.js ci` is the build-pipeline entry point: deterministic, read-only, and it writes nothing at all. It exits non-zero only on findings a machine can prove — what the host won't load, a rule pointing at a file that isn't there, metadata that doesn't validate — and `--fail-on` narrows even that. Nothing heuristic or model-judged can fail a build, with no flag to opt in. Wire it into your CI when you want the report enforced rather than read.
 - Promotions are built at project scope, straight from the current official docs — fetched at promotion time, so the formats are never stale. You see each one before it's written, and nothing else gets installed.
