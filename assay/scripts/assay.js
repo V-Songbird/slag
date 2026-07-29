@@ -129,7 +129,7 @@ const TMP_DIR = ".assay-tmp";
 // A release cut keeps ANALYZER_VERSION in step with assay's version in
 // .claude-plugin/marketplace.json, which owns the published number.
 const SCHEMA_VERSION = 1;
-const ANALYZER_VERSION = "1.1.0";
+const ANALYZER_VERSION = "1.2.0";
 const PARSER_NAME = "assay-markdown";
 // [Foreman: 073] 2 = markdown-it 14.1.0 + js-yaml 4.1.0 behind assay's adapter.
 // 1 was the handwritten line scanner; a record naming version 1 was produced by
@@ -886,15 +886,15 @@ function globMatchPaths(globs, root) {
 // [Foreman: 070] A file that is discovered but unreadable leaves the corpus
 // and is reported, not thrown on: one locked file must not take the whole
 // audit down, and it must not vanish either.
-function readSources(sources, root, inaccessible = [], adapter = claudeAdapter) {
+function readSources(sources, root, inaccessible = [], adapter = claudeAdapter, context = null) {
   const parsed = [];
-  for (const source of sources) {
+  const openSource = (source) => {
     let content;
     try {
       content = fs.readFileSync(source.absPath, "utf-8");
     } catch (err) {
       inaccessible.push({ path: source.path, reason: err.code || err.message });
-      continue;
+      return null;
     }
     const fm = parseFrontmatter(content);
     let globs = fm.paths || [];
@@ -918,8 +918,54 @@ function readSources(sources, root, inaccessible = [], adapter = claudeAdapter) 
       const upTo = Buffer.from(content, "utf-8").subarray(0, source.truncatedAtByte).toString("utf-8");
       f.truncatedAtLine = upTo.split("\n").length;
     }
-    parsed.push(f);
+    return f;
+  };
+
+  for (const source of sources) {
+    const f = openSource(source);
+    if (f) parsed.push(f);
   }
+
+  // [Foreman: 090] Memory files can pull other files into the loaded set with
+  // the host's @path import syntax. The adapter reads the syntax and resolves
+  // each target; this loop owns recursion, the documented hop cap, and the
+  // one-read-per-real-file guarantee that makes an import cycle terminate.
+  // An unresolved path-shaped import lands in `inaccessible` — the agent was
+  // promised that file and assay could not read it.
+  if (typeof adapter.discoverImports === "function") {
+    const ctx = { projectRoot: root, userDir: context && context.userDir };
+    const realOf = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
+    const seen = new Set(parsed.map((f) => realOf(f.absPath)));
+    let frontier = parsed.slice();
+    const maxDepth = adapter.IMPORT_MAX_DEPTH || 5;
+    for (let depth = 0; depth < maxDepth && frontier.length; depth++) {
+      const next = [];
+      for (const file of frontier) {
+        const found = adapter.discoverImports(file, ctx);
+        for (const u of found.unresolved) {
+          inaccessible.push({ path: u.target, reason: "imported by " + u.importedBy + ":" + u.line + " — " + u.reason });
+        }
+        for (const src of found.sources) {
+          const real = realOf(src.absPath);
+          if (seen.has(real)) continue; // a cycle or a double import reads once
+          seen.add(real);
+          const f = openSource(src);
+          if (f) { parsed.push(f); next.push(f); }
+        }
+      }
+      frontier = next;
+    }
+    // A file past the hop cap is never opened; the import that names it must
+    // not vanish from coverage just because the recursion stopped.
+    for (const file of frontier) {
+      const found = adapter.discoverImports(file, ctx);
+      for (const src of found.sources) {
+        if (seen.has(realOf(src.absPath))) continue;
+        inaccessible.push({ path: src.path, reason: src.selectionReason + " — beyond the documented " + maxDepth + "-hop import depth, not read" });
+      }
+    }
+  }
+
   return parsed;
 }
 
@@ -931,7 +977,7 @@ function findInstructionFiles(root, inaccessible = []) {
   const ctx = claudeAdapter.detectContext({ root, projectOnly: true });
   const found = claudeAdapter.discoverSources(ctx);
   inaccessible.push(...found.inaccessible);
-  return readSources(found.sources, ctx.projectRoot, inaccessible);
+  return readSources(found.sources, ctx.projectRoot, inaccessible, claudeAdapter, ctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -2228,7 +2274,7 @@ function scan(root, options = {}) {
   });
   const discovered = adapter.discoverSources(context);
   const inaccessible = [...(discovered.inaccessible || [])];
-  const files = readSources(discovered.sources, context.projectRoot, inaccessible, adapter);
+  const files = readSources(discovered.sources, context.projectRoot, inaccessible, adapter, context);
   const skillsFound = adapter.discoverSkills(context);
   const rules = [];
   const sources = [];
@@ -2339,6 +2385,9 @@ function scan(root, options = {}) {
       // [Foreman: 076] what the host actually loads every session, and how much
       // of the window it costs — the two inputs the context-pressure line needs
       alwaysLoaded: file.alwaysLoaded === true,
+      // [Foreman: 090] how this file entered the loaded set, when not directly
+      ...(file.nested ? { nested: true } : {}),
+      ...(file.imported ? { imported: true } : {}),
       bytes: Buffer.byteLength(file.content, "utf-8"),
       sourceHash: hashContent(file.content),
       lineCount: file.lineCount,
@@ -4134,6 +4183,12 @@ function coverageLines(audit, rules, suppressed, findings) {
   } else {
     add(`${alwaysLoadedBytes(audit).total} bytes of always-loaded instructions (user + project memory, unscoped rules)`);
   }
+  // [Foreman: 090] Files that entered the loaded set indirectly. Counted here
+  // so "N files parsed" is never read as "N files sit beside the root".
+  const nestedCount = (audit.sources || []).filter((s) => s.nested).length;
+  if (nestedCount) add(`${nestedCount} nested CLAUDE.md file(s) — each loads only when Claude works in its directory`);
+  const importedCount = (audit.sources || []).filter((s) => s.imported).length;
+  if (importedCount) add(`${importedCount} file(s) pulled in by @path imports, graded like the files that import them`);
   const pressure = (findings || []).find((f) => f.type === "context-pressure");
   if (pressure) add(`${pressure.summary} ${evidenceTag(pressure.evidence)} — ${pressure.evidence.limits}`, pressure, 1);
   // [Foreman: 085] The pairwise analyses that did not run, named with the number

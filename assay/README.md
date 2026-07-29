@@ -18,7 +18,7 @@
 
 ## What is this?
 
-"Write clean, maintainable code" is not a rule — it's a wish. assay reads the instruction files Claude Code loads for your project — `CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules/`, and your own user-level `CLAUDE.md` — and grades each rule on the parts you control: does it name *when it fires* and *what to do*, is it specific, and does it sit where the file gets read. Then it offers to rewrite the ones that grade badly.
+"Write clean, maintainable code" is not a rule — it's a wish. assay reads the instruction files Claude Code loads for your project — `CLAUDE.md` and every file it pulls in with `@path` imports, `CLAUDE.local.md`, `.claude/rules/`, nested `CLAUDE.md` files in subfolders, and your own user-level `CLAUDE.md` — and grades each rule on the parts you control: does it name *when it fires* and *what to do*, is it specific, and does it sit where the file gets read. Then it offers to rewrite the ones that grade badly. An import that points at a missing file is a finding, not a shrug.
 
 It also spots the rules that were never meant to be prose at all — "run prettier before committing" is a hook pretending to be a sentence — and offers to build that mechanism, or to note the plan for later. Either way the rule itself stays put and keeps working.
 

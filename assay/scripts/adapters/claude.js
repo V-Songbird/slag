@@ -242,7 +242,127 @@ function discoverSources(ctx) {
     }
   }
 
+  // Nested memory: a CLAUDE.md in a subdirectory loads when Claude works in
+  // that subtree, not every session. Discovered so its rules are graded and its
+  // existence is disclosed; `nested: true` keeps its bytes out of the
+  // always-loaded total.
+  for (const found of findNestedMemoryFiles(root, inaccessible)) {
+    sources.push({
+      path: found.rel,
+      absPath: found.abs,
+      scope: "project",
+      kind: "memory",
+      alwaysLoaded: false,
+      nested: true,
+      precedence: PRECEDENCE.projectMemory,
+      selectionReason: "nested memory — loads when Claude works under `" +
+        found.rel.slice(0, -"CLAUDE.md".length) + "`",
+    });
+  }
+
   return { sources, inaccessible };
+}
+
+// Every <subdir>/CLAUDE.md below the project root. Dot-directories and
+// node_modules never hold instructions the host reads for this project, and a
+// visited-realpath set keeps a symlink cycle from walking forever.
+// razor: CLAUDE.md only — a nested CLAUDE.local.md is undocumented; support it
+// the day the host documents it.
+function findNestedMemoryFiles(root, inaccessible = []) {
+  const found = [];
+  const visited = new Set();
+
+  function walk(absDir, relDir, depth) {
+    if (depth > 12) return; // razor: bounded walk; raise if a real repo nests deeper
+    let realDir;
+    try {
+      realDir = fs.realpathSync(absDir);
+    } catch (err) {
+      inaccessible.push({ path: relDir, reason: err.code || err.message });
+      return;
+    }
+    if (visited.has(realDir)) return;
+    visited.add(realDir);
+    let entries;
+    try {
+      entries = fs.readdirSync(absDir, { withFileTypes: true });
+    } catch (err) {
+      inaccessible.push({ path: relDir, reason: err.code || err.message });
+      return;
+    }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const rel = relDir ? relDir + "/" + entry.name : entry.name;
+      if (entry.isDirectory()) {
+        if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+        walk(path.join(absDir, entry.name), rel, depth + 1);
+      } else if (entry.name === "CLAUDE.md" && relDir) {
+        found.push({ rel, abs: path.join(absDir, entry.name) });
+      }
+    }
+  }
+
+  walk(root, "", 0);
+  return found;
+}
+
+// The documented @path import syntax in memory files: a token at a whitespace
+// boundary, resolved relative to the importing file, `~/` to the home
+// directory. Code fences and inline code spans never import. A bare token with
+// no separator that resolves to nothing is a mention, not an import — only a
+// path-shaped target that fails to resolve is reported.
+const IMPORT_MAX_DEPTH = 5; // documented hop cap — the engine enforces it
+
+function discoverImports(file, ctx) {
+  const out = { sources: [], unresolved: [] };
+  if (file.kind !== "memory") return out;
+  const root = ctx.projectRoot;
+  const lines = String(file.content).split("\n");
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    const scrubbed = line.replace(/`[^`]*`/g, "");
+    const re = /(^|\s)@([A-Za-z0-9_~.][A-Za-z0-9_~./-]*)/g;
+    let m;
+    while ((m = re.exec(scrubbed))) {
+      const target = m[2].replace(/[.,;:)]+$/, "");
+      if (!target) continue;
+      const abs = target.startsWith("~/")
+        ? path.join(os.homedir(), target.slice(2))
+        : path.resolve(path.dirname(file.absPath), target);
+      let stat = null;
+      try { stat = fs.statSync(abs); } catch { /* not a file — decided below */ }
+      if (!stat || !stat.isFile()) {
+        if (target.includes("/")) {
+          out.unresolved.push({ target, line: i + 1, importedBy: file.path, reason: "not found" });
+        }
+        continue;
+      }
+      const relToRoot = path.relative(root, abs);
+      const inRoot = relToRoot && !relToRoot.startsWith("..") && !path.isAbsolute(relToRoot);
+      const userDir = ctx.userDir ? path.resolve(ctx.userDir) : null;
+      const inUserDir = userDir && !path.relative(userDir, abs).startsWith("..");
+      if (!inRoot && !inUserDir) {
+        out.unresolved.push({
+          target, line: i + 1, importedBy: file.path,
+          reason: "outside the project and user scope — not analyzed",
+        });
+        continue;
+      }
+      out.sources.push({
+        path: inRoot ? relToRoot.replace(/\\/g, "/") : abs.replace(/\\/g, "/"),
+        absPath: abs,
+        scope: file.scope,
+        kind: "memory",
+        alwaysLoaded: file.alwaysLoaded === true,
+        imported: true,
+        precedence: file.precedence,
+        selectionReason: "imported by " + file.path + ":" + (i + 1),
+      });
+    }
+  }
+  return out;
 }
 
 // The one loading question that cannot be answered until the file is parsed: a
@@ -459,6 +579,8 @@ module.exports = {
   discoverAgents,
   discoverHooks,
   discoverRepoChecks,
+  discoverImports,
+  IMPORT_MAX_DEPTH,
   budgets,
   docs,
   // exported for the engine's compatibility re-export and its own tests

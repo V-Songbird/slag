@@ -4,6 +4,14 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.2.0] — 2026-07-28
+
+### Added
+
+- `@path` imports in `CLAUDE.md` files are now followed. Every imported file is discovered, graded, and counted in coverage, recursively up to the host's documented 5-hop depth. An import pointing at a missing file is reported with the importing file and line; a cycle is read once; a file past the hop cap is disclosed instead of silently skipped. Imports inside code fences and inline code never fire, and a bare `@mention` or an email address is left alone
+- A `CLAUDE.md` in a subdirectory is now discovered and its rules graded. The report marks it as loading only when Claude works in that directory, and its bytes never count toward the always-loaded total. `node_modules` and dot-directories are not walked
+- The Coverage block counts imported and nested files separately, so "files parsed" is never read as "files sitting beside the root"
+
 ## [1.1.0] — 2026-07-28
 
 ### Added

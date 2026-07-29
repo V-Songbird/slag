@@ -6267,3 +6267,109 @@ test("--startup reaches the codex chain, and a profile that ignores it is a usag
   assert.equal(outside.code, 1);
   assert.match(outside.err, /--startup must name the root or a directory inside it/);
 });
+
+// ---------------------------------------------------------------------------
+// @path imports and nested memory — [Foreman: 090]
+// ---------------------------------------------------------------------------
+
+function scanRecord(root) {
+  const scanned = cli(root, "scan", "--project-only");
+  assert.equal(scanned.code, 0, scanned.err);
+  return JSON.parse(fs.readFileSync(path.join(root, ".assay-tmp", "scan.json"), "utf-8"));
+}
+
+test("an @path import pulls the target file into the graded set", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n@docs/style.md\n\n- Run `npm test` before pushing.\n",
+    "docs/style.md": "- Never use `var` anywhere in `src/`.\n",
+  });
+  const record = scanRecord(root);
+  const imported = record.sources.find((s) => s.path === "docs/style.md");
+  assert.ok(imported, "imported file missing from sources");
+  assert.equal(imported.imported, true);
+  assert.equal(imported.alwaysLoaded, true); // importer loads every session, so its imports do too
+  assert.match(imported.selectionReason, /imported by CLAUDE\.md:3/);
+  assert.ok(record.rules.some((r) => r.file === "docs/style.md"), "imported rules not graded");
+});
+
+test("an import cycle reads each file once and terminates", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "@a.md\n\n- Run `npm test` before pushing.\n",
+    "a.md": "@b.md\n\n- Always update `README.md` after a release.\n",
+    "b.md": "@a.md\n\n- Never commit `dist/` output.\n",
+  });
+  const record = scanRecord(root);
+  assert.equal(record.sources.filter((s) => s.path === "a.md").length, 1);
+  assert.equal(record.sources.filter((s) => s.path === "b.md").length, 1);
+});
+
+test("a path-shaped import that resolves nowhere lands in coverage", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "@docs/gone.md\n\n- Run `npm test` before pushing.\n",
+  });
+  const record = scanRecord(root);
+  const miss = record.coverage.inaccessible.find((e) => e.path === "docs/gone.md");
+  assert.ok(miss, "unresolved import not disclosed");
+  assert.match(miss.reason, /imported by CLAUDE\.md:1/);
+  assert.match(miss.reason, /not found/);
+});
+
+test("a bare @word mention and an email address are not imports", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "Ping @reviewer or victor.villegas@tuta.com first.\n\n- Run `npm test` before pushing.\n",
+  });
+  const record = scanRecord(root);
+  assert.equal(record.coverage.inaccessible.length, 0);
+  assert.equal(record.sources.length, 1);
+});
+
+test("imports inside code fences and inline code never fire", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "```\n@docs/fenced.md\n```\n\nUse `@docs/span.md` literally.\n\n- Run `npm test` before pushing.\n",
+  });
+  const record = scanRecord(root);
+  assert.equal(record.coverage.inaccessible.length, 0);
+  assert.equal(record.sources.length, 1);
+});
+
+test("a chain past the documented hop cap is disclosed, not silently dropped", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "@a1.md\n",
+    "a1.md": "@a2.md\n",
+    "a2.md": "@a3.md\n",
+    "a3.md": "@a4.md\n",
+    "a4.md": "@a5.md\n",
+    "a5.md": "@a6.md\n",
+    "a6.md": "- Never reach this depth.\n",
+  });
+  const record = scanRecord(root);
+  assert.ok(record.sources.some((s) => s.path === "a5.md"), "hop 5 should be read");
+  assert.ok(!record.sources.some((s) => s.path === "a6.md"), "hop 6 must not be read");
+  const capped = record.coverage.inaccessible.find((e) => e.path === "a6.md");
+  assert.ok(capped, "the file past the cap must land in coverage");
+  assert.match(capped.reason, /import depth/);
+});
+
+test("a nested CLAUDE.md is graded but never counted always-loaded", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "- Run `npm test` before pushing.\n",
+    "packages/app/CLAUDE.md": "- Always lint `app/` code with `npm run lint`.\n",
+  });
+  const record = scanRecord(root);
+  const nested = record.sources.find((s) => s.path === "packages/app/CLAUDE.md");
+  assert.ok(nested, "nested memory missing from sources");
+  assert.equal(nested.nested, true);
+  assert.equal(nested.alwaysLoaded, false);
+  assert.match(nested.selectionReason, /loads when Claude works under/);
+  assert.ok(record.rules.some((r) => r.file === "packages/app/CLAUDE.md"), "nested rules not graded");
+});
+
+test("node_modules and dot-directories are not walked for nested memory", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "- Run `npm test` before pushing.\n",
+    "node_modules/pkg/CLAUDE.md": "- Never grade this.\n",
+    ".cache/CLAUDE.md": "- Never grade this either.\n",
+  });
+  const record = scanRecord(root);
+  assert.equal(record.sources.length, 1);
+});

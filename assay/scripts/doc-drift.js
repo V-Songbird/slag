@@ -43,6 +43,8 @@ const PROBES = [
       { claim: "user, project, and local memory files and their load order", any: ["~/.claude/CLAUDE.md"] },
       { claim: ".claude/rules/ recursive discovery, symlinks, and paths scoping", any: [".claude/rules"] },
       { claim: ".claude/rules/ recursive discovery, symlinks, and paths scoping", any: ["paths:"] },
+      { claim: "@path imports and their recursion depth", any: ["@path", "import"] },
+      { claim: "nested memory in subdirectories loads on demand", any: ["subtree", "subdirector"] },
     ],
   },
   {
