@@ -219,21 +219,19 @@ the same message, then record their answer back into `_candidates[].accepted` �
 `true` or `false` — before you clean up. An accepted proposal is still a
 proposal: it never changes a rule's state, its score, or the grade.
 
-The report is this skill's deliverable and the user must have read it before
-the step 4 menu asks them to choose anything. Length limits from an output
-style never apply to it: reproduce every table in full.
+The report is this skill's deliverable, and it is a document rather than a
+summary: every table belongs in it in full, and the user needs to have read it
+before the step 4 menu asks them to choose anything.
 
-Some output styles discard text written before a tool call, so the report has
-to reach the user differently depending on the style in force:
+Where the report lands depends on whether this run can put text in front of the
+user ahead of a tool call:
 
-- If you can write text before a tool call, print the report now, then go to
-  step 4 and ask the menu underneath it.
-- If you cannot — a style requiring silence until the work is done, or a hook
-  telling you your next output must be a tool call — then **skip step 4
-  entirely**, go to step 5, and make the report your final message. Close it
-  with one line: rerun with `--fix` to apply every rewrite, or name what to
-  rewrite. Never ask the menu when the report cannot precede it; a menu with
-  no report behind it asks the user to choose blind.
+- If it can, print the report now, then go to step 4 and ask the menu
+  underneath it.
+- If it cannot, **skip step 4 entirely**, go to step 5, and make the report the
+  final message. Close it with one line: rerun with `--fix` to apply every
+  rewrite, or name what to rewrite. A menu with no report behind it asks the
+  user to choose blind, so the menu waits for a run that can show one first.
 
 Print its markdown **verbatim** — each rule cell is a clickable
 `[rule](file:line)` link, so do not rebuild the tables as an artifact, reword
