@@ -48,6 +48,25 @@ function verify(root, marketplace) {
     if (manifest.version !== undefined) {
       problems.push(`"${entry.name}": ${source}/.claude-plugin/plugin.json sets "version" -- marketplace.json owns versions`);
     }
+
+    // A Codex manifest carries its own required version field. It must match
+    // the marketplace entry, or the Codex package announces a stale release.
+    const codexPath = path.join(root, source, ".codex-plugin", "plugin.json");
+    if (fs.existsSync(codexPath)) {
+      let codex;
+      try {
+        codex = JSON.parse(fs.readFileSync(codexPath, "utf-8"));
+      } catch (err) {
+        problems.push(`"${entry.name}": ${source}/.codex-plugin/plugin.json is not valid JSON -- ${err.message}`);
+        continue;
+      }
+      if (codex.name !== entry.name) {
+        problems.push(`"${entry.name}": ${source}/.codex-plugin/plugin.json declares name "${codex.name}"`);
+      }
+      if (codex.version !== entry.version) {
+        problems.push(`"${entry.name}": ${source}/.codex-plugin/plugin.json version "${codex.version}" does not match marketplace version "${entry.version}"`);
+      }
+    }
   }
   return problems;
 }

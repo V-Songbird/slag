@@ -47,6 +47,25 @@ test("flags a version in plugin.json, which would mask marketplace.json's", () =
   assert.match(problems[0], /marketplace\.json owns versions/);
 });
 
+test("flags a codex manifest whose version drifts from the marketplace entry", () => {
+  const root = repoWith("widget", { name: "widget" });
+  const codexDir = path.join(root, "widget", ".codex-plugin");
+  fs.mkdirSync(codexDir, { recursive: true });
+  fs.writeFileSync(path.join(codexDir, "plugin.json"), JSON.stringify({ name: "widget", version: "0.9.0" }));
+  const problems = verify(root, { plugins: [{ name: "widget", source: "./widget", version: "1.0.0" }] });
+  assert.strictEqual(problems.length, 1);
+  assert.match(problems[0], /does not match marketplace version "1\.0\.0"/);
+});
+
+test("passes when the codex manifest version matches the marketplace entry", () => {
+  const root = repoWith("widget", { name: "widget" });
+  const codexDir = path.join(root, "widget", ".codex-plugin");
+  fs.mkdirSync(codexDir, { recursive: true });
+  fs.writeFileSync(path.join(codexDir, "plugin.json"), JSON.stringify({ name: "widget", version: "1.0.0" }));
+  const problems = verify(root, { plugins: [{ name: "widget", source: "./widget", version: "1.0.0" }] });
+  assert.deepStrictEqual(problems, []);
+});
+
 test("flags a non-relative source", () => {
   const root = repoWith("widget", { name: "widget" });
   const problems = verify(root, {
