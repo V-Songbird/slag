@@ -15,6 +15,13 @@ const { execSync } = require("child_process");
 const WATCHED_TOOLS = new Set(["Edit", "Write"]);
 const WATCHED_SUBDIRS = new Set(["scripts", "hooks"]);
 
+// Must stay under this hook's own `timeout` in .claude/settings.json -- Claude
+// Code kills the whole hook at that mark. assay's suite is the long pole at
+// ~33s; the old 25s cap killed it mid-run and the hook called that a failure.
+// razor: a suite slower than this reports "did not complete", not a verdict --
+// raise both numbers together if one gets that slow.
+const TEST_TIMEOUT_MS = 110000;
+
 function readInput() {
   let raw;
   try {
@@ -73,7 +80,7 @@ function cleanEnv() {
 
 function runTests(pluginRoot) {
   try {
-    execSync(`node --test "${testGlob(pluginRoot)}"`, { stdio: "pipe", timeout: 25000, env: cleanEnv() });
+    execSync(`node --test "${testGlob(pluginRoot)}"`, { stdio: "pipe", timeout: TEST_TIMEOUT_MS, env: cleanEnv() });
     return { passed: true };
   } catch (err) {
     const output = `${err.stdout || ""}${err.stderr || ""}` || err.message || "";
@@ -97,12 +104,18 @@ function main() {
   const pluginName = path.basename(pluginRoot);
   const edited = path.basename(String(data.tool_input.file_path));
 
+  // No TAP summary means the run never reached a verdict -- killed by the
+  // timeout, or node bailed before the first test. Say so rather than blame a
+  // test that never ran.
+  const verdict = stats ? "failed" : "did not complete";
+  const detail = stats || result.output.trim().split(/\r?\n/).slice(-3).join(" ").slice(0, 300);
+
   const payload = {
     hookSpecificOutput: {
       hookEventName: "PostToolUse",
       additionalContext:
-        `[slag] node --test ${pluginName}/tests/ failed after this edit to ${edited}. ` +
-        `${stats} Run \`node --test "${testGlob(pluginRoot)}"\` for the full trace before moving on.`,
+        `[slag] node --test ${pluginName}/tests/ ${verdict} after this edit to ${edited}. ` +
+        `${detail} Run \`node --test "${testGlob(pluginRoot)}"\` for the full trace before moving on.`,
     },
   };
   try {
