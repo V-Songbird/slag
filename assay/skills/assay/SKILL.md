@@ -1,5 +1,5 @@
 ---
-name: audit
+name: assay
 description: >-
   Grades every rule in the project's CLAUDE.md and .claude/rules/ for structural
   hygiene — verb strength, framing, trigger distance, loading scope, position in
@@ -11,13 +11,13 @@ description: >-
   English-only scoring. Use when the user wants feedback on existing rule files
   — e.g. "are my rules any good", "check my CLAUDE.md", "grade my instruction
   files", "which rules are weak or vague", "audit my rules", "which rules should
-  be hooks" — or invokes /assay:audit with any flags. Do NOT use to review code,
+  be hooks" — or invokes /assay:assay or /assay:audit with any flags. Do NOT use to review code,
   PRs, or non-Claude config like eslint.
 argument-hint: "[--fix] [--verbose] [--json] [--no-verify] [--deterministic] [--semantic] [--artifact] [--project-only] [--host codex] [--startup <path>]"
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent, Artifact
 ---
 
-# assay:audit
+# assay:assay
 
 The script measures everything mechanical; you judge two factors and present the
 result. Never re-derive by hand what the script already computed. Flags in

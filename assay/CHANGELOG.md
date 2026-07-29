@@ -4,6 +4,12 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.4.0] — 2026-07-28
+
+### Changed
+
+- The audit skill is now `/assay:assay` — the plugin's name is its front door. The old `/assay:audit` slash command is gone, though asking for an audit in words still routes there; the flags are unchanged
+
 ## [1.3.0] — 2026-07-28
 
 ### Added

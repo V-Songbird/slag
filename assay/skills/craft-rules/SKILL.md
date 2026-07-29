@@ -9,7 +9,7 @@ description: >-
   e.g. "add a rule", "write a CLAUDE.md rule for X", "make Claude always do X",
   "add a rule to AGENTS.md", "Claude keeps ignoring my instructions", "help me
   write a rule" — or invokes /assay:craft-rules. Do NOT use to grade or rewrite
-  existing rules — that is /assay:audit — and not for skill descriptions — that
+  existing rules — that is /assay:assay — and not for skill descriptions — that
   is /assay:craft-skill.
 argument-hint: "[what the rule should enforce] [--host codex]"
 allowed-tools: Bash, Read, Write, Glob, AskUserQuestion, WebFetch
@@ -19,7 +19,7 @@ allowed-tools: Bash, Read, Write, Glob, AskUserQuestion, WebFetch
 
 You write one rule per run. The wording and placement are the product: follow
 [references/recipe.md](references/recipe.md) exactly — it encodes the same
-factors `/assay:audit` grades. `$ARGUMENTS`, if present, describes what the
+factors `/assay:assay` grades. `$ARGUMENTS`, if present, describes what the
 rule should enforce, and may carry `--host codex` to author for the Codex
 instruction system instead of the Claude Code one (default `claude-code`).
 
@@ -107,7 +107,7 @@ Then compose the draft bullet per the recipe's anatomy and check it against
   Do not write, do not merge them, and do not pick a winner: assay identifies
   incompatibility and the developer resolves intent. Once they answer, the
   resolution is theirs to state — a change to the existing rule is
-  `/assay:audit`'s rewrite path, not something you do quietly here.
+  `/assay:assay`'s rewrite path, not something you do quietly here.
 - **Duplicate.** Does an active rule already state this duty, in these words or
   other ones? Say so, quote it with its file and line, and ask whether they want
   the existing one reworded instead. A second copy of a rule is corpus noise,
@@ -146,7 +146,7 @@ blind and nothing is reversible.
 
 1. **Assemble the draft.** Write one `.assay-tmp/draft-plan.json` with a single
    change, per the draft-plan shape documented in
-   `${CLAUDE_PLUGIN_ROOT}/skills/audit/references/fixes.md`:
+   `${CLAUDE_PLUGIN_ROOT}/skills/assay/references/fixes.md`:
 
    - adding a bullet to a file that already exists → `"kind": "rule-rewrite"`,
      with `old` set to the **exact** current text of the line you are inserting

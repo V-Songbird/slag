@@ -2980,7 +2980,7 @@ test("the report warns when the judgments predate the engine's rubric version", 
 
   // the rubric file's own header is what the skill copies into promptVersion —
   // the two must not drift apart
-  const rubrics = fs.readFileSync(path.join(__dirname, "..", "skills", "audit", "references", "rubrics.md"), "utf-8");
+  const rubrics = fs.readFileSync(path.join(__dirname, "..", "skills", "assay", "references", "rubrics.md"), "utf-8");
   assert.equal(rubrics.split("\n")[0], "Rubric version: " + engine.RUBRIC_VERSION);
 });
 
@@ -4771,14 +4771,14 @@ test("assay's own .codex-plugin/plugin.json carries every documented required fi
   // the audit workflow is what the packaging exists to carry, and it is the same
   // skill directory the Claude packaging uses rather than a second copy
   assert.equal(manifest.skills, "./skills/");
-  assert.ok(fs.existsSync(path.join(pluginRoot, "skills", "audit", "SKILL.md")));
+  assert.ok(fs.existsSync(path.join(pluginRoot, "skills", "assay", "SKILL.md")));
   // the Claude manifest still owns no version — the marketplace does
   assert.equal(JSON.parse(fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf-8")).version, undefined);
 
   // and a plugin manifest is a discovery surface too: pointed at this directory,
   // the adapter finds the packaged skills through it
   const found = codex.discoverSkills(codexContext(pluginRoot));
-  assert.ok(found.project.some((s) => s.scope === "plugin" && s.path === "skills/audit/SKILL.md"),
+  assert.ok(found.project.some((s) => s.scope === "plugin" && s.path === "skills/assay/SKILL.md"),
     JSON.stringify(found.project.map((s) => s.path)));
 });
 

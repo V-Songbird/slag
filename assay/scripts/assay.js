@@ -130,7 +130,7 @@ const TMP_DIR = ".assay-tmp";
 // A release cut keeps ANALYZER_VERSION in step with assay's version in
 // .claude-plugin/marketplace.json, which owns the published number.
 const SCHEMA_VERSION = 1;
-const ANALYZER_VERSION = "1.3.0";
+const ANALYZER_VERSION = "1.4.0";
 const PARSER_NAME = "assay-markdown";
 // [Foreman: 073] 2 = markdown-it 14.1.0 + js-yaml 4.1.0 behind assay's adapter.
 // 1 was the handwritten line scanner; a record naming version 1 was produced by
@@ -143,7 +143,7 @@ const PROFILE_VERSION = claudeAdapter.profileVersion;
 // [Foreman: 071] The semantic pass's other cache axis. Judgment keys are content
 // hashes, so an edited rule re-judges by construction; a changed RUBRIC is what
 // that cannot see. The number here is the one printed at the top of
-// skills/audit/references/rubrics.md, and the two move together — bump both or
+// skills/assay/references/rubrics.md, and the two move together — bump both or
 // neither. A judgments file recorded under a different one still composes; the
 // report says the judgments predate the current rubric.
 const RUBRIC_VERSION = "2";

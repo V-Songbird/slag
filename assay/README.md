@@ -76,7 +76,7 @@ repository's `assay/` directory. See below for what that gets you.
 
 ## Codex
 
-`/assay:audit --host codex` audits the instruction system Codex loads instead of
+`/assay:assay --host codex` audits the instruction system Codex loads instead of
 the Claude Code one: the `AGENTS.md` files it actually reads, the skills it
 lists, and the hooks wired around them. The findings say what never takes effect
 and why — a file the host stops reading at its size limit, a skill description
@@ -97,13 +97,13 @@ preview.
 
 | You want to… | Command |
 | --- | --- |
-| Grade your rules and get the fix list | `/assay:audit` |
-| Same, but apply rewrites without the menu | `/assay:audit --fix` |
-| See every factor score per rule | `/assay:audit --verbose` |
-| Open the whole report as HTML, with search and filters | `/assay:audit --artifact` |
-| Grade the repo's files only, not your own | `/assay:audit --project-only` |
-| Audit what Codex loads instead | `/assay:audit --host codex` |
-| Audit a Codex session started in a subdirectory | `/assay:audit --host codex --startup <path>` |
+| Grade your rules and get the fix list | `/assay:assay` |
+| Same, but apply rewrites without the menu | `/assay:assay --fix` |
+| See every factor score per rule | `/assay:assay --verbose` |
+| Open the whole report as HTML, with search and filters | `/assay:assay --artifact` |
+| Grade the repo's files only, not your own | `/assay:assay --project-only` |
+| Audit what Codex loads instead | `/assay:assay --host codex` |
+| Audit a Codex session started in a subdirectory | `/assay:assay --host codex --startup <path>` |
 | Build a skill that reliably triggers | `/assay:craft-skill` |
 | Fix a skill Claude keeps ignoring | `/assay:craft-skill <skill name>` |
 | Write a new rule that sticks | `/assay:craft-rules` |

@@ -9,7 +9,7 @@ description: >-
   reliably — e.g. "make me a skill", "create a skill for X", "my skill never
   fires", "Claude keeps ignoring my skill", "fix this skill description", "craft
   a skill" — or invokes /assay:craft-skill. Do NOT use for auditing CLAUDE.md
-  rules — that is /assay:audit.
+  rules — that is /assay:assay.
 argument-hint: "[skill name or what it should do] [--host codex]"
 allowed-tools: Bash, Read, Write, Glob, AskUserQuestion, WebFetch
 ---
@@ -140,7 +140,7 @@ sidecar, rule, or settings file directly.
 
 1. **Assemble the draft.** One `.assay-tmp/draft-plan.json`, per the draft-plan
    shape documented in
-   `${CLAUDE_PLUGIN_ROOT}/skills/audit/references/fixes.md`:
+   `${CLAUDE_PLUGIN_ROOT}/skills/assay/references/fixes.md`:
 
    - the new skill is one `placement-promotion` change carrying
      `"mechanism": { "type": "skill", "name": "<name>" }` and a `provenance`
