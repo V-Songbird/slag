@@ -92,7 +92,10 @@ preview.
 
 > [!NOTE]
 > The Codex profile is encoded from the official Codex documentation and
-> exercised against fixtures. No live Codex host has verified it end to end.
+> exercised against fixtures. A live host has verified its core: real sessions
+> confirmed the chain order, session-start delivery, and `AGENTS.override.md`
+> selection. `node assay/scripts/live-host-codex.js` reruns that check against
+> your own install. Byte caps, skills, and hooks remain fixture-verified only.
 
 ## What you can do
 

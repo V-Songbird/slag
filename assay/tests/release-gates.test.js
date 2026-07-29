@@ -923,14 +923,21 @@ test("release gate: the Codex profile's required fixtures", () => {
 // Disclosed gaps — cells this machine cannot express
 // ---------------------------------------------------------------------------
 
-// A live host. Nothing on this machine can stand in for one, and pretending
-// otherwise would put a checkmark next to the one claim assay has never made.
+// A live host costs a model session per probe, which a unit suite must never
+// spend — so these two cells stay disclosed here and their proof lives in the
+// manual script, run like doc-drift as a pre-release step. It starts real
+// Codex sessions over a sentinel-token AGENTS.md chain and exits 2 when the
+// loaded chain disagrees with the adapter's model.
+// [Foreman: 094] Last run 2026-07-28 against codex-cli 0.145.0: OK — chain
+// order, fresh-session delivery, and AGENTS.override.md selection all held.
+const LIVE_CODEX_CHECK = " The manual live check is `node assay/scripts/live-host-codex.js` — " +
+  "last run 2026-07-28 against codex-cli 0.145.0: OK.";
 test("release gate: Codex installed-host end-to-end", {
-  skip: disclose("codex installed-host end-to-end", NO_LIVE_CODEX),
+  skip: disclose("codex installed-host end-to-end", NO_LIVE_CODEX + LIVE_CODEX_CHECK),
 }, () => {});
 
 test("release gate: Codex fresh-session loading at session start", {
-  skip: disclose("codex fresh-session loading", NO_LIVE_CODEX),
+  skip: disclose("codex fresh-session loading", NO_LIVE_CODEX + LIVE_CODEX_CHECK),
 }, () => {});
 
 test("release gate: Claude Code installed-host end-to-end", {

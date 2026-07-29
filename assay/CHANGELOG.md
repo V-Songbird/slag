@@ -12,6 +12,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - One missing path that several rules or hooks still point at is reported once as a stale shared target, naming every dependent — restoring the one file fixes the whole set. Mechanical, and part of the CI `stale-targets` gate
 - Personal rules in `~/.claude/rules/` are discovered and graded under **User scope**, scoped `paths` frontmatter respected, without moving the project grade
 - `CLAUDE.md` and `CLAUDE.local.md` files in directories above the project root are discovered and graded under a new **Above the project root** section — the host loads them in full at launch, outermost first. `--project-only` leaves them out, and they never move the project grade
+- A live Codex host check: `node assay/scripts/live-host-codex.js` starts real Codex sessions over a sentinel-token `AGENTS.md` chain and verifies the installed host loads it the way assay models it — chain order, delivery at session start, and `AGENTS.override.md` selection. Manual, like the doc-drift check, because each run spends two live sessions
 
 ### Changed
 
