@@ -203,7 +203,9 @@ markdown report, findings first, in this order:
   are fixed in the user's setup, not in this repo, and they never move the
   project grade — do not fold them into the project's numbers when you
   summarize;
-- **Weak skill descriptions**.
+- **Weak skill descriptions**, and **Weak subagent descriptions** when
+  `.claude/agents/` files grade weak — a subagent rewrite patches that file's
+  frontmatter description through the same transaction as a skill's.
 
 Every finding line carries a bracketed evidence tag — `[mechanical]`,
 `[heuristic]`, `[model-inferred]`, `[experiment-supported: …]`. Keep them: they
@@ -293,7 +295,9 @@ header `"Fix menu"`), including only options that have evidence:
   reversible."
 - `Rewrite [N] weak skill descriptions` — only if the report has a "Weak skill
   descriptions" section. Description: "Rewrite each skill's frontmatter
-  description to the trigger recipe; you approve each patch."
+  description to the trigger recipe; you approve each patch." Count weak
+  subagent descriptions here too — same recipe, same patch shape, different
+  file.
 - `Promote [N] candidates now` — only if placement candidates exist. Description:
   "Preview each hook, skill, or subagent built from the live official docs, and
   install the ones you approve; the rules stay active."

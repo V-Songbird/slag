@@ -78,6 +78,7 @@
 // deterministic finding.
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 
@@ -129,7 +130,7 @@ const TMP_DIR = ".assay-tmp";
 // A release cut keeps ANALYZER_VERSION in step with assay's version in
 // .claude-plugin/marketplace.json, which owns the published number.
 const SCHEMA_VERSION = 1;
-const ANALYZER_VERSION = "1.2.0";
+const ANALYZER_VERSION = "1.3.0";
 const PARSER_NAME = "assay-markdown";
 // [Foreman: 073] 2 = markdown-it 14.1.0 + js-yaml 4.1.0 behind assay's adapter.
 // 1 was the handwritten line scanner; a record naming version 1 was produced by
@@ -1260,8 +1261,9 @@ function markdownRegions(lines, frontmatterEnd) {
   const hrLines = new Set();
   const tableLines = new Set();
   const tableBodyRows = new Set();
+  const quoteLines = new Set();     // block quotes — cited, not commanded
   const unsupported = [];
-  const regions = { fenceLines, headings, headingLines, hrLines, tableLines, tableBodyRows, unsupported };
+  const regions = { fenceLines, headings, headingLines, hrLines, tableLines, tableBodyRows, quoteLines, unsupported };
 
   // The frontmatter is YAML, not Markdown: blank it out so its "---" markers
   // cannot read as a thematic break or a setext underline. Blanking rather than
@@ -1314,6 +1316,14 @@ function markdownRegions(lines, frontmatterEnd) {
         break;
       case "table_open":
         addRange(tableLines, token.map);
+        break;
+      // [Foreman: 091] A block quote is a citation by construction — a pasted
+      // requirement, a retro line, someone else's words. Its lines stay in the
+      // inventory as content and never chunk into rules; before this, "> We
+      // never test on Fridays" graded as a live mandate with the marker
+      // breaking verb detection on genuinely imperative quotes.
+      case "blockquote_open":
+        addRange(quoteLines, token.map);
         break;
       case "tbody_open":
         inTableBody = true;
@@ -1470,6 +1480,11 @@ function stripMetadata(content) {
   for (let i = frontmatterEnd; i < lines.length; i++) {
     const lineNum = i + 1;
     if (fenceRegions.has(i) || tagRegions.has(i) || ignoreRegions.has(i)) continue;
+    // [Foreman: 091] Quoted lines are inventoried as content, never graded.
+    if (regions.quoteLines.has(i)) {
+      result.push({ lineNum, text: "", isContent: false, isBlank: false, isHeading: false, raw: visibleLines[i].trim() });
+      continue;
+    }
     if (tableRegions.has(i)) {
       if (tableBodyRows.has(i)) {
         for (const cell of tableCells(visibleLines[i])) {
@@ -1737,6 +1752,15 @@ function makeBasenameResolver(root) {
 // A backtick token is checkable only as a project-relative concrete path.
 // Whitespace means a command with arguments (`./gradlew generateLexer`), not a path.
 function backtickToPath(name) {
+  // [Foreman: 091] A Windows-authored corpus writes `scripts\release.md`; a
+  // backslash token is treated as a path only when its last segment carries an
+  // extension, so `\d+` and other escape-shaped tokens never read as files.
+  // razor: extension required — a bare `scripts\hooks` stays invisible; widen
+  // when a real corpus shows the need.
+  if (!name.includes("/") && /^[A-Za-z0-9_.-]+(\\[A-Za-z0-9_.-]+)+$/.test(name) &&
+      /\.[A-Za-z0-9]+$/.test(name)) {
+    name = name.replace(/\\/g, "/");
+  }
   if (!name.includes("/")) return null;
   if (/[<>{}*$\s]|:\/\//.test(name)) return null;
   if (name.startsWith("/") || name.startsWith("~") || /^[A-Za-z]:/.test(name)) return null;
@@ -2494,12 +2518,38 @@ function scan(root, options = {}) {
       // the marker says which corpus the numbers above cover.
       userFilesIncluded: files.some((f) => f.scope === "user"),
       userSkills,
-      agents: adapter.discoverAgents(context),
+      // [Foreman: 091] Subagent descriptions are routing triggers, graded on
+      // the same recipe as a model-invocable skill description.
+      agents: gradeAgents(adapter.discoverAgents(context)),
       ...(budget ? { budget } : {}),
       ...(skillBudget ? { skillBudget } : {}),
       ...(profileNotes.length ? { profileNotes } : {}),
     },
   };
+}
+
+// [Foreman: 091] A subagent's frontmatter description decides when the model
+// reaches for it — the skill trigger recipe applies verbatim. A file that will
+// not read or parse keeps its name and carries the issue instead of a verdict.
+function gradeAgents(found) {
+  return (found || []).map((a) => {
+    if (typeof a === "string") return { name: a, path: ".claude/agents/" + a + ".md", checks: null };
+    let fm;
+    try {
+      fm = parseFrontmatter(fs.readFileSync(a.absPath, "utf-8"));
+    } catch (err) {
+      return { name: a.name, path: a.path, checks: null, issue: err.code || String(err.message).split("\n")[0] };
+    }
+    const description = typeof fm.description === "string" ? fm.description.trim() : "";
+    return {
+      name: typeof fm.name === "string" && fm.name.trim() ? fm.name.trim() : a.name,
+      path: a.path,
+      description,
+      checks: description
+        ? { mode: "model", ...checkSkillDescription(description), hasWhenToUse: false }
+        : { mode: "model", missing: ["description"], redundant: false, length: 0, overCap: false, quotedPhrases: 0, hasWhenToUse: false },
+    };
+  });
 }
 
 // Inventory-grade facts about a skill nobody grades: does it declare a
@@ -3339,8 +3389,12 @@ function deriveMechanisms(audit) {
   for (const skill of ((audit.coverage || {}).userSkills) || []) {
     add("skill", skill.name, "user scope", skillStates, skillLimits);
   }
-  for (const name of ((audit.coverage || {}).agents) || []) {
-    add("subagent", name, ".claude/agents/" + name + ".md", skillStates, skillLimits);
+  for (const agent of ((audit.coverage || {}).agents) || []) {
+    // [Foreman: 091] entries are graded objects now; a pre-091 record's bare
+    // names still render
+    const name = typeof agent === "string" ? agent : agent.name;
+    const p = typeof agent === "string" ? ".claude/agents/" + agent + ".md" : agent.path;
+    add("subagent", name, p, skillStates, skillLimits);
   }
   for (const hook of audit.hookInventory || []) {
     const matcher = hook.matcher || "*";
@@ -3367,7 +3421,9 @@ function deriveMechanisms(audit) {
     const states = isRecordObject(hook.states)
       ? hook.states
       : { configured: true, enabled: true, trusted: "unknown", applicable: true };
-    add("hook", hook.command, hook.source, states, limits, restricts
+    // [Foreman: 091] `label` is the display name; the full command stays on the
+    // inventory record for redaction and target checks to read.
+    add("hook", hook.label || hook.command, hook.source, states, limits, restricts
       ? { events: [hook.event], matchers: [matcher], tools: matcher.split("|") }
       : { events: [hook.event], matchers: [matcher] });
   }
@@ -3508,7 +3564,7 @@ function deriveFindings(audit) {
   for (const covered of hookCoverage(audit)) {
     push({
       type: "redundant-enforcement", severity: "low", analyzer: "mechanism-coverage", rule: covered.rule.id,
-      summary: `a \`${covered.event}\` hook (\`${covered.hook.command}\`, ${covered.hook.source}) is already wired for the moment this rule names`,
+      summary: `a \`${covered.event}\` hook (\`${covered.hook.label || covered.hook.command}\`, ${covered.hook.source}) is already wired for the moment this rule names`,
       explanation: "The rule asks Claude to remember something a configured hook already fires on. assay read the hook out of the settings files; it has not watched it run, so treat this as configured, not verified.",
       evidence: {
         level: "heuristic", basis: "a wired hook already covers this event",
@@ -3517,6 +3573,51 @@ function deriveFindings(audit) {
       sources: ruleSpan(covered.rule),
       safeActions: ["confirm the hook covers this rule", "retire the prose once the hook is confirmed"],
     });
+  }
+  // [Foreman: 091] Two mechanical checks on the wired hooks themselves. A hook
+  // whose script is gone never fires, and a matcher that is not a valid regex
+  // matches nothing — both read straight out of the configuration, and both
+  // only for project-source hooks, whose commands resolve inside this repo.
+  for (const hook of audit.hookInventory || []) {
+    if (hook.source !== "project") continue;
+    const cmd = String(hook.command || "");
+    const tokens = cmd.replace(/["']/g, "").split(/\s+/);
+    const pathy = tokens.filter((t) => /[\\/]/.test(t) && !t.startsWith("-"));
+    const scriptTok = pathy.length ? pathy[pathy.length - 1] : null;
+    if (scriptTok) {
+      const substituted = scriptTok
+        .replace(/\$\{?CLAUDE_PROJECT_DIR\}?/g, ".")
+        .replace(/%CLAUDE_PROJECT_DIR%/g, ".");
+      if (!path.isAbsolute(substituted) && !/^[A-Za-z]:/.test(substituted) && !substituted.startsWith("~")) {
+        let missing = false;
+        try { fs.statSync(path.join(audit.root, substituted)); } catch { missing = true; }
+        if (missing) {
+          push({
+            type: "hook-target-missing", severity: "high", analyzer: "mechanism-coverage",
+            summary: `a \`${hook.event}\` hook runs \`${hook.label || hook.command}\`, and \`${substituted}\` is not in the project`,
+            explanation: "The hook is configured but the script its command names does not resolve inside this repository, so the guardrail it promises never runs. A rule this hook was said to cover is not covered.",
+            evidence: { level: "mechanical", basis: "the command's script path, resolved against the project root" },
+            sources: [{ path: ".claude/settings.json" }],
+            safeActions: ["fix the script path", "remove the dead hook entry"],
+          });
+        }
+      }
+    }
+    const matcher = hook.matcher;
+    if (matcher && matcher !== "*" && matcher !== "") {
+      let bad = null;
+      try { new RegExp(matcher); } catch (err) { bad = String(err.message).split("\n")[0]; }
+      if (bad) {
+        push({
+          type: "hook-matcher-invalid", severity: "high", analyzer: "mechanism-coverage",
+          summary: `a \`${hook.event}\` hook's matcher \`${matcher}\` is not a valid pattern`,
+          explanation: "The host reads a matcher as a regular expression, and this one does not compile: " + bad + ". The hook cannot match the events it was written for.",
+          evidence: { level: "mechanical", basis: "the matcher compiled as a regular expression" },
+          sources: [{ path: ".claude/settings.json" }],
+          safeActions: ["fix the matcher pattern"],
+        });
+      }
+    }
   }
   // [Foreman: 077] One skill name defined in two scopes. Mechanical and cheap:
   // two names matched, nothing inferred about which one the host picks.
@@ -3768,7 +3869,7 @@ function deriveRelationships(audit) {
   }
   for (const covered of hookCoverage(audit)) {
     rels.push({
-      kind: "covers", between: [covered.hook.source + ":" + covered.hook.command, site(covered.rule)],
+      kind: "covers", between: [covered.hook.source + ":" + (covered.hook.label || covered.hook.command), site(covered.rule)],
       explanation: `a wired \`${covered.event}\` hook covers the moment ${covered.rule.file}:${covered.rule.lineStart} names — configured, not verified`,
       evidence: { level: "heuristic", basis: "a wired hook already covers this event" },
     });
@@ -3902,6 +4003,30 @@ function pushWeakSkillSection(out, weakSkills) {
     out.push(`| ${s.name} | [${s.path}](${s.path}) | ${c.length}/${DESCRIPTION_CAP} | ${issues.join(", ")} |`);
   }
   out.push("");
+}
+
+// [Foreman: 091] Same recipe, different mechanism: a subagent's description is
+// how the model decides to delegate to it, and one that reads as documentation
+// fails the same way a skill description does.
+function pushWeakAgentSection(out, weakAgents) {
+  out.push(`## Weak subagent descriptions (${weakAgents.length} to fix)`);
+  out.push("");
+  out.push("A subagent's frontmatter description is how the model decides to delegate to it — the same trigger recipe as a skill description, read out of `.claude/agents/`. Every check is mechanical.");
+  out.push("");
+  out.push("| Subagent | Where | Chars | Issue |");
+  out.push("|---|---|---|---|");
+  for (const a of weakAgents) {
+    const c = a.checks;
+    const issues = c ? c.missing.map((k) => SKILL_CHECK_LABELS[k] || k).concat(c.redundant ? [SKILL_CHECK_LABELS.redundant] : []) : [a.issue || "unreadable"];
+    out.push(`| ${a.name} | [${a.path}](${a.path}) | ${c ? c.length : "—"}/${DESCRIPTION_CAP} | ${issues.join(", ")} |`);
+  }
+  out.push("");
+}
+
+function isWeakAgent(a) {
+  if (typeof a === "string") return false; // pre-091 record — names only
+  if (!a.checks) return true; // unreadable file
+  return Boolean(a.checks.missing.length || a.checks.redundant);
 }
 
 // [Foreman: 057]
@@ -4072,7 +4197,7 @@ function pushRestructureSection(out, shapes) {
 // Files Claude loads for this project that do not live in it. Graded on the same
 // rubric and kept in their own table, because the fix for one of these is in the
 // reader's own setup, not in this repo.
-function pushUserScopeSection(out, files) {
+function pushUserScopeSection(out, files, userWeak = [], helpers = null) {
   const userFiles = files.filter((f) => f.scope === "user");
   if (!userFiles.length) return;
   out.push("### User scope");
@@ -4083,9 +4208,20 @@ function pushUserScopeSection(out, files) {
   out.push("|---|---|---|");
   for (const f of userFiles) {
     const g = f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`;
-    out.push(`| ${f.path} | ${f.ruleCount} | ${g} |`);
+    const label = helpers ? `[${helpers.showPath(f.path)}](${helpers.linkPath(f.path)})` : f.path;
+    out.push(`| ${label} | ${f.ruleCount} | ${g} |`);
   }
   out.push("");
+  // [Foreman: 091] User weak rules render here, beside the files they belong
+  // to, instead of inside the project's fix list.
+  if (userWeak.length && helpers) {
+    out.push(`Weak rules in your own files (${userWeak.length}):`);
+    out.push("");
+    for (const r of userWeak) {
+      out.push(`- ${helpers.ruleLink(r, 60)} — ${r.grade} (${fmt(r.score)})`);
+    }
+    out.push("");
+  }
 }
 
 // [Foreman: 079]
@@ -4238,7 +4374,7 @@ function coverageLines(audit, rules, suppressed, findings) {
   const userSkills = (cov.userSkills || []).length;
   if (userSkills) add(`${userSkills} user skill(s) present — not graded`);
   const agents = (cov.agents || []).length;
-  if (agents) add(`${agents} subagent(s) defined in \`.claude/agents/\` — inventoried, not graded`);
+  if (agents) add(`${agents} subagent(s) defined in \`.claude/agents/\` — descriptions graded like skill descriptions`);
   const unreadable = (findings || []).filter((f) => f.type === "inaccessible-source");
   for (const s of cov.inaccessible || []) {
     const f = unreadable.find((x) => (x.sources[0] || {}).path === s.path) || null;
@@ -4318,6 +4454,11 @@ function pushLadderSection(out, audit, mechanisms, activeRules, opts, findings) 
   for (const f of (findings || []).filter((x) => x.type === "mechanism-overlap")) {
     out.push(`- ${redactSecrets(f.summary)} ${evidenceTag(f.evidence)}`);
   }
+  // [Foreman: 091] A wired hook that cannot work is a ladder property too: the
+  // level-3 count above includes it, so the break is named right beside it.
+  for (const f of (findings || []).filter((x) => x.type === "hook-target-missing" || x.type === "hook-matcher-invalid")) {
+    out.push(`- ${redactSecrets(f.summary)} ${evidenceTag(f.evidence)}`);
+  }
   // A surface that exists and could not be read is a hole in this ladder, named
   // here rather than counted as an empty level.
   for (const s of ((audit.repoChecks || {}).inaccessible) || []) {
@@ -4355,16 +4496,25 @@ function renderReport(audit, opts = {}) {
   const rulesById = new Map(rules.map((r) => [r.id, r]));
   const stateOf = (r) => findingByRule.get(r.id) || null;
   const tagOf = (r) => { const f = stateOf(r); return f ? evidenceTag(f.evidence) : ""; };
+  // [Foreman: 091] A user-scope file arrives as an absolute path. Backslashes
+  // break a markdown link target, and the home directory does not belong in a
+  // shareable report — the href keeps forward slashes, the label shows `~/`.
+  const linkPath = (p) => String(p).replace(/\\/g, "/");
+  const home = os.homedir();
+  const showPath = (p) => {
+    const s = String(p);
+    return s.startsWith(home) ? "~" + s.slice(home.length).replace(/\\/g, "/") : linkPath(s);
+  };
   // file:line as a markdown link — Claude Code renders it clickable, opening
   // the rule at its exact line
-  const loc = (r) => `[${r.file}:${r.lineStart}](${r.file}:${r.lineStart})`;
+  const loc = (r) => `[${showPath(r.file)}:${r.lineStart}](${linkPath(r.file)}:${r.lineStart})`;
   // [Foreman: 078] the same link off a finding's source span, which is what a
   // corpus finding carries instead of a rule
-  const spanLink = (s) => `[${s.path}:${s.lineStart}](${s.path}:${s.lineStart})`;
+  const spanLink = (s) => `[${showPath(s.path)}:${s.lineStart}](${linkPath(s.path)}:${s.lineStart})`;
   // The rule cell itself is the click target: a bare line number is useless to
   // a reader, so the rule id + text opens the file at its line. Brackets in the
   // label would break the markdown link, so drop them.
-  const ruleLink = (r, n) => `[${r.id} "${truncate(r.text, n).replace(/[[\]]/g, "")}"](${r.file}:${r.lineStart})`;
+  const ruleLink = (r, n) => `[${r.id} "${truncate(r.text, n).replace(/[[\]]/g, "")}"](${linkPath(r.file)}:${r.lineStart})`;
   const weakSkills = (audit.skills || []).filter(isWeakSkill);
   // [Foreman: 071] No `semantic` block means no model judged anything in this
   // audit. Every renderer says so rather than letting a renormalized score read
@@ -4440,11 +4590,18 @@ function renderReport(audit, opts = {}) {
   // a rule the host never loads has no operational behavior to be weak at.
   // [Foreman: 079] The three score-derived lists are the wording rubric's own,
   // so a profile that declines it gets none of them.
-  const weak = rubric ? rules.filter((r) => r.weak && !gated.has(r.id)).sort((a, b) => a.score - b.score) : [];
-  const stalls = rules.filter((r) => r.stallRisk);
-  const buried = rubric ? rules.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD) : [];
-  const stale = rules.filter((r) => r.staleness && r.staleness.missing.length);
-  const badCategories = rules.filter((r) => r.invalidCategory);
+  // [Foreman: 091] A user-scope rule is fixed in the reader's own setup, not
+  // in this repo — its findings render under User scope, never in the
+  // project's fix list. Conflicts and duplicates stay cross-scope: a user rule
+  // arguing with a project rule is exactly what that section exists to say.
+  const userFilePaths = new Set(files.filter((f) => f.scope === "user").map((f) => f.path));
+  const projectRules = rules.filter((r) => !userFilePaths.has(r.file));
+  const weak = rubric ? projectRules.filter((r) => r.weak && !gated.has(r.id)).sort((a, b) => a.score - b.score) : [];
+  const userWeak = rubric ? rules.filter((r) => userFilePaths.has(r.file) && r.weak && !gated.has(r.id)).sort((a, b) => a.score - b.score) : [];
+  const stalls = projectRules.filter((r) => r.stallRisk);
+  const buried = rubric ? projectRules.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD) : [];
+  const stale = projectRules.filter((r) => r.staleness && r.staleness.missing.length);
+  const badCategories = projectRules.filter((r) => r.invalidCategory);
   // [Foreman: 076] Corpus findings the renderer lists rather than re-derives.
   // [Foreman: 079] Duplicates and file shape are maintainability, not
   // reliability. Under a wording rubric they have always been listed here;
@@ -4784,9 +4941,11 @@ function renderReport(audit, opts = {}) {
     out.push(`| ${f.path} | ${f.ruleCount} | ${g} | ${loadingCell(f)} |`);
   }
   out.push("");
-  pushUserScopeSection(out, files);
+  pushUserScopeSection(out, files, userWeak, { showPath, linkPath, ruleLink });
 
   if (weakSkills.length) pushWeakSkillSection(out, weakSkills);
+  const weakAgents = (((audit.coverage || {}).agents) || []).filter(isWeakAgent);
+  if (weakAgents.length) pushWeakAgentSection(out, weakAgents);
 
   // [Foreman: 079] Every column of this table is a rubric factor, so a profile
   // without the rubric has no table to print — the Instruction chain and Files
@@ -6322,7 +6481,7 @@ function hostDiscoveryEvidence(root, opts, change) {
   } else if (mech.type === "skill") {
     seen = scanData.skills.some((s) => s.name === mech.name);
   } else if (mech.type === "subagent") {
-    seen = (scanData.coverage.agents || []).includes(mech.name);
+    seen = (scanData.coverage.agents || []).some((a) => (typeof a === "string" ? a : a.name) === mech.name);
   }
   return {
     kind: "host-discovery", level: "mechanical", result: seen ? "pass" : "fail",

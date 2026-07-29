@@ -4,6 +4,24 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.3.0] — 2026-07-28
+
+### Added
+
+- Wired hooks are checked, not just counted: a hook whose script is missing from the project and a matcher that will not compile as a pattern are both findings, named on the enforcement ladder beside the level that counts them
+- Subagent descriptions in `.claude/agents/` are graded on the same trigger recipe as skill descriptions, with weak ones listed in their own section — they were previously counted and never read
+- Rules citing a backslash path with a file extension — `` `scripts\release.md` `` — are now checked for staleness like their forward-slash siblings
+
+### Changed
+
+- Block-quoted lines are treated as quoted content, never as rules. A pasted requirement or a retro line no longer grades as a live mandate
+- Your own user-scope weak rules now render under **User scope** with `~/` paths, instead of inside the project's fix list with an absolute path the report should not carry
+- The full hook command line is kept on the audit record, so secret masking and the new target checks read the real command; reports still show the short script name
+
+### Fixed
+
+- A `.claude/settings.json` that exists but will not parse is reported as a hole in the enforcement ladder. It was silently treated as absent, which also made assay propose hooks the project already had
+
 ## [1.2.0] — 2026-07-28
 
 ### Added

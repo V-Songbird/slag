@@ -408,14 +408,18 @@ function discoverSkills(ctx) {
   };
 }
 
-// Project subagents, by name. Inventory only: a subagent is a real placement
-// target, and knowing one already exists changes what a placement candidate
-// should say. Modeling the mechanism itself is a later entry's job.
+// Project subagents. A subagent's frontmatter description is its routing
+// trigger — the same job, and the same failure mode, as a skill description —
+// so discovery hands back the file for the engine to grade, not just a name.
 function discoverAgents(ctx) {
   const dir = path.join(ctx.projectRoot, ".claude", "agents");
   try {
     if (!fs.statSync(dir).isDirectory()) return [];
-    return fs.readdirSync(dir).filter((n) => n.endsWith(".md")).sort().map((n) => n.slice(0, -3));
+    return fs.readdirSync(dir).filter((n) => n.endsWith(".md")).sort().map((n) => ({
+      name: n.slice(0, -3),
+      path: ".claude/agents/" + n,
+      absPath: path.join(dir, n),
+    }));
   } catch {
     return [];
   }
@@ -430,19 +434,40 @@ function hookCommandLabel(cmd) {
   return token.split(/[\\/]/).pop();
 }
 
-function readHookConfig(file, source, entries) {
+function readHookConfig(file, source, entries, issues = []) {
+  let raw;
+  try {
+    raw = fs.readFileSync(file, "utf-8");
+  } catch {
+    return; // absent — nothing configured here
+  }
   let cfg;
   try {
-    cfg = JSON.parse(fs.readFileSync(file, "utf-8"));
-  } catch {
-    return; // absent or malformed — no inventory from this file
+    cfg = JSON.parse(raw);
+  } catch (err) {
+    // [Foreman: 091] A settings file that exists and will not parse is a hole
+    // in the enforcement ladder, not an empty layer: every hook it declares is
+    // invisible, and a candidate it would have covered gets proposed again.
+    // The Codex adapter has always reported this; now both hosts do.
+    issues.push({
+      path: file,
+      reason: "unreadable hook configuration — " + String(err.message).split("\n")[0].trim(),
+    });
+    return;
   }
   for (const [event, groups] of Object.entries(cfg.hooks || {})) {
     if (!Array.isArray(groups)) continue;
     for (const g of groups) {
       for (const h of g.hooks || []) {
         if (!h || !h.command) continue;
-        entries.push({ event, matcher: g.matcher || "*", command: hookCommandLabel(h.command), source });
+        // [Foreman: 091] The full command line stays on the record — it is what
+        // secret redaction and target checks read. `label` is the display name.
+        entries.push({
+          event, matcher: g.matcher || "*", source,
+          command: String(h.command),
+          label: hookCommandLabel(h.command),
+          ...(Number.isInteger(h.timeout) ? { timeout: h.timeout } : {}),
+        });
       }
     }
   }
@@ -454,33 +479,37 @@ function readHookConfig(file, source, entries) {
 // can be checked instead of rebuilt.
 function discoverHooks(ctx) {
   const entries = [];
+  const inaccessible = [];
   const root = ctx.projectRoot;
-  readHookConfig(path.join(root, ".claude", "settings.json"), "project", entries);
-  readHookConfig(path.join(root, ".claude", "settings.local.json"), "project", entries);
+  readHookConfig(path.join(root, ".claude", "settings.json"), "project", entries, inaccessible);
+  readHookConfig(path.join(root, ".claude", "settings.local.json"), "project", entries, inaccessible);
   // The hook inventory is the author's working input, not graded content, so it
   // reads the user's settings even under --project-only: a hook wired there
   // still fires on this project.
   const userDir = ctx.userDir || path.join(os.homedir(), ".claude");
-  readHookConfig(path.join(userDir, "settings.json"), "user", entries);
+  readHookConfig(path.join(userDir, "settings.json"), "user", entries, inaccessible);
   try {
     const reg = JSON.parse(fs.readFileSync(path.join(userDir, "plugins", "installed_plugins.json"), "utf-8"));
     for (const [key, installs] of Object.entries(reg.plugins || {})) {
       const name = key.split("@")[0];
       for (const inst of Array.isArray(installs) ? installs : []) {
         if (!inst || !inst.installPath) continue;
-        readHookConfig(path.join(inst.installPath, "hooks", "hooks.json"), "plugin: " + name, entries);
+        readHookConfig(path.join(inst.installPath, "hooks", "hooks.json"), "plugin: " + name, entries, inaccessible);
       }
     }
   } catch {
     // no plugin registry — nothing to add
   }
   const seen = new Set();
-  return entries.filter((e) => {
-    const k = e.event + "|" + e.matcher + "|" + e.command + "|" + e.source;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  return {
+    hooks: entries.filter((e) => {
+      const k = e.event + "|" + e.matcher + "|" + e.command + "|" + e.source;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }),
+    inaccessible,
+  };
 }
 
 // [Foreman: 077] Levels 4 and 5 of the enforcement ladder: checks the repository

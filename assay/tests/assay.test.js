@@ -1239,8 +1239,12 @@ test("scan collects wired hooks; the report names them on the ladder, never as a
     }),
   });
   const scanData = engine.scan(root);
+  // [Foreman: 091] The record keeps the full command line — it is what secret
+  // redaction and target checks read — and `label` carries the display name.
   assert.deepEqual(scanData.hookInventory[0], {
-    event: "PostToolUse", matcher: "Edit|Write", command: "auto-regen.py", source: "project",
+    event: "PostToolUse", matcher: "Edit|Write", source: "project",
+    command: 'python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/auto-regen.py"',
+    label: "auto-regen.py",
   });
   const judgments = {};
   for (const r of scanData.rules) judgments[r.key] = { F3: 0.5, F8: r.text.includes("prettier") ? 0.15 : 0.9 };
@@ -3845,7 +3849,7 @@ test("a user memory file that cannot be read becomes a coverage gap, not a throw
   assert.equal(scanData.coverage.userFilesIncluded, false);
 });
 
-test("user skills and subagents are inventoried, never graded", () => {
+test("user skills are inventoried; project subagent descriptions are graded", () => {
   const root = tmpProject({
     "CLAUDE.md": "- Use `const`.\n",
     ".claude/agents/reviewer.md": "---\nname: reviewer\n---\n",
@@ -3863,7 +3867,10 @@ test("user skills and subagents are inventoried, never graded", () => {
     { name: "bare", hasDescription: false },
     { name: "mine", hasDescription: true },
   ]);
-  assert.deepEqual(scanData.coverage.agents, ["reviewer"]);
+  // [Foreman: 091] Subagent descriptions are graded on the skill trigger
+  // recipe; this one has no description at all, which is the first finding.
+  assert.deepEqual(scanData.coverage.agents.map((a) => a.name), ["reviewer"]);
+  assert.deepEqual(scanData.coverage.agents[0].checks.missing, ["description"]);
 
   const report = engine.renderReport(engine.composeAudit(scanData, judgeEvery(scanData)));
   assert.match(report, /2 user skill\(s\) present — not graded/);
@@ -6372,4 +6379,110 @@ test("node_modules and dot-directories are not walked for nested memory", () => 
   });
   const record = scanRecord(root);
   assert.equal(record.sources.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Hooks, quotes, scopes — [Foreman: 091]
+// ---------------------------------------------------------------------------
+
+test("a malformed settings.json is a named hole, not an empty layer", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "- Run `npm test` before pushing.\n",
+    ".claude/settings.json": '{ "hooks": { "PreToolUse": [ ] },, }',
+  });
+  const scanData = engine.scan(root);
+  const audit = engine.composeAudit(scanData, judgeEvery(scanData));
+  const holes = (audit.repoChecks || {}).inaccessible || [];
+  assert.ok(holes.some((h) => /settings\.json/.test(h.path) && /unreadable hook configuration/.test(h.reason)),
+    "parse failure must be disclosed: " + JSON.stringify(holes));
+  assert.match(engine.renderReport(audit), /could not read .*settings\.json/);
+});
+
+test("a hook whose script is gone and a matcher that will not compile are findings", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "- Run `npm test` before pushing.\n",
+    ".claude/settings.json": JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          { matcher: "Bash", hooks: [{ type: "command", command: "node .claude/hooks/gone.js" }] },
+          { matcher: "([", hooks: [{ type: "command", command: "echo hi" }] },
+        ],
+      },
+    }),
+  });
+  const scanData = engine.scan(root);
+  const audit = engine.composeAudit(scanData, judgeEvery(scanData));
+  const missing = audit.findings.filter((f) => f.type === "hook-target-missing");
+  assert.equal(missing.length, 1);
+  assert.match(missing[0].summary, /gone\.js/);
+  const bad = audit.findings.filter((f) => f.type === "hook-matcher-invalid");
+  assert.equal(bad.length, 1);
+  const report = engine.renderReport(audit);
+  assert.match(report, /is not in the project/);
+  assert.match(report, /is not a valid pattern/);
+});
+
+test("a wired hook with a live script raises neither finding", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "- Run `npm test` before pushing.\n",
+    ".claude/hooks/ok.js": "console.log(1);\n",
+    ".claude/settings.json": JSON.stringify({
+      hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "node .claude/hooks/ok.js" }] }] },
+    }),
+  });
+  const scanData = engine.scan(root);
+  const audit = engine.composeAudit(scanData, judgeEvery(scanData));
+  assert.deepEqual(audit.findings.filter((f) => f.type === "hook-target-missing"), []);
+  assert.deepEqual(audit.findings.filter((f) => f.type === "hook-matcher-invalid"), []);
+});
+
+test("block-quoted lines are content, never rules", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n> Always update the changelog before merging.\n\n> We never test on Fridays.\n\n- Use `pnpm` for every install.\n",
+  });
+  const scanData = engine.scan(root);
+  assert.equal(scanData.rules.length, 1, JSON.stringify(scanData.rules.map((r) => r.text)));
+  assert.equal(scanData.rules[0].text, "Use `pnpm` for every install.");
+  // the inventory invariant still holds: quoted lines are content, not lost
+  const src = scanData.sources[0];
+  const total = Object.values(src.spans).reduce((a, b) => a + b, 0);
+  assert.equal(total, src.lineCount);
+});
+
+test("a backslash path with an extension is checked for staleness", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "- Follow the checklist in `scripts\\release.md` for releases.\n- Escape digits with `\\d+` in matchers.\n",
+  });
+  const scanData = engine.scan(root);
+  const flagged = scanData.rules.filter((r) => r.staleness && r.staleness.missing.length);
+  assert.equal(flagged.length, 1, JSON.stringify(scanData.rules.map((r) => r.staleness)));
+  assert.match(flagged[0].text, /release\.md/);
+});
+
+test("user-scope weak rules render under User scope, not in the project fix list", () => {
+  const root = tmpProject({ "CLAUDE.md": "- Run `npm test` before pushing.\n" });
+  const userDir = tmpUserDir({ "CLAUDE.md": "- Be helpful.\n" });
+  const scanData = engine.scan(root, { userDir });
+  const audit = engine.composeAudit(scanData, judgeEvery(scanData));
+  const report = engine.renderReport(audit);
+  const weakSection = report.split("### Weak rules")[1];
+  if (weakSection) {
+    assert.doesNotMatch(weakSection.split("###")[0], /Be helpful/);
+  }
+  assert.match(report, /### User scope/);
+  assert.match(report.split("### User scope")[1], /Be helpful/);
+  // links to the user file carry forward slashes and a ~ label
+  assert.doesNotMatch(report, /\]\(\w:\\/);
+});
+
+test("a subagent description is graded and a weak one lands in its own section", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "- Run `npm test` before pushing.\n",
+    ".claude/agents/helper.md": "---\nname: helper\ndescription: A general helper for various tasks.\n---\n",
+  });
+  const scanData = engine.scan(root);
+  const audit = engine.composeAudit(scanData, judgeEvery(scanData));
+  const report = engine.renderReport(audit);
+  assert.match(report, /## Weak subagent descriptions \(1 to fix\)/);
+  assert.match(report, /helper/);
 });
