@@ -19,6 +19,13 @@ const engine = require("../scripts/assay.js");
 const EMPTY_USER_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "assay-userdir-"));
 process.env.ASSAY_USER_DIR = EMPTY_USER_DIR;
 
+// [Foreman: 093] The same fence for the above-root walk: fixtures live directly
+// under os.tmpdir(), so stopping the ancestor climb there (exclusive) means no
+// fixture ever reads a CLAUDE.md that happens to sit above the temp directory
+// on the developer's machine. Ancestor tests build a nested root and pass their
+// own `ancestorStop` explicitly.
+process.env.ASSAY_ANCESTOR_STOP = os.tmpdir();
+
 // [Foreman: 079] The same seam for the Codex profile: CODEX_HOME is the host's
 // own documented variable for its configuration and global instruction file, so
 // pointing it at an empty directory keeps the developer's real ~/.codex out of
@@ -857,7 +864,7 @@ test("checkStaleness flags missing project-relative paths, ignores globs and URL
   const root = tmpProject({ "src/real.ts": "export {};" });
   const bad = engine.checkStaleness("See `src/missing.ts` for details.", root);
   assert.equal(bad.gated, true);
-  assert.deepEqual(bad.missing, [{ ref: "src/missing.ts", moved: [] }]);
+  assert.deepEqual(bad.missing, [{ ref: "src/missing.ts", resolved: "src/missing.ts", moved: [] }]);
   const ok = engine.checkStaleness("See `src/real.ts` and `src/**/*.ts` and `https://x.dev/a`.", root);
   assert.equal(ok.gated, false);
 });
@@ -1879,7 +1886,7 @@ test("a rule whose moment a wired hook already fires on is named, and only then"
 
 test("the always-loaded byte count always prints; only real heft is a finding", () => {
   const small = auditOf({ "CLAUDE.md": "# Rules\n\n- Validate every request body at the handler boundary.\n" });
-  assert.match(engine.renderReport(small), /- \d+ bytes of always-loaded instructions \(user \+ project memory, unscoped rules\)/);
+  assert.match(engine.renderReport(small), /- \d+ bytes of always-loaded instructions \(user, above-root and project memory, unscoped rules\)/);
   assert.deepEqual(findingsOfType(small, "context-pressure"), []);
 
   const bulk = "# Big\n\n" + Array.from({ length: 900 }, (_, i) =>
@@ -3816,7 +3823,7 @@ test("discoverSources returns the documented Claude surface in load order with p
   assert.deepEqual(sources.map((s) => s.scope), ["user", "project", "project", "project", "project"]);
   assert.deepEqual(sources.map((s) => s.kind), ["memory", "memory", "memory", "rules", "rules"]);
   // user memory is read first and outranked by everything in the project
-  assert.deepEqual(sources.map((s) => s.precedence), [1, 2, 3, 2, 2]);
+  assert.deepEqual(sources.map((s) => s.precedence), [1, 3, 4, 3, 3]);
   assert.ok(sources.every((s) => typeof s.selectionReason === "string" && s.selectionReason));
 
   // the same-level choice between ./CLAUDE.md and ./.claude/CLAUDE.md says which won
@@ -4233,7 +4240,7 @@ test("no --host is the Claude profile, and the record it writes is the one it al
   const { targets, ...profile } = implicit.profile;
   assert.deepEqual(profile, { host: "claude-code", version: 2 });
   assert.equal(targets.rule.places[0].path, "CLAUDE.md");
-  assert.deepEqual(Object.keys(implicit.context), ["projectRoot", "startupDirectory", "userDir", "hostVersion", "analysisTime"]);
+  assert.deepEqual(Object.keys(implicit.context), ["projectRoot", "startupDirectory", "userDir", "projectOnly", "ancestorStop", "hostVersion", "analysisTime"]);
   assert.equal("budget" in implicit.coverage, false);
   assert.equal("profileNotes" in implicit.coverage, false);
   assert.equal(implicit.files.some((f) => "startsAtByte" in f || "loaded" in f), false);
@@ -6346,13 +6353,12 @@ test("a chain past the documented hop cap is disclosed, not silently dropped", (
     "a2.md": "@a3.md\n",
     "a3.md": "@a4.md\n",
     "a4.md": "@a5.md\n",
-    "a5.md": "@a6.md\n",
-    "a6.md": "- Never reach this depth.\n",
+    "a5.md": "- Never reach this depth.\n",
   });
   const record = scanRecord(root);
-  assert.ok(record.sources.some((s) => s.path === "a5.md"), "hop 5 should be read");
-  assert.ok(!record.sources.some((s) => s.path === "a6.md"), "hop 6 must not be read");
-  const capped = record.coverage.inaccessible.find((e) => e.path === "a6.md");
+  assert.ok(record.sources.some((s) => s.path === "a4.md"), "hop 4 should be read");
+  assert.ok(!record.sources.some((s) => s.path === "a5.md"), "hop 5 must not be read");
+  const capped = record.coverage.inaccessible.find((e) => e.path === "a5.md");
   assert.ok(capped, "the file past the cap must land in coverage");
   assert.match(capped.reason, /import depth/);
 });
@@ -6485,4 +6491,156 @@ test("a subagent description is graded and a weak one lands in its own section",
   const report = engine.renderReport(audit);
   assert.match(report, /## Weak subagent descriptions \(1 to fix\)/);
   assert.match(report, /helper/);
+});
+
+// ---------------------------------------------------------------------------
+// Conditional conflicts, shared stale targets, scopes above and beside — [Foreman: 093]
+// ---------------------------------------------------------------------------
+
+test("two rules gated on one condition that ban and command the same action are a conditional conflict", () => {
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "# Rules", "",
+      "- When releasing a plugin, always pin dependencies to exact versions in `package.json`.",
+      "- When releasing a plugin, never pin dependencies to exact versions in `package.json`.",
+      "",
+    ].join("\n"),
+  });
+  const scanData = engine.scan(root);
+  const audit = engine.composeAudit(scanData, judgeEvery(scanData));
+  const found = audit.findings.filter((f) => f.type === "conditional-conflict");
+  assert.equal(found.length, 1, JSON.stringify(audit.findings.map((f) => f.type)));
+  assert.match(found[0].summary, /under "When releasing a plugin"/);
+  assert.equal(found[0].evidence.level, "heuristic");
+  // both rules take the conflicting state, and the note names the condition
+  const states = audit.findings.filter((f) => f.state === "conflicting");
+  assert.equal(states.length, 2);
+  assert.match(states[0].explanation, /Both fire under one condition/);
+  // the pair is a conflict edge, never also a duplicate
+  assert.equal(audit.relationships.filter((r) => r.kind === "conflict").length, 1);
+  assert.deepEqual(audit.findings.filter((f) => f.type === "duplicate"), []);
+  // and the report renders it under Conflicts
+  assert.match(engine.renderReport(audit), /### Conflicts[\s\S]*under "When releasing a plugin"/);
+});
+
+test("a conditional rule against an unconditional opposite reads as an exception, not a conflict", () => {
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "# Rules", "",
+      "- Never pin dependencies to exact versions in `package.json`.",
+      "- When releasing a plugin, always pin dependencies to exact versions in `package.json`.",
+      "",
+    ].join("\n"),
+  });
+  const scanData = engine.scan(root);
+  const audit = engine.composeAudit(scanData, judgeEvery(scanData));
+  assert.deepEqual(audit.findings.filter((f) => f.type === "conditional-conflict"), []);
+  assert.deepEqual(audit.findings.filter((f) => f.type === "conflict"), []);
+});
+
+test("one dead path several sources point at is a stale shared target", () => {
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "# Rules", "",
+      "- Run `scripts/shared/tool.js` before every push to keep the manifest honest.",
+      "- Validate the marketplace manifest with `scripts/shared/tool.js` after edits.",
+      "",
+    ].join("\n"),
+    ".claude/settings.json": JSON.stringify({
+      hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "node scripts/shared/tool.js" }] }] },
+    }),
+  });
+  const scanData = engine.scan(root);
+  const audit = engine.composeAudit(scanData, judgeEvery(scanData));
+  const shared = audit.findings.filter((f) => f.type === "stale-shared-target");
+  assert.equal(shared.length, 1, JSON.stringify(audit.findings.map((f) => f.type)));
+  assert.match(shared[0].summary, /`scripts\/shared\/tool\.js` does not exist, and 3 sources still point at it/);
+  assert.equal(shared[0].evidence.level, "mechanical");
+  assert.match(engine.renderReport(audit), /### Stale shared targets/);
+  // the CI stale-targets gate closes over it
+  const verdict = engine.ciEvaluate(audit, ["stale-targets"]);
+  assert.ok(verdict.failed.some((f) => f.type === "stale-shared-target"),
+    JSON.stringify(verdict));
+});
+
+test("a single dead reference stays a per-rule finding, never a shared target", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "- Run `scripts/shared/tool.js` before every push to keep the manifest honest.\n",
+  });
+  const scanData = engine.scan(root);
+  const audit = engine.composeAudit(scanData, judgeEvery(scanData));
+  assert.deepEqual(audit.findings.filter((f) => f.type === "stale-shared-target"), []);
+});
+
+test("user rules in ~/.claude/rules/ are discovered, graded under User scope, and move no project number", () => {
+  const root = tmpProject({ "CLAUDE.md": "- Run `npm test` before pushing.\n" });
+  const userDir = tmpUserDir({
+    "CLAUDE.md": "- Prefer pnpm.\n",
+    "rules/prefs.md": "- Be helpful.\n",
+    "rules/scoped.md": '---\npaths: ["src/**"]\n---\n\n- Return typed errors from every handler.\n',
+  });
+  const scanData = engine.scan(root, { userDir });
+  const userRules = scanData.files.filter((f) => f.scope === "user" && f.kind === "rules");
+  assert.equal(userRules.length, 2, JSON.stringify(scanData.files.map((f) => [f.path, f.scope, f.kind])));
+  // an unscoped user rules file loads every session; a scoped one does not
+  assert.deepEqual(userRules.map((f) => f.alwaysLoaded).sort(), [false, true]);
+
+  const audit = engine.composeAudit(scanData, judgeEvery(scanData));
+  const report = engine.renderReport(audit);
+  assert.match(report.split("### User scope")[1], /prefs\.md/);
+  // the project grade is the project's alone
+  const alone = engine.scan(root, { projectOnly: true });
+  const aloneAudit = engine.composeAudit(alone, judgeEvery(alone));
+  assert.equal(audit.corpusScore, aloneAudit.corpusScore);
+});
+
+test("CLAUDE.md files above the project root are read outermost-first and sectioned apart", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "assay-above-"));
+  fs.writeFileSync(path.join(base, "CLAUDE.md"), "- Always ask before deleting anything under this tree.\n");
+  fs.mkdirSync(path.join(base, "mid"), { recursive: true });
+  fs.writeFileSync(path.join(base, "mid", "CLAUDE.local.md"), "- Prefer the staging database here.\n");
+  const root = path.join(base, "mid", "proj");
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(path.join(root, "CLAUDE.md"), "- Run `npm test` before pushing.\n");
+
+  const { sources } = adapter.discoverSources(adapter.detectContext({ root, projectOnly: false, userDir: EMPTY_USER_DIR }));
+  const ancestors = sources.filter((s) => s.scope === "ancestor");
+  assert.deepEqual(ancestors.map((s) => s.absPath), [
+    path.join(base, "CLAUDE.md"),
+    path.join(base, "mid", "CLAUDE.local.md"),
+  ], "outermost directory first, CLAUDE.local.md at its own level");
+  assert.ok(ancestors.every((s) => s.alwaysLoaded === true));
+  assert.ok(ancestors.every((s) => s.kind === "memory"));
+  // the ancestor sits between user memory and the project's own memory
+  const projMemory = sources.find((s) => s.path === "CLAUDE.md");
+  assert.ok(ancestors[0].precedence < projMemory.precedence);
+
+  // --project-only means this repository's files alone
+  const fenced = adapter.discoverSources(adapter.detectContext({ root, projectOnly: true }));
+  assert.deepEqual(fenced.sources.filter((s) => s.scope === "ancestor"), []);
+
+  // graded apart, counted always-loaded, and the project grade is untouched
+  const scanData = engine.scan(root);
+  const audit = engine.composeAudit(scanData, judgeEvery(scanData));
+  const report = engine.renderReport(audit);
+  assert.match(report, /### Above the project root/);
+  assert.match(report.split("### Above the project root")[1], /ask before deleting/i);
+  const alone = engine.scan(root, { projectOnly: true });
+  const aloneAudit = engine.composeAudit(alone, judgeEvery(alone));
+  assert.equal(audit.corpusScore, aloneAudit.corpusScore);
+});
+
+test("the chain table's # column counts read order, matching the Why column's chain positions", () => {
+  const root = tmpProject({
+    "AGENTS.md": "# Root\n\n- Return typed errors from every handler.\n",
+    "svc/AGENTS.md": "# Service\n\n- Log every request id.\n",
+    "svc/api/AGENTS.md": "# API\n\n- Validate every request body.\n",
+  });
+  const startup = path.join(root, "svc", "api");
+  const audit = engine.composeAudit(engine.scan(root, { adapter: codex, projectOnly: true, startup }), null);
+  const report = engine.renderReport(audit);
+  const rows = report.split("\n").filter((l) => /^\| \d+ \|/.test(l));
+  assert.deepEqual(rows.map((l) => l.split("|")[1].trim()), ["1", "2", "3"],
+    "the # column must be 1..N in read order, not the precedence numbers");
+  assert.match(report, /chain position 2 of 3/);
 });

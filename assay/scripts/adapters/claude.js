@@ -30,9 +30,11 @@ const PROFILE_VERSION = 2;
 // sources sharing a number are documented as loading at the same priority.
 const PRECEDENCE = {
   userMemory: 1,
-  projectMemory: 2,
-  projectRules: 2, // "same priority as .claude/CLAUDE.md"
-  localMemory: 3, // appended after CLAUDE.md at the project level, so read last
+  userRules: 1, // "loaded before project rules, giving project rules higher priority"
+  ancestorMemory: 2, // "ordered from the filesystem root down to your working directory"
+  projectMemory: 3,
+  projectRules: 3, // "same priority as .claude/CLAUDE.md"
+  localMemory: 4, // appended after CLAUDE.md at the project level, so read last
 };
 
 // ---------------------------------------------------------------------------
@@ -72,6 +74,10 @@ function detectContext(opts = {}) {
     const raw = opts.userDir || process.env.ASSAY_USER_DIR || path.join(os.homedir(), ".claude");
     userDir = raw ? path.resolve(raw) : null;
   }
+  // ASSAY_ANCESTOR_STOP fences the above-root walk the way ASSAY_USER_DIR
+  // fences the home directory: ancestors are read only strictly below it. The
+  // host itself walks to the filesystem root, which is the unfenced default.
+  const stopRaw = opts.ancestorStop || process.env.ASSAY_ANCESTOR_STOP || null;
   return {
     projectRoot,
     // razor: assay analyzes one root, so the startup directory is that root.
@@ -80,6 +86,11 @@ function detectContext(opts = {}) {
     // distinction observable, and nothing asks for it yet.
     startupDirectory: projectRoot,
     userDir,
+    // --project-only means "this repository's own files": it switches off the
+    // user scope above and the above-root walk below, the two machine-local
+    // surfaces a project audit cannot fix.
+    projectOnly: opts.projectOnly === true,
+    ancestorStop: stopRaw ? path.resolve(stopRaw) : null,
     hostVersion: opts.probeHost ? probeHostVersion() : null,
   };
 }
@@ -154,11 +165,6 @@ function exists(abs) {
 // load order. Discovery only: no file is opened, so a path that exists but
 // cannot be read still arrives here and is reported by the engine's reader as a
 // coverage gap rather than vanishing.
-//
-// razor: user scope is the user's CLAUDE.md alone. ~/.claude/rules/ is a real
-// documented surface too; it lands the day the report has somewhere useful to
-// put a second user-scope file, and until then a user rules walk would be
-// discovery nobody reads.
 function discoverSources(ctx) {
   const sources = [];
   const inaccessible = [];
@@ -176,6 +182,63 @@ function discoverSources(ctx) {
         precedence: PRECEDENCE.userMemory,
         selectionReason: "user memory — loads for every project on this machine",
       });
+    }
+    // "Personal rules in ~/.claude/rules/ apply to every project on your
+    // machine" and load before project rules. Same recursive walk as the
+    // project's rules directory; an unscoped file loads every session.
+    const userRulesDir = path.join(ctx.userDir, "rules");
+    if (exists(userRulesDir)) {
+      const walkIssues = [];
+      for (const ruleFile of findRuleMarkdownFiles(userRulesDir, walkIssues)) {
+        sources.push({
+          path: ruleFile.abs,
+          absPath: ruleFile.abs,
+          scope: "user",
+          kind: "rules",
+          alwaysLoaded: false, // declared scope decides; see loadsAlways
+          precedence: PRECEDENCE.userRules,
+          selectionReason: "user rules directory — loads before project rules for every project on this machine",
+        });
+      }
+      for (const issue of walkIssues) {
+        inaccessible.push({
+          path: issue.path === "." ? userRulesDir : path.join(userRulesDir, issue.path),
+          reason: issue.reason,
+        });
+      }
+    }
+  }
+
+  // "CLAUDE.md and CLAUDE.local.md files in the directory hierarchy above the
+  // working directory are loaded in full at launch", ordered from the
+  // filesystem root down. The walk climbs from the root's parent and reverses,
+  // so the outermost directory is emitted (and read) first. `ancestorStop`
+  // fences fixtures; the host itself climbs all the way up.
+  if (!ctx.projectOnly) {
+    const ancestorDirs = [];
+    let dir = path.dirname(root);
+    while (true) {
+      if (ctx.ancestorStop && dir === ctx.ancestorStop) break;
+      ancestorDirs.push(dir);
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    ancestorDirs.reverse();
+    for (const ancestor of ancestorDirs) {
+      for (const name of ["CLAUDE.md", "CLAUDE.local.md"]) {
+        const abs = path.join(ancestor, name);
+        if (!exists(abs)) continue;
+        sources.push({
+          path: abs,
+          absPath: abs,
+          scope: "ancestor",
+          kind: "memory",
+          alwaysLoaded: true,
+          precedence: PRECEDENCE.ancestorMemory,
+          selectionReason: "ancestor memory — `" + ancestor + "` is above the project root, read before the project's own memory",
+        });
+      }
     }
   }
 
@@ -310,7 +373,7 @@ function findNestedMemoryFiles(root, inaccessible = []) {
 // directory. Code fences and inline code spans never import. A bare token with
 // no separator that resolves to nothing is a mention, not an import — only a
 // path-shaped target that fails to resolve is reported.
-const IMPORT_MAX_DEPTH = 5; // documented hop cap — the engine enforces it
+const IMPORT_MAX_DEPTH = 4; // "a maximum depth of four hops" — the engine enforces it
 
 function discoverImports(file, ctx) {
   const out = { sources: [], unresolved: [] };
@@ -589,6 +652,9 @@ function budgets() {
 function docs() {
   return [
     { claim: "user, project, and local memory files and their load order", url: "https://code.claude.com/docs/en/memory.md", verified: "2026-07-28" },
+    { claim: "CLAUDE.md and CLAUDE.local.md above the working directory load in full at launch, filesystem root first", url: "https://code.claude.com/docs/en/memory.md", verified: "2026-07-28" },
+    { claim: "~/.claude/rules/ user rules load before project rules", url: "https://code.claude.com/docs/en/memory.md", verified: "2026-07-28" },
+    { claim: "@path imports recurse to a maximum depth of four hops", url: "https://code.claude.com/docs/en/memory.md", verified: "2026-07-28" },
     { claim: ".claude/rules/ recursive discovery, symlinks, and paths scoping", url: "https://code.claude.com/docs/en/memory.md", verified: "2026-07-28" },
     { claim: "skill discovery and SKILL.md frontmatter", url: "https://code.claude.com/docs/en/skills.md", verified: "2026-07-28" },
     { claim: "hook configuration in settings files", url: "https://code.claude.com/docs/en/hooks.md", verified: "2026-07-28" },

@@ -18,7 +18,7 @@
 
 ## What is this?
 
-"Write clean, maintainable code" is not a rule — it's a wish. assay reads the instruction files Claude Code loads for your project — `CLAUDE.md` and every file it pulls in with `@path` imports, `CLAUDE.local.md`, `.claude/rules/`, nested `CLAUDE.md` files in subfolders, and your own user-level `CLAUDE.md` — and grades each rule on the parts you control: does it name *when it fires* and *what to do*, is it specific, and does it sit where the file gets read. Then it offers to rewrite the ones that grade badly. An import that points at a missing file is a finding, not a shrug.
+"Write clean, maintainable code" is not a rule — it's a wish. assay reads the instruction files Claude Code loads for your project — `CLAUDE.md` and every file it pulls in with `@path` imports, `CLAUDE.local.md`, `.claude/rules/`, nested `CLAUDE.md` files in subfolders, `CLAUDE.md` files in the directories above your project, and your own user-level `CLAUDE.md` and `~/.claude/rules/` — and grades each rule on the parts you control: does it name *when it fires* and *what to do*, is it specific, and does it sit where the file gets read. Then it offers to rewrite the ones that grade badly. An import that points at a missing file is a finding, not a shrug.
 
 It also spots the rules that were never meant to be prose at all — "run prettier before committing" is a hook pretending to be a sentence — and offers to build that mechanism, or to note the plan for later. Either way the rule itself stays put and keeps working.
 
@@ -39,6 +39,7 @@ Both build for whichever host you name — add `--host codex` and they write to 
 - **Skill descriptions written as triggers.** A skill's description is how Claude decides to use it; most are written as documentation instead. Crafted ones name the moment.
 - **Skills you already have get graded too.** The audit checks every project skill's description against the same trigger recipe and offers to rewrite the ones missing parts, in the same fix menu as the rules. Subagent descriptions in `.claude/agents/` get the same treatment — they route by description exactly like skills do.
 - **Broken hooks get named.** A hook whose script isn't in the project, a matcher that won't compile, or a settings file that won't parse — each is a finding on the enforcement ladder, because a guardrail that can't fire protects nothing.
+- **Contradictions are caught even behind a condition.** "When releasing, always X" against "when releasing, never X" is a conflict the moment that condition holds, and it's reported as one — while a rule and its stated exception stay silent. And when several rules or hooks all lean on one path that no longer exists, that's reported once, as the shared dead target it is.
 
 ## How it works
 
@@ -50,7 +51,7 @@ Before the report, one more question gets asked of each doubtful entry: is this 
 
 Every report opens by saying what it actually looked at — and names any file it couldn't read. Every line of every file it did read is accounted for: graded, set aside, ignored on purpose, or named as something assay couldn't parse. A number in the report never covers more than that.
 
-Your user-level `CLAUDE.md` loads for this project too, so it gets graded — but under its own **User scope** heading, and never inside the project's grade. The fix for one of those rules lives in your setup, not in the repo. `--project-only` leaves them out.
+Your user-level `CLAUDE.md` and `~/.claude/rules/` load for this project too, so they get graded — but under their own **User scope** heading, and never inside the project's grade. The fix for one of those rules lives in your setup, not in the repo. The same goes for `CLAUDE.md` files in directories above your project: they load in full at launch, so they're graded under **Above the project root**, apart from the project's numbers. `--project-only` leaves all of them out.
 
 | Moment | What happens |
 | --- | --- |

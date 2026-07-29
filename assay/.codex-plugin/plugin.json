@@ -1,6 +1,6 @@
 {
   "name": "assay",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Analyzes the instruction files an agent loads for a project — the AGENTS.md chain, skills, and hooks — and reports what is shadowed, past the byte cap, stale, contradictory, or better served by a mechanism than by prose.",
   "author": {
     "name": "Victor Villegas",

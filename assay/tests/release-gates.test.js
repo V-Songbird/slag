@@ -542,6 +542,38 @@ test("release gate: the source cannot be retired before validation", () => {
   assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE);
 });
 
+// [Foreman: 093] A rolled-back change must refuse retirement by naming the
+// rollback — not "no write in the journal", and not only a missing retire patch.
+test("release gate: a rolled-back change refuses retirement by naming the rollback", () => {
+  const root = txProject();
+  assert.equal(cli(root, ["plan", "--from", "draft.json"]).code, 0);
+  assert.equal(cli(root, ["apply", "--change", "c-skill"]).code, 0);
+  assert.equal(cli(root, ["validate", "--change", "c-skill"]).code, 0);
+  assert.equal(cli(root, ["rollback", "--change", "c-skill"]).code, 0);
+
+  const afterRollback = cli(root, ["retire", "--change", "c-skill"]);
+  assert.equal(afterRollback.code, 1);
+  assert.match(afterRollback.err, /the change was rolled back/);
+  assert.doesNotMatch(afterRollback.err, /no write in the journal/);
+  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE);
+
+  // a change with no retire patch says so too, and still names the rollback
+  const bare = txProject();
+  const rewrite = {
+    id: "c-rw", kind: "rule-rewrite", rationale: "why",
+    patches: [{ path: "CLAUDE.md", old: CLEAN_RULE, new: "- Never use `var`; use `const` everywhere." }],
+  };
+  fs.writeFileSync(path.join(bare, "draft2.json"), JSON.stringify({ changes: [rewrite] }));
+  assert.equal(cli(bare, ["plan", "--from", "draft2.json"]).code, 0);
+  assert.equal(cli(bare, ["apply", "--change", "c-rw"]).code, 0);
+  assert.equal(cli(bare, ["validate", "--change", "c-rw"]).code, 0);
+  assert.equal(cli(bare, ["rollback", "--change", "c-rw"]).code, 0);
+  const noPatch = cli(bare, ["retire", "--change", "c-rw"]);
+  assert.equal(noPatch.code, 1);
+  assert.match(noPatch.err, /declares no retirement patch/);
+  assert.match(noPatch.err, /rolled back/);
+});
+
 // ---------------------------------------------------------------------------
 // "public language does not imply static compliance prediction"
 // ---------------------------------------------------------------------------

@@ -4,6 +4,24 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.5.0] — 2026-07-28
+
+### Added
+
+- Two rules gated on the same condition that ban and command one action are reported as a conditional conflict — "when releasing, always X" against "when releasing, never X". A conditional rule facing an unconditional opposite stays silent on purpose: that shape is a rule and its exception. The pair joins the Conflicts section, the CI `conflicts` gate, and the relationship graph
+- One missing path that several rules or hooks still point at is reported once as a stale shared target, naming every dependent — restoring the one file fixes the whole set. Mechanical, and part of the CI `stale-targets` gate
+- Personal rules in `~/.claude/rules/` are discovered and graded under **User scope**, scoped `paths` frontmatter respected, without moving the project grade
+- `CLAUDE.md` and `CLAUDE.local.md` files in directories above the project root are discovered and graded under a new **Above the project root** section — the host loads them in full at launch, outermost first. `--project-only` leaves them out, and they never move the project grade
+
+### Changed
+
+- `@path` imports now stop at four hops, matching the host documentation's current recursion cap; the fifth hop is disclosed as beyond the cap instead of read
+
+### Fixed
+
+- The instruction chain table's `#` column now counts read order, matching the "chain position N of M" the Why column describes; a shadowed variant gets no number. It printed the precedence rank, which starts at 2
+- Retiring a rolled-back change now refuses by naming the rollback and the missing validation, instead of a message about a missing retirement patch or an empty journal
+
 ## [1.4.0] — 2026-07-28
 
 ### Changed
