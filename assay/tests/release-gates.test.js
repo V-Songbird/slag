@@ -1190,3 +1190,57 @@ test("release gate: DISCLOSED GAPS", () => {
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// "the four commands are the four commands"
+// ---------------------------------------------------------------------------
+
+// [Foreman: 096] A rename ships broken when one reference survives it. The
+// retired name is the cheapest thing to check and the easiest thing to miss:
+// it lives in prose, in a skill description, in a manifest, and in the closing
+// line the engine prints. So the gate greps the whole shipped plugin for it,
+// and asserts the four skill directories that replaced it are the only ones.
+//
+// CHANGELOG.md is excluded on purpose. It is the record of what the plugin used
+// to be called, and rewriting history there would be the actual defect.
+const RETIRED_COMMANDS = ["/assay:assay", "/assay:audit"];
+const COMMANDS = ["claude", "codex", "craft-rules", "craft-skill"];
+
+function shippedFiles(dir, out = []) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "node_modules" || entry.name === "tests" || entry.name.startsWith(".assay")) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) shippedFiles(full, out);
+    else if (/\.(md|js|json)$/.test(entry.name) && entry.name !== "CHANGELOG.md") out.push(full);
+  }
+  return out;
+}
+
+test("release gate: no retired command name survives anywhere in the plugin", () => {
+  const offenders = [];
+  for (const file of shippedFiles(PLUGIN_ROOT)) {
+    const text = fs.readFileSync(file, "utf-8");
+    for (const retired of RETIRED_COMMANDS) {
+      if (text.includes(retired)) offenders.push(path.relative(PLUGIN_ROOT, file) + " → " + retired);
+    }
+  }
+  assert.deepEqual(offenders, [], "a retired command name still ships:\n" + offenders.join("\n"));
+});
+
+test("release gate: four commands, each named by its own skill, none taking --host", () => {
+  const dirs = fs.readdirSync(path.join(PLUGIN_ROOT, "skills")).sort();
+  assert.deepEqual(dirs, [...COMMANDS].sort());
+  for (const dir of dirs) {
+    const fm = engine.parseFrontmatter(fs.readFileSync(path.join(PLUGIN_ROOT, "skills", dir, "SKILL.md"), "utf-8"));
+    // the command name is the frontmatter name, not the directory
+    assert.equal(fm.name, dir, dir + " names itself something else");
+    const hint = String(fm["argument-hint"] || "");
+    // --host is an engine argument now. Each command knows its own host, so a
+    // hint offering the flag would put a choice back in front of a user who
+    // does not have one to make.
+    assert.doesNotMatch(hint, /--host/, dir + " still offers --host");
+    // --startup names the directory a session began in, which only the chain
+    // host has. It belongs to that one command and nowhere else.
+    assert.equal(/--startup/.test(hint), dir === "codex", dir + " gets --startup wrong");
+  }
+});

@@ -2990,7 +2990,7 @@ test("the report warns when the judgments predate the engine's rubric version", 
 
   // the rubric file's own header is what the skill copies into promptVersion —
   // the two must not drift apart
-  const rubrics = fs.readFileSync(path.join(__dirname, "..", "skills", "assay", "references", "rubrics.md"), "utf-8");
+  const rubrics = fs.readFileSync(path.join(__dirname, "..", "skills", "claude", "references", "rubrics.md"), "utf-8");
   assert.equal(rubrics.split("\n")[0], "Rubric version: " + engine.RUBRIC_VERSION);
 });
 
@@ -4778,17 +4778,19 @@ test("assay's own .codex-plugin/plugin.json carries every documented required fi
     assert.match(asset, /^\.\//);
     assert.ok(fs.existsSync(path.resolve(pluginRoot, asset)), `${key} points at ${asset}, which does not exist`);
   }
-  // the audit workflow is what the packaging exists to carry, and it is the same
-  // skill directory the Claude packaging uses rather than a second copy
-  assert.equal(manifest.skills, "./skills/");
-  assert.ok(fs.existsSync(path.join(pluginRoot, "skills", "assay", "SKILL.md")));
+  // This manifest advertises NO skills directory. The packaged skills are
+  // written against Claude Code's tooling — ${CLAUDE_PLUGIN_ROOT},
+  // AskUserQuestion, Agent, Artifact — so none of them can run here, and a
+  // manifest that pointed at them would be selling a surface that does not work.
+  // On this host assay is the engine CLI.
+  assert.equal(manifest.skills, undefined);
   // the Claude manifest still owns no version — the marketplace does
   assert.equal(JSON.parse(fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf-8")).version, undefined);
 
   // and a plugin manifest is a discovery surface too: pointed at this directory,
-  // the adapter finds the packaged skills through it
+  // the adapter finds no plugin skills through it, because it declares none
   const found = codex.discoverSkills(codexContext(pluginRoot));
-  assert.ok(found.project.some((s) => s.scope === "plugin" && s.path === "skills/assay/SKILL.md"),
+  assert.deepEqual(found.project.filter((s) => s.scope === "plugin"), [],
     JSON.stringify(found.project.map((s) => s.path)));
 });
 
@@ -5281,8 +5283,10 @@ test("both craft skills still pass the trigger recipe their own audit applies", 
     assert.equal(checks.redundant, false, name + " carries a duplicated clause");
     assert.equal(checks.overCap, false, name + " is over the listing cap");
     assert.equal(fm.when_to_use, undefined, name + " is model-invocable and must not carry when_to_use");
-    // the host flag is part of the contract, so it is part of the hint
-    assert.match(String(fm["argument-hint"]), /--host codex/, name);
+    // [1.7.0] The host flag left the user-facing surface. These two skills are
+    // Claude Code's, the audit commands name their own host, and a hint that
+    // still offered --host would be advertising a choice nobody has.
+    assert.doesNotMatch(String(fm["argument-hint"]), /--host|--startup/, name);
     // no in-place editing tool at all: the write path is the transaction, and
     // this is the structural half of that promise
     assert.doesNotMatch(String(fm["allowed-tools"]), /\bEdit\b/, name + " still allows Edit");
@@ -5329,12 +5333,18 @@ test("the craft skills write only through the transaction, never a host path of 
   }
 });
 
-test("both craft skills read the host policy that decides what they may claim", () => {
-  // craft-rules must not report a wording grade under a profile that withdraws
-  // the rubric; craft-skill must not write to the trigger recipe under one that
-  // withdraws the recipe. Each names the policy key it reads.
-  assert.match(skillBody(skillSource("craft-rules")), /policy\.wordingRubric/);
-  assert.match(skillBody(skillSource("craft-skill")), /policy\.skillRecipe/);
+test("the craft skills are Claude Code's alone, with no host branch left in them", () => {
+  // [1.7.0] Both were written to run under either profile and carried the policy
+  // branches that made that honest: no wording grade where the rubric is
+  // withdrawn, no recipe score where the recipe is. The split retired the branch
+  // rather than the guarantee — these two build for one host now, so a surviving
+  // --host, or a fork on a policy key this host never sets, would be an
+  // instruction for a run that cannot happen.
+  for (const name of CRAFT_SKILLS) {
+    const body = skillBody(skillSource(name));
+    assert.doesNotMatch(body, /--host|--startup/, name + " still offers a host flag");
+    assert.doesNotMatch(body, /policy\.wordingRubric|policy\.skillRecipe/, name + " still branches on host policy");
+  }
   // and the recipes they load say where they were measured
   assert.match(fs.readFileSync(path.join(SKILLS_ROOT, "craft-rules", "references", "recipe.md"), "utf-8"),
     /policy\.wordingRubric/);

@@ -493,8 +493,12 @@ function discoverSkills(ctx) {
     project.push(...skillsIn(at, rel + "/", "project", rel));
   }
   const manifest = readPluginManifest(ctx.projectRoot);
-  if (manifest) {
-    const abs = insideRoot(ctx.projectRoot, typeof manifest.skills === "string" ? manifest.skills : "./skills/");
+  // The doc names no default for an omitted component path — the same reading
+  // `project_doc_fallback_filenames` gets above: an example and no default means
+  // the default is none. A manifest that declares no `skills` bundles no skills,
+  // and guessing `./skills/` for it would report a surface nothing advertises.
+  if (manifest && typeof manifest.skills === "string") {
+    const abs = insideRoot(ctx.projectRoot, manifest.skills);
     if (abs) {
       const rel = relPath(ctx.projectRoot, abs);
       project.push(...skillsIn(abs, rel + "/", "plugin", ".codex-plugin/plugin.json"));

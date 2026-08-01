@@ -4,6 +4,27 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.7.0] — 2026-08-01
+
+### Added
+
+- `/assay:codex` is its own command: it audits what Codex loads for a project — the `AGENTS.md` chain, the skills it lists, and the hooks wired around them. `--startup <path>` audits a session that begins in a subdirectory
+
+### Changed
+
+- **Breaking.** The audit is now `/assay:claude`. `/assay:assay` is gone; there is one command per host, and each one names the host it audits
+- The audit skill is shorter — six steps and one subagent call, with the instructions for applying a fix now inside the step that applies it
+
+### Removed
+
+- No command takes `--host` or `--startup` any more. Each audit command already knows its host, and `/assay:craft-rules` and `/assay:craft-skill` write for Claude Code only — authoring for Codex is no longer offered
+- The Codex plugin manifest no longer advertises a skills directory. Those skills are written for Claude Code's tooling and could not run there; on Codex, assay is the engine CLI
+
+### Fixed
+
+- A path holding a space, `(`, `)`, `#`, `?` or `|` now produces a link that opens everywhere in the `--verbose` report; it used to render as plain text at several of those places
+- Rule text in the HTML report and in the saved record no longer carries the backslashes that only a markdown table needs
+
 ## [1.6.0] — 2026-07-29
 
 ### Added

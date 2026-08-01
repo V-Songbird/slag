@@ -1,6 +1,6 @@
 {
   "name": "assay",
-  "description": "Analyzes the instruction files Claude Code or Codex loads — CLAUDE.md, .claude/rules/, AGENTS.md, skills and hooks — grading structural hygiene without predicting compliance. Flags stale references and rules better served by a mechanism, rewrites the weak ones, and authors new rules and skills.",
+  "description": "Analyzes the instruction files an agent loads — CLAUDE.md, .claude/rules/, AGENTS.md, skills and hooks — flagging what is vague, stale, buried, or better served by a mechanism, and rewriting the weak ones. /assay:claude and /assay:codex audit a host each; craft-rules and craft-skill write new ones.",
   "license": "MIT",
   "author": {
     "name": "Victor Villegas",

@@ -26,7 +26,7 @@ And when the problem is a skill instead of a rule, `/assay:craft-skill` builds o
 
 Rules get the same treatment: `/assay:craft-rules` grills you — when should it fire, what replaces the thing you're banning, what does a violation actually look like — then writes one bullet that would survive its own audit, placed where Claude will actually read it. If what you asked for was never a rule at all, it says so instead of writing you a wish.
 
-Both build for whichever host you name — add `--host codex` and they write to that host's own files, with that host's required metadata, and claim only what that host has evidence for. Either way, nothing lands unreviewed: what they write goes through the same previewed, reversible transaction as the audit's fixes, and a draft that contradicts a rule you already have is shown to you as a question, not resolved behind your back.
+Nothing either one writes lands unreviewed: it goes through the same previewed, reversible transaction as the audit's fixes, and a draft that contradicts a rule you already have is shown to you as a question, not resolved behind your back.
 
 ## Why you'd want it
 
@@ -73,23 +73,13 @@ Inside Claude Code, run:
 
 Nothing to configure. Works at the next session.
 
-assay installs on Codex too — point your Codex plugin install at this
-repository's `assay/` directory. See below for what that gets you.
-
 ## Codex
 
-`/assay:assay --host codex` audits the instruction system Codex loads instead of
-the Claude Code one: the `AGENTS.md` files it actually reads, the skills it
-lists, and the hooks wired around them. The findings say what never takes effect
-and why — a file the host stops reading at its size limit, a skill description
-too long to survive the initial listing, a hook configured but not yet trusted.
-A Codex report is findings only; the hygiene grade stays off, because that
-rubric carries no evidence for this host.
+`/assay:codex` audits the instruction system Codex loads instead of the Claude Code one: the `AGENTS.md` files it actually reads, the skills it lists, and the hooks wired around them. The findings say what never takes effect and why — a file the host stops reading at its size limit, a skill description too long to survive the initial listing, a hook configured but not yet trusted. A Codex report is findings only; the hygiene grade stays off, because that rubric carries no evidence for this host.
 
-The packaged skills and workflows are written for Claude Code's tooling. On
-Codex, the supported surface today is the engine CLI — `scan`, `report --json`,
-`ci`, and the transaction commands — and the Codex profile is an adapter
-preview.
+`--startup <path>` audits a session that begins in a subdirectory, since the chain runs from the project root down to wherever the session started.
+
+assay also installs on Codex itself — point your Codex plugin install at this repository's `assay/` directory. There it is the engine CLI and nothing else: `scan`, `report`, `ci`, and the transaction commands. The packaged skills are written for Claude Code's tooling and are not offered to Codex.
 
 > [!NOTE]
 > The Codex profile is encoded from the official Codex documentation and
@@ -102,29 +92,28 @@ preview.
 
 | You want to… | Command |
 | --- | --- |
-| See what's wrong with your rules | `/assay:assay` |
-| Apply the rewrites without the menu | `/assay:assay --fix` |
-| See the full analysis behind the short report | `/assay:assay --verbose` |
+| See what's wrong with your rules | `/assay:claude` |
+| Apply the rewrites without the menu | `/assay:claude --fix` |
+| See the full analysis behind the short report | `/assay:claude --verbose` |
+| Audit what Codex loads instead | `/assay:codex` |
 | Write a new rule that sticks | `/assay:craft-rules` |
 | Build a skill that reliably triggers | `/assay:craft-skill` |
 | Fix a skill Claude keeps ignoring | `/assay:craft-skill <skill name>` |
-| Audit what Codex loads instead | `/assay:assay --host codex` |
 
 <details>
 <summary>Less common flags</summary>
 
 | You want to… | Command |
 | --- | --- |
-| Grade the repo's files only, not your own | `/assay:assay --project-only` |
-| Open the whole report as HTML, with search and filters | `/assay:assay --artifact` |
-| Audit a Codex session started in a subdirectory | `/assay:assay --host codex --startup <path>` |
-| Author a rule or skill for Codex instead | `/assay:craft-rules --host codex` |
+| Grade the repo's files only, not your own | `/assay:claude --project-only` |
+| Open the whole report as HTML, with search and filters | `/assay:claude --artifact` |
+| Audit a Codex session started in a subdirectory | `/assay:codex --startup <path>` |
 
 </details>
 
 ## Under the hood
 
-One scoring script and three skills — the audit with its two rubrics, craft-skill with its trigger recipe, craft-rules with its rule recipe — all there to read in the plugin's files. It reads your Markdown and YAML with real parsers and ships them with it; there is still nothing to install.
+One scoring script and four skills — an audit per host, craft-skill with its trigger recipe, craft-rules with its rule recipe — all there to read in the plugin's files. It reads your Markdown and YAML with real parsers and ships them with it; there is still nothing to install.
 
 ## Good to know
 

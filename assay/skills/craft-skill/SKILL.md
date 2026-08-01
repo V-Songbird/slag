@@ -1,58 +1,51 @@
 ---
 name: craft-skill
 description: >-
-  Builds one skill for the host you name — `.claude/skills/<name>/SKILL.md`, or
-  Codex's `.agents/skills` with its `agents/openai.yaml` metadata — with the
-  format fetched live from that host's own docs, and installs it as a reviewed,
+  Builds one Claude Code skill — `.claude/skills/<name>/SKILL.md`, with the
+  format fetched live from the official docs — and installs it as a reviewed,
   reversible change. Also refits an existing skill's description that never
   seems to fire. Use when the user wants a skill created or made to trigger
   reliably — e.g. "make me a skill", "create a skill for X", "my skill never
   fires", "Claude keeps ignoring my skill", "fix this skill description", "craft
   a skill" — or invokes /assay:craft-skill. Do NOT use for auditing CLAUDE.md
-  rules — that is /assay:assay.
-argument-hint: "[skill name or what it should do] [--host codex]"
+  rules — that is /assay:claude.
+argument-hint: "[skill name or what it should do]"
 allowed-tools: Bash, Read, Write, Glob, AskUserQuestion, WebFetch
 ---
 
 # assay:craft-skill
 
 You build one skill per run — new, or a refit of an existing one. `$ARGUMENTS`,
-if present, names the skill or describes what it should do, and may carry
-`--host codex` to build for the Codex skill system instead of the Claude Code
-one (default `claude-code`).
+if present, names the skill or describes what it should do.
 
 You never write a skill file yourself. Every artifact — the `SKILL.md`, any
 metadata sidecar, a companion rule, a hook — goes through the engine's change
 transaction in step 5, so each one is previewed before it lands and reversible
 after.
 
-## 1. Read the host
+## 1. Read the project
 
 Before anything else, from the project root:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" scan --host <host>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" scan
 ```
 
 If `node` is not on PATH (fnm/nvm setups), register it the way the project's
-CLAUDE.md says to, then rerun. Pass the same `--host` to **every** later
-`assay.js` call — the profile decides where skills live, what metadata is
-required, and what `validate` checks.
+CLAUDE.md says to, then rerun.
 
-Then read `.assay-tmp/scan.json`. Every host fact below comes from it; never
-assume a directory or a required field from the host's name:
+Then read `.assay-tmp/scan.json`. Every fact below comes from it; never assume a
+directory or a required field:
 
-- `profile.targets.skill` — `dir` and `file` (where this host's skills live),
-  `requires[]` (the frontmatter this host documents as required), `metadata[]`
-  (any invocation/UI sidecar it reads), and `docs` (the page to fetch in step 2).
-- `profile.policy.skillRecipe` — `false` means this profile does **not** grade
-  descriptions against the measured trigger recipe. See step 3.
-- `skills[]` — every project skill the host already discovers, with its `name`,
-  `path`, and `checks`. This is where a refit target comes from, and where a
-  name collision shows up.
-- `coverage.skillBudget` — where the host publishes a collective listing budget,
-  what it is. Every skill's name and description spend from it before any skill
-  is selected, so a long description costs the whole list.
+- `profile.targets.skill` — `dir` and `file` (where skills live), `requires[]`
+  (the frontmatter documented as required), `metadata[]` (any invocation/UI
+  sidecar), and `docs` (the page to fetch in step 2).
+- `skills[]` — every project skill already discovered, with its `name`, `path`,
+  and `checks`. This is where a refit target comes from, and where a name
+  collision shows up.
+- `coverage.skillBudget` — the collective listing budget, where one is published.
+  Every skill's name and description spend from it before any skill is selected,
+  so a long description costs the whole list.
 - `profile.targets.hook.docs` — the hooks page, for step 4's ladder.
 
 ## 2. Scope, and ground the format
@@ -69,8 +62,7 @@ ask for what the user already said; only fill real gaps.
 - The nearest adjacent ask the skill should NOT fire on.
 - Whether the skill is bound to a file type or path (a candidate for a scoped
   companion rule).
-- Which tools or commands the skill depends on, where the host records
-  dependencies.
+- Which tools or commands the skill depends on.
 - How critical firing is: nice-to-have, should-always-run, or
   must-never-be-skipped.
 
@@ -80,46 +72,29 @@ remembered format. If the fetch fails, stop and tell the user to retry later; a
 stale-format skill is worse than no skill. Keep the URL and the date you fetched
 it: step 5 records them as the change's provenance.
 
-## 3. Write the metadata the host actually requires
+## 3. Write the metadata
 
 Every field in `profile.targets.skill.requires[]` must be present and non-empty.
-Beyond that, what "good" means depends on the profile:
-
-**Where `profile.policy.skillRecipe` is not `false`** — the description is a
-router and the measured recipe applies. Follow
-[references/recipe.md](references/recipe.md) exactly: concrete base sentence,
+Beyond that, the description is a router and the measured recipe applies: follow
+[references/recipe.md](references/recipe.md) exactly — concrete base sentence,
 "Use when…" trigger clause, "Do NOT use…" exclusion, under the listing cap. Read
-the finished description once against the recipe's refit checklist before
-putting it in the plan. On a refit, edit only the frontmatter description (and
-`when_to_use` if the format still uses it) — never the body's instructions
-beyond what the user asked.
+the finished description once against the recipe's refit checklist before putting
+it in the plan. On a refit, edit only the frontmatter description (and
+`when_to_use` if the format still uses it) — never the body's instructions beyond
+what the user asked.
 
-**Where `profile.policy.skillRecipe` is `false`** — the engine grades no
-description on this profile and produces no recipe score, because the recipe was
-measured against a different host's router. Do not write to it and do not claim
-a score. What the profile does check is `requires[]`, and what it does model is
-the host's own mechanism:
+Where `coverage.skillBudget` exists, keep the name and description short: they
+are spent from a shared listing budget before any skill is selected, and a long
+description costs the whole list.
 
-- write every file named in `profile.targets.skill.metadata[]`, in the skill
-  directory, as YAML the host documents — display name and short description for
-  the UI, `policy.allow_implicit_invocation` for routing, and each tool the
-  skill depends on under `dependencies.tools`;
-- `allow_implicit_invocation: false` makes the skill explicit-only: it is reached
-  when a session names it and never by description matching. Ask which the user
-  wants and say what they are choosing;
-- where `coverage.skillBudget` exists, keep the name and description short —
-  they are spent from a shared listing budget, and the host shortens
-  descriptions and omits skills entirely when the set is large.
-
-On every profile: a name already in `skills[]` is a collision, not a version.
-Say so before writing — some hosts do not merge two skills with one name; both
-appear and neither wins.
+A name already in `skills[]` is a collision, not a version. Say so before
+writing — both appear and neither wins.
 
 ## 4. Climb the ladder if asked
 
 Only when step 2 said should-always-run or must-never-be-skipped. Description
-routing is probabilistic on **every** host, whatever the metadata says, so a
-must-run duty needs something above it:
+routing is **probabilistic**, whatever the metadata says, so a must-run duty
+needs something above it:
 
 - **should-always-run** — add the companion rule from the recipe, placed per
   `profile.targets.rule.places[]` (the scoped target when the skill is
@@ -138,9 +113,12 @@ Mutation is one explicit transaction and the engine owns every mechanical part
 of it. You own the wording and the approval. Never write or edit a skill,
 sidecar, rule, or settings file directly.
 
-1. **Assemble the draft.** One `.assay-tmp/draft-plan.json`, per the draft-plan
-   shape documented in
-   `${CLAUDE_PLUGIN_ROOT}/skills/assay/references/fixes.md`:
+1. **Assemble the draft.** One `.assay-tmp/draft-plan.json`, holding a `changes`
+   array. Each change carries an `id` (yours, stable and unique in the plan — it
+   is what the user approves and what every later command names), a `kind`, a
+   one-sentence `rationale`, and a `patches` array of `{ path, old, new }`, where
+   `old` is the **exact** current text with enough context to appear exactly
+   once, or `null` to create a file:
 
    - the new skill is one `placement-promotion` change carrying
      `"mechanism": { "type": "skill", "name": "<name>" }` and a `provenance`
@@ -158,7 +136,7 @@ sidecar, rule, or settings file directly.
 2. **Plan it.**
 
    ```
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" plan --from .assay-tmp/draft-plan.json --host <host>
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" plan --from .assay-tmp/draft-plan.json
    ```
 
    Exit 1 means the draft was rejected — a file that already exists, a promotion
@@ -174,7 +152,7 @@ sidecar, rule, or settings file directly.
 4. **Collect approval per change**, then apply exactly the approved ids:
 
    ```
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" apply --change <id> --host <host>
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" apply --change <id>
    ```
 
    The ids are the approval boundary; there is no apply-everything default. A
@@ -186,8 +164,8 @@ sidecar, rule, or settings file directly.
 Per applied change:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" validate --change <id> --host <host>
-node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" scan --host <host>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" validate --change <id>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" scan
 ```
 
 `validate` re-parses every file the change wrote (the `SKILL.md` frontmatter as
@@ -199,8 +177,7 @@ ran.
 Then check the fresh `.assay-tmp/scan.json` yourself:
 
 - the skill is in `skills[]` under the name you gave it;
-- `checks.missing` is empty — on a recipe profile that is the trigger recipe's
-  parts, on a validation profile it is the host's required frontmatter;
+- `checks.missing` is empty — that is the trigger recipe's parts;
 - every file the `SKILL.md` body references exists (`Read` or `Glob` each one) —
   a skill pointing at a missing reference is blocked the first time it runs;
 - where a metadata sidecar was written, `metadata` is present on the entry and
@@ -224,7 +201,7 @@ or roll it back. Then report in a few lines: what was built and where, that it
 loads from the next session on, and the two invocation facts kept separate —
 **explicit** invocation, where a session names the skill and it runs, and
 **implicit** routing, where the description is matched and it may not. Say the
-measured line plainly: description routing is probabilistic on every host, and a
-duty that must never be skipped needs the rule or the hook above it. Never
+measured line plainly: description routing is probabilistic, and a duty that
+must never be skipped needs the rule or the hook above it. Never
 promise invocation. Remind the user that `git diff` shows every change and that
 `rollback --change <id>` undoes it. One pass, then done; no follow-up menus.

@@ -130,7 +130,7 @@ const TMP_DIR = ".assay-tmp";
 // A release cut keeps ANALYZER_VERSION in step with assay's version in
 // .claude-plugin/marketplace.json, which owns the published number.
 const SCHEMA_VERSION = 1;
-const ANALYZER_VERSION = "1.6.0";
+const ANALYZER_VERSION = "1.7.0";
 const PARSER_NAME = "assay-markdown";
 // [Foreman: 073] 2 = markdown-it 14.1.0 + js-yaml 4.1.0 behind assay's adapter.
 // 1 was the handwritten line scanner; a record naming version 1 was produced by
@@ -143,7 +143,7 @@ const PROFILE_VERSION = claudeAdapter.profileVersion;
 // [Foreman: 071] The semantic pass's other cache axis. Judgment keys are content
 // hashes, so an edited rule re-judges by construction; a changed RUBRIC is what
 // that cannot see. The number here is the one printed at the top of
-// skills/assay/references/rubrics.md, and the two move together — bump both or
+// skills/claude/references/rubrics.md, and the two move together — bump both or
 // neither. A judgments file recorded under a different one still composes; the
 // report says the judgments predate the current rubric.
 const RUBRIC_VERSION = "2";
@@ -4167,7 +4167,7 @@ function pushWeakSkillSection(out, weakSkills) {
   for (const s of weakSkills) {
     const c = s.checks;
     const issues = skillIssues(s);
-    out.push(`| ${s.name} | [${s.path}](${s.path}) | ${c.length}/${DESCRIPTION_CAP} | ${issues.join(", ")} |`);
+    out.push(`| ${s.name} | ${mdPathLink(s.path)} | ${c.length}/${DESCRIPTION_CAP} | ${issues.join(", ")} |`);
   }
   out.push("");
 }
@@ -4186,7 +4186,7 @@ function pushWeakAgentSection(out, weakAgents) {
     const c = a.checks;
     // [Foreman: 095] Shared with the short report, so the two views can never
     // tell different stories about one description.
-    out.push(`| ${a.name} | [${a.path}](${a.path}) | ${c ? c.length : "—"}/${DESCRIPTION_CAP} | ${skillIssues(a).join(", ")} |`);
+    out.push(`| ${a.name} | ${mdPathLink(a.path)} | ${c ? c.length : "—"}/${DESCRIPTION_CAP} | ${skillIssues(a).join(", ")} |`);
   }
   out.push("");
 }
@@ -4228,7 +4228,7 @@ function pushSuppressedSection(out, suppressed) {
   out.push("These were extracted and scored, then dropped from every count above — the verification pass judged them prose rather than instructions. Their scores are unchanged; only their membership in the report is.");
   out.push("");
   for (const r of suppressed) {
-    out.push(`- ${r.id} ([${r.file}:${r.lineStart}](${r.file}:${r.lineStart})) "${truncate(r.text, 70)}" — "${r.suppressedReason}"`);
+    out.push(`- ${r.id} (${mdPathLink(r.file, r.lineStart)}) "${truncateCell(r.text, 70)}" — "${r.suppressedReason}"`);
   }
   out.push("");
 }
@@ -4355,7 +4355,7 @@ function pushRestructureSection(out, shapes) {
   out.push("");
   for (const f of shapes) {
     const p = f.sources[0].path;
-    out.push(`- [${p}](${p}) — ${(f.reasons || []).join(", ")}`);
+    out.push(`- ${mdPathLink(p)} — ${(f.reasons || []).join(", ")}`);
     for (const r of f.safeActions) out.push(`  - ${r}`);
   }
   out.push("");
@@ -4376,7 +4376,7 @@ function pushUserScopeSection(out, files, userWeak = [], helpers = null) {
   out.push("|---|---|---|");
   for (const f of userFiles) {
     const g = f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`;
-    const label = helpers ? `[${helpers.showPath(f.path)}](${helpers.linkPath(f.path)})` : f.path;
+    const label = helpers ? `[${mdLabel(escapeTableCell(helpers.showPath(f.path)))}](${mdTarget(helpers.linkPath(f.path))})` : f.path;
     out.push(`| ${label} | ${f.ruleCount} | ${g} |`);
   }
   out.push("");
@@ -4408,7 +4408,7 @@ function pushAncestorScopeSection(out, files, ancestorWeak = [], helpers = null)
   out.push("|---|---|---|");
   for (const f of ancestorFiles) {
     const g = f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`;
-    const label = helpers ? `[${helpers.showPath(f.path)}](${helpers.linkPath(f.path)})` : f.path;
+    const label = helpers ? `[${mdLabel(escapeTableCell(helpers.showPath(f.path)))}](${mdTarget(helpers.linkPath(f.path))})` : f.path;
     out.push(`| ${label} | ${f.ruleCount} | ${g} |`);
   }
   out.push("");
@@ -4472,7 +4472,7 @@ function pushChainSection(out, files, budget) {
   for (const f of rows) {
     const from = Number.isInteger(f.startsAtByte) ? String(f.startsAtByte) : "—";
     const pos = Number.isInteger(f.startsAtByte) ? String(++position) : "—";
-    out.push(`| ${pos} | [${f.path}](${f.path}) | ${f.bytes == null ? "—" : f.bytes} | ${from} | ${chainStatus(f)} | ${f.selectionReason || ""} |`);
+    out.push(`| ${pos} | ${mdPathLink(f.path)} | ${f.bytes == null ? "—" : f.bytes} | ${from} | ${chainStatus(f)} | ${f.selectionReason || ""} |`);
   }
   out.push("");
   if (budget) {
@@ -4752,23 +4752,14 @@ function renderBrief(audit) {
   // built from paths, and a path may carry one. `truncate` gives the rule text
   // this guarantee; `cell` gives it to everything else in a row.
   const cell = escapeTableCell;
-  // A `]` closes a markdown link label, so a path carrying one renders as
-  // literal text instead of a clickable location.
-  const label = (s) => String(s).replace(/([[\]])/g, "\\$1");
-  // A link target ends at a space or a `)`, a `#` starts a fragment and a `?` a
-  // query, and a `|` would still split the table row the link sits in. None of
-  // them survives as a raw byte. The LABEL beside it keeps the real path, so a
-  // terminal that reads `path:line` out of the visible text still sees it.
-  const TARGET_ESCAPES = { "(": "%28", ")": "%29", " ": "%20", "|": "%7C", "#": "%23", "?": "%3F" };
-  const target = (s) => String(s).replace(/[()| #?]/g, (c) => TARGET_ESCAPES[c]);
-  // `cell` first, then `label`: the brackets `label` adds are for the link and
-  // must not themselves be escaped again for the table.
-  const where = (p, line) => `[${label(cell(showPath(p)))}:${line}](${target(linkPath(p))}:${line})`;
+  // `cell` first, then `mdLabel`: the brackets `mdLabel` adds are for the link
+  // and must not themselves be escaped again for the table.
+  const where = (p, line) => `[${mdLabel(cell(showPath(p)))}:${line}](${mdTarget(linkPath(p))}:${line})`;
   const at = (r) => where(r.file, r.lineStart);
   // A newline in a list item would end the item and break the section's shape.
   const oneLine = (s) => cell(String(s).replace(/\s*\n\s*/g, " "));
   // Brackets would break the link label the rule text sits in.
-  const quote = (r, n) => '"' + truncate(r.text, n).replace(/[[\]]/g, "") + '"';
+  const quote = (r, n) => '"' + truncateCell(r.text, n).replace(/[[\]]/g, "") + '"';
 
   // G2, mechanically. A rule lands in the first bucket that claims it and is
   // invisible to every bucket after — so "one rule, one line" is a property of
@@ -4907,7 +4898,7 @@ function renderBrief(audit) {
   const also = [];
   for (const f of shapes) {
     const p = f.sources[0].path;
-    also.push(`- [${label(cell(showPath(p)))}](${target(linkPath(p))}) — ${oneLine((f.safeActions || [])[0] || "reshape this file")}`);
+    also.push(`- [${mdLabel(cell(showPath(p)))}](${mdTarget(linkPath(p))}) — ${oneLine((f.safeActions || [])[0] || "reshape this file")}`);
   }
   if (buried.length) {
     also.push(`- ${buried.length} ${buried.length === 1 ? "rule sits" : "rules sit"} near the bottom of a long file, where they get skimmed — move the important ones up.`);
@@ -4928,9 +4919,12 @@ function renderBrief(audit) {
     out.push("");
   }
 
+  // One command per host, so the closing line names the door the reader came
+  // through rather than the one this engine happens to default to.
+  const cmd = ((audit.profile || {}).host === "codex") ? "/assay:codex" : "/assay:claude";
   out.push(weak.length
-    ? "Run `/assay:assay --fix` to rewrite the weak ones, or `--verbose` to see everything assay found."
-    : "Run `/assay:assay --verbose` to see everything assay found.");
+    ? `Run \`${cmd} --fix\` to rewrite the weak ones, or \`--verbose\` to see everything assay found.`
+    : `Run \`${cmd} --verbose\` to see everything assay found.`);
 
   return out.join("\n");
 }
@@ -4972,15 +4966,17 @@ function renderReport(audit, opts = {}) {
     return s.startsWith(home) ? "~" + s.slice(home.length).replace(/\\/g, "/") : linkPath(s);
   };
   // file:line as a markdown link — Claude Code renders it clickable, opening
-  // the rule at its exact line
-  const loc = (r) => `[${showPath(r.file)}:${r.lineStart}](${linkPath(r.file)}:${r.lineStart})`;
+  // the rule at its exact line. A path may carry a space, a bracket or a `(`,
+  // none of which survives raw in a link, so both halves are escaped for the
+  // side they land on.
+  const loc = (r) => `[${mdLabel(showPath(r.file))}:${r.lineStart}](${mdTarget(linkPath(r.file))}:${r.lineStart})`;
   // [Foreman: 078] the same link off a finding's source span, which is what a
   // corpus finding carries instead of a rule
-  const spanLink = (s) => `[${showPath(s.path)}:${s.lineStart}](${linkPath(s.path)}:${s.lineStart})`;
+  const spanLink = (s) => `[${mdLabel(showPath(s.path))}:${s.lineStart}](${mdTarget(linkPath(s.path))}:${s.lineStart})`;
   // The rule cell itself is the click target: a bare line number is useless to
   // a reader, so the rule id + text opens the file at its line. Brackets in the
   // label would break the markdown link, so drop them.
-  const ruleLink = (r, n) => `[${r.id} "${truncate(r.text, n).replace(/[[\]]/g, "")}"](${linkPath(r.file)}:${r.lineStart})`;
+  const ruleLink = (r, n) => `[${r.id} "${truncateCell(r.text, n).replace(/[[\]]/g, "")}"](${mdTarget(linkPath(r.file))}:${r.lineStart})`;
   const weakSkills = (audit.skills || []).filter(isWeakSkill);
   // [Foreman: 071] No `semantic` block means no model judged anything in this
   // audit. Every renderer says so rather than letting a renormalized score read
@@ -5108,7 +5104,7 @@ function renderReport(audit, opts = {}) {
     out.push("");
     for (const f of conflicts) {
       const [a, b] = f.sources;
-      out.push(`- [${a.path}:${a.lineStart}](${a.path}:${a.lineStart}) ↔ [${b.path}:${b.lineStart}](${b.path}:${b.lineStart}) — ${f.summary}`);
+      out.push(`- ${mdPathLink(a.path, a.lineStart)} ↔ ${mdPathLink(b.path, b.lineStart)} — ${f.summary}`);
       out.push(`  - ${f.explanation}`);
     }
     out.push("");
@@ -5160,7 +5156,7 @@ function renderReport(audit, opts = {}) {
     out.push(`A prohibition with no named alternative can stall a run outright when the task needs the banned thing. Pair it with the replacement — "Never X — do Y instead" — or with the escape hatch ("stop and ask"). ${evidenceTag(stallEvidence)} — ${stallEvidence.limits}.`);
     out.push("");
     for (const r of stalls) {
-      out.push(`- ${r.id} (${loc(r)}) "${truncate(r.text, 80)}"`);
+      out.push(`- ${r.id} (${loc(r)}) "${truncateCell(r.text, 80)}"`);
     }
     out.push("");
   }
@@ -5172,7 +5168,7 @@ function renderReport(audit, opts = {}) {
     out.push("");
     for (const r of buried) {
       const total = files[r.fileIndex] ? files[r.fileIndex].lineCount : "?";
-      out.push(`- ${r.id} (${loc(r)}) "${truncate(r.text, 80)}" — line ${r.lineStart} of ${total}`);
+      out.push(`- ${r.id} (${loc(r)}) "${truncateCell(r.text, 80)}" — line ${r.lineStart} of ${total}`);
     }
     out.push("");
   }
@@ -5249,7 +5245,7 @@ function renderReport(audit, opts = {}) {
     out.push("");
     for (const r of badCategories) {
       const line = r.invalidCategory.line;
-      out.push(`- ${r.id} ([${r.file}:${line}](${r.file}:${line})) — \`<!-- category: ${r.invalidCategory.value} -->\``);
+      out.push(`- ${r.id} (${mdPathLink(r.file, line)}) — \`<!-- category: ${r.invalidCategory.value} -->\``);
     }
     out.push("");
   }
@@ -5340,7 +5336,7 @@ function renderReport(audit, opts = {}) {
     out.push("A hook or script could enforce these mechanically, on every run, instead of relying on Claude to read and remember them: [model-inferred]");
     out.push("");
     for (const r of hooks) {
-      out.push(`- ${r.id} (${loc(r)}) "${truncate(r.text, 80)}"`);
+      out.push(`- ${r.id} (${loc(r)}) "${truncateCell(r.text, 80)}"`);
     }
     out.push("");
     // The wired-hook inventory stays out of the report: it is the reader's
@@ -5365,7 +5361,7 @@ function renderReport(audit, opts = {}) {
       const det = Object.entries(r.placement.detections)
         .map(([prim, d]) => `${prim} ${fmt(d.confidence)} [${d.evidence.join(", ")}]`)
         .join("; ");
-      out.push(`- ${r.id} (${loc(r)}) → **${r.placement.bestFit}** — "${truncate(r.text, 70)}"`);
+      out.push(`- ${r.id} (${loc(r)}) → **${r.placement.bestFit}** — "${truncateCell(r.text, 70)}"`);
       out.push(`  - signals: ${det}`);
     }
     out.push("");
@@ -5489,9 +5485,41 @@ function escapeTableCell(s) {
   return out;
 }
 
+// razor: shortening only. The result reaches the HTML view and the record's
+// `where.label` as well as the markdown, so it must stay faithful to the source
+// text — a markdown table cell wraps it in `truncateCell` instead.
 function truncate(text, n) {
-  const clean = escapeTableCell(text).replace(/\s+/g, " ");
+  const clean = String(text).replace(/\s+/g, " ");
   return clean.length > n ? clean.slice(0, n - 1) + "…" : clean;
+}
+
+// Rule text inside a markdown table. Escaping runs BEFORE the cut so the added
+// backslash is counted against the width, the way a rendered cell sees it.
+function truncateCell(text, n) {
+  return truncate(escapeTableCell(text), n);
+}
+
+// A `]` closes a markdown link label, so a path carrying one renders as literal
+// text instead of a clickable location.
+function mdLabel(s) {
+  return String(s).replace(/([[\]])/g, "\\$1");
+}
+
+// A link target ends at a space or a `)`, a `#` starts a fragment and a `?` a
+// query, and a `|` would still split the table row the link sits in. None of
+// them survives as a raw byte. The LABEL beside it keeps the real path, so a
+// terminal that reads `path:line` out of the visible text still sees it.
+const TARGET_ESCAPES = { "(": "%28", ")": "%29", " ": "%20", "|": "%7C", "#": "%23", "?": "%3F" };
+function mdTarget(s) {
+  return String(s).replace(/[()| #?]/g, (c) => TARGET_ESCAPES[c]);
+}
+
+// A path as a clickable location, escaped on both halves: the label for the
+// link syntax and the table cell it may sit in, the target for the URL. Pass
+// `line` to open the file at it.
+function mdPathLink(p, line) {
+  const at = line == null ? "" : ":" + line;
+  return `[${mdLabel(escapeTableCell(p))}${at}](${mdTarget(p)}${at})`;
 }
 
 // ---------------------------------------------------------------------------
