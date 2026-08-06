@@ -3,7 +3,11 @@
 // brink — UserPromptSubmit hook.
 // Watches how full the context window is and, once it crosses a threshold,
 // surfaces a nudge to run /compact with a guided instruction — so the summary
-// keeps the live task instead of an auto-summary's guess. It goes out
+// keeps the live task instead of an auto-summary's guess. The threshold
+// tracks the session's auto-compact window whenever the user has configured
+// one, because the window itself is not a constant — 200k on a default
+// session, 1M with extended context — and a fixed token count is either past
+// the edge or nowhere near it. It goes out
 // on two channels: `systemMessage`, which reaches the user directly wherever
 // the client renders it, and `additionalContext`, which reaches the assistant
 // with an instruction to relay it — the only channel that survives clients
@@ -41,6 +45,38 @@ function setting(name, fallback) {
 function settingNum(name, fallback) {
   const n = Number(setting(name, ''));
   return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+// The share of the auto-compact window that counts as "near the edge", and the
+// fallback for sessions that publish no window at all. Guessing the window low
+// only nudges early; guessing it high means the host compacts first and brink
+// never speaks, so the fallback stays under the 200k default window.
+const FILL_SHARE = 0.75;
+const DEFAULT_THRESHOLD = 160000;
+
+// The window /autocompact accepts, and so the only range worth believing.
+const WINDOW_MIN = 100000;
+const WINDOW_MAX = 1000000;
+
+function windowValue(raw) {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= WINDOW_MIN && n <= WINDOW_MAX ? n : null;
+}
+
+// How full the context window may get before the host compacts on its own.
+// The env var wins over the setting /autocompact saves, matching the host's
+// own precedence. Null when the user set neither — no hook input carries the
+// window size, so there is nothing else to read.
+function autoCompactWindow() {
+  const fromEnv = windowValue(process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW);
+  if (fromEnv) return fromEnv;
+  const dir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  try {
+    const settings = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+    return windowValue(settings.autoCompactWindow);
+  } catch {
+    return null; // absent, unreadable, or not JSON — treat as unset
+  }
 }
 
 const TAIL_BYTES = 1024 * 1024;
@@ -237,18 +273,25 @@ function decide(tokensNow, firedAt, threshold, rearm, repeat) {
 }
 
 // Build the suggestion. The keep-clause names the live task and files when the
-// transcript gave us any, and degrades to a generic list when it didn't.
+// transcript gave us any, and degrades to a generic list when it didn't. The
+// conventions entry is there because path-scoped rules and nested CLAUDE.md
+// files live in the message history and do not survive a compaction — nothing
+// re-injects them until a matching file is read again.
 function nudge(tokensNow, signals) {
   const k = Math.round(tokensNow / 1000);
   const s = signals || {};
   const keep = [s.task ? `the current task (${s.task})` : 'the current task and goal'];
   if (s.files && s.files.length) keep.push(`the files in play (${s.files.join(', ')})`);
   keep.push('the decisions already made');
+  keep.push('the project conventions and rules you have been following');
   keep.push('the exact errors or test output still open');
   keep.push('the facts already verified this session');
   const clause = keep.join(', ').replace(/, ([^,]+)$/, ', and $1');
+  const share = s.window
+    ? `, about ${Math.round((tokensNow / s.window) * 100)}% of this session's window,`
+    : '';
   return (
-    `brink: context is ~${k}k tokens and filling. Compact now with an instruction so the ` +
+    `brink: context is ~${k}k tokens${share} and filling. Compact now with an instruction so the ` +
     `summary keeps what matters, e.g.:\n` +
     `/compact Keep, in priority order, ${clause}. Prefer the most recent work over ` +
     `older history. Drop resolved exploration, tool dumps, and file listings.`
@@ -265,13 +308,19 @@ function nudge(tokensNow, signals) {
 // grace and goes out regardless.
 // `direct` false drops `systemMessage` and leaves only the assistant channel:
 // a held nudge re-offered every turn would otherwise nag the user directly,
-// which is exactly the judgment call being delegated.
+// which is exactly the judgment call being delegated. That re-offer also gets
+// the short relay — the full one is a per-turn cost paid in the very room
+// brink is trying to save, and the assistant already read it this session.
 function emit(message, opts) {
   const { urgent = false, direct = true } = opts || {};
   const relay = urgent
     ? `(brink: this nudge has been pending while the window kept growing. Repeat the ` +
       `two lines above to the user verbatim, before answering their prompt, whatever ` +
       `the moment. Do not act on them yourself — whether to compact is the user's call.)`
+    : !direct
+    ? `(brink: the same nudge, still pending. At a clean break, repeat the two lines ` +
+      `above to the user verbatim. Otherwise carry on — brink offers it again next ` +
+      `turn. Do not act on it yourself.)`
     : `(brink asks you to judge the timing first: is this a clean break — work landed, ` +
       `checks green, nothing half-finished — or are you mid-edit, mid-test, mid-tool-chain?\n` +
       `- Clean break: repeat the two lines above to the user verbatim, before answering ` +
@@ -294,9 +343,14 @@ function main() {
   const data = readInput();
   if (setting('DISABLE', '') === '1') return;
 
-  const threshold = settingNum('THRESHOLD', 200000);
+  const window = autoCompactWindow();
+  const threshold = settingNum('THRESHOLD', window ? Math.round(window * FILL_SHARE) : DEFAULT_THRESHOLD);
   const rearm = Math.round(threshold * 0.8);
-  const repeat = settingNum('REPEAT', 75000);
+  // Urgency has to land before the edge, not past it: against a small window a
+  // flat repeat step sits beyond the point the host compacts on its own, and a
+  // nudge that only turns urgent after the autopilot ran is no nudge at all.
+  let repeat = settingNum('REPEAT', 75000);
+  if (window && window > threshold) repeat = Math.min(repeat, Math.round((window - threshold) / 2));
 
   const { tokens, files, task } = scan(data.transcript_path);
   if (tokens == null) return;
@@ -310,7 +364,7 @@ function main() {
   }
   if (next.notify) {
     const opts = { urgent: next.urgent, direct: first || next.urgent };
-    process.stdout.write(JSON.stringify(emit(nudge(tokens, { files, task }), opts)));
+    process.stdout.write(JSON.stringify(emit(nudge(tokens, { files, task, window }), opts)));
   }
 }
 
@@ -322,4 +376,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { scan, currentTokens, decide, nudge, emit };
+module.exports = { autoCompactWindow, scan, currentTokens, decide, nudge, emit };

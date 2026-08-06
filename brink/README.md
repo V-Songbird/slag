@@ -25,7 +25,7 @@ brink watches how full the window is getting. Once you're near the edge it speak
 ## Why you'd want it
 
 - **A heads-up before the cliff, not after.** It nudges while you can still choose — not once the good part is already gone.
-- **Compaction with a plan.** It hands you a ready-made instruction, ranked: the task you're on now, the files in play, the decisions made, the errors still open, the facts you've already verified. Recent work outranks old history.
+- **Compaction with a plan.** It hands you a ready-made instruction, ranked: the task you're on now, the files in play, the decisions made, the conventions you've been following, the errors still open, the facts you've already verified. Recent work outranks old history.
 - **It waits for a decent moment.** Claude checks whether you're mid-edit before passing the warning on. If you are, it says so briefly and brink keeps the message for the next clean break.
 - **Ignoring it doesn't make it go away.** A held warning comes back every turn, and once the window keeps growing it stops being optional.
 - **Quiet the rest of the time.** Below the line it does nothing and costs you nothing.
@@ -35,11 +35,17 @@ brink watches how full the window is getting. Once you're near the edge it speak
 | Moment | What happens |
 | --- | --- |
 | Your context creeps toward full | brink is watching, and says nothing yet |
-| You cross ~200k tokens | One message: run `/compact`, with an instruction worth pasting |
+| You reach three quarters of the window | One message: run `/compact`, with an instruction worth pasting |
 | Your client hides that message | Claude repeats it to you in its next reply, so it reaches you either way |
 | You're mid-edit when it lands | Claude holds it, tells you in a line, and brink offers it again next turn |
-| You keep going instead | 75k tokens later it comes back as urgent, timing or no timing |
+| You keep going instead | Closer to the edge it comes back as urgent, timing or no timing |
 | You compact and free up room | It resets — ready to warn again if you fill up again |
+
+### Where the edge is
+
+Your context window isn't always the same size, and an extended one holds five times what a normal one does. A fixed line would sit past the edge on the small window and nowhere near it on the big one, so brink doesn't use a fixed line.
+
+If you've set your own compaction point with `/autocompact`, brink speaks at three quarters of it. If you haven't, it picks a cautious line — on time for a normal window, early for a large one.
 
 ## Install
 
@@ -62,14 +68,15 @@ Most people never touch these.
 
 | Variable | What it does |
 | --- | --- |
-| `BRINK_THRESHOLD` | How much of the window gets used before brink first speaks up (default 200000) |
-| `BRINK_REPEAT` | How much more the window may grow before a held nudge turns urgent (default 75000) |
+| `BRINK_THRESHOLD` | Pin the first nudge to an exact token count. Left unset, brink uses three quarters of your `/autocompact` window, or 160000 when you have none |
+| `BRINK_REPEAT` | How much more the window may grow before a held nudge turns urgent (default 75000, trimmed so it still lands before the edge) |
 | `BRINK_DISABLE` | Set to `1` and brink stays silent |
 
 ## Good to know
 
+- brink can't see how big your window is. It goes by where you told Claude Code to compact, and falls back to a cautious line when you never told it.
 - brink reads the fill level from your session record, which updates each turn — so the nudge lands within a message of crossing the line, not to the exact word.
-- The escalation is measured in tokens, not minutes — a quiet stretch that adds nothing to the window won't force the warning through.
+- The escalation follows how much the window grows, not how much time passes — a quiet stretch that adds nothing won't force the warning through.
 - Only the first warning and the urgent one reach you directly. The ones in between go to Claude, which decides whether the moment is right.
 - It only ever suggests. Whether and how you compact is entirely your call.
 - The nudge goes out on two channels at once. On a client that renders both, you'll see it twice — better than a client that shows it nowhere.
