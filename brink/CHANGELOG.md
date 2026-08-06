@@ -4,6 +4,17 @@ All notable changes to brink are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.5.0-alpha] — 2026-08-06
+
+### Changed
+
+- The nudge now arrives relative to your session's auto-compact window instead of a fixed token count. Set one with `/autocompact` and brink speaks at three quarters of it.
+- With no window set, the first nudge now lands at 160000 tokens instead of 200000, so it still arrives before a normal-sized window fills.
+- A held nudge now turns urgent before the edge rather than past it.
+- The suggested `/compact` instruction now also keeps the project conventions and rules you've been following, which a summary otherwise drops.
+- A repeated nudge is shorter, so waiting for a clean break costs less of the room brink is trying to save.
+- `BRINK_THRESHOLD` now pins the nudge to an exact token count, overriding the window it would otherwise track.
+
 ## [0.4.0-alpha] — 2026-07-28
 
 ### Changed

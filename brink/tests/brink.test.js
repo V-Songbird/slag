@@ -6,10 +6,38 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { scan, currentTokens, decide, nudge, emit } = require('../hooks/brink.js');
+const { autoCompactWindow, scan, currentTokens, decide, nudge, emit } = require('../hooks/brink.js');
 
 let seq = 0;
 const made = [];
+
+// A config dir with no settings.json, so a real one on the machine running the
+// suite can never leak an auto-compact window into a test.
+const emptyConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'brink-cfg-'));
+
+function configDirWith(settings) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'brink-cfg-'));
+  fs.writeFileSync(path.join(dir, 'settings.json'), typeof settings === 'string' ? settings : JSON.stringify(settings));
+  return dir;
+}
+
+// autoCompactWindow() reads process.env directly; swap it for one call.
+function withEnv(vars, fn) {
+  const saved = {};
+  for (const [k, v] of Object.entries(vars)) {
+    saved[k] = process.env[k];
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  try {
+    return fn();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
 function writeTranscript(lines) {
   const p = path.join(os.tmpdir(), `brink-test-${process.pid}-${seq++}.jsonl`);
   fs.writeFileSync(p, lines.map((l) => (typeof l === 'string' ? l : JSON.stringify(l))).join('\n') + '\n');
@@ -21,6 +49,53 @@ function assistant(usage, extra = {}) {
 }
 test.after(() => {
   for (const p of made) try { fs.unlinkSync(p); } catch { /* gone */ }
+});
+
+describe('autoCompactWindow', () => {
+  const noEnv = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: undefined, CLAUDE_CONFIG_DIR: emptyConfigDir };
+
+  test('reads the env override', () => {
+    assert.strictEqual(
+      withEnv({ ...noEnv, CLAUDE_CODE_AUTO_COMPACT_WINDOW: '500000' }, autoCompactWindow),
+      500000,
+    );
+  });
+
+  test('reads autoCompactWindow from the settings file /autocompact writes', () => {
+    assert.strictEqual(
+      withEnv({ ...noEnv, CLAUDE_CONFIG_DIR: configDirWith({ autoCompactWindow: 300000 }) }, autoCompactWindow),
+      300000,
+    );
+  });
+
+  test('the env override wins over the saved setting', () => {
+    assert.strictEqual(
+      withEnv(
+        { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '250000', CLAUDE_CONFIG_DIR: configDirWith({ autoCompactWindow: 900000 }) },
+        autoCompactWindow,
+      ),
+      250000,
+    );
+  });
+
+  test('null when neither is set', () => {
+    assert.strictEqual(withEnv(noEnv, autoCompactWindow), null);
+  });
+
+  test('ignores values outside the window /autocompact accepts', () => {
+    for (const raw of ['99999', '1000001', 'auto', '', '500k']) {
+      assert.strictEqual(withEnv({ ...noEnv, CLAUDE_CODE_AUTO_COMPACT_WINDOW: raw }, autoCompactWindow), null, raw);
+    }
+  });
+
+  test('survives a missing, unreadable, or non-JSON settings file', () => {
+    assert.strictEqual(withEnv({ ...noEnv, CLAUDE_CONFIG_DIR: configDirWith('{ not json') }, autoCompactWindow), null);
+    assert.strictEqual(withEnv({ ...noEnv, CLAUDE_CONFIG_DIR: configDirWith({ theme: 'dark' }) }, autoCompactWindow), null);
+    assert.strictEqual(
+      withEnv({ ...noEnv, CLAUDE_CONFIG_DIR: path.join(os.tmpdir(), `brink-no-cfg-${process.pid}`) }, autoCompactWindow),
+      null,
+    );
+  });
 });
 
 describe('currentTokens', () => {
@@ -199,6 +274,20 @@ describe('nudge', () => {
   test('tells the summary to favour the most recent work', () => {
     assert.match(nudge(210000), /Prefer the most recent work over older history\./);
   });
+
+  test('keeps the conventions compaction would otherwise drop', () => {
+    assert.match(nudge(160000), /the project conventions and rules you have been following/);
+  });
+
+  test('reports the share of the window when the window is known', () => {
+    assert.match(nudge(150000, { window: 200000 }), /~150k tokens, about 75% of this session's window, and filling/);
+  });
+
+  test('reports tokens alone when the window is unknown', () => {
+    const msg = nudge(150000, { window: null });
+    assert.match(msg, /~150k tokens and filling/);
+    assert.doesNotMatch(msg, /of this session's window/);
+  });
 });
 
 describe('emit', () => {
@@ -228,26 +317,40 @@ describe('emit', () => {
     assert.strictEqual('systemMessage' in out, false);
     assert.match(out.hookSpecificOutput.additionalContext, /^brink: go compact\n\n/);
   });
+
+  test('a re-offer relays the short form, not the full timing walkthrough again', () => {
+    const first = emit('brink: go compact').hookSpecificOutput.additionalContext;
+    const again = emit('brink: go compact', { direct: false }).hookSpecificOutput.additionalContext;
+    assert.match(again, /the same nudge, still pending/);
+    assert.match(again, /verbatim/);
+    assert.doesNotMatch(again, /mid-edit, mid-test, mid-tool-chain/);
+    assert.ok(again.length < first.length / 2, 'the re-offer should cost a fraction of the first');
+  });
 });
 
 describe('hook process', () => {
   const hook = path.join(__dirname, '..', 'hooks', 'brink.js');
 
   function run(transcriptPath, env = {}, session = {}) {
+    const childEnv = {
+      ...process.env,
+      CLAUDE_PLUGIN_DATA: session.dir || fs.mkdtempSync(path.join(os.tmpdir(), 'brink-data-')),
+      CLAUDE_CONFIG_DIR: emptyConfigDir,
+    };
+    delete childEnv.CLAUDE_CODE_AUTO_COMPACT_WINDOW; // never inherit the runner's own window
+    Object.assign(childEnv, env);
     const out = execFileSync(process.execPath, [hook], {
       input: JSON.stringify({
         session_id: session.id || `brink-test-${process.pid}-${seq++}`,
         transcript_path: transcriptPath,
       }),
-      env: {
-        ...process.env,
-        CLAUDE_PLUGIN_DATA: session.dir || fs.mkdtempSync(path.join(os.tmpdir(), 'brink-data-')),
-        ...env,
-      },
+      env: childEnv,
       encoding: 'utf8',
     });
     return out ? JSON.parse(out) : null;
   }
+
+  const at = (n) => writeTranscript([assistant({ input_tokens: 0, cache_read_input_tokens: n, output_tokens: 0 })]);
 
   test('emits both channels once over the threshold', () => {
     const p = writeTranscript([
@@ -266,7 +369,6 @@ describe('hook process', () => {
   });
 
   test('re-offers a held nudge on the assistant channel, then escalates a repeat step later', () => {
-    const at = (n) => writeTranscript([assistant({ input_tokens: 0, cache_read_input_tokens: n, output_tokens: 0 })]);
     const session = { id: `brink-repeat-${process.pid}`, dir: fs.mkdtempSync(path.join(os.tmpdir(), 'brink-data-')) };
     assert.match(run(at(205000), {}, session).systemMessage, /~205k tokens/);
     const held = run(at(270000), {}, session);
@@ -279,7 +381,6 @@ describe('hook process', () => {
   });
 
   test('BRINK_REPEAT sets how far a held nudge runs before it turns urgent', () => {
-    const at = (n) => writeTranscript([assistant({ input_tokens: 0, cache_read_input_tokens: n, output_tokens: 0 })]);
     const session = { id: `brink-repeat-cfg-${process.pid}`, dir: fs.mkdtempSync(path.join(os.tmpdir(), 'brink-data-')) };
     const env = { BRINK_REPEAT: '10000' };
     assert.match(run(at(205000), env, session).systemMessage, /~205k tokens/);
@@ -289,5 +390,40 @@ describe('hook process', () => {
   test('BRINK_DISABLE=1 silences a reading that would otherwise fire', () => {
     const p = writeTranscript([assistant({ input_tokens: 10, cache_read_input_tokens: 400000, output_tokens: 30 })]);
     assert.strictEqual(run(p, { BRINK_DISABLE: '1' }), null);
+  });
+
+  test('with no configured window it falls back to the conservative default', () => {
+    assert.strictEqual(run(at(159000)), null);
+    assert.match(run(at(161000)).systemMessage, /~161k tokens/);
+  });
+
+  test('a configured window moves the line to three quarters of it', () => {
+    const env = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000' };
+    assert.strictEqual(run(at(149000), env), null);
+    assert.match(run(at(151000), env).systemMessage, /~151k tokens, about 76% of this session's window/);
+  });
+
+  test('a 1M window pushes the line out instead of nagging from one fifth full', () => {
+    const env = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000' };
+    assert.strictEqual(run(at(400000), env), null);
+    assert.match(run(at(760000), env).systemMessage, /about 76% of this session's window/);
+  });
+
+  test('urgency lands before the edge on a small window, not past it', () => {
+    // 200k window → nudge at 150k, and half the room that is left is 25k, so a
+    // flat 75k step (which would sit at 225k, past the window) gets clamped.
+    const env = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000' };
+    const session = { id: `brink-clamp-${process.pid}`, dir: fs.mkdtempSync(path.join(os.tmpdir(), 'brink-data-')) };
+    assert.match(run(at(151000), env, session).systemMessage, /~151k tokens/);
+    const held = run(at(170000), env, session);
+    assert.strictEqual('systemMessage' in held, false);
+    const urgent = run(at(180000), env, session);
+    assert.match(urgent.systemMessage, /~180k tokens/);
+    assert.match(urgent.hookSpecificOutput.additionalContext, /whatever the moment/);
+  });
+
+  test('BRINK_THRESHOLD still wins over a configured window', () => {
+    const env = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000', BRINK_THRESHOLD: '120000' };
+    assert.match(run(at(125000), env).systemMessage, /~125k tokens/);
   });
 });
