@@ -21,7 +21,7 @@
 // suite that fails on someone's flaky DNS teaches people to ignore failures.
 // It is the manual pre-release step named in the release-gates header.
 //
-// Usage: node assay/scripts/doc-drift.js
+// Usage: node scripts/assay-doc-drift.js
 //   exit 0  every page reachable and every guarded string present
 //   exit 2  DRIFT — the named profile is blocked for release
 //   exit 1  usage error, or a page could not be reached (unreachable is NOT
@@ -144,7 +144,7 @@ async function probe(row) {
 
 async function main() {
   if (process.argv.length > 2) {
-    process.stderr.write("Usage: node assay/scripts/doc-drift.js\n" +
+    process.stderr.write("Usage: node scripts/assay-doc-drift.js\n" +
       "Checks every host-profile documentation claim against the live page.\n");
     process.exit(1);
   }

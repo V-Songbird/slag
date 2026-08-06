@@ -23,7 +23,7 @@
 //                                        journal once it holds no open change
 //
 // [Foreman: 081] The safe-change transaction — diagnose is the scan/audit record
-// above, and these five are the mutation half:
+// above, and these four are the mutation half:
 //   node assay.js plan --from <draft.json>
 //                                        validates + canonicalizes a draft plan,
 //                                        fingerprints every affected file and
@@ -31,22 +31,11 @@
 //   node assay.js apply --change <id> [--change <id> …] | --batch <id>
 //                                        applies ONLY the changes named here;
 //                                        the argument is the approval boundary
-//   node assay.js validate --change <id> [--external "<kind>: <result>"] [--proof <ptr>]
+//   node assay.js validate --change <id> [--external "<kind>: <result>"]
 //                                        runs the mechanical checks and records
 //                                        external attestations as evidence
 //   node assay.js rollback --change <id> | --transaction <id>
 //                                        restores journalled pre-images
-//   node assay.js retire --change <id>   deactivates the prose a validated
-//                                        mechanism replaced — refused without
-//                                        validation evidence
-//
-// [Foreman: 083] Behavior evidence, linked and never converted:
-//   node assay.js link --proof <pointer> --rule <key|R###> | --skill <name>
-//                      | --finding <F###|type@path:line> | --change <id>
-//                                        attaches ONE saved Proof record to ONE
-//                                        anchor and stores the behavioral-
-//                                        evidence key read out of that record
-//   node assay.js link --list            every stored link, with its key
 //
 // [Foreman: 084] Opt-in CI output — deterministic, read-only, writes nothing:
 //   node assay.js ci [--host <name>] [--project-only] [--fail-on <gate>[,…]] [--json]
@@ -62,9 +51,9 @@
 // [Foreman: 079] --host <claude-code|codex> selects the host profile discovery
 // runs under, defaulting to claude-code. It is the adapter that changes, not the
 // analyzers: a profile declares where its host loads instructions from and which
-// analyses apply to it, and everything below reads that declaration. `report` and
-// `artifact` take the profile from the record they read, so the flag matters on
-// the commands that discover — scan and remeasure.
+// analyses apply to it, and everything below reads that declaration. `report`
+// takes the profile from the record it reads, so the flag matters on the
+// commands that discover — scan and remeasure.
 //
 // Everything mechanical happens here; the only model-judged inputs are F3
 // (trigger-action distance) and F8 (enforceability), supplied via judgments.json.
@@ -130,7 +119,7 @@ const TMP_DIR = ".assay-tmp";
 // A release cut keeps ANALYZER_VERSION in step with assay's version in
 // .claude-plugin/marketplace.json, which owns the published number.
 const SCHEMA_VERSION = 1;
-const ANALYZER_VERSION = "1.7.0";
+const ANALYZER_VERSION = "1.8.0";
 const PARSER_NAME = "assay-markdown";
 // [Foreman: 073] 2 = markdown-it 14.1.0 + js-yaml 4.1.0 behind assay's adapter.
 // 1 was the handwritten line scanner; a record naming version 1 was produced by
@@ -179,9 +168,6 @@ const RECORD_SCHEMA = {
   // before 076 stays readable.
   // [Foreman: 077] `mechanisms` left it too — see the block below. Still
   // optional: an audit written before 077 loses its ladder and nothing else.
-  // [Foreman: 083] `proofLinks` left it as well, and stays optional in the
-  // strongest sense: it is emitted only when links exist, so a project that
-  // never linked a Proof record writes exactly the record it wrote before.
   reserved: [
     "instructions",
     "evidence", "plans", "changes", "validation",
@@ -2799,7 +2785,7 @@ function composeAudit(scanData, judgments) {
   };
   // [Foreman: 085] An analysis that did not run is part of what the audit
   // covered, so it lands in coverage beside every other honest gap — one field
-  // in the record, one line both renderers already read. It is a disclosure and
+  // in the record, one line in the coverage block. It is a disclosure and
   // never a finding: nothing about a large corpus is a defect in it, and a
   // build must not fail because assay declined to pair.
   const comparableCount = comparableRules(audit).length;
@@ -2846,7 +2832,6 @@ const FINDING_STATES = [
   "inactive", "shadowed", "blocked", "conflicting",
   "ambiguous", "at-risk", "mechanical-candidate", "advisory", "healthy",
 ];
-const STATE_RANK = new Map(FINDING_STATES.map((s, i) => [s, i]));
 const HARD_GATE_STATES = new Set(["inactive", "shadowed", "blocked"]);
 const OPERATIONAL_STATES = new Set(["ambiguous", "conflicting", "at-risk"]);
 // F3 at or below this: the moment the rule fires has more than one reading.
@@ -4087,21 +4072,6 @@ function redactSecrets(text) {
   return out;
 }
 
-// Every string in a copy of the record. Used for the artifact's JSON export:
-// the page is publishable page content, so nothing embedded in it may carry a
-// credential. The record on disk (`.assay-tmp/audit.json`) keeps the raw value —
-// that is where fidelity lives. See docs/foreman/078.md.
-function redactRecord(value) {
-  if (typeof value === "string") return redactSecrets(value);
-  if (Array.isArray(value)) return value.map(redactRecord);
-  if (isRecordObject(value)) {
-    const out = {};
-    for (const key of Object.keys(value)) out[key] = redactRecord(value[key]);
-    return out;
-  }
-  return value;
-}
-
 // [Foreman: 079] A profile with no hygiene rubric carries no score to print, and
 // an em dash is what "not measured" looks like everywhere else in these reports.
 function fmt(x) {
@@ -4113,7 +4083,8 @@ function fmt(x) {
 // check instead, and its problems are findings — this table has nothing to say
 // about it and must not print an empty verdict against it.
 // [Foreman: 080] The findings a profile makes about its skills instead of
-// grading them. One set, read by both renderers, so neither can orphan one.
+// grading them. One set, so the skills table and the findings list can never
+// disagree about which of them a skill's problem belongs to.
 const SKILL_FINDING_TYPES = new Set([
   "skill-metadata", "skill-metadata-unreadable", "skill-name-collision", "skill-listing-budget",
 ]);
@@ -4435,7 +4406,7 @@ function chainRows(files) {
   return (files || []).filter((f) => Number.isInteger(f.startsAtByte) || f.shadowedBy);
 }
 
-// The Files table's Loading cell, shared by both renderers. Every branch reads a
+// The Files table's Loading cell. Every branch reads a
 // fact the adapter declared — a file the host never opens must never read as
 // "always loaded" because it happens to carry no scope declaration.
 function loadingCell(f) {
@@ -4489,9 +4460,10 @@ function pushChainSection(out, files, budget) {
 // thing the verification pass must never do, so its count belongs here.
 // razor: counts and one line per unreadable source — not a per-file table. The
 // per-file breakdown already exists under "## Files".
-// [Foreman: 078] The coverage story as data, so the markdown report and the HTML
-// report say the same sentences instead of each writing their own. `finding`
-// names the finding a line stands for, wherever one exists.
+// [Foreman: 078] The coverage story as data rather than as prose the report
+// writes inline, so a second view of it would say the same sentences instead of
+// inventing its own. `finding` names the finding a line stands for, wherever one
+// exists.
 function coverageLines(audit, rules, suppressed, findings) {
   const cov = audit.coverage || {};
   const parsed = cov.filesParsed != null ? cov.filesParsed : audit.files.length;
@@ -5369,12 +5341,6 @@ function renderReport(audit, opts = {}) {
 
   if (restructure.length) pushRestructureSection(out, restructure);
 
-  // [Foreman: 083] What was actually measured, beside what was analyzed. Present
-  // only when links exist, and walled off from everything above and below it:
-  // the section reads `audit.proofLinks`, which is attached after the whole
-  // derivation has already finished.
-  if ((audit.proofLinks || []).length) pushProofSection(out, audit.proofLinks, opts);
-
   // 6. Structural hygiene — the score, demoted to what it is.
   const corpusBit = audit.corpusScore === null
     ? "no mandate rules left to grade"
@@ -5467,8 +5433,8 @@ function renderReport(audit, opts = {}) {
 // so there the doubling is visible damage. This touches exactly the sequence
 // that breaks a table and nothing else.
 //
-// razor: markdown table escaping only. The result also reaches the HTML view and
-// the record's `where.label`, so it must stay faithful to the source text.
+// razor: markdown table escaping only. It escapes the one sequence that breaks
+// a table and leaves the text otherwise exactly as the author wrote it.
 //
 // Split rather than `/(\\*)\|/g`: a greedy run backtracks from every position in
 // a long line of backslashes, which turns a shared helper quadratic. This walks
@@ -5485,9 +5451,9 @@ function escapeTableCell(s) {
   return out;
 }
 
-// razor: shortening only. The result reaches the HTML view and the record's
-// `where.label` as well as the markdown, so it must stay faithful to the source
-// text — a markdown table cell wraps it in `truncateCell` instead.
+// razor: shortening only, so the result stays faithful to the source text
+// wherever it is printed — a markdown table cell wraps it in `truncateCell`
+// instead, which escapes first and then cuts.
 function truncate(text, n) {
   const clean = String(text).replace(/\s+/g, " ");
   return clean.length > n ? clean.slice(0, n - 1) + "…" : clean;
@@ -5522,634 +5488,9 @@ function mdPathLink(p, line) {
   return `[${mdLabel(escapeTableCell(p))}${at}](${mdTarget(p)}${at})`;
 }
 
-// ---------------------------------------------------------------------------
-// artifact — self-contained interactive HTML report
-// ---------------------------------------------------------------------------
-
-// [Foreman: 054, 078]
-// The markdown report opens a rule at its line; the artifact is the same report
-// in a browser — every finding the markdown carries, plus a filter box, facet
-// chips, keyboard-reachable disclosure, and a JSON export. It is built from the
-// audit record, the same object renderReport renders and with the same rule
-// against it: nothing here re-derives a finding, a mechanism or a score. The
-// generated file is page content only (no <!doctype>/<html>/<head>/<body>) so it
-// both opens standalone in a browser AND publishes unchanged through the
-// Artifact tool, which wraps its own skeleton around it — see
-// docs/foreman/054.md and docs/foreman/078.md.
-
-// Per-rule row data. hookInventory is deliberately absent: it is the report
-// author's working input, and the ladder below names the mechanisms a reader is
-// meant to see. Every string from the record reaches the page through esc(),
-// so a rule that contains markup or a URL is shown literally, never parsed.
-function artifactRuleData(audit) {
-  // [Foreman: 075] The page carries each rule's primary state and the kind of
-  // evidence behind it, and sorts hard gates to the top before it sorts by
-  // score — the same demotion the markdown report makes.
-  const findings = audit.findings || [];
-  // [Foreman: 079] Without a wording rubric there is no weakest factor to name:
-  // the issue and fix cells stay empty rather than quoting a rubric the profile
-  // declined.
-  const rubric = profilePolicy(audit).wordingRubric !== false;
-  const byRule = new Map(findings.filter((f) => f.state).map((f) => [f.rule, f]));
-  return audit.rules.filter((r) => !r.suppressed).map((r) => {
-    const names = rubric ? rowWeaknesses(r) : [];
-    const f = byRule.get(r.id);
-    return {
-      id: r.id, file: r.file, line: r.lineStart, text: r.text,
-      category: r.category, score: r.score, grade: r.grade, weak: r.weak,
-      // [Foreman: 078] the finding this row IS, so the page can prove it lost none
-      findingId: f ? f.id : null,
-      state: f ? f.state : "healthy",
-      stateRank: f ? STATE_RANK.get(f.state) : STATE_RANK.get("healthy"),
-      severity: f ? f.severity : "info",
-      evidence: f ? evidenceTag(f.evidence) : "",
-      evidenceLevel: f ? (f.evidence || {}).level || "" : "",
-      why: f ? f.summary : "",
-      stallRisk: r.stallRisk, hookOpportunity: r.hookOpportunity,
-      placement: r.placement ? r.placement.bestFit : null,
-      factors: r.factorValues, f8: r.f8,
-      issues: names.map((n) => FACTOR_LABELS[n] || n),
-      fixes: names.map((n) => FRIENDLY_FIXES[n]).filter(Boolean),
-    };
-  });
-}
-
-// [Foreman: 078] Everything the record puts on the page goes through here. HTML
-// is generated server-side so the page reads without JavaScript and so every
-// finding id is a real attribute a test can count.
-const HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-
-function esc(value) {
-  return String(value == null ? "" : value).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
-}
-
-// A markdown line as plain text. The HTML sections reuse the markdown report's
-// own sentences rather than restating them, so the link syntax and the emphasis
-// markers come off on the way through.
-function plainText(md) {
-  return md.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*]/g, "");
-}
-
-// Markdown lines a section builder emitted, as depth-tagged plain text.
-function bulletLines(build) {
-  const out = [];
-  build(out);
-  return out.filter((l) => /^\s*- /.test(l)).map((l) => ({
-    depth: Math.floor((l.length - l.replace(/^ */, "").length) / 2),
-    text: plainText(l.replace(/^\s*- /, "")),
-  }));
-}
-
-const ARTIFACT_STYLE = `<style>
-  #assay-report { font: 14px/1.5 system-ui, sans-serif; max-width: 1100px; margin: 0 auto; padding: 1rem;
-    color: #1a1a1a; }
-  #assay-report [hidden] { display: none !important; }
-  #assay-report h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
-  #assay-report h2 { font-size: 1.1rem; margin: 1.6rem 0 .3rem; }
-  #assay-report h3 { font-size: .95rem; margin: 1.1rem 0 .3rem; }
-  #assay-report .sub { color: #666; margin: 0 0 1rem; }
-  #assay-report .note { color: #555; margin: .2rem 0 .6rem; }
-  #assay-report .headline { font-weight: 600; margin: .8rem 0; }
-  #assay-report #assay-controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center;
-    padding: .6rem 0; position: sticky; top: 0; background: inherit; }
-  #assay-report #assay-search { flex: 1 1 16rem; padding: .35rem .5rem; font: inherit; border-radius: 4px;
-    border: 1px solid #bbb; background: transparent; color: inherit; }
-  #assay-report #assay-filters { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; }
-  #assay-report .facet { font-size: .75rem; color: #666; margin-left: .4rem; }
-  #assay-report button { font: inherit; color: inherit; background: transparent; border: 1px solid #bbb;
-    border-radius: 4px; padding: .15rem .5rem; cursor: pointer; }
-  #assay-report button:focus-visible { outline: 2px solid #0b6bcb; outline-offset: 1px; }
-  #assay-report .chip { font-size: .78rem; }
-  #assay-report .chip[aria-pressed="true"] { background: #0b6bcb; border-color: #0b6bcb; color: #fff; }
-  #assay-report .items { margin: .2rem 0 .8rem; padding-left: 1.1rem; }
-  #assay-report .items > li { margin-bottom: .25rem; }
-  #assay-report .sub-items { margin: .1rem 0 .3rem; padding-left: 1.1rem; color: #555; }
-  #assay-report table { border-collapse: collapse; width: 100%; margin-bottom: 1.5rem; }
-  #assay-report th, #assay-report td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #e2e2e2;
-    vertical-align: top; }
-  #assay-report thead th { white-space: nowrap; border-bottom: 2px solid #ccc; }
-  #assay-report thead th button { border: 0; padding: 0; font-weight: 600; }
-  #assay-report th[aria-sort="ascending"] button::after { content: " \\25B4"; }
-  #assay-report th[aria-sort="descending"] button::after { content: " \\25BE"; }
-  #assay-report .disclose { border: 0; padding: 0; text-align: left; text-decoration: underline dotted; }
-  #assay-report .badge { display: inline-block; min-width: 1.4rem; text-align: center; padding: 0 .4rem;
-    border-radius: 4px; font-weight: 600; color: #fff; }
-  #assay-report .g-A { background: #1a7f37; } #assay-report .g-B { background: #4a9c2e; }
-  #assay-report .g-C { background: #b58900; } #assay-report .g-D { background: #cb4b16; }
-  #assay-report .g-F { background: #c1272d; }
-  #assay-report .tag { font-size: .75rem; padding: 0 .35rem; border-radius: 3px; background: #eee; color: #555;
-    margin-left: .3rem; }
-  #assay-report .detail { background: rgba(0,0,0,.03); }
-  #assay-report .detail td { padding: .75rem 1rem 1rem; }
-  #assay-report .detail pre { white-space: pre-wrap; word-break: break-word; margin: 0 0 .75rem; font-size: .85rem;
-    background: rgba(0,0,0,.05); padding: .6rem; border-radius: 4px; }
-  #assay-report .factors { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .6rem; }
-  #assay-report .factors span { font-size: .8rem; padding: .1rem .45rem; border-radius: 3px; background: #ececec; }
-  #assay-report .factors span.low { background: #f4c7c3; color: #7a1c17; }
-  #assay-report .fixes { margin: 0; padding-left: 1.1rem; }
-  #assay-report .muted { color: #777; font-size: .85rem; }
-  @media (prefers-color-scheme: dark) {
-    #assay-report { color: #e6e6e6; }
-    #assay-report .sub, #assay-report .muted, #assay-report .note,
-    #assay-report .sub-items, #assay-report .facet { color: #9aa0a6; }
-    #assay-report th, #assay-report td { border-color: #333; }
-    #assay-report thead th { border-bottom-color: #555; }
-    #assay-report #assay-search, #assay-report button { border-color: #555; }
-    #assay-report .tag { background: #333; color: #bbb; }
-    #assay-report .detail { background: rgba(255,255,255,.04); }
-    #assay-report .detail pre, #assay-report .factors span { background: rgba(255,255,255,.08); }
-    #assay-report .factors span.low { background: #5a1e1a; color: #f4c7c3; }
-  }
-</style>`;
-
-// [Foreman: 078]
-// The page's behavior, and only its behavior: the DOM arrives rendered from the
-// record, so this adds filtering, sorting, disclosure and the export and nothing
-// that could disagree with what the server wrote. Every listener is attached
-// here rather than inline, so the page carries no event-handler attributes.
-const ARTIFACT_SCRIPT = `<script>
-(function () {
-  var root = document.getElementById("assay-report");
-  if (!root) return;
-  var search = document.getElementById("assay-search");
-  var chips = root.querySelectorAll("#assay-filters button.chip");
-  var units = root.querySelectorAll("[data-unit]");
-  var sections = root.querySelectorAll("section[data-section]");
-
-  function detailOf(unit) {
-    var id = unit.getAttribute("data-detail");
-    return id ? document.getElementById(id) : null;
-  }
-
-  function apply() {
-    var q = (search.value || "").trim().toLowerCase();
-    var on = {};
-    Array.prototype.forEach.call(chips, function (c) {
-      if (c.getAttribute("aria-pressed") !== "true") return;
-      var facet = c.getAttribute("data-facet");
-      (on[facet] = on[facet] || []).push(c.getAttribute("data-value"));
-    });
-    var facets = Object.keys(on);
-    Array.prototype.forEach.call(units, function (u) {
-      var ok = true;
-      for (var i = 0; i < facets.length && ok; i++) {
-        ok = on[facets[i]].indexOf(u.getAttribute("data-" + facets[i]) || "") >= 0;
-      }
-      if (ok && q) ok = u.textContent.toLowerCase().indexOf(q) >= 0;
-      u.hidden = !ok;
-      var detail = detailOf(u);
-      if (detail && !ok) {
-        detail.hidden = true;
-        var b = u.querySelector("button.disclose");
-        if (b) b.setAttribute("aria-expanded", "false");
-      }
-    });
-    Array.prototype.forEach.call(sections, function (s) {
-      var own = s.querySelectorAll("[data-unit]");
-      s.hidden = own.length > 0 && !Array.prototype.some.call(own, function (u) { return !u.hidden; });
-    });
-  }
-
-  search.addEventListener("input", apply);
-  Array.prototype.forEach.call(chips, function (c) {
-    c.addEventListener("click", function () {
-      c.setAttribute("aria-pressed", c.getAttribute("aria-pressed") === "true" ? "false" : "true");
-      apply();
-    });
-  });
-
-  Array.prototype.forEach.call(root.querySelectorAll("button.disclose"), function (b) {
-    b.addEventListener("click", function () {
-      var open = b.getAttribute("aria-expanded") === "true";
-      var d = document.getElementById(b.getAttribute("aria-controls"));
-      b.setAttribute("aria-expanded", open ? "false" : "true");
-      if (d) d.hidden = open;
-    });
-  });
-
-  var tbody = document.getElementById("assay-rows");
-  var heads = root.querySelectorAll("#assay-rules thead th");
-  var sortCol = -1, sortDesc = false;
-  Array.prototype.forEach.call(heads, function (th, i) {
-    var b = th.querySelector("button");
-    if (!b || !tbody) return;
-    b.addEventListener("click", function () {
-      if (i === sortCol) sortDesc = !sortDesc; else { sortCol = i; sortDesc = false; }
-      var num = th.getAttribute("data-num") === "1";
-      var rows = Array.prototype.slice.call(tbody.querySelectorAll("tr.rule"));
-      rows.sort(function (p, q) {
-        var x = p.children[i].getAttribute("data-sort") || "";
-        var y = q.children[i].getAttribute("data-sort") || "";
-        if (num) { x = parseFloat(x); y = parseFloat(y); } else { x = x.toLowerCase(); y = y.toLowerCase(); }
-        if (x < y) return sortDesc ? 1 : -1;
-        if (x > y) return sortDesc ? -1 : 1;
-        return 0;
-      });
-      rows.forEach(function (r) {
-        tbody.appendChild(r);
-        var d = detailOf(r);
-        if (d) tbody.appendChild(d);
-      });
-      Array.prototype.forEach.call(heads, function (h, j) {
-        if (j === i) h.setAttribute("aria-sort", sortDesc ? "descending" : "ascending");
-        else h.removeAttribute("aria-sort");
-      });
-    });
-  });
-
-  var exportBtn = document.getElementById("assay-export");
-  if (exportBtn) {
-    exportBtn.addEventListener("click", function () {
-      var record = JSON.parse(document.getElementById("assay-data").textContent);
-      var blob = new Blob([JSON.stringify(record, null, 2)], { type: "application/json" });
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement("a");
-      a.href = url;
-      a.download = "assay-audit.json";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    });
-  }
-})();
-</script>`;
-
-// [Foreman: 078]
-// One list item. `finding` is the record entry the line stands for — its id
-// becomes the attribute the parity test counts, and its state, severity and
-// evidence level become the facets the chips filter on. A line that is not a
-// finding carries no facets, so any active facet filters it out.
-function artifactItem(finding, text, sub) {
-  const f = finding || null;
-  const facets = f
-    ? ` data-finding-id="${esc(f.id)}" data-state="${esc(f.state || "")}"` +
-      ` data-severity="${esc(f.severity || "")}" data-evidence="${esc((f.evidence || {}).level || "")}"`
-    : "";
-  const subs = (sub || []).filter(Boolean).map((s) => `<li>${esc(s)}</li>`).join("");
-  return `<li data-unit="item"${facets}>${esc(text)}` +
-    (subs ? `<ul class="sub-items">${subs}</ul>` : "") + "</li>";
-}
-
-function artifactSection(id, level, title, note, items) {
-  if (!items.length) return "";
-  return `<section data-section="${esc(id)}" id="assay-${esc(id)}">` +
-    `<h${level}>${esc(title)}</h${level}>` +
-    (note ? `<p class="note">${esc(note)}</p>` : "") +
-    `<ul class="items">${items.join("")}</ul></section>`;
-}
-
-function artifactTable(id, level, title, note, columns, rows) {
-  if (!rows.length) return "";
-  const head = columns.map((c) => `<th scope="col">${esc(c)}</th>`).join("");
-  const body = rows.map((cells) =>
-    "<tr>" + cells.map((c) => `<td>${esc(c)}</td>`).join("") + "</tr>").join("");
-  return `<section data-section="${esc(id)}" id="assay-${esc(id)}">` +
-    `<h${level}>${esc(title)}</h${level}>` +
-    (note ? `<p class="note">${esc(note)}</p>` : "") +
-    `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></section>`;
-}
-
-// The rules table: the artifact's centerpiece since 054, now carrying one
-// `data-finding-id` per row so every rule state in the record is accounted for
-// on the page. The disclosure is a real button — the row is reachable, openable
-// and closable from the keyboard alone.
-const ARTIFACT_COLUMNS = [
-  ["Rule", false], ["File", false], ["State", true], ["Evidence", false],
-  ["Cat", false], ["Main issue", false], ["Score", true], ["Grade", true],
-];
-const GRADE_RANK = { A: 0, B: 1, C: 2, D: 3, F: 4 };
-
-function artifactRulesTable(rows, factorColumns) {
-  if (!rows.length) return "";
-  const head = ARTIFACT_COLUMNS.map(([label, num]) =>
-    `<th scope="col"${num ? ' data-num="1"' : ""}><button type="button">${esc(label)}</button></th>`).join("");
-  const body = rows.map((r) => {
-    const detailId = "assay-detail-" + esc(r.id);
-    const cells = [
-      `<td data-sort="${esc(r.id)}"><button type="button" class="disclose" aria-expanded="false" aria-controls="${detailId}">${esc(r.id)}</button></td>`,
-      `<td data-sort="${esc(r.file + ":" + r.line)}">${esc(r.file + ":" + r.line)}</td>`,
-      `<td data-sort="${esc(r.stateRank)}">${esc(r.state)}</td>`,
-      `<td data-sort="${esc(r.evidence)}">${esc(r.evidence)}</td>`,
-      `<td data-sort="${esc(r.category)}">${esc(r.category)}</td>`,
-      `<td data-sort="${esc(r.issues.join(", "))}">${esc(r.issues.join(", "))}</td>`,
-      `<td data-sort="${esc(r.score)}">${esc(fmt(r.score))}</td>`,
-      `<td data-sort="${esc(GRADE_RANK[r.grade])}"><span class="badge g-${esc(r.grade)}">${esc(r.grade)}</span></td>`,
-    ].join("");
-    const factors = factorColumns.map(([key, label]) => {
-      const v = key === "F8" ? r.f8 : r.factors[key];
-      return `<span class="${v != null && v < WEAK_FACTOR_THRESHOLD ? "low" : ""}">${esc(label)} ${esc(v == null ? "—" : fmt(v))}</span>`;
-    }).join("");
-    const flags = [
-      r.stallRisk ? "stall risk" : "",
-      r.hookOpportunity ? "better as a hook" : "",
-      r.placement ? "placement: " + r.placement : "",
-    ].filter(Boolean).join(" · ");
-    const fixes = r.fixes.length
-      ? `<ul class="fixes">${r.fixes.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>`
-      : '<p class="muted">No fix suggested — this rule is above its floor.</p>';
-    const detail = `<tr class="detail" id="${detailId}" hidden><td colspan="${ARTIFACT_COLUMNS.length}">` +
-      `<pre>${esc(r.text)}</pre>` +
-      (r.why ? `<p class="muted">${esc(r.state + " — " + r.why + " " + r.evidence)}</p>` : "") +
-      `<div class="factors">${factors}</div>` +
-      (flags ? `<p class="muted">${esc(flags)}</p>` : "") + fixes + "</td></tr>";
-    return `<tr class="rule" data-unit="rule" data-detail="${detailId}"` +
-      (r.findingId ? ` data-finding-id="${esc(r.findingId)}"` : "") +
-      ` data-state="${esc(r.state)}" data-severity="${esc(r.severity)}"` +
-      ` data-evidence="${esc(r.evidenceLevel)}">${cells}</tr>` + detail;
-  }).join("");
-  return '<section data-section="rules" id="assay-rules-section"><h3>Rules</h3>' +
-    '<p class="note">Every rule the host loads, hard gates first. Open a row for its full text, factor scores and suggested fix.</p>' +
-    `<table id="assay-rules"><thead><tr>${head}</tr></thead><tbody id="assay-rows">${body}</tbody></table></section>`;
-}
-
-// The facet chips, built from the values actually present in this record — a
-// chip for a state no rule holds would filter to nothing and teach nothing.
-function artifactChips(rows, findings) {
-  const facets = [["state", "State"], ["severity", "Severity"], ["evidence", "Evidence"]];
-  const values = { state: new Set(), severity: new Set(), evidence: new Set() };
-  for (const r of rows) {
-    values.state.add(r.state);
-    values.severity.add(r.severity);
-    if (r.evidenceLevel) values.evidence.add(r.evidenceLevel);
-  }
-  for (const f of findings) {
-    if (f.state) values.state.add(f.state);
-    if (f.severity) values.severity.add(f.severity);
-    if (f.evidence && f.evidence.level) values.evidence.add(f.evidence.level);
-  }
-  return facets.map(([facet, label]) => {
-    const present = [...values[facet]].filter(Boolean).sort();
-    if (!present.length) return "";
-    return `<span class="facet">${esc(label)}</span>` + present.map((v) =>
-      `<button type="button" class="chip" data-facet="${esc(facet)}" data-value="${esc(v)}" aria-pressed="false">${esc(v)}</button>`).join("");
-  }).join("");
-}
-
-// [Foreman: 078]
-// The HTML report, section for section in the markdown report's order. Every
-// list is a filter over `audit.findings`, `audit.mechanisms` or a record field —
-// nothing on this page is measured a second time on the way out. The catch-all
-// at the end is the honesty valve: a finding no section above claimed still
-// reaches the reader, and the parity test still balances.
-function renderArtifact(audit) {
-  const rules = audit.rules.filter((r) => !r.suppressed);
-  const suppressed = audit.rules.filter((r) => r.suppressed);
-  const findings = audit.findings || [];
-  const mechanisms = audit.mechanisms || [];
-  const files = audit.files || [];
-  // [Foreman: 075] hard gates first, then worst score — the same demotion the
-  // markdown report makes, settled here so the page arrives already ordered.
-  const rows = artifactRuleData(audit).sort((a, b) => a.stateRank - b.stateRank || a.score - b.score);
-  const rulesById = new Map(rules.map((r) => [r.id, r]));
-  const byType = (type) => findings.filter((f) => f.type === type);
-  const seen = new Set(rows.map((r) => r.findingId).filter(Boolean));
-  const item = (f, text, sub) => { if (f) seen.add(f.id); return artifactItem(f, text, sub); };
-  const at = (s) => s.path + ":" + s.lineStart;
-  const ruleAt = (id) => { const r = rulesById.get(id); return r ? r.file + ":" + r.lineStart : id; };
-  const body = [];
-
-  // Coverage — the same sentences the markdown report prints, from one builder.
-  body.push(artifactSection("coverage", 2, "Coverage", "",
-    coverageLines(audit, rules, suppressed, findings)
-      .map((l) => item(l.finding, (l.depth ? "↳ " : "") + plainText(l.text)))));
-
-  const counts = stateCounts(findings);
-  const topology = FINDING_STATES.filter((s) => counts.get(s)).map((s) => `${counts.get(s)} ${stateWord(s, counts.get(s))}`);
-  const withRules = files.filter((f) => f.ruleCount > 0).length;
-  if (topology.length) {
-    body.push(`<p class="headline">${esc(topology.join(", ") + " across " + withRules + " file(s).")}</p>`);
-  }
-
-  // Hard gates.
-  const gates = findings.filter((f) => HARD_GATE_STATES.has(f.state));
-  body.push(artifactSection("gates", 2, "Hard gates",
-    "The host cannot apply these as written. No wording fix reaches them, and no hygiene score overrides one.",
-    gates.map((f) => item(f, `${ruleAt(f.rule)} — ${f.state}: ${f.summary} ${evidenceTag(f.evidence)}`))));
-
-  // [Foreman: 079] The resolved chain and the budget findings that read it —
-  // present only for a profile whose sources carry a read order, absent for one
-  // whose host documents none.
-  body.push(artifactTable("chain", 2, "Instruction chain",
-    "The order the host reads these in, and where its budget runs out. A file lower in the table is the later word; a file the host never opens takes no effect whatever it says.",
-    ["#", "Source", "Bytes", "From", "Status", "Why"],
-    (() => {
-      // Read order, matching the markdown renderer: a shadowed variant is
-      // never read and gets no number.
-      let position = 0;
-      return chainRows(files).map((f) => [
-        Number.isInteger(f.startsAtByte) ? String(++position) : "—",
-        f.path, f.bytes == null ? "—" : String(f.bytes),
-        Number.isInteger(f.startsAtByte) ? String(f.startsAtByte) : "—",
-        plainText(chainStatus(f)), plainText(f.selectionReason || ""),
-      ]);
-    })()));
-  body.push(artifactSection("budget", 2, "Byte budget",
-    "The host stops adding instruction sources at a documented limit. These are the sources that reach it: one the limit lands inside, and any that begin past it.",
-    byType("budget-exceeded").concat(byType("budget-truncation")).map((f) => item(f, f.summary + " " + evidenceTag(f.evidence)))));
-
-  // Operational findings.
-  const operational = [];
-  operational.push(artifactSection("conflicts", 3, "Conflicts",
-    "Two loaded rules that ban and command the same action — outright, or the moment one shared condition holds. assay names the pair and stops.",
-    byType("conflict").concat(byType("conditional-conflict")).map((f) => item(f, f.sources.map(at).join(" ↔ ") + " — " + f.summary, [f.explanation]))));
-  operational.push(artifactRulesTable(rows, FACTOR_COLUMNS));
-  operational.push(artifactSection("stalls", 3, "Stall risks (bare prohibitions)",
-    "A prohibition with no named alternative can stall a run outright when the task needs the banned thing.",
-    rules.filter((r) => r.stallRisk).map((r) => artifactItem(null, `${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}"`))));
-  operational.push(artifactSection("buried", 3, "Buried rules",
-    "These sit in the bottom half of a long file, where rules lose force.",
-    rules.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD).map((r) =>
-      artifactItem(null, `${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}" — line ${r.lineStart} of ${(files[r.fileIndex] || {}).lineCount || "?"}`))));
-  operational.push(artifactSection("stale", 3, "Stale references",
-    "A rule pointing at a path that no longer resolves makes Claude re-discover it or give up.",
-    rules.filter((r) => r.staleness && r.staleness.missing.length).map((r) =>
-      artifactItem(null, `${r.id} (${r.file}:${r.lineStart})`,
-        r.staleness.missing.map((m) => "cites " + m.ref + ((m.moved || []).length ? " → likely moved to " + m.moved.slice(0, 4).join(", ") : " → no file by that name in the repo"))))));
-  operational.push(artifactSection("shared-stale", 3, "Stale shared targets",
-    "One missing path that several policies depend on — restoring it, or repairing every reference at once, fixes the whole set.",
-    byType("stale-shared-target").map((f) => item(f, f.summary, [f.explanation]))));
-  operational.push(artifactSection("duplicates", 3, "Duplicates",
-    "The same duty stated twice. Both copies are graded and assay edits neither: pick which one survives.",
-    byType("duplicate").map((f) => item(f,
-      `${at(f.sources[0])} ↔ ${at(f.sources[1])} — ${f.tier} copy ${evidenceTag(f.evidence)}`,
-      [`consider keeping ${at(f.keep)} (${f.keepWhy}); ${at(f.drop)} is the removal candidate`]))));
-  operational.push(artifactSection("overlaps", 3, "Scope overlap",
-    "These scoped files load together for the same paths, which is how their rules ended up colliding.",
-    byType("scope-overlap").map((f) => item(f, f.summary))));
-  const proposals = ((audit.semantic || {}).candidates) || [];
-  operational.push(artifactSection("proposals", 3, "Model-proposed relationships",
-    "Proposals, not measurements: nothing here moved a rule's state, its score, the corpus grade, or the deterministic relationships. [model-inferred]",
-    proposals.map((c) => artifactItem(null,
-      `${c.kind} — ${c.accepted === true ? "accepted" : c.accepted === false ? "rejected" : "proposed"} — ${c.summary || ""}${c.reason ? " (" + c.reason + ")" : ""}`))));
-  operational.push(artifactSection("categories", 3, "Unknown category annotations",
-    "The annotation was not recognized, so the rule was graded under its file's default category.",
-    byType("unknown-category").map((f) => item(f, `${ruleAt(f.rule)} — ${f.summary}`))));
-  // [Foreman: 080] The same skill findings the markdown report lists, so neither
-  // renderer leaves one for the orphan section at the bottom.
-  operational.push(artifactSection("skillmeta", 3, "Skills",
-    "The host requires some skill metadata and publishes a budget for the list it builds at session start. Read out of the files, never judged.",
-    findings.filter((f) => SKILL_FINDING_TYPES.has(f.type)).map((f) =>
-      item(f, redactSecrets(f.summary) + " " + evidenceTag(f.evidence), [f.explanation]))));
-  // [Foreman: 084] A skill description carries no rule id, so the location comes
-  // off the finding's own span when there is no rule behind it.
-  operational.push(artifactSection("language", 3, "Unsupported language",
-    "Wording checks need English. Nothing below was scored or graded on its wording; every language-independent check still applies to it.",
-    byType("unsupported-language").map((f) =>
-      item(f, `${f.rule ? ruleAt(f.rule) : at(f.sources[0])} — ${f.summary}`))));
-  if (operational.some(Boolean)) {
-    body.push('<section data-section="operational" id="assay-operational"><h2>Operational findings</h2>' +
-      '<p class="note">Rules the host loads that carry a risk to how reliably they act. Each line names the kind of evidence behind it.</p></section>');
-    body.push(...operational);
-  }
-
-  // [Foreman: 079] Maintainability, apart from the reliability findings above.
-  body.push(artifactSection("maintainability", 2, "Maintainability",
-    "Optional improvements. None of these is a reliability failure: every rule below is one the host loads and can act on.",
-    byType("action-clarity").map((f) => item(f, `${ruleAt(f.rule)} — ${f.summary} ${evidenceTag(f.evidence)}`))));
-
-  // Policy placement.
-  const placement = [];
-  const activeRules = rules.filter((r) => !gates.some((f) => f.rule === r.id)).length;
-  if (mechanisms.length) {
-    const ladder = bulletLines((out) => pushLadderSection(out, audit, mechanisms, activeRules, { verbose: true }, []))
-      .map((l) => artifactItem(null, "↳ ".repeat(l.depth) + l.text));
-    placement.push(artifactSection("ladder", 3, "Enforcement ladder",
-      "A mechanism listed here is configured. Only validation can show it runs — assay never infers execution from presence.",
-      ladder.concat(byType("mechanism-overlap").map((f) => item(f, redactSecrets(f.summary) + " " + evidenceTag(f.evidence))))));
-  }
-  placement.push(artifactSection("wired", 3, "Already wired",
-    "A hook is already configured for the moment each of these rules names. assay read that out of the settings files and has not watched it run.",
-    byType("redundant-enforcement").map((f) => item(f, `${ruleAt(f.rule)} — ${redactSecrets(f.summary)}`))));
-  placement.push(artifactSection("hooks", 3, "Better enforced by a hook",
-    "A hook or script could enforce these mechanically, on every run. [model-inferred]",
-    rules.filter((r) => r.hookOpportunity).map((r) =>
-      artifactItem(null, `${r.id} (${r.file}:${r.lineStart}) "${truncate(r.text, 80)}"`))));
-  placement.push(artifactSection("candidates", 3, "Placement candidates",
-    `Rules whose job fits a ${profileNouns(audit).primitive} better than rule prose. [heuristic]`,
-    rules.filter((r) => r.placement).map((r) => artifactItem(null,
-      `${r.id} (${r.file}:${r.lineStart}) → ${r.placement.bestFit} — "${truncate(r.text, 70)}"`,
-      [Object.entries(r.placement.detections).map(([p, d]) => `${p} ${fmt(d.confidence)} [${d.evidence.join(", ")}]`).join("; ")]))));
-  placement.push(artifactSection("restructure", 3, "Restructure candidates",
-    "These files score low because of their shape, not their wording — a per-rule rewrite can't reach the problem.",
-    byType("file-shape").map((f) => item(f, `${f.sources[0].path} — ${(f.reasons || []).join(", ")}`, f.safeActions))));
-  if (placement.some(Boolean)) {
-    body.push('<section data-section="placement" id="assay-placement"><h2>Policy placement</h2>' +
-      '<p class="note">Where each policy belongs: a mechanism that enforces it, or prose that asks for judgment.</p></section>');
-    body.push(...placement);
-  }
-
-  // [Foreman: 083] Behavior evidence, in the section idiom every other block
-  // here uses and off the same line builder the markdown report reads — so a
-  // linked record cannot appear in one view and not the other. Each anchor is a
-  // heading item, its records the sub-lines under it.
-  const proofItems = [];
-  for (const g of proofGroups(audit.proofLinks || [])) {
-    proofItems.push(artifactItem(null, plainText(proofGroupHeading(g)),
-      g.anchorFound ? [] : ["the anchor this evidence was linked to is not in the current analysis — the link is kept and shown rather than dropped"]));
-    for (const l of g.links) {
-      for (const line of proofLinkLines(l, { verbose: true })) {
-        proofItems.push(artifactItem(null, "↳ " + plainText(line.text), line.subs));
-      }
-    }
-  }
-  body.push(artifactSection("proof", 2, "Behavior evidence",
-    "What a separate Proof run measured about these instructions — linked by hand, shown as recorded. Nothing here moves a state, a score, a grade or a threshold: it is evidence beside the finding, not a weight inside it.",
-    proofItems));
-
-  // Structural hygiene.
-  // [Foreman: 079] A profile without the rubric gets the same sentence the
-  // markdown report puts where the grade would be, not an empty grade cell.
-  const rubric = profilePolicy(audit).wordingRubric !== false;
-  const corpus = !rubric ? "no grade"
-    : audit.corpusScore == null ? "no mandate rules left to grade"
-      : `corpus grade ${audit.corpusGrade} (${fmt(audit.corpusScore)}), mandate rules only`;
-  const hygieneNote = rubric
-    ? "A summary of how rules are written, scoped, and placed — never a prediction that Claude will comply, and never a reason to discount a hard gate above."
-    : `The structural-hygiene rubric is measured on the Claude Code profile. It is not applied to ${(audit.profile || {}).host || "this host"} sources until there is evidence for this one, so nothing here is graded.`;
-  body.push('<section data-section="hygiene" id="assay-hygiene"><h2>Structural hygiene (secondary)</h2>' +
-    `<p class="note">${esc(hygieneNote)}</p>` +
-    `<p class="headline">${esc(rules.length + " rules across " + withRules + " file(s) — " + corpus + ".")}</p></section>`);
-  body.push(artifactTable("files", 3, "Files", "", ["File", "Rules", "Grade", "Loading"],
-    files.filter((f) => f.scope !== "user").map((f) => [
-      f.path, String(f.ruleCount),
-      f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`,
-      loadingCell(f),
-    ])));
-  body.push(artifactTable("user-scope", 3, "User scope",
-    "These load for every project on this machine. They are graded here but left out of the project grade.",
-    ["File", "Rules", "Grade"],
-    files.filter((f) => f.scope === "user").map((f) => [
-      f.path, String(f.ruleCount), f.grade === null ? "—" : `${f.grade} (${fmt(f.score)})`,
-    ])));
-
-  // Weak skills — the same rows the markdown table carries.
-  const weakSkills = [];
-  // [Foreman: 084] One predicate for both renderers — the copy that used to live
-  // here could not see a mode it did not know about.
-  pushWeakSkillSection(weakSkills, (audit.skills || []).filter(isWeakSkill));
-  const skillRows = weakSkills.filter((l) => l.startsWith("| ") && !l.startsWith("| Skill") && !l.startsWith("|---"))
-    .map((l) => l.split("|").slice(1, -1).map((c) => plainText(c.trim())));
-  body.push(artifactTable("skills", 2, "Weak skill descriptions", "Every check below is read out of the frontmatter, not judged. [mechanical]",
-    ["Skill", "Where", "Chars", "Issue"], skillRows));
-
-  // Suppressed — present, collapsed, exactly as --verbose has it in markdown.
-  const suppressedItems = byType("suppressed-entry").map((f) =>
-    item(f, `${ruleAt(f.rule)} — ${f.summary}`));
-  if (suppressedItems.length) {
-    body.push('<section data-section="suppressed" id="assay-suppressed"><h2>Suppressed</h2>' +
-      '<p class="note">Extracted and scored, then dropped from every count above — the verification pass judged them prose rather than instructions.</p>' +
-      '<p><button type="button" class="disclose" aria-expanded="false" aria-controls="assay-suppressed-list">' +
-      esc(suppressedItems.length + " suppressed entr" + (suppressedItems.length === 1 ? "y" : "ies")) + "</button></p>" +
-      `<ul class="items" id="assay-suppressed-list" hidden>${suppressedItems.join("")}</ul></section>`);
-  }
-
-  // Anything no section above claimed. It is never empty by design — it is empty
-  // because every finding found a home, and it says so the moment one does not.
-  const orphans = findings.filter((f) => !seen.has(f.id));
-  body.push(artifactSection("other", 2, "Other findings",
-    "Findings no section above claims. They are listed here rather than dropped.",
-    orphans.map((f) => item(f, `${f.type} — ${redactSecrets(f.summary)} ${evidenceTag(f.evidence)}`))));
-
-  const controls = '<div id="assay-controls">' +
-    '<input id="assay-search" type="search" placeholder="Filter rules and findings…" aria-label="Filter rules and findings">' +
-    `<div id="assay-filters" role="group" aria-label="Filter by state, severity and evidence">${artifactChips(rows, findings)}</div>` +
-    '<button type="button" id="assay-export">Download JSON</button></div>';
-  const header = `<h1>${esc("Rule audit — " + path.basename(audit.root))}</h1>` +
-    `<p class="muted">${esc(redactSecrets(recordBanner(audit)) + (audit.semantic ? "" : " · deterministic only"))}</p>`;
-
-  // [Foreman: 078] The export carries the record, redacted. The page is
-  // publishable content, so no credential may ride inside it; the raw record
-  // stays in .assay-tmp/audit.json. Escape "<" so no substring of the embedded
-  // data can break out of the JSON block.
-  const json = JSON.stringify(redactRecord(audit)).replace(/</g, "\\u003c");
-  return [
-    ARTIFACT_STYLE,
-    '<div id="assay-report">' + header + controls + body.filter(Boolean).join("") + "</div>",
-    '<script type="application/json" id="assay-data">' + json + "</script>",
-    ARTIFACT_SCRIPT,
-  ].join("\n");
-}
-
 // [Foreman: 072] The rejection message for a record this assay cannot read.
 function staleRecordError(label, kind, problem) {
   return label + " is not a schema " + SCHEMA_VERSION + " " + kind + " record (" + problem + ") — rerun `scan`.";
-}
-
-function cmdArtifact(root) {
-  const auditFile = path.join(root, TMP_DIR, "audit.json");
-  if (!fs.existsSync(auditFile)) {
-    process.stderr.write("No " + TMP_DIR + "/audit.json — run report first.\n");
-    process.exit(1);
-  }
-  const { record: audit, problem } = readRecord(auditFile, "audit");
-  if (problem) {
-    process.stderr.write(staleRecordError(TMP_DIR + "/audit.json", "audit", problem) + "\n");
-    process.exit(1);
-  }
-  const outFile = path.join(root, TMP_DIR, "report.html");
-  fs.writeFileSync(outFile, renderArtifact(audit));
-  process.stdout.write(TMP_DIR + "/report.html\n");
 }
 
 function cmdReport(root, opts) {
@@ -6170,23 +5511,13 @@ function cmdReport(root, opts) {
     process.stderr.write(error + "\n");
     process.exit(1);
   }
-  const audit = attachProofLinks(root, makeRecord("audit", composeAudit(scanData, judgments), root));
+  const audit = makeRecord("audit", composeAudit(scanData, judgments), root);
   fs.writeFileSync(path.join(root, TMP_DIR, "audit.json"), JSON.stringify(audit, null, 2));
   // [Foreman: 095] The default is the short report; --verbose is the full one,
   // unchanged. One line, so reverting the default is one line too.
   if (opts.json) process.stdout.write(JSON.stringify(audit, null, 2) + "\n");
   else if (opts.verbose) process.stdout.write(renderReport(audit, opts) + "\n");
   else process.stdout.write(renderBrief(audit) + "\n");
-}
-
-// [Foreman: 083] The attachment point, and the neutrality proof: links arrive
-// AFTER composeAudit has derived every state, score, grade and relationship, so
-// no derivation in this engine can read one. Absent when the store is empty, so
-// a project that never linked anything writes the record it always wrote.
-function attachProofLinks(root, audit) {
-  const links = resolveProofLinks(root, audit);
-  if (links.length) audit.proofLinks = links;
-  return audit;
 }
 
 // [Foreman: 061]
@@ -6258,7 +5589,7 @@ function cmdRemeasure(root, opts) {
     process.stderr.write(error + "\n");
     process.exit(1);
   }
-  const audit = attachProofLinks(root, makeRecord("audit", composeAudit(scanData, valid), root));
+  const audit = makeRecord("audit", composeAudit(scanData, valid), root);
   fs.writeFileSync(auditFile, JSON.stringify(audit, null, 2));
   if (opts.json) process.stdout.write(JSON.stringify({ ...audit, previous: prev }, null, 2) + "\n");
   else process.stdout.write(renderReport(audit, { ...opts, prev }) + "\n");
@@ -6268,15 +5599,15 @@ function cmdRemeasure(root, opts) {
 // The safe-change transaction — [Foreman: 081]
 // ---------------------------------------------------------------------------
 
-// SCOPE.md's migration contract is `diagnose → plan → apply → validate →
-// retire`. `diagnose` is not a command: the scan/audit record already IS the
-// diagnose artifact — context, coverage, per-file source hashes, findings as
-// evidence. The five below are the mutation half, and the split between them and
-// the audit skill is the mechanical-first rule drawn as a line: the skill
-// interviews, chooses the rewrite, and collects approval; the engine owns the
-// plan schema, the fingerprints, the exact patch, the staleness check, the
-// journal, the rollback state and the retirement gate. A model cannot decide a
-// mechanical fact, so none of those live in prose.
+// SCOPE.md's migration contract is `diagnose → plan → apply → validate`.
+// `diagnose` is not a command: the scan/audit record already IS the diagnose
+// artifact — context, coverage, per-file source hashes, findings as evidence.
+// The four below are the mutation half, and the split between them and the audit
+// skill is the mechanical-first rule drawn as a line: the skill interviews,
+// chooses the rewrite, and collects approval; the engine owns the plan schema,
+// the fingerprints, the exact patch, the staleness check, the journal and the
+// rollback state. A model cannot decide a mechanical fact, so none of those live
+// in prose.
 
 // Where transaction state lives. NOT in `.assay-tmp/`: that directory's whole
 // contract is "disposable", `clean` removes it, and the journal holds the only
@@ -6294,8 +5625,8 @@ const JOURNAL_FILE = "journal.jsonl";
 const CHANGE_KINDS = ["rule-rewrite", "stale-reference-repair", "placement-promotion", "park"];
 
 // Validation proportional to the kind, filled in when a draft names none. The
-// steps are the mechanical ones assay can run itself; repository tests, fresh
-// session smoke tests and Proof arrive through `--external` / `--proof` instead.
+// steps are the mechanical ones assay can run itself; repository tests and fresh
+// session smoke tests arrive through `--external` instead.
 const VALIDATION_STEPS = {
   "rule-rewrite": ["reparse", "static-reanalysis"],
   "stale-reference-repair": ["reparse", "static-reanalysis"],
@@ -6389,7 +5720,7 @@ function validatePlanChanges(changes, batches) {
       }
       touched.add(p.path);
     }
-    for (const p of [...c.patches, ...(c.retire ? [c.retire] : [])]) {
+    for (const p of c.patches) {
       const problem = validatePlanPatch(c.id, p);
       if (problem) return problem;
     }
@@ -6467,11 +5798,7 @@ function planFromDraft(draft, root) {
       const patch = fingerprintPatch(p, root, label, problems);
       if (patch) patches.push(patch);
     }
-    let retire = null;
-    if (raw.retire !== undefined && raw.retire !== null) {
-      retire = fingerprintPatch(raw.retire, root, label + " retirement", problems);
-    }
-    const files = [...new Set([...patches, ...(retire ? [retire] : [])].map((p) => p.path))].sort();
+    const files = [...new Set(patches.map((p) => p.path))].sort();
     const validation = [...new Set(
       Array.isArray(raw.validation) && raw.validation.length ? raw.validation : (VALIDATION_STEPS[raw.kind] || [])
     )].sort();
@@ -6492,7 +5819,6 @@ function planFromDraft(draft, root) {
     if (raw.addresses) change.addresses = String(raw.addresses);
     if (raw.mechanism) change.mechanism = { type: raw.mechanism.type, name: raw.mechanism.name };
     if (raw.provenance) change.provenance = raw.provenance;
-    if (retire) change.retire = retire;
     changes.push(change);
   }
   changes.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -6547,9 +5873,9 @@ function fingerprintPatch(raw, root, label, problems) {
 // ARCHITECT'S CALL, encoded here: a journal row stores its pre-image VERBATIM.
 // Reversibility beats redaction inside a private local file — a redacted
 // pre-image restores a file the user never had, which is data loss wearing a
-// safety hat. The journal is therefore never rendered into a report, an export,
-// or the HTML artifact; any future rendered view of it passes through
-// redactSecrets first, exactly as the two renderers already do.
+// safety hat. The journal is therefore never rendered into a report or an
+// export; any future rendered view of it passes through redactSecrets first,
+// exactly as the report already does.
 function appendJournal(root, row) {
   const file = statePath(root, JOURNAL_FILE);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -6584,8 +5910,8 @@ function readJournal(root) {
 }
 
 // The journal is append-only, so state is a replay rather than a field anyone
-// updates. Keyed by stage and path, so a change's apply write and its later
-// retirement write are two independent things to restore.
+// updates. Keyed by stage and path, so two writes to one file at different
+// stages stay independent things to restore.
 function replayJournal(rows) {
   const changes = new Map();
   let order = 0;
@@ -6643,14 +5969,13 @@ function latestRunClean(state) {
   return latest.some((e) => e.result === "pass") && !latest.some((e) => e.result === "fail");
 }
 
-// Open = written (or interrupted mid-write) and not yet resolved. The three
-// resolutions are a clean validation run, a rollback, and a retirement.
+// Open = written (or interrupted mid-write) and not yet resolved. The two
+// resolutions are a clean validation run and a rollback.
 function openChangeIds(rows) {
   const open = [];
   for (const c of replayJournal(rows).values()) {
     const live = changeWrites(c).filter((w) => !w.restored);
     if (!live.length) continue;
-    if (changeWrites(c, "retire").some((w) => w.written)) continue;
     const interrupted = live.some((w) => !w.written);
     if (!interrupted && latestRunClean(c)) continue;
     open.push(c.id);
@@ -6943,7 +6268,8 @@ function cmdApply(root, opts) {
     journal: STATE_DIR + "/" + JOURNAL_FILE,
     // No apply kind deletes or deactivates prose. A promotion adds the mechanism
     // beside the rule; a rewrite replaces rule text and leaves the rule in place.
-    // Deactivation is `retire`, and only after validation evidence exists.
+    // Deactivating a rule is the author's own edit, outside this transaction:
+    // `rollback` restores what assay wrote, never what a person wrote by hand.
     note: "The source instruction is still active. Validate next: `assay.js validate --change <id>`.",
   }, null, 2) + "\n");
 }
@@ -7013,14 +6339,6 @@ function validationEvidence(root, opts, change) {
       detail: "recorded from outside — assay did not run this",
     });
   }
-  for (const pointer of opts.proof) {
-    // A Proof record is linked, never executed and never converted. `linked` is
-    // not `pass`, so a Proof pointer alone can never open the retirement gate.
-    rows.push({
-      kind: "proof-link", level: "behavior-observed", result: "linked", pointer,
-      detail: "a Proof record is referenced, not run, and is not validation evidence on its own",
-    });
-  }
   return rows;
 }
 
@@ -7060,8 +6378,8 @@ function cmdValidate(root, opts) {
       "Apply it first: `assay.js apply --change " + id + "`.");
   }
   const ctx = { transaction: state.transaction, plan: found.plan.planId, change: id };
-  // One marker per invocation, so the retirement gate can tell THIS run's rows
-  // from an earlier run's. The journal only grows, so its length is unique here.
+  // One marker per invocation, so a reader can tell THIS run's rows from an
+  // earlier run's. The journal only grows, so its length is unique here.
   const run = "v" + journalRows.length;
   const rows = validationEvidence(root, opts, found.change);
   for (const row of rows) appendJournal(root, { event: "evidence", run, ...ctx, ...row });
@@ -7074,7 +6392,7 @@ function cmdValidate(root, opts) {
   process.stdout.write(JSON.stringify({
     change: id, evidence: rows.map((r) => ({ kind: r.kind, level: r.level, result: r.result, detail: r.detail })),
     note: "Evidence is in " + STATE_DIR + "/" + JOURNAL_FILE + ". The source instruction is still active; " +
-      "`assay.js retire --change " + id + "` is a separate decision.",
+      "deactivating it is a separate decision, and your own edit.",
   }, null, 2) + "\n");
 }
 
@@ -7170,585 +6488,6 @@ function cmdRollback(root, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// retire
-// ---------------------------------------------------------------------------
-
-function cmdRetire(root, opts) {
-  // Its own approval boundary: retiring source policy is a separate action and a
-  // separate argument, never a tail on the apply that replaced it.
-  if (opts.changes.length !== 1) fail("retire takes exactly one --change <id> — its own approval.");
-  const id = opts.changes[0];
-  const found = findChange(root, id);
-  if (found.problem) fail(found.problem);
-  const state = replayJournal(readJournal(root)).get(id);
-  // [Foreman: 093] A rolled-back change is the deeper refusal: even a planned
-  // retirement has nothing validated left to stand behind. Read the journal
-  // before complaining about the plan, so the message names the real gate.
-  const applyWrites = state ? changeWrites(state, "apply") : [];
-  const rolledBack = applyWrites.length > 0 && applyWrites.every((w) => !w.written) &&
-    applyWrites.some((w) => w.restored);
-  if (!found.change.retire) {
-    fail("The plan declares no retirement patch for change " + id + "." + (rolledBack
-      ? " And the change was rolled back — its write was restored, so a retirement would also need a re-plan, re-apply, and a clean validation first."
-      : " Retirement is planned like any other write: give the change a `retire` patch naming the prose to deactivate."));
-  }
-
-  // THE GATE, mechanical and unconditional. SCOPE.md: no source instruction is
-  // retired without validation evidence. Not a warning, not a default — a
-  // refusal that names what is missing.
-  const missing = [];
-  const applied = applyWrites.filter((w) => w.written);
-  if (!applied.length) {
-    missing.push(rolledBack
-      ? "the change was rolled back — its write was restored, so no validated write remains to retire behind; re-apply and re-validate first"
-      : "the change has not been applied (no write in the journal)");
-  }
-  const latest = latestValidationEvidence(state);
-  if (!latest.some((e) => e.result === "pass")) {
-    missing.push("the journal holds no validation evidence marking success for this change");
-  }
-  // The gate reads the WHOLE latest run: a run with any failing step is a
-  // failed validation, whatever its other rows say. assay reproduced its own
-  // worst case here — a failed host-discovery beside an always-pass
-  // static-reanalysis row must not open retirement.
-  const failedRows = latest.filter((e) => e.result === "fail");
-  if (failedRows.length) {
-    missing.push("the latest validation run failed (" + failedRows.map((e) => e.kind).join(", ") +
-      ") — a run must pass in full before retirement");
-  }
-  if (missing.length) {
-    fail("Refusing to retire change " + id + ":\n  " + missing.join("\n  ") +
-      "\n  Run `assay.js validate --change " + id + "` first. Source policy stays active until evidence exists.");
-  }
-
-  const patch = found.change.retire;
-  const full = path.join(root, patch.path);
-  const now = fs.existsSync(full) ? hashContent(fs.readFileSync(full, "utf-8")) : null;
-  const ctx = { transaction: state.transaction, plan: found.plan.planId, change: id };
-  if (now !== patch.sourceHash) {
-    appendJournal(root, {
-      event: "reject", stage: "retire", ...ctx, path: patch.path,
-      reason: "stale-fingerprint", expected: patch.sourceHash, found: now,
-    });
-    fail("Stale plan: " + patch.path + " changed since the retirement was planned.\n" +
-      "  planned fingerprint: " + (patch.sourceHash === null ? "(file absent)" : patch.sourceHash) + "\n" +
-      "  fingerprint now:     " + (now === null ? "(file absent)" : now) + "\n" +
-      "  Re-plan the retirement. Nothing was written.");
-  }
-  journalledWrite(root, ctx, patch, "retire");
-  const problems = postWriteProblems(root, [patch.path]);
-  if (problems.length) {
-    const after = replayJournal(readJournal(root)).get(id);
-    for (const w of changeWrites(after, "retire").filter((w) => w.written)) restoreWrite(root, ctx, w, "post-write-validation");
-    fail("The retirement of change " + id + " was restored: what it wrote does not parse.\n  " + problems.join("\n  "));
-  }
-  process.stdout.write(JSON.stringify({
-    retired: id, file: patch.path, journal: STATE_DIR + "/" + JOURNAL_FILE,
-    note: "Keeping the prose as documentation or defence in depth is a legitimate outcome — " +
-      "retiring it is not the reward for a validated mechanism. Reversible: `assay.js rollback --change " + id + "`.",
-  }, null, 2) + "\n");
-}
-
-// ---------------------------------------------------------------------------
-// Proof links — [Foreman: 083]
-// ---------------------------------------------------------------------------
-
-// SCOPE.md splits truth three ways and gives behavioral truth to Proof. This is
-// the seam, and it is deliberately thin: a link attaches ONE saved Proof record
-// to ONE anchor assay already has a stable key for, so a report can show what
-// was measured beside what was analyzed. Nothing here runs Proof, nothing here
-// runs a model, and nothing here MATCHES a record to a rule — assay never
-// infers that a Proof run was about a particular rule, because the record does
-// not say so and a similarity guess would be exactly the "universal weight"
-// the evidence contract forbids. A link exists because a person wrote it.
-//
-// Display only. The resolved links are attached AFTER composeAudit has finished,
-// so no number below can reach a state, a score, a grade or a threshold: the
-// derivation never sees them. That is the neutrality proof made structural
-// rather than promised.
-//
-// Where it lives: `.assay/links.jsonl`, beside the journal and not inside
-// `.assay-tmp/`. A link is curated state like a parked plan — it names evidence
-// that cost money to produce and that no rerun regenerates — so `clean` keeps it.
-const LINKS_FILE = "links.jsonl";
-
-// The anchors a link may name. `ref` is stored in its STABLE form: a rule's
-// content-hash key, a skill's name, a finding's state/type plus its first source
-// span, a plan's change id. The display id (`R###`, `F###`) is accepted as input
-// because that is what a report prints, and resolved to the stable form here —
-// a positional counter must never become a durable reference.
-const LINK_ANCHOR_FLAGS = { "--rule": "rule", "--skill": "skill", "--finding": "finding", "--change": "change" };
-
-// The behavioral-evidence key SCOPE.md requires:
-//     host × host version × model × harness × repository fixture × date
-const PROOF_KEY_PARTS = ["host", "hostVersion", "model", "harness", "fixture", "date"];
-const PROOF_KEY_LABELS = {
-  host: "host", hostVersion: "host version", model: "model",
-  harness: "harness", fixture: "repository fixture", date: "date",
-};
-
-// What a saved Proof record actually is, read out of its own fields. Two shapes
-// ship today and this reads both mechanically:
-//
-//   paired A/B — what `proof run --json` prints (`analyze` in proof/lib/runner.js,
-//     decorated in proof/bin/proof.js): { id, model, seed, cells, usable,
-//     totalCostUsd, arms: { baseline: {n, ran, mean, costUsd},
-//     <arm>: {n, ran, mean, costUsd, lift, ci: [lo,hi], verdict} },
-//     disclosure, explanations }. Verdicts are CONFIRMED+ / CONFIRMED- / NULL /
-//     INCONCLUSIVE (proof/lib/stats.js `verdictFor`).
-//
-//   fingerprint — what `proof watch save` stores, one JSON per (agent, model,
-//     probe) under $PROOF_HOME/fingerprints (proof/lib/watch.js `saveFingerprint`,
-//     `fpDir`): { key, probeId, agent, model, version, n, rate, ci, scores,
-//     savedAt }.
-//
-// What is NOT in either, and is therefore never invented: the A/B record names
-// no host, no host version and no date; neither names a repository fixture; and
-// neither hashes the configuration it measured. `absent` says which parts of the
-// key came back empty, and the report prints that sentence instead of a guess.
-function parseProofRecord(record) {
-  if (!isRecordObject(record)) return { problem: "not a JSON object" };
-  const ab = isRecordObject(record.arms);
-  const fp = typeof record.probeId === "string" && Array.isArray(record.ci);
-  if (!ab && !fp) return { problem: "no `arms` and no `probeId` — not a Proof run or fingerprint record" };
-  const key = {
-    host: typeof record.agent === "string" ? record.agent : null,
-    hostVersion: typeof record.version === "string" ? record.version : null,
-    model: typeof record.model === "string" ? record.model : null,
-    // The one part read from the record's SHAPE rather than one of its fields:
-    // which Proof measurement wrote this file. No Proof record carries a harness
-    // field, and the shape is the fact — an `arms` object is a paired run, a
-    // `probeId` with a band is a drift fingerprint.
-    harness: ab ? "proof run (paired A/B)" : "proof watch (fingerprint)",
-    // The spec names the fixture tree; the saved record does not carry it, and a
-    // spec is not the record that was saved.
-    fixture: null,
-    date: typeof record.savedAt === "string" ? record.savedAt : null,
-  };
-  const results = [];
-  if (ab) {
-    const base = isRecordObject(record.arms.baseline) ? record.arms.baseline : null;
-    for (const arm of Object.keys(record.arms)) {
-      const d = record.arms[arm];
-      if (arm === "baseline" || !isRecordObject(d)) continue;
-      results.push({
-        arm,
-        verdict: typeof d.verdict === "string" ? d.verdict : null,
-        lift: typeof d.lift === "number" ? d.lift : null,
-        rate: null,
-        ci: Array.isArray(d.ci) ? d.ci : null,
-        n: typeof d.n === "number" ? d.n : null,
-        baseline: base && typeof base.mean === "number" ? base.mean : null,
-        costUsd: typeof record.totalCostUsd === "number" ? record.totalCostUsd : null,
-      });
-    }
-  } else {
-    // A fingerprint is a saved rate with a band, not a lift over a baseline, and
-    // it carries no verdict at all — `watch check` computes one against a FRESH
-    // run. Printing "—" for the verdict is the honest cell.
-    results.push({
-      arm: record.probeId, verdict: null, lift: null,
-      rate: typeof record.rate === "number" ? record.rate : null,
-      ci: record.ci, n: typeof record.n === "number" ? record.n : null,
-      baseline: null, costUsd: null,
-    });
-  }
-  return {
-    recordId: String(ab ? record.id : record.probeId),
-    key,
-    absent: PROOF_KEY_PARTS.filter((k) => key[k] == null),
-    // No Proof record hashes the configuration it measured. Read one if a later
-    // Proof ever writes it; until then the analyzer fingerprint below is the
-    // only hash a mismatch can honestly be stated against.
-    configFingerprint: typeof record.configHash === "string" ? record.configHash : null,
-    limits: typeof record.disclosure === "string" ? record.disclosure : null,
-    results,
-  };
-}
-
-// A pointer is a path to a saved record — project-relative or absolute, because
-// `proof watch` stores its fingerprints under the user's home, not the repo.
-// Read-only: this file never writes through a pointer.
-function proofPointerPath(root, pointer) {
-  return path.isAbsolute(pointer) ? pointer : path.resolve(root, pointer);
-}
-
-function readProofRecordAt(file) {
-  let raw;
-  try {
-    raw = fs.readFileSync(file, "utf-8");
-  } catch {
-    return { problem: "the pointer no longer resolves" };
-  }
-  let json;
-  try {
-    json = JSON.parse(raw);
-  } catch (err) {
-    return { problem: "the record no longer parses: " + err.message };
-  }
-  const parsed = parseProofRecord(json);
-  return parsed.problem ? { problem: "the record is not a Proof record — " + parsed.problem } : { parsed };
-}
-
-function readProofLinks(root) {
-  const file = statePath(root, LINKS_FILE);
-  if (!fs.existsSync(file)) return [];
-  const rows = [];
-  for (const line of fs.readFileSync(file, "utf-8").split("\n")) {
-    if (!line.trim()) continue;
-    // Same discipline as the journal: a torn last line is an interrupted append,
-    // not a lie about what was linked.
-    try { rows.push(JSON.parse(line)); } catch { /* skip */ }
-  }
-  return rows;
-}
-
-function appendProofLink(root, row) {
-  const file = statePath(root, LINKS_FILE);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, JSON.stringify(row) + "\n");
-}
-
-// A finding's stable address: what it is, and where it starts. The `F###` id is
-// an emission counter and moves when a finding above it appears or goes.
-function findingRef(f) {
-  const s = (f.sources || [])[0] || {};
-  return (f.state || f.type) + "@" + (s.path || "?") + ":" + (s.lineStart == null ? "?" : s.lineStart);
-}
-
-// Exact lookup against the current analysis. Never a similarity match: an anchor
-// resolves by the key assay itself assigned, or it does not resolve.
-function findAnchor(audit, anchor) {
-  if (!isRecordObject(anchor)) return null;
-  if (anchor.kind === "rule") return (audit.rules || []).find((r) => r.key === anchor.ref) || null;
-  if (anchor.kind === "skill") return (audit.skills || []).find((s) => s.name === anchor.ref) || null;
-  if (anchor.kind === "finding") return (audit.findings || []).find((f) => findingRef(f) === anchor.ref) || null;
-  // A change anchor lives in a plan artifact, not in the audit record.
-  return null;
-}
-
-// The analyzer artifact a link was made against, as text to hash. A rule's key is
-// its NORMALIZED text (`ruleKey`: trimmed, lowercased, whitespace-collapsed), so
-// a rule can keep its key while its exact wording moves — and Proof measured the
-// exact wording. That gap is the whole of "measured an earlier wording".
-function anchorText(anchor, target) {
-  if (!target) return null;
-  if (anchor.kind === "rule") return target.text;
-  if (anchor.kind === "skill") return target.description || "";
-  if (anchor.kind === "finding") return target.summary || "";
-  return null;
-}
-
-function anchorWhere(anchor, target) {
-  if (!target) return null;
-  if (anchor.kind === "rule") {
-    return { path: target.file, line: target.lineStart, label: target.id + ' "' + truncate(target.text, 60) + '"' };
-  }
-  if (anchor.kind === "skill") return { path: target.path, line: 1, label: "skill `" + target.name + "`" };
-  if (anchor.kind === "finding") {
-    const s = (target.sources || [])[0] || {};
-    return { path: s.path, line: s.lineStart, label: (target.state || target.type) + ": " + target.summary };
-  }
-  return null;
-}
-
-function anchorId(anchor) {
-  return (isRecordObject(anchor) ? anchor.kind + ":" + anchor.ref : "?");
-}
-
-// Read time, and fail-open by contract. A pointer that no longer resolves and a
-// record that no longer parses are BOTH disclosed as stale rows rather than
-// crashing or vanishing: the link is a fact the user recorded, and a report that
-// silently drops it would be quieter and less true. Same for an anchor that is
-// no longer in the analysis — the row stays and says so.
-function resolveProofLinks(root, audit) {
-  const stored = readProofLinks(root);
-  if (!stored.length) return [];
-  const rows = stored.map((link) => {
-    const anchor = isRecordObject(link.anchor) ? link.anchor : { kind: "?", ref: "?" };
-    const target = findAnchor(audit, anchor);
-    const now = anchorText(anchor, target);
-    const row = {
-      anchor,
-      pointer: String(link.pointer || ""),
-      recordId: link.recordId == null ? null : String(link.recordId),
-      linkedAt: link.linkedAt || null,
-      key: isRecordObject(link.key) ? link.key : {},
-      absent: Array.isArray(link.absent) ? link.absent : [],
-      anchorHash: link.anchorHash == null ? null : String(link.anchorHash),
-      configFingerprint: link.configFingerprint == null ? null : String(link.configFingerprint),
-      // A change anchor is answered by the plan artifact, so the audit not
-      // holding it is not a miss.
-      anchorFound: Boolean(target) || anchor.kind === "change",
-      where: anchorWhere(anchor, target),
-      // The mismatch the entry names: this link was made against a wording that
-      // is no longer the one on disk. Stated, never used to hide the row.
-      wordingMoved: Boolean(link.anchorHash && now != null && hashContent(now) !== link.anchorHash),
-      stale: null, results: [], limits: null,
-    };
-    const { parsed, problem } = readProofRecordAt(proofPointerPath(root, row.pointer));
-    if (problem) {
-      row.stale = problem;
-      return row;
-    }
-    row.results = parsed.results;
-    row.limits = parsed.limits;
-    return row;
-  });
-  // Grouped by anchor, then date-ordered inside it — the drift story reads
-  // oldest first. A record with no date falls back to when the link was made,
-  // and the pointer breaks any remaining tie so two runs order identically.
-  const at = (l) => (l.key.date || l.linkedAt || "") + "\u0000" + l.pointer;
-  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
-  return rows.sort((a, b) => cmp(anchorId(a.anchor), anchorId(b.anchor)) || cmp(at(a), at(b)));
-}
-
-// ---------------------------------------------------------------------------
-// Rendering the evidence — display, never a weight
-// ---------------------------------------------------------------------------
-
-function fmtSigned(x) {
-  return x == null ? "—" : (x >= 0 ? "+" : "") + x.toFixed(2);
-}
-
-function fmtBand(ci) {
-  return Array.isArray(ci) && ci[0] != null && ci[1] != null
-    ? "[" + Number(ci[0]).toFixed(2) + ", " + Number(ci[1]).toFixed(2) + "]"
-    : "—";
-}
-
-function proofKeyLine(key) {
-  return PROOF_KEY_PARTS.filter((k) => key[k] != null).map((k) => PROOF_KEY_LABELS[k] + " " + key[k]).join(" · ");
-}
-
-function andList(words) {
-  return words.length < 2 ? words.join("") : words.slice(0, -1).join(", ") + " or " + words[words.length - 1];
-}
-
-function proofAbsentLine(absent) {
-  if (!absent.length) return null;
-  return "the record names no " + andList(absent.map((k) => PROOF_KEY_LABELS[k])) +
-    " — stored as absent, not guessed";
-}
-
-// The day, not the timestamp: a row is a date-ordered history and the clock time
-// belongs with the rest of the key under --verbose.
-function proofDay(date) {
-  return typeof date === "string" && date.length >= 10 ? date.slice(0, 10) : date;
-}
-
-// One measurement, as the record states it. Nothing is recomputed, rescaled or
-// combined: a lift stays a lift over that run's own baseline.
-function proofResultText(l, r) {
-  const head = r.verdict
-    ? "**" + r.verdict + "** " + r.arm + " lift " + fmtSigned(r.lift)
-    : r.rate != null
-      ? r.arm + " rate " + r.rate.toFixed(2)
-      : r.arm;
-  const bits = [head, "95% CI " + fmtBand(r.ci)];
-  if (r.n != null) bits.push("n=" + r.n);
-  if (r.costUsd != null) bits.push("$" + r.costUsd.toFixed(4));
-  bits.push(proofDay(l.key.date) || "no date recorded");
-  return bits.join(", ") + " — record `" + (l.recordId || "?") + "` " + evidenceTag(BEHAVIOR_EVIDENCE);
-}
-
-// The evidence level this whole section carries. It is the contract's own row —
-// produced by Proof from actual agent executions — and the limits sentence is
-// what stops it reading as a general claim.
-const BEHAVIOR_EVIDENCE = {
-  level: "behavior-observed",
-  basis: "a saved Proof record, linked by hand and read as written",
-  limits: "measured on the host, model, harness and tasks the record names, on the date it names — never converted into a score, a state or a threshold here",
-};
-
-function proofSubLines(l, opts) {
-  const subs = [];
-  if (l.wordingMoved) {
-    subs.push("measured an earlier wording — the anchor's text changed after this link was made, so read the numbers against that older text");
-  }
-  if (l.limits) subs.push(redactSecrets(l.limits));
-  const absent = proofAbsentLine(l.absent);
-  if (absent) subs.push(absent);
-  if (opts && opts.verbose) {
-    const key = proofKeyLine(l.key);
-    if (key) subs.push(redactSecrets(key));
-    subs.push("linked " + (l.linkedAt || "at an unrecorded time") + " from `" + l.pointer + "`");
-  }
-  return subs;
-}
-
-// Every line this section prints, as {text, subs} — one builder, both renderers,
-// so neither view can carry a row the other drops.
-function proofLinkLines(l, opts) {
-  const lines = [];
-  if (l.stale) {
-    const stored = proofKeyLine(l.key);
-    lines.push({
-      text: "evidence unavailable — " + l.stale + " (`" + l.pointer + "`) " + evidenceTag(BEHAVIOR_EVIDENCE),
-      subs: ["this link recorded: " + (stored || "no key at all") + " — the numbers are not readable, so none are shown"],
-    });
-    return lines;
-  }
-  if (!l.results.length) {
-    lines.push({ text: "record `" + (l.recordId || "?") + "` carries no measured arm " + evidenceTag(BEHAVIOR_EVIDENCE), subs: proofSubLines(l, opts) });
-    return lines;
-  }
-  for (const r of l.results) lines.push({ text: proofResultText(l, r), subs: proofSubLines(l, opts) });
-  return lines;
-}
-
-function proofGroups(links) {
-  const groups = [];
-  for (const l of links) {
-    const id = anchorId(l.anchor);
-    const last = groups[groups.length - 1];
-    if (last && last.id === id) last.links.push(l);
-    else groups.push({ id, anchor: l.anchor, where: l.where, anchorFound: l.anchorFound, links: [l] });
-  }
-  // A later link may resolve the anchor a earlier one could not (the pointer
-  // differs, the anchor does not) — take the first resolved address in the group.
-  for (const g of groups) {
-    const resolved = g.links.find((l) => l.where);
-    if (resolved) { g.where = resolved.where; g.anchorFound = true; }
-  }
-  return groups;
-}
-
-function proofGroupHeading(g) {
-  if (g.where && g.where.path) {
-    return "`" + g.where.path + ":" + g.where.line + "` — " + g.where.label;
-  }
-  if (g.anchor.kind === "change") return "plan change `" + g.anchor.ref + "`";
-  return g.anchor.kind + " `" + g.anchor.ref + "` — not in this analysis";
-}
-
-// razor: one section, addressed to each anchor by its own clickable source line,
-// rather than an evidence cell repeated inside all six tables and lists a rule
-// can appear in. A reader gets the finding, then the measurement beside its
-// address. Upgrade path when a corpus routinely carries links: a marker column
-// in the rules table pointing at the anchor's heading here.
-function pushProofSection(out, links, opts) {
-  out.push("## Behavior evidence");
-  out.push("");
-  out.push("What a separate Proof run measured about these instructions — linked by hand, shown as recorded. " +
-    "Nothing here moves a state, a score, a grade or a threshold anywhere in this report: it is evidence beside the finding, not a weight inside it. " +
-    "A record covers only the host, model and tasks it names, on the date it names. " +
-    "Records come from the `/proof:proof` skill; assay never runs one.");
-  out.push("");
-  for (const g of proofGroups(links)) {
-    out.push("### " + proofGroupHeading(g));
-    out.push("");
-    if (!g.anchorFound) {
-      out.push("The anchor this evidence was linked to is not in the current analysis. The link is kept and shown rather than dropped.");
-      out.push("");
-    }
-    for (const l of g.links) {
-      for (const line of proofLinkLines(l, opts)) {
-        out.push("- " + line.text);
-        for (const sub of line.subs) out.push("  - " + sub);
-      }
-    }
-    out.push("");
-  }
-  if (!opts || !opts.verbose) {
-    out.push("Rerun with `--verbose` for each record's full evidence key.");
-    out.push("");
-  }
-}
-
-// ---------------------------------------------------------------------------
-// link
-// ---------------------------------------------------------------------------
-
-// Resolving an anchor at link time against the audit the reader is looking at.
-// The `R###` / `F###` display ids are accepted and converted; the stored ref is
-// always the stable one.
-function resolveLinkAnchor(root, kind, ref) {
-  if (kind === "change") {
-    const found = findChange(root, ref);
-    if (found.problem) return { problem: found.problem };
-    // A plan is content-addressed, so its id IS the fingerprint of what this
-    // link was made against.
-    return { anchor: { kind, ref }, anchorHash: found.plan.planId };
-  }
-  const auditFile = path.join(root, TMP_DIR, "audit.json");
-  if (!fs.existsSync(auditFile)) {
-    return { problem: "No " + TMP_DIR + "/audit.json — run `report` first so the anchor can be resolved against a real analysis." };
-  }
-  const { record: audit, problem } = readRecord(auditFile, "audit");
-  if (problem) return { problem: staleRecordError(TMP_DIR + "/audit.json", "audit", problem) };
-  let target = null;
-  if (kind === "rule") {
-    target = (audit.rules || []).find((r) => r.key === ref) || (audit.rules || []).find((r) => r.id === ref) || null;
-  } else if (kind === "skill") {
-    target = (audit.skills || []).find((s) => s.name === ref) || null;
-  } else {
-    target = (audit.findings || []).find((f) => f.id === ref) || (audit.findings || []).find((f) => findingRef(f) === ref) || null;
-  }
-  if (!target) {
-    return { problem: "No " + kind + " " + JSON.stringify(ref) + " in " + TMP_DIR + "/audit.json. " +
-      "An anchor is matched exactly, never by similarity — check the " +
-      (kind === "rule" ? "content-hash key or R### id" : kind === "skill" ? "skill name" : "F### id or type@path:line") + "." };
-  }
-  const anchor = {
-    kind,
-    ref: kind === "rule" ? target.key : kind === "skill" ? target.name : findingRef(target),
-  };
-  const text = anchorText(anchor, target);
-  return { anchor, anchorHash: text == null ? null : hashContent(text) };
-}
-
-function cmdLink(root, opts) {
-  const named = Object.entries(LINK_ANCHOR_FLAGS).filter(([flag]) => opts.anchorArgs[flag] != null);
-  if (opts.list) {
-    if (named.length || opts.proof.length) fail("link --list takes no other argument — it prints the store as it stands.");
-    const stored = readProofLinks(root);
-    process.stdout.write(JSON.stringify({
-      links: stored,
-      store: STATE_DIR + "/" + LINKS_FILE,
-      note: stored.length
-        ? "Each row is one saved Proof record attached to one anchor. Evidence is displayed, never converted into a score."
-        : "No links yet. Measure a change with the `/proof:proof` skill, then attach its saved record with `assay.js link --proof <pointer> --rule <key>`.",
-    }, null, 2) + "\n");
-    return;
-  }
-  if (opts.proof.length !== 1) fail("link takes exactly one --proof <pointer> naming a saved Proof record.");
-  if (named.length !== 1) {
-    fail("link takes exactly one anchor: " + Object.keys(LINK_ANCHOR_FLAGS).join(", ") +
-      ". One record, one anchor — assay never matches a Proof record to a rule for you.");
-  }
-  const [flag, kind] = named[0];
-  const resolved = resolveLinkAnchor(root, kind, opts.anchorArgs[flag]);
-  if (resolved.problem) fail(resolved.problem);
-
-  // The record must be readable NOW: the evidence key is read out of it, and a
-  // key that cannot be read is a key that would have to be invented.
-  const pointer = opts.proof[0];
-  const { parsed, problem } = readProofRecordAt(proofPointerPath(root, pointer));
-  if (problem) fail("Cannot link " + pointer + ": " + problem + ".");
-
-  const row = {
-    anchor: resolved.anchor,
-    anchorHash: resolved.anchorHash,
-    pointer,
-    recordId: parsed.recordId,
-    key: parsed.key,
-    absent: parsed.absent,
-    configFingerprint: parsed.configFingerprint,
-    linkedAt: new Date().toISOString(),
-  };
-  appendProofLink(root, row);
-  process.stdout.write(JSON.stringify({
-    linked: row,
-    store: STATE_DIR + "/" + LINKS_FILE,
-    note: "Behavior evidence is displayed beside this anchor in the next report. It never moves a score, a state or a grade — " +
-      (parsed.absent.length
-        ? "and the record names no " + andList(parsed.absent.map((k) => PROOF_KEY_LABELS[k])) + ", which the report states rather than filling in."
-        : "and the full evidence key came out of the record."),
-  }, null, 2) + "\n");
-}
-
-// ---------------------------------------------------------------------------
 // clean
 // ---------------------------------------------------------------------------
 
@@ -7760,20 +6499,13 @@ function cmdClean(root) {
   if (open.length) {
     fail("Removed " + TMP_DIR + "/, kept " + STATE_DIR + "/" + JOURNAL_FILE + ": " + open.length +
       " open change(s) — " + open.join(", ") + ".\n  An open change is applied and unresolved. Close each one " +
-      "with `validate`, `rollback`, or `retire`; a journal holding the only copy of a pre-image is never deleted.");
+      "with `validate` or `rollback`; a journal holding the only copy of a pre-image is never deleted.");
   }
   fs.rmSync(journal, { force: true });
   const kept = planFiles(root).length;
-  // [Foreman: 083] The link store is curated state like a parked plan: it names
-  // evidence a rerun cannot regenerate, so `clean` never takes it and says so.
-  const links = readProofLinks(root).length;
-  if (!kept && !links) fs.rmSync(statePath(root), { recursive: true, force: true });
-  const keptBits = [
-    kept ? kept + " plan artifact(s)" : null,
-    links ? links + " Proof link(s)" : null,
-  ].filter(Boolean);
+  if (!kept) fs.rmSync(statePath(root), { recursive: true, force: true });
   process.stdout.write("Removed " + TMP_DIR + "/ and the closed journal." +
-    (keptBits.length ? " Kept " + keptBits.join(" and ") + " in " + STATE_DIR + "/." : "") + "\n");
+    (kept ? " Kept " + kept + " plan artifact(s) in " + STATE_DIR + "/." : "") + "\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -7949,16 +6681,14 @@ function cmdCi(root, opts) {
 // [Foreman: 070] One exit-code contract: 0 on success, 1 on any expected
 // failure — a missing input, a malformed judgments file, a usage error.
 // [Foreman: 081] The transaction commands join it unchanged: a stale plan, an
-// unknown change id, a failed validation and a refused retirement all exit 1.
-// [Foreman: 083] `link` joins the same contract: an unknown anchor, an
-// unreadable Proof record and a missing audit all exit 1.
+// unknown change id and a failed validation all exit 1.
 // [Foreman: 084] `ci` adds the ONE second failure code in this engine: 2 means
 // a selected gate failed, and it is distinct from 1 precisely so a build can
 // tell a finding from a broken invocation. A `--fail-on` naming a gate outside
 // the closed set is still 1 — that is a usage error, not a finding.
-const COMMANDS = ["scan", "report", "remeasure", "artifact", "clean",
-  "plan", "apply", "validate", "rollback", "retire", "link", "ci"];
-const FLAGS = new Set(["--verbose", "--json", "--project-only", "--list", "--force"]);
+const COMMANDS = ["scan", "report", "remeasure", "clean",
+  "plan", "apply", "validate", "rollback", "ci"];
+const FLAGS = new Set(["--verbose", "--json", "--project-only", "--force"]);
 // [Foreman: 079] Flags that take a value, mapped to what that value is, so the
 // parser skips the argument instead of rejecting it as an unknown flag and the
 // error says what was missing.
@@ -7971,9 +6701,7 @@ const VALUE_FLAGS = new Map([
   // [Foreman: 081] The transaction's arguments. `--change` repeats, and that
   // repetition IS the approval boundary — every id written out by hand.
   ["--from", "draft plan path"], ["--change", "change id"], ["--batch", "batch id"],
-  ["--transaction", "transaction id"], ["--external", '"<kind>: <result>"'], ["--proof", "record pointer"],
-  // [Foreman: 083] the anchors a Proof link may name
-  ["--rule", "rule key or R### id"], ["--skill", "skill name"], ["--finding", "F### id or type@path:line"],
+  ["--transaction", "transaction id"], ["--external", '"<kind>: <result>"'],
   // [Foreman: 084] which gates may fail a ci run, from the closed set
   ["--fail-on", "comma-separated gate list (" + CI_GATE_NAMES.join(", ") + ")"],
 ]);
@@ -7981,14 +6709,11 @@ const USAGE = [
   "Usage: assay.js <" + COMMANDS.join("|") + "> [--root <path>]",
   "  scan|remeasure  [--host <" + Object.keys(ADAPTERS).join("|") + ">] [--startup <dir>] [--project-only] [--verbose] [--json]",
   "  report          [--verbose] [--json]",
-  "  artifact | clean",
+  "  clean",
   "  plan            --from <draft.json>",
   "  apply           --change <id> [--change <id> …] | --batch <id>",
-  "  validate        --change <id> [--external \"<kind>: <result>\"] [--proof <pointer>]",
+  "  validate        --change <id> [--external \"<kind>: <result>\"]",
   "  rollback        --change <id> [--change <id> …] | --transaction <id>  [--force]",
-  "  retire          --change <id>",
-  "  link            --proof <pointer> --rule <key> | --skill <name> | --finding <ref> | --change <id>",
-  "  link            --list",
   "  ci              [--host <" + Object.keys(ADAPTERS).join("|") + ">] [--startup <dir>] [--project-only] [--fail-on <gate>[,<gate>…]] [--json]",
   "                  deterministic, writes nothing; exit 0 clean, 2 a gate failed, 1 usage error",
   "                  gates (closed set): " + CI_GATE_NAMES.join(", "),
@@ -8074,11 +6799,6 @@ function main() {
     batch: args.includes("--batch") ? args[args.indexOf("--batch") + 1] : null,
     transaction: args.includes("--transaction") ? args[args.indexOf("--transaction") + 1] : null,
     external: valuesOf(args, "--external"),
-    proof: valuesOf(args, "--proof"),
-    // [Foreman: 083] the link command's own arguments
-    list: args.includes("--list"),
-    anchorArgs: Object.fromEntries(Object.keys(LINK_ANCHOR_FLAGS)
-      .map((flag) => [flag, args.includes(flag) ? args[args.indexOf(flag) + 1] : null])),
     // [Foreman: 084] null means the conservative default set, not "no gates".
     failOn: args.includes("--fail-on") ? args[args.indexOf("--fail-on") + 1] : null,
   };
@@ -8086,13 +6806,10 @@ function main() {
   if (command === "scan") cmdScan(root, opts);
   else if (command === "report") cmdReport(root, opts);
   else if (command === "remeasure") cmdRemeasure(root, opts);
-  else if (command === "artifact") cmdArtifact(root); // [Foreman: 054]
   else if (command === "plan") cmdPlan(root, opts); // [Foreman: 081]
   else if (command === "apply") cmdApply(root, opts);
   else if (command === "validate") cmdValidate(root, opts);
   else if (command === "rollback") cmdRollback(root, opts);
-  else if (command === "retire") cmdRetire(root, opts);
-  else if (command === "link") cmdLink(root, opts); // [Foreman: 083]
   else if (command === "ci") cmdCi(root, opts); // [Foreman: 084]
   else cmdClean(root);
 }
@@ -8119,8 +6836,8 @@ module.exports = {
   // [Foreman: 077] the mechanism contract: the ladder and its limits vocabulary
   deriveMechanisms, MECHANISM_LEVELS, MECHANISM_LIMITS,
   looksLikeStatement, hasImperativeVerb, checkSkillDescription, gradeSkill, findSkillFiles,
-  renderArtifact, artifactRuleData,
-  // [Foreman: 078] the output contract: one record, both renderers, one masker
+  // [Foreman: 078] the output contract: one record, one masker, one coverage
+  // story every view of it has to tell the same way
   redactSecrets, coverageLines,
   // [Foreman: 072] the record contract
   RECORD_SCHEMA, SCHEMA_VERSION, ANALYZER_VERSION, validateRecord, makeRecord, hashContent,
@@ -8128,10 +6845,6 @@ module.exports = {
   // replay, and where transaction state lives
   CHANGE_KINDS, VALIDATION_STEPS, validatePlanChanges, planFromDraft,
   readJournal, replayJournal, openChangeIds, postWriteProblems, STATE_DIR, JOURNAL_FILE,
-  // [Foreman: 083] the Proof link store: what a saved record yields, where the
-  // links live, and how they resolve against an analysis they never enter
-  LINKS_FILE, PROOF_KEY_PARTS, BEHAVIOR_EVIDENCE,
-  parseProofRecord, readProofLinks, resolveProofLinks, attachProofLinks, findingRef,
   // [Foreman: 079] the host-profile contract: the registry `--host` selects
   // from, and the policy every analyzer consults instead of a host name
   ADAPTERS, DEFAULT_POLICY, profilePolicy, DEFAULT_NOUNS, profileNouns, readSkillMetadata,

@@ -1615,7 +1615,7 @@ test("every finding is schema-valid and source-linked to a path in the record", 
     ".claude/rules/dead.md": '---\npaths: ["nope/**/*.ts"]\n---\n\n- Return typed errors from every handler.\n',
   });
   const severities = new Set(["info", "low", "medium", "high"]);
-  const levels = new Set(["mechanical", "documented", "experiment-supported", "heuristic", "model-inferred", "behavior-observed"]);
+  const levels = new Set(["mechanical", "documented", "experiment-supported", "heuristic", "model-inferred"]);
   const known = new Set([
     ...audit.files.map((f) => f.path),
     ...(audit.sources || []).map((s) => s.path),
@@ -1934,11 +1934,6 @@ test("a corpus past the pairwise cap says so instead of failing", () => {
   assert.deepEqual(findingsOfType(audit, "duplicate"), []);
   assert.deepEqual(findingsOfType(audit, "conflict"), []);
   assert.deepEqual(audit.relationships.filter((r) => ["duplicate", "conflict"].includes(r.kind)), []);
-
-  // and the third view carries the same sentence
-  assert.equal(cli(root, "artifact").code, 0);
-  const html = fs.readFileSync(path.join(root, ".assay-tmp", "report.html"), "utf-8");
-  assert.match(html, disclosure);
 });
 
 test("a corpus at the cap still gets the real pairwise analysis", () => {
@@ -2251,134 +2246,6 @@ test("a skill defined in both project and user scope is flagged, and only then",
 });
 
 // ---------------------------------------------------------------------------
-// artifact — self-contained interactive HTML report
-// ---------------------------------------------------------------------------
-
-// A hand-built audit exercising the escaping, suppression, and hookInventory
-// rules without needing the model-judged pipeline.
-function fixtureAudit() {
-  return {
-    root: "/tmp/demo-project",
-    corpusScore: 0.478,
-    corpusGrade: "D",
-    hookInventory: [{ event: "PreToolUse", matcher: "*", command: "secret-scan.js", source: "project" }],
-    files: [{ path: "CLAUDE.md", ruleCount: 1, score: 0.5, grade: "C", globs: [] }],
-    skills: [],
-    rules: [
-      {
-        id: "R001", key: "aaa", file: "CLAUDE.md", lineStart: 3, lineEnd: 3,
-        text: "Never inline `</script>` — see https://example.com/style instead.",
-        category: "mandate",
-        factorValues: { F1: 0.95, F2: 0.2, F3: 0.5, F4: 0.9, F5: 0.95, F7: 0.8 },
-        f8: 0.3, score: 0.16, grade: "F", weak: true, stallRisk: true,
-        hookOpportunity: true, placement: null, dominantWeakness: "F7", suppressed: false,
-      },
-      {
-        id: "R002", key: "bbb", file: "CLAUDE.md", lineStart: 6, lineEnd: 6,
-        text: "This is a note about the project, not a rule.",
-        category: "mandate",
-        factorValues: { F1: 0.5, F2: 0.85, F3: 0.5, F4: 0.9, F5: 0.95, F7: 0.05 },
-        f8: 0.9, score: 0.3, grade: "F", weak: true, stallRisk: false,
-        hookOpportunity: false, placement: null, dominantWeakness: "F7",
-        suppressed: true, suppressedReason: "Describes the project; asks for nothing.",
-      },
-    ],
-  };
-}
-
-test("renderArtifact emits self-contained page content with no external assets", () => {
-  const html = engine.renderArtifact(fixtureAudit());
-  // no external asset reference — src/href to http, @import, <link>, url(http…)
-  assert.doesNotMatch(html, /(?:src|href)\s*=\s*["']?https?:/i);
-  assert.doesNotMatch(html, /@import|<link\b/i);
-  assert.doesNotMatch(html, /url\(\s*["']?https?:/i);
-  // page content only — the Artifact tool supplies the document skeleton
-  assert.doesNotMatch(html, /<!doctype|<html\b|<head\b|<body\b/i);
-  assert.match(html, /id="assay-data"/);
-  // [Foreman: 078] every listener is attached in script, never as an attribute
-  assert.doesNotMatch(html, /\son(?:click|change|input|load|keydown)\s*=/i);
-});
-
-function embeddedRecord(html) {
-  const block = html.match(/<script type="application\/json" id="assay-data">([\s\S]*?)<\/script>/);
-  assert.ok(block, "data block present");
-  return { raw: block[1], record: JSON.parse(block[1]) };
-}
-
-const bodyOf = (html) => html.slice(0, html.indexOf('id="assay-data"'));
-const findingIdsIn = (html) => new Set([...html.matchAll(/data-finding-id="([^"]+)"/g)].map((m) => m[1]));
-
-test("renderArtifact escapes < so embedded rule text can't break out of the script block", () => {
-  const html = engine.renderArtifact(fixtureAudit());
-  // the literal </script> inside the rule text must be escaped in the data block
-  const { raw, record } = embeddedRecord(html);
-  assert.doesNotMatch(raw, /<\/script>/i);
-  assert.ok(raw.includes("\\u003c"), "< is escaped in the data block");
-  // and the parsed record restores the original rule text intact
-  assert.match(record.rules[0].text, /<\/script>/);
-  // in the rendered page the same text is HTML-escaped, never markup
-  assert.doesNotMatch(bodyOf(html), /<\/script>/i);
-  assert.match(html, /&lt;\/script&gt;/);
-});
-
-// [Foreman: 078] The rules table is what a reader sees; the raw wired-hook
-// inventory stays the report author's working input, as it has since 054.
-test("the rules table drops suppressed rules and never prints the raw hook inventory", () => {
-  const body = bodyOf(engine.renderArtifact(fixtureAudit()));
-  assert.doesNotMatch(body, /hookInventory/);
-  assert.equal((body.match(/<tr class="rule"/g) || []).length, 1);
-  assert.match(body, /R001/);
-  assert.doesNotMatch(body, /This is a note about the project/);
-});
-
-test("artifactRuleData carries full untruncated text, factor scores, and fixes", () => {
-  const rows = engine.artifactRuleData(fixtureAudit());
-  assert.equal(rows.length, 1);
-  const r = rows[0];
-  assert.equal(r.text, "Never inline `</script>` — see https://example.com/style instead.");
-  assert.equal(r.factors.F2, 0.2);
-  assert.equal(r.f8, 0.3);
-  assert.ok(Array.isArray(r.issues) && r.issues.length);
-  assert.ok(Array.isArray(r.fixes) && r.fixes.length);
-});
-
-// [Foreman: 075]
-test("the artifact carries State and Evidence columns and puts hard gates first", () => {
-  const audit = auditOf({
-    ".claude/rules/dead.md": '---\npaths: ["nope/**/*.ts"]\n---\n\n- Return typed errors from every handler.\n',
-    "CLAUDE.md": "- Validate every request body at the handler boundary.\n",
-  });
-  const html = engine.renderArtifact(audit);
-  assert.match(html, /<th scope="col" data-num="1"><button type="button">State<\/button><\/th>/);
-  assert.match(html, /<th scope="col"><button type="button">Evidence<\/button><\/th>/);
-  // the server writes the rows already ordered: state precedence, score as tiebreak
-  const states = [...bodyOf(html).matchAll(/<tr class="rule"[^>]*data-state="([^"]+)"/g)].map((m) => m[1]);
-  assert.equal(states[0], "inactive");
-  assert.ok(states.length > 1);
-
-  const rows = engine.artifactRuleData(audit);
-  const gate = rows.find((r) => r.state === "inactive");
-  assert.ok(gate, "no hard-gated row in the payload");
-  assert.equal(gate.stateRank, 0);
-  assert.equal(gate.evidence, "[mechanical]");
-  assert.ok(gate.why);
-  // and every other row ranks below it
-  assert.ok(rows.filter((r) => r.id !== gate.id).every((r) => r.stateRank > 0));
-});
-
-test("renderArtifact round-trips a real audit built from the scoring pipeline", () => {
-  const root = tmpProject({ "CLAUDE.md": "- Never use `var` — use `const` instead.\n" });
-  const scanData = engine.scan(root);
-  const audit = engine.composeAudit(scanData, { [scanData.rules[0].key]: { F3: 0.7, F8: 0.9 } });
-  const html = engine.renderArtifact(audit);
-  // the embedded block is the record itself — the export is a record, not a view
-  const { record } = embeddedRecord(html);
-  assert.equal(record.rules.length, 1);
-  assert.deepEqual(record.findings.map((f) => f.id), audit.findings.map((f) => f.id));
-  assert.equal((bodyOf(html).match(/<tr class="rule"/g) || []).length, 1);
-});
-
-// ---------------------------------------------------------------------------
 // Output contract — one record, every renderer — [Foreman: 078]
 // ---------------------------------------------------------------------------
 
@@ -2441,13 +2308,6 @@ test("the parity fixture carries a gate, a conflict, a duplicate, a mechanism an
   assert.ok(audit.semantic.candidates.length, "fixture is missing its semantic candidate");
 });
 
-test("every finding in the record reaches the HTML report, and nothing else does", () => {
-  const audit = richAudit();
-  const shown = findingIdsIn(bodyOf(engine.renderArtifact(audit)));
-  const recorded = new Set(audit.findings.map((f) => f.id));
-  assert.deepEqual([...shown].sort(), [...recorded].sort());
-});
-
 test("every finding in the record is named in the markdown report", () => {
   const audit = richAudit();
   const md = engine.renderReport(audit, { verbose: true });
@@ -2459,14 +2319,11 @@ test("every finding in the record is named in the markdown report", () => {
   }
 });
 
-test("every mechanism and every relationship is represented in both renderers", () => {
+test("every mechanism and every relationship reaches the report", () => {
   const audit = richAudit();
   const md = engine.renderReport(audit, { verbose: true });
-  const html = engine.renderArtifact(audit);
   for (const m of audit.mechanisms) {
-    const name = engine.redactSecrets(m.name);
-    assert.ok(md.includes(name), "markdown drops mechanism " + m.id);
-    assert.ok(html.includes(name.replace(/&/g, "&amp;")), "html drops mechanism " + m.id);
+    assert.ok(md.includes(engine.redactSecrets(m.name)), "markdown drops mechanism " + m.id);
   }
   // relationships are the edges behind the conflict, duplicate and shadow
   // findings — each is present wherever its finding is
@@ -2476,52 +2333,41 @@ test("every mechanism and every relationship is represented in both renderers", 
   const kinds = new Set(audit.relationships.map((r) => r.kind));
   if (kinds.has("conflict")) assert.match(md, /### Conflicts/);
   if (kinds.has("duplicate")) assert.match(md, /### Duplicates/);
-  if (kinds.has("conflict")) assert.match(html, /id="assay-conflicts"/);
-  if (kinds.has("duplicate")) assert.match(html, /id="assay-duplicates"/);
 });
 
 // [Foreman: 078] The contract in one test: a renderer reads the record. Poison
-// the record and both outputs carry the poison — if either recomputed anything,
-// the original text would come back instead.
-test("neither renderer recomputes: an edited record renders exactly as edited", () => {
+// the record and the output carries the poison — if it recomputed anything, the
+// original text would come back instead.
+test("the renderer never recomputes: an edited record renders exactly as edited", () => {
   const audit = richAudit();
-  const finding = audit.findings.find((f) => f.type === "duplicate");
+  // a state-carrying finding, whose summary the report prints as its own line
+  const finding = audit.findings.find((f) => f.state === "inactive");
   finding.summary = "POISONED-SUMMARY-MARKER";
   const mechanism = audit.mechanisms[0];
   mechanism.name = "POISONED-MECHANISM-MARKER";
 
   const md = engine.renderReport(audit, { verbose: true });
-  const html = engine.renderArtifact(audit);
   assert.match(md, /POISONED-MECHANISM-MARKER/);
-  assert.match(html, /POISONED-MECHANISM-MARKER/);
-  // the duplicate summary is the finding's own line in the HTML report
-  assert.match(html, /POISONED-SUMMARY-MARKER|assay-duplicates/);
-  assert.ok(html.includes(finding.id), "the poisoned finding kept its place on the page");
+  assert.match(md, /POISONED-SUMMARY-MARKER/);
 
-  // and dropping the derived arrays empties the renderers rather than making
-  // them derive a second, differently-timed analysis
+  // and dropping the derived arrays empties the renderer rather than making it
+  // derive a second, differently-timed analysis
   const bare = { ...audit, findings: [], mechanisms: [] };
   const bareMd = engine.renderReport(bare, { verbose: true });
   assert.doesNotMatch(bareMd, /POISONED-MECHANISM-MARKER/);
   assert.doesNotMatch(bareMd, /### Duplicates|### Conflicts|Enforcement ladder/);
-  assert.equal(findingIdsIn(bodyOf(engine.renderArtifact(bare))).size, 0);
 });
 
-test("a secret in a hook command is masked in both reports and kept in the record", () => {
+test("a secret in a hook command is masked in the report and kept in the record", () => {
   const audit = richAudit();
   const md = engine.renderReport(audit, { verbose: true });
-  const html = engine.renderArtifact(audit);
   // the record keeps the raw value — redaction is a render concern
   assert.ok(audit.mechanisms.some((m) => m.name.includes("abc123SECRETxyz789")));
-  for (const [label, out] of [["markdown", md], ["html", html]]) {
-    assert.doesNotMatch(out, /abc123SECRETxyz789/, label + " leaked the token");
-    assert.match(out, /--token=\[redacted\]/, label + " never masked the token");
-    // the mechanism itself is still there — redaction hides the value, never
-    // the existence of the finding
-    assert.match(out, /secret-scan\.js/, label + " dropped the hook entirely");
-  }
-  // the page is publishable content, so its embedded export is masked too
-  assert.doesNotMatch(embeddedRecord(html).raw, /abc123SECRETxyz789/);
+  assert.doesNotMatch(md, /abc123SECRETxyz789/, "markdown leaked the token");
+  assert.match(md, /--token=\[redacted\]/, "markdown never masked the token");
+  // the mechanism itself is still there — redaction hides the value, never the
+  // existence of the finding
+  assert.match(md, /secret-scan\.js/, "markdown dropped the hook entirely");
 });
 
 test("redactSecrets masks the known credential shapes and leaves prose alone", () => {
@@ -2546,54 +2392,6 @@ test("redactSecrets masks the known credential shapes and leaves prose alone", (
     assert.equal(engine.redactSecrets(safe), safe);
   }
 });
-
-test("the HTML report ships search, filter chips, keyboard disclosure and a JSON export", () => {
-  const body = bodyOf(engine.renderArtifact(richAudit()));
-  assert.match(body, /<input id="assay-search" type="search"[^>]*aria-label="Filter rules and findings"/);
-  assert.match(body, /<div id="assay-filters" role="group"/);
-  assert.match(body, /<button type="button" class="chip" data-facet="state" data-value="[^"]+" aria-pressed="false">/);
-  assert.match(body, /data-facet="severity"/);
-  assert.match(body, /data-facet="evidence"/);
-  assert.match(body, /<button type="button" id="assay-export">/);
-  // every disclosure is a real button that says whether it is open
-  assert.match(body, /<button type="button" class="disclose" aria-expanded="false" aria-controls="assay-detail-R\d+">/);
-  assert.doesNotMatch(body, /<div[^>]*class="[^"]*disclose/);
-  // the sort controls are buttons in the header cells, not click handlers on <th>
-  assert.match(body, /<th scope="col"[^>]*><button type="button">Rule<\/button><\/th>/);
-  // the export downloads the embedded record under a stable name
-  const html = engine.renderArtifact(richAudit());
-  assert.match(html, /a\.download = "assay-audit\.json"/);
-  assert.match(html, /new Blob\(/);
-});
-
-test("the HTML report carries every section the markdown report has", () => {
-  const html = engine.renderArtifact(richAudit());
-  for (const id of [
-    "assay-coverage", "assay-gates", "assay-operational", "assay-conflicts",
-    "assay-rules-section", "assay-duplicates", "assay-placement", "assay-ladder",
-    "assay-hygiene", "assay-files", "assay-user-scope", "assay-suppressed",
-  ]) {
-    assert.match(html, new RegExp('id="' + id + '"'), "html is missing section " + id);
-  }
-  // the file-shape section needs a file with a shape problem, which the parity
-  // fixture deliberately does not have
-  const narrative = auditOf({
-    "CLAUDE.md": [
-      "# Overview", "",
-      "Background: this repository is a personal experiment.",
-      "It carries no runtime dependencies whatsoever.",
-      "The whole tool is plain standard library code.",
-      "The history behind this file is long and winding.",
-      "", "- Run the tests before every commit.",
-    ].join("\n"),
-  });
-  assert.match(engine.renderArtifact(narrative), /id="assay-restructure"/);
-  // suppressed entries are present but folded away, like --verbose in markdown
-  assert.match(html, /<ul class="items" id="assay-suppressed-list" hidden>/);
-  // and the catch-all is empty, because every finding found a section
-  assert.doesNotMatch(html, /id="assay-other"/);
-});
-
 
 // ---------------------------------------------------------------------------
 // Command-level CLI — [Foreman: 070]
@@ -2818,21 +2616,6 @@ test("report before scan exits 1 and says to run scan first", () => {
   const { code, err } = cli(root, "report", "--verbose");
   assert.equal(code, 1);
   assert.match(err, /No \.assay-tmp\/scan\.json — run scan first/);
-});
-
-test("artifact writes report.html from audit.json, and exits 1 without one", () => {
-  const root = cliFixture();
-  const missing = cli(root, "artifact");
-  assert.equal(missing.code, 1);
-  assert.match(missing.err, /No \.assay-tmp\/audit\.json — run report first/);
-
-  judgeAll(root);
-  assert.equal(cli(root, "report", "--verbose").code, 0);
-  const { code, out } = cli(root, "artifact");
-  assert.equal(code, 0);
-  assert.match(out, /report\.html/);
-  const html = fs.readFileSync(path.join(root, ".assay-tmp", "report.html"), "utf-8");
-  assert.match(html, /id="assay-data"/);
 });
 
 test("remeasure lists reworded rules first, then composes a before/after report", () => {
@@ -3094,7 +2877,7 @@ test("an unknown command, an unknown flag, or a bare --root prints usage and exi
   const noCommand = cli(root);
   assert.equal(noCommand.code, 1);
   assert.match(noCommand.err, /No command given\./);
-  assert.match(noCommand.err, /Usage: assay\.js <scan\|report\|remeasure\|artifact\|clean\|plan\|apply\|validate\|rollback\|retire\|link\|ci>/);
+  assert.match(noCommand.err, /Usage: assay\.js <scan\|report\|remeasure\|clean\|plan\|apply\|validate\|rollback\|ci>/);
 
   const badCommand = cli(root, "frobnicate");
   assert.equal(badCommand.code, 1);
@@ -3111,7 +2894,7 @@ test("an unknown command, an unknown flag, or a bare --root prints usage and exi
   assert.match(bareRoot.err, /--root needs a path/);
 });
 
-test("installation to report: a fresh project runs scan, judge, report and artifact", () => {
+test("installation to report: a fresh project runs scan, judge and report", () => {
   const root = tmpProject({
     "CLAUDE.md": FIXTURE_CLAUDE,
     ".claude/rules/api.md": '---\npaths: ["src/**/*.ts"]\n---\n\n- Validate every request body at the handler boundary.\n',
@@ -3137,14 +2920,9 @@ test("installation to report: a fresh project runs scan, judge, report and artif
   assert.match(reported.out, /Write clean, maintainable code\./);
   assert.match(reported.out, /\(CLAUDE\.md:4\)/);
   assert.ok(fs.existsSync(path.join(root, ".assay-tmp", "audit.json")));
-
-  const artifact = cli(root, "artifact");
-  assert.equal(artifact.code, 0, artifact.err);
-  const html = fs.readFileSync(path.join(root, ".assay-tmp", "report.html"), "utf-8");
-  assert.match(html, /Write clean, maintainable code/);
 });
 
-test("scan, report, artifact and remeasure write nothing outside .assay-tmp", () => {
+test("scan, report and remeasure write nothing outside .assay-tmp", () => {
   const root = tmpProject({
     "CLAUDE.md": FIXTURE_CLAUDE,
     ".claude/rules/api.md": "- Validate every request body at the handler boundary.\n",
@@ -3154,7 +2932,6 @@ test("scan, report, artifact and remeasure write nothing outside .assay-tmp", ()
   const before = snapshotTree(root);
   judgeAll(root);
   assert.equal(cli(root, "report", "--verbose").code, 0);
-  assert.equal(cli(root, "artifact").code, 0);
   assert.equal(cli(root, "remeasure").code, 0);
   assert.deepEqual(snapshotTree(root), before);
   // no policy file was invented either, and no transaction state — [Foreman: 081]
@@ -3236,22 +3013,12 @@ test("every artifact the CLI writes is a schema 1 record, and the report says so
     // reserved fields are documented, not emitted
     for (const key of engine.RECORD_SCHEMA.reserved) assert.equal(key in record, false, key);
   }
-
-  assert.equal(cli(root, "artifact").code, 0);
-  const html = fs.readFileSync(path.join(root, ".assay-tmp", "report.html"), "utf-8");
-  assert.match(html, /claude-code profile · schema 1/);
 });
 
-test("report and artifact reject a pre-schema artifact and say to rerun scan", () => {
+test("report rejects a pre-schema artifact and says to rerun scan", () => {
   const root = cliFixture();
   judgeAll(root);
   assert.equal(cli(root, "report", "--verbose").code, 0);
-
-  const auditFile = path.join(root, ".assay-tmp", "audit.json");
-  fs.writeFileSync(auditFile, JSON.stringify(stripEnvelope(readJson(root, "audit.json"))));
-  const artifact = cli(root, "artifact");
-  assert.equal(artifact.code, 1);
-  assert.match(artifact.err, /audit\.json is not a schema 1 audit record \(found schema pre-1\) — rerun `scan`\./);
 
   const scanFile = path.join(root, ".assay-tmp", "scan.json");
   fs.writeFileSync(scanFile, JSON.stringify(stripEnvelope(readJson(root, "scan.json"))));
@@ -4227,7 +3994,6 @@ test("--host names the profile discovery runs under, and an unknown one is a usa
   const reported = cli(root, "report", "--verbose", "--host", "codex");
   assert.equal(reported.code, 0, reported.err);
   assert.match(reported.out, /codex profile · schema 1/);
-  assert.equal(cli(root, "artifact").code, 0);
 });
 
 test("no --host is the Claude profile, and the record it writes is the one it always wrote", () => {
@@ -4325,12 +4091,7 @@ test("the Claude wording rubric is not applied to a profile it was never measure
   assert.match(maintainability, /None of these is a reliability failure/);
   assert.match(maintainability, /no directive verb could be read out of it/);
   assert.match(maintainability, /### Restructure candidates/);
-  // and the artifact renders the same record without a Claude-only section
-  const html = engine.renderArtifact(codexAudit);
-  assert.match(html, /id="assay-chain"/);
-  assert.match(html, /id="assay-maintainability"/);
-  assert.doesNotMatch(html, /id="assay-other"/, "every finding found a section");
-  assert.match(html, /no grade/);
+  assert.match(report, /## Instruction chain/);
 });
 
 test("two scans of one Codex project differ only in analysisTime", () => {
@@ -4537,7 +4298,6 @@ test("the collective skill listing budget is reported, and no Claude per-descrip
   const report = engine.renderReport(audit);
   assert.match(report, /against a documented 8000-character budget/);
   assert.doesNotMatch(report, /Weak skill descriptions/);
-  assert.doesNotMatch(engine.renderArtifact(audit), /id="assay-other"/);
 });
 
 // Every documented hook surface at once: a project hooks.json, an inline
@@ -4838,8 +4598,6 @@ test("mechanism nouns follow the profile, and the Claude report keeps the words 
   assert.match(codexReport, /Split into narrower `AGENTS\.md` files further down the chain by topic\./);
   assert.doesNotMatch(codexReport, /\.claude\/rules\//);
   assert.doesNotMatch(codexReport, /Claude Code primitive/);
-  assert.doesNotMatch(engine.renderArtifact(codexAudit), /Claude Code primitive/);
-  assert.doesNotMatch(engine.renderArtifact(codexAudit), /\.claude\/rules\//);
 });
 
 test("two scans of one Codex project with skills and hooks differ only in analysisTime", () => {
@@ -4894,8 +4652,8 @@ const REWRITE_CHANGE = {
   limitations: ["wording only — compliance is not measured here"],
 };
 
-// A promotion that builds a real skill beside the prose, and plans the
-// retirement of that prose as a separate patch.
+// A promotion that builds a real skill beside the prose. The prose stays: no
+// command in this engine deactivates a rule on the author's behalf.
 const PROMOTE_CHANGE = {
   id: "c-skill",
   kind: "placement-promotion",
@@ -4909,11 +4667,6 @@ const PROMOTE_CHANGE = {
       'description: Updates CHANGELOG.md when a public API changes. Use when "update the changelog". Do NOT use for internal refactors.',
       "---", "", "# changelog", "", "Always update the changelog when you touch a public API.", ""].join("\n"),
   }],
-  retire: {
-    path: "CLAUDE.md",
-    old: "- Always update the changelog when you touch a public API.",
-    new: "<!-- retired: the `changelog` skill owns this duty. -->",
-  },
 };
 
 function journalRows(root) {
@@ -5079,7 +4832,6 @@ test("a patch producing invalid YAML frontmatter is restored automatically, exit
     changes: [{
       ...PROMOTE_CHANGE, id: "c-broken", mechanism: { type: "skill", name: "broken" },
       patches: [{ path: ".claude/skills/broken/SKILL.md", old: null, new: "---\nname: [unclosed\n---\n\n# broken\n" }],
-      retire: undefined,
     }],
   });
   const { code, err } = cli(root, "apply", "--change", "c-broken");
@@ -5093,13 +4845,13 @@ test("a patch producing invalid YAML frontmatter is restored automatically, exit
   assert.equal(journalRows(root).at(-1).cause, "post-write-validation");
 });
 
-test("validate records mechanical evidence, external attestations and a Proof link, each at its own level", () => {
+test("validate records mechanical evidence and external attestations, each at its own level", () => {
   const root = txProject();
   planDraft(root, { changes: [PROMOTE_CHANGE] });
   assert.equal(cli(root, "apply", "--change", "c-skill").code, 0);
 
   const { code, out } = cli(root, "validate", "--change", "c-skill",
-    "--external", "repo tests: pass", "--proof", "proof/changelog-2026-07-28");
+    "--external", "repo tests: pass");
   assert.equal(code, 0);
   const evidence = JSON.parse(out).evidence;
   const byKind = Object.fromEntries(evidence.map((e) => [e.kind, e]));
@@ -5111,9 +4863,6 @@ test("validate records mechanical evidence, external attestations and a Proof li
   // assay never runs the repository's own commands: an external result is attested
   assert.equal(byKind["repo tests"].level, "attested");
   assert.match(byKind["repo tests"].detail, /assay did not run this/);
-  // a Proof record is linked, never converted into a passing check
-  assert.equal(byKind["proof-link"].level, "behavior-observed");
-  assert.equal(byKind["proof-link"].result, "linked");
   assert.equal(journalRows(root).filter((r) => r.event === "evidence").length, evidence.length);
 });
 
@@ -5155,37 +4904,19 @@ test("rollback after a stale rejection says there is nothing to undo", () => {
   assert.match(JSON.parse(out).rolledBack[0].outcome, /nothing to roll back — the change was rejected as stale/);
 });
 
-test("retire is refused without validation evidence, journalled once it has it, and reversible", () => {
+// A promotion adds the mechanism beside the rule. Taking the prose out
+// afterwards is the author's own edit, not a command this engine offers — so
+// the whole transaction leaves the source instruction exactly where it was.
+test("no command deactivates the prose a validated mechanism replaced", () => {
   const root = txProject();
   planDraft(root, { changes: [PROMOTE_CHANGE] });
-
-  const beforeApply = cli(root, "retire", "--change", "c-skill");
-  assert.equal(beforeApply.code, 1);
-  assert.match(beforeApply.err, /the change has not been applied/);
-
   assert.equal(cli(root, "apply", "--change", "c-skill").code, 0);
-  const beforeValidate = cli(root, "retire", "--change", "c-skill");
-  assert.equal(beforeValidate.code, 1);
-  assert.match(beforeValidate.err, /no validation evidence marking success/);
-  // the prose is still exactly where it was
+  const validated = cli(root, "validate", "--change", "c-skill");
+  assert.equal(validated.code, 0);
+  assert.match(JSON.parse(validated.out).note, /source instruction is still active/);
   assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE);
-
-  assert.equal(cli(root, "validate", "--change", "c-skill").code, 0);
-  const retired = cli(root, "retire", "--change", "c-skill");
-  assert.equal(retired.code, 0);
-  assert.match(JSON.parse(retired.out).note, /Keeping the prose as documentation or defence in depth is a legitimate outcome/);
-  const after = fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8");
-  assert.doesNotMatch(after, /- Always update the changelog/);
-  assert.match(after, /<!-- retired: the `changelog` skill owns this duty\. -->/);
-  // the retirement is a journalled write like any other, on its own stage
-  const retireRows = journalRows(root).filter((r) => r.stage === "retire");
-  assert.deepEqual(retireRows.map((r) => r.event), ["intent", "outcome"]);
-  assert.equal(retireRows[0].preImage, TX_CLAUDE);
-
-  // and reversible: the retirement unwinds before the promotion it followed
-  assert.equal(cli(root, "rollback", "--change", "c-skill").code, 0);
-  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE);
-  assert.equal(fs.existsSync(path.join(root, ".claude", "skills", "changelog", "SKILL.md")), false);
+  // every journalled write belongs to the apply stage — there is no second one
+  assert.deepEqual([...new Set(journalRows(root).filter((r) => r.path).map((r) => r.stage))], ["apply"]);
 });
 
 test("clean keeps a journal with an open change and removes a closed one, keeping the plan artifacts", () => {
@@ -5224,7 +4955,7 @@ test("a park is recorded in the plan and refused by apply", () => {
 
 test("every transaction command exits 1 on an unknown change id, a missing plan, or a malformed draft", () => {
   const root = txProject();
-  for (const args of [["apply", "--change", "nope"], ["validate", "--change", "nope"], ["retire", "--change", "nope"]]) {
+  for (const args of [["apply", "--change", "nope"], ["validate", "--change", "nope"]]) {
     const r = cli(root, ...args);
     assert.equal(r.code, 1, args.join(" "));
     assert.match(r.err, /no plan in \.assay\/ defines change nope/);
@@ -5456,375 +5187,6 @@ test("a skill metadata sidecar that is not valid YAML is restored, and a valid o
   assert.deepEqual(entry.metadata.toolDependencies, [{ type: "command", value: "kubectl" }]);
   assert.equal("metadataIssue" in entry, false);
   assert.equal("quotedPhrases" in entry.checks, false, "no trigger-recipe grade belongs on this profile");
-});
-
-// ---------------------------------------------------------------------------
-// Proof links — [Foreman: 083]
-// ---------------------------------------------------------------------------
-
-// The two record shapes Proof actually saves today, copied from the plugin's own
-// code so these fixtures cannot drift into wishful thinking:
-//
-//   PROOF_AB — what `proof run --json` prints: the object `analyze` builds in
-//     proof/lib/runner.js plus the `disclosure` proof/bin/proof.js attaches.
-//   PROOF_FP — what `proof watch save` writes into $PROOF_HOME/fingerprints,
-//     field for field from `saveFingerprint` in proof/lib/watch.js.
-//
-// The asymmetry between them is the point of half these tests: the A/B record
-// names no host, no host version and no date; the fingerprint names all three
-// but carries no verdict; and NEITHER names a repository fixture.
-const PROOF_AB = {
-  id: "prettier-trigger",
-  model: "haiku",
-  seed: 42,
-  cells: 16,
-  usable: 16,
-  totalCostUsd: 0.0412,
-  arms: {
-    baseline: { n: 8, ran: 8, mean: 0.25, costUsd: 0.0203 },
-    treatment: { n: 8, ran: 8, mean: 0.875, costUsd: 0.0209, lift: 0.625, ci: [0.31, 0.88], verdict: "CONFIRMED+" },
-  },
-  disclosure: "This verdict covers 1 task of type file_exists; it is directional for this task type, not general.",
-  explanations: {},
-};
-
-const PROOF_FP = {
-  key: "claude__haiku__prettier-probe",
-  probeId: "prettier-probe",
-  agent: "claude",
-  model: "haiku",
-  version: "2.1.0 (Claude Code)",
-  n: 4,
-  rate: 1,
-  ci: [0.5, 1],
-  scores: [1, 1, 1, 1],
-  savedAt: "2026-07-20T10:00:00.000Z",
-};
-
-const LINK_CLAUDE = [
-  "# Project rules",
-  "",
-  "- Never use `var` — use `const` instead.",
-  "- Run prettier before committing.",
-  "",
-].join("\n");
-
-// A project with an audit already on disk, which is what `link` resolves an
-// anchor against, plus both Proof records written where a pointer can reach them.
-function linkProject(extra) {
-  const root = tmpProject({ "CLAUDE.md": LINK_CLAUDE, ...(extra || {}) });
-  fs.writeFileSync(path.join(root, "ab.json"), JSON.stringify(PROOF_AB, null, 2));
-  fs.writeFileSync(path.join(root, "fp.json"), JSON.stringify(PROOF_FP, null, 2));
-  assert.equal(cli(root, "scan").code, 0);
-  assert.equal(cli(root, "report", "--verbose").code, 0);
-  return root;
-}
-
-function storedLinks(root) {
-  return engine.readProofLinks(root);
-}
-
-test("a link stores the behavioral-evidence key it read out of the Proof record", () => {
-  const root = linkProject();
-  const { code, out } = cli(root, "link", "--proof", "fp.json", "--rule", "R002");
-  assert.equal(code, 0);
-  const { linked } = JSON.parse(out);
-
-  // The anchor is stored in its STABLE form: R002 is a positional counter, the
-  // content hash is not.
-  assert.equal(linked.anchor.kind, "rule");
-  assert.match(linked.anchor.ref, /^[0-9a-f]{12}$/);
-  assert.notEqual(linked.anchor.ref, "R002");
-  assert.equal(linked.recordId, "prettier-probe");
-
-  // Five of the six key parts come straight out of the fingerprint; the sixth is
-  // the one no Proof record carries.
-  assert.equal(linked.key.host, "claude");
-  assert.equal(linked.key.hostVersion, "2.1.0 (Claude Code)");
-  assert.equal(linked.key.model, "haiku");
-  assert.equal(linked.key.harness, "proof watch (fingerprint)");
-  assert.equal(linked.key.date, "2026-07-20T10:00:00.000Z");
-  assert.equal(linked.key.fixture, null);
-  assert.deepEqual(linked.absent, ["fixture"]);
-  assert.deepEqual(Object.keys(linked.key).sort(), [...engine.PROOF_KEY_PARTS].sort());
-
-  // The analyzer artifact fingerprint is the rule's VERBATIM text at link time —
-  // the rule key is its normalized form, so the two are different hashes.
-  const audit = readJson(root, "audit.json");
-  const rule = audit.rules.find((r) => r.id === "R002");
-  assert.equal(linked.anchorHash, engine.hashContent(rule.text));
-  assert.notEqual(linked.anchorHash, rule.key);
-  // Nothing invented a configuration hash: no Proof record writes one.
-  assert.equal(linked.configFingerprint, null);
-
-  assert.deepEqual(storedLinks(root).map((l) => l.recordId), ["prettier-probe"]);
-});
-
-test("a Proof record missing part of the key stores what exists and names what is absent", () => {
-  const root = linkProject();
-  const { code, out } = cli(root, "link", "--proof", "ab.json", "--rule", "R002");
-  assert.equal(code, 0);
-  const parsed = JSON.parse(out);
-  const { linked } = parsed;
-
-  // A paired A/B record names its model and nothing else about where it ran.
-  assert.equal(linked.key.model, "haiku");
-  assert.equal(linked.key.harness, "proof run (paired A/B)");
-  assert.deepEqual(linked.absent, ["host", "hostVersion", "fixture", "date"]);
-  for (const part of linked.absent) assert.equal(linked.key[part], null, part + " must be absent, never invented");
-  assert.match(parsed.note, /names no host, host version, repository fixture or date/);
-
-  // The parser reads the same facts off the record directly.
-  const direct = engine.parseProofRecord(PROOF_AB);
-  assert.equal(direct.recordId, "prettier-trigger");
-  assert.deepEqual(direct.results.map((r) => [r.arm, r.verdict, r.lift]), [["treatment", "CONFIRMED+", 0.625]]);
-  assert.deepEqual(direct.results[0].ci, [0.31, 0.88]);
-  assert.equal(direct.results[0].n, 8);
-  assert.equal(direct.results[0].costUsd, 0.0412);
-  assert.match(direct.limits, /directional for this task type/);
-  // A fingerprint has a rate and a band but no verdict — `watch check` computes
-  // one against a fresh run, so there is none saved to show.
-  const fp = engine.parseProofRecord(PROOF_FP);
-  assert.equal(fp.results[0].verdict, null);
-  assert.equal(fp.results[0].rate, 1);
-  assert.deepEqual(fp.results[0].ci, [0.5, 1]);
-  assert.equal(fp.limits, null);
-});
-
-test("link lists the store, and an unknown anchor or an unreadable record exits 1", () => {
-  const root = linkProject({
-    ".claude/skills/changelog/SKILL.md": [
-      "---", "name: changelog",
-      'description: Updates CHANGELOG.md when a public API changes. Use when "update the changelog". Do NOT use for internal refactors.',
-      "---", "", "# changelog", "",
-    ].join("\n"),
-  });
-  assert.equal(cli(root, "scan").code, 0);
-  assert.equal(cli(root, "report", "--verbose").code, 0);
-
-  const empty = JSON.parse(cli(root, "link", "--list").out);
-  assert.deepEqual(empty.links, []);
-  assert.match(empty.note, /\/proof:proof/);
-  assert.equal(empty.store, ".assay/links.jsonl");
-
-  assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R001").code, 0);
-  assert.equal(cli(root, "link", "--proof", "ab.json", "--skill", "changelog").code, 0);
-  const listed = JSON.parse(cli(root, "link", "--list").out).links;
-  assert.deepEqual(listed.map((l) => l.anchor.kind), ["rule", "skill"]);
-  assert.equal(listed[1].anchor.ref, "changelog");
-
-  // An anchor is matched exactly or not at all — assay never guesses which rule a
-  // Proof record was about.
-  const unknown = cli(root, "link", "--proof", "ab.json", "--rule", "not-a-key");
-  assert.equal(unknown.code, 1);
-  assert.match(unknown.err, /matched exactly, never by similarity/);
-
-  const missing = cli(root, "link", "--proof", "absent.json", "--rule", "R001");
-  assert.equal(missing.code, 1);
-  assert.match(missing.err, /the pointer no longer resolves/);
-
-  fs.writeFileSync(path.join(root, "junk.json"), '{"not":"a proof record"}');
-  const junk = cli(root, "link", "--proof", "junk.json", "--rule", "R001");
-  assert.equal(junk.code, 1);
-  assert.match(junk.err, /not a Proof run or fingerprint record/);
-
-  // One record, one anchor.
-  const two = cli(root, "link", "--proof", "ab.json", "--rule", "R001", "--skill", "changelog");
-  assert.equal(two.code, 1);
-  assert.match(two.err, /exactly one anchor/);
-  assert.equal(cli(root, "link", "--rule", "R001").code, 1);
-
-  // The fourth anchor kind answers from a plan artifact, not from the audit, and
-  // a plan is content-addressed — its id IS the fingerprint it was linked at.
-  const { summary } = planDraft(root, { changes: [REWRITE_CHANGE] });
-  assert.equal(cli(root, "link", "--proof", "fp.json", "--change", "c-rewrite").code, 0);
-  assert.equal(storedLinks(root).at(-1).anchorHash, summary.planId);
-  assert.match(cli(root, "link", "--proof", "fp.json", "--change", "nope").err, /no plan in \.assay\/ defines change nope/);
-
-  // Nothing above added a row beyond the three that succeeded.
-  assert.equal(storedLinks(root).length, 3);
-});
-
-test("linked behavior evidence renders beside its anchor in both views, date-ordered", () => {
-  const root = linkProject();
-  assert.equal(cli(root, "link", "--proof", "ab.json", "--rule", "R002").code, 0);
-  assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R002").code, 0);
-  assert.equal(cli(root, "report", "--verbose").code, 0);
-
-  const audit = readJson(root, "audit.json");
-  assert.equal(audit.proofLinks.length, 2);
-  // The drift story reads oldest first: the dated fingerprint precedes the
-  // undated A/B, which falls back to when it was linked.
-  assert.deepEqual(audit.proofLinks.map((l) => l.recordId), ["prettier-probe", "prettier-trigger"]);
-  assert.equal(audit.proofLinks[0].stale, null);
-  assert.equal(audit.proofLinks[0].anchorFound, true);
-
-  const report = cli(root, "report", "--verbose").out;
-  const section = report.slice(report.indexOf("## Behavior evidence"), report.indexOf("## Structural hygiene"));
-  // The anchor's own address is the heading, so the evidence sits beside the rule.
-  assert.match(section, /### `CLAUDE\.md:4` — R002 "Run prettier before committing\."/);
-  // Verdict, lift, interval, reps, cost, limits and the exact record id.
-  assert.match(section, /\*\*CONFIRMED\+\*\* treatment lift \+0\.63, 95% CI \[0\.31, 0\.88\], n=8, \$0\.0412/);
-  assert.match(section, /record `prettier-trigger` \[behavior-observed\]/);
-  assert.match(section, /directional for this task type/);
-  assert.match(section, /prettier-probe rate 1\.00, 95% CI \[0\.50, 1\.00\], n=4, 2026-07-20/);
-  assert.match(report, /host claude · host version 2\.1\.0 \(Claude Code\) · model haiku · harness proof watch \(fingerprint\)/);
-  // [Foreman: 095] The full report without --verbose still hides the host key.
-  // --verbose is the CLI's only door to that report now, so the split inside it
-  // is asserted at the function level; the subject is unchanged.
-  const plainReport = engine.renderReport(readJson(root, "audit.json"), {});
-  const plainSection = plainReport.slice(plainReport.indexOf("## Behavior evidence"), plainReport.indexOf("## Structural hygiene"));
-  assert.doesNotMatch(plainSection, /host version 2\.1\.0/);
-
-  // Both views, off one builder — the HTML carries the same two rows.
-  assert.equal(cli(root, "artifact").code, 0);
-  const html = fs.readFileSync(path.join(root, ".assay-tmp", "report.html"), "utf-8");
-  assert.match(html, /id="assay-proof"/);
-  assert.match(html, /CONFIRMED\+ treatment lift \+0\.63/);
-  assert.match(html, /prettier-probe rate 1\.00/);
-  assert.match(html, /CLAUDE\.md:4 — R002/);
-  // and no finding was orphaned by the new section
-  assert.doesNotMatch(html, /id="assay-other"/);
-});
-
-test("a stale pointer is disclosed as unavailable evidence, and the row stays", () => {
-  const root = linkProject();
-  assert.equal(cli(root, "link", "--proof", "ab.json", "--rule", "R002").code, 0);
-  fs.rmSync(path.join(root, "ab.json"));
-  // and a second link whose record is still there but no longer parses
-  assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R001").code, 0);
-  fs.writeFileSync(path.join(root, "fp.json"), "{ truncated mid-write");
-
-  const report = cli(root, "report", "--verbose");
-  // Fail-open: a broken pointer is a disclosure, never a crash.
-  assert.equal(report.code, 0);
-  const section = report.out.slice(report.out.indexOf("## Behavior evidence"), report.out.indexOf("## Structural hygiene"));
-  assert.match(section, /evidence unavailable — the pointer no longer resolves \(`ab\.json`\)/);
-  assert.match(section, /evidence unavailable — the record no longer parses/);
-  // The row survives and still says what it once measured.
-  assert.match(section, /this link recorded: model haiku · harness proof run \(paired A\/B\)/);
-  assert.match(section, /host claude · host version 2\.1\.0/);
-
-  const audit = readJson(root, "audit.json");
-  assert.equal(audit.proofLinks.length, 2);
-  for (const l of audit.proofLinks) {
-    assert.ok(l.stale, "a broken pointer is flagged");
-    assert.deepEqual(l.results, [], "no numbers are shown for evidence that cannot be read");
-  }
-
-  // An anchor that left the corpus is also disclosed rather than dropped.
-  fs.writeFileSync(path.join(root, "CLAUDE.md"), "# Project rules\n\n- Never use `var` — use `const` instead.\n");
-  assert.equal(cli(root, "remeasure").code, 0);
-  const after = readJson(root, "audit.json");
-  const orphan = after.proofLinks.find((l) => l.anchor.ref !== after.rules[0].key);
-  assert.equal(orphan.anchorFound, false);
-  assert.match(cli(root, "report", "--verbose").out, /not in this analysis/);
-});
-
-test("a link made against an earlier wording says so, and keeps its row", () => {
-  const root = linkProject();
-  assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R002").code, 0);
-
-  // The rule keeps its content-hash key (`ruleKey` normalizes whitespace) while
-  // the exact wording Proof measured has moved. That is the mismatch to state.
-  const before = readJson(root, "audit.json").rules.find((r) => r.id === "R002").key;
-  fs.writeFileSync(path.join(root, "CLAUDE.md"),
-    LINK_CLAUDE.replace("- Run prettier before committing.", "-   Run  prettier before committing."));
-  assert.equal(cli(root, "remeasure").code, 0);
-  const audit = readJson(root, "audit.json");
-  assert.equal(audit.rules.find((r) => r.id === "R002").key, before, "the key survives a whitespace edit");
-
-  assert.equal(audit.proofLinks[0].wordingMoved, true);
-  assert.equal(audit.proofLinks[0].anchorFound, true);
-  const report = cli(root, "report", "--verbose").out;
-  assert.match(report, /measured an earlier wording — the anchor's text changed after this link was made/);
-  // Stated, not hidden: the numbers are still there.
-  assert.match(report, /prettier-probe rate 1\.00/);
-});
-
-test("links move no state, no score and no grade — evidence beside a finding, never a weight inside it", () => {
-  const root = linkProject();
-  assert.equal(cli(root, "report", "--verbose").code, 0);
-  const before = readJson(root, "audit.json");
-
-  assert.equal(cli(root, "link", "--proof", "ab.json", "--rule", "R002").code, 0);
-  assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R001").code, 0);
-  assert.equal(cli(root, "report", "--verbose").code, 0);
-  const after = readJson(root, "audit.json");
-
-  // Every derived thing is identical. This is the SCOPE contract made mechanical:
-  // a host or model result is never converted into a weight.
-  const strip = (a) => {
-    const { context, proofLinks, ...rest } = a;
-    return JSON.stringify(rest);
-  };
-  assert.equal(strip(after), strip(before), "composing an audit with links present must change nothing derived");
-  assert.deepEqual(after.findings.map((f) => [f.id, f.state || f.type, f.severity, f.evidence.level]),
-    before.findings.map((f) => [f.id, f.state || f.type, f.severity, f.evidence.level]));
-  assert.deepEqual(after.rules.map((r) => [r.score, r.grade, r.weak]), before.rules.map((r) => [r.score, r.grade, r.weak]));
-  assert.equal(after.corpusScore, before.corpusScore);
-  assert.equal(after.corpusGrade, before.corpusGrade);
-
-  // The only difference in either rendered view is the evidence display itself.
-  const cut = (text, from, to) => text.slice(0, text.indexOf(from)) + text.slice(text.indexOf(to));
-  const withLinks = cli(root, "report", "--verbose").out;
-  assert.match(withLinks, /## Behavior evidence/);
-  const withoutSection = cut(withLinks, "## Behavior evidence", "## Structural hygiene");
-  fs.rmSync(path.join(root, ".assay", "links.jsonl"));
-  assert.equal(cli(root, "report", "--verbose").code, 0);
-  assert.equal(withoutSection, cli(root, "report", "--verbose").out);
-
-  // And the derivation genuinely never sees them: composeAudit takes no links at
-  // all, so the record's own field is added afterwards.
-  const scanData = engine.scan(root, { projectOnly: true });
-  assert.equal("proofLinks" in engine.composeAudit(scanData, null), false);
-});
-
-test("proofLinks validates additively, and resolving it is deterministic", () => {
-  const root = linkProject();
-  const recordless = readJson(root, "audit.json");
-  // A project that never linked anything writes exactly the record it always did.
-  assert.equal("proofLinks" in recordless, false);
-  assert.equal(engine.RECORD_SCHEMA.reserved.includes("proofLinks"), false);
-  assert.equal(engine.RECORD_SCHEMA.payload.audit.includes("proofLinks"), false);
-  assert.equal(engine.validateRecord(recordless, "audit"), null);
-
-  assert.equal(cli(root, "link", "--proof", "ab.json", "--rule", "R002").code, 0);
-  assert.equal(cli(root, "report", "--verbose").code, 0);
-  const linked = readJson(root, "audit.json");
-  assert.equal(engine.validateRecord(linked, "audit"), null, "the field is additive, not a schema break");
-  assert.equal(engine.validateRecord({ ...recordless, proofLinks: [] }, "audit"), null);
-  // and it is an audit-record field: a scan record still has none
-  assert.equal("proofLinks" in readJson(root, "scan.json"), false);
-
-  // Two resolutions of one store over one audit are byte-identical.
-  assert.equal(JSON.stringify(engine.resolveProofLinks(root, linked)),
-    JSON.stringify(engine.resolveProofLinks(root, linked)));
-  assert.equal(cli(root, "report", "--verbose").out, cli(root, "report", "--verbose").out);
-
-  // The evidence level is the contract's own row, and it discloses its limits.
-  assert.equal(engine.BEHAVIOR_EVIDENCE.level, "behavior-observed");
-  assert.match(engine.BEHAVIOR_EVIDENCE.limits, /never converted into a score, a state or a threshold/);
-});
-
-test("clean keeps the Proof link store, which no rerun can regenerate", () => {
-  const root = linkProject();
-  assert.equal(cli(root, "link", "--proof", "fp.json", "--rule", "R002").code, 0);
-
-  // With no journal at all, clean takes the disposable directory and nothing else.
-  assert.equal(cli(root, "clean").code, 0);
-  assert.equal(fs.existsSync(path.join(root, ".assay-tmp")), false);
-  assert.equal(storedLinks(root).length, 1);
-
-  // And with a closed journal beside it, the store is named as kept.
-  assert.equal(cli(root, "scan").code, 0);
-  planDraft(root, { changes: [REWRITE_CHANGE] });
-  assert.equal(cli(root, "apply", "--change", "c-rewrite").code, 0);
-  assert.equal(cli(root, "validate", "--change", "c-rewrite").code, 0);
-  const closed = cli(root, "clean");
-  assert.equal(closed.code, 0);
-  assert.match(closed.out, /Kept 1 plan artifact\(s\) and 1 Proof link\(s\) in \.assay\//);
-  assert.equal(storedLinks(root).length, 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -6075,7 +5437,7 @@ test("a gated type labelled heuristic cannot fail a build — the evidence bound
   for (const level of ["mechanical", "documented"]) {
     assert.equal(engine.ciEvaluate(gated(level), ["conflicts"]).failed.length, 1, level);
   }
-  for (const level of ["heuristic", "model-inferred", "experiment-supported", "behavior-observed"]) {
+  for (const level of ["heuristic", "model-inferred", "experiment-supported"]) {
     const result = engine.ciEvaluate(gated(level), ["conflicts"]);
     assert.deepEqual(result.failed, [], level + " failed a build");
     assert.deepEqual(result.advisory, { conflict: 1 }, level);
@@ -6137,7 +5499,7 @@ test("ci never runs a model step and never reads a judgments file", () => {
 // Transaction hardening — the reproduced 1.0.0 holes stay closed
 // ---------------------------------------------------------------------------
 
-test("a failed validation run blocks retire and clean, whatever its passing rows say", () => {
+test("a failed validation run leaves the change open, whatever its passing rows say", () => {
   const root = txProject();
   // The mechanism names a skill the patch does NOT create, so host-discovery
   // fails while reparse and static-reanalysis both record `pass`.
@@ -6151,14 +5513,11 @@ test("a failed validation run blocks retire and clean, whatever its passing rows
   const validated = cli(root, "validate", "--change", "c-skill");
   assert.equal(validated.code, 1);
   assert.match(validated.err, /host-discovery/);
-
-  const retired = cli(root, "retire", "--change", "c-skill");
-  assert.equal(retired.code, 1);
-  assert.match(retired.err, /the latest validation run failed \(host-discovery\)/);
   // the prose is untouched
   assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE);
 
-  // the same definition of "closed" guards the journal: clean refuses too
+  // a run with any failing step is a failed run, so the change stays open and
+  // the journal holding its pre-image is not deletable: clean refuses
   const cleaned = cli(root, "clean");
   assert.equal(cleaned.code, 1);
   assert.match(cleaned.err, /1 open change\(s\) — c-skill/);

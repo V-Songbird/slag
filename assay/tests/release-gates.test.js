@@ -12,7 +12,7 @@
 // The 1.0.0+ cut procedure:
 //   1. `node --test assay/tests/assay.test.js`   — the main suite, green
 //   2. `node --test assay/tests/release-gates.test.js` — this file, green
-//   3. `node assay/scripts/doc-drift.js`         — OK, or the affected
+//   3. `node scripts/assay-doc-drift.js`         — OK, or the affected
 //      capability disabled with an explanation in the adapter and the README
 // A required cell that fails exits this file non-zero, and doc-drift exits 2
 // naming the blocked profile. Nothing is wired into git hooks: the release
@@ -238,36 +238,21 @@ test("release gate: parser coverage meets the inventory invariant", () => {
 });
 
 // ---------------------------------------------------------------------------
-// "Markdown, JSON, and HTML agree on findings"
+// "Markdown and JSON agree on findings"
 // ---------------------------------------------------------------------------
 
-// One fixture artifact, three views, one finding set. The fixture reaches every
+// One fixture artifact, two views, one finding set. The fixture reaches every
 // section that exists today: hard gates, conflicts, duplicates, the byte
-// budget, behavior evidence, unsupported language, and — on the profile that
-// has them — the instruction chain and maintainability.
-const PROOF_FP = {
-  key: "claude__haiku__gate-probe", probeId: "gate-probe", agent: "claude", model: "haiku",
-  version: "2.1.0 (Claude Code)", n: 4, rate: 1, ci: [0.5, 1], scores: [1, 1, 1, 1],
-  savedAt: "2026-07-20T10:00:00.000Z",
-};
-
-function findingIdsIn(html) {
-  return new Set([...html.matchAll(/data-finding-id="([^"]+)"/g)].map((m) => m[1]));
-}
-
-function embeddedRecord(html) {
-  const block = html.match(/<script type="application\/json" id="assay-data">([\s\S]*?)<\/script>/);
-  assert.ok(block, "the HTML carries no data block");
-  return JSON.parse(block[1]);
-}
+// budget, unsupported language, and — on the profile that has them — the
+// instruction chain and maintainability.
 
 // The four ways a markdown report can name a finding: its own sentence, the
 // rule id it belongs to, the exact span, or the file it is about. The last one
 // is the floor and it is deliberate — where one cause affects many rules (the
 // byte cap landing inside a file), the markdown states the cause once against
-// the file instead of repeating a line per rule, while the HTML rules table
-// necessarily carries a row each. Both views hold the same finding; only the
-// grouping differs, so the check matches at the granularity each view uses.
+// the file, while the record carries the finding once per affected rule. Both
+// hold the same finding; only the grouping differs, so the check matches at the
+// granularity the report actually uses.
 // razor: file granularity is the floor for markdown. Tightening it to the span
 // means the markdown renderer must list one line per affected rule — a report
 // change, not a test change, and the upgrade path if that ever becomes wanted.
@@ -277,7 +262,7 @@ function namedInMarkdown(md, finding) {
   return (finding.sources || []).some((s) => md.includes(s.path + ":" + s.lineStart) || md.includes(s.path));
 }
 
-test("release gate: Markdown, JSON and HTML agree on findings", () => {
+test("release gate: Markdown and JSON agree on findings", () => {
   // Bytes, not rules: the byte budget is a property of what loads every session,
   // so the fixture reaches it with fenced narrative rather than a thousand
   // near-identical bullets that would only be testing the duplicate detector.
@@ -297,16 +282,11 @@ test("release gate: Markdown, JSON and HTML agree on findings", () => {
     ".claude/rules/deps.md": "# Deps\n\n- Never pin dependencies to exact versions in `package.json`.\n",
     ".claude/rules/dupe.md": "# Dupe\n\n" + CLEAN_RULE + "\n",
   });
-  fs.writeFileSync(path.join(root, "fp.json"), JSON.stringify(PROOF_FP));
 
   assert.equal(cli(root, ["scan"]).code, 0);
   assert.equal(cli(root, ["report", "--verbose"]).code, 0);
-  assert.equal(cli(root, ["link", "--proof", "fp.json", "--rule", "R001"]).code, 0);
-  assert.equal(cli(root, ["report", "--verbose"]).code, 0);
-  assert.equal(cli(root, ["artifact"]).code, 0);
 
   const audit = readJson(root, "audit.json");
-  const html = fs.readFileSync(path.join(root, ".assay-tmp", "report.html"), "utf-8");
   const md = cli(root, ["report", "--verbose"]).out;
 
   // the fixture actually reaches the sections it claims to
@@ -315,27 +295,18 @@ test("release gate: Markdown, JSON and HTML agree on findings", () => {
     assert.ok(types.has(type), "fixture is missing a " + type + " finding");
   }
   assert.ok(audit.findings.some((f) => f.state === "blocked"), "fixture is missing its stale target");
-  assert.equal(audit.proofLinks.length, 1);
 
-  // JSON == HTML data block == HTML rendered
-  const recorded = audit.findings.map((f) => f.id).sort();
-  assert.deepEqual(embeddedRecord(html).findings.map((f) => f.id).sort(), recorded);
-  assert.deepEqual([...findingIdsIn(html)].sort(), recorded);
-
-  // == markdown
+  // JSON == markdown
   for (const f of audit.findings) {
     assert.ok(namedInMarkdown(md, f), "markdown never names finding " + f.id + " (" + f.type + ")");
   }
 
-  // and the newer sections are in both views, not just the record
-  assert.match(md, /## Behavior evidence/);
-  assert.match(html, /id="assay-proof"/);
+  // and the newer sections reach the report, not just the record
   assert.match(md, /bytes of instructions load before every session/);
   assert.match(md, /read as Spanish \(`latin-unsupported:es`\)/);
-  assert.match(html, /id="assay-language"/);
 });
 
-test("release gate: Markdown, JSON and HTML agree on findings — Codex chain and budget", () => {
+test("release gate: Markdown and JSON agree on findings — Codex chain and budget", () => {
   // Two sections exist only for a profile whose host documents a read order and
   // a cap, and a chain that reaches the cap needs a startup directory below the
   // root — which the CLI fixes at the root by design. So this half runs through
@@ -356,16 +327,12 @@ test("release gate: Markdown, JSON and HTML agree on findings — Codex chain an
     startup: path.join(root, "svc"), userDir: home,
   }), null);
   const record = engine.makeRecord("audit", audit, root);
-  const html = engine.renderArtifact(audit);
   const md = engine.renderReport(audit, { verbose: true });
 
   const types = new Set(audit.findings.map((f) => f.type));
   assert.ok(types.has("budget-exceeded") || types.has("budget-truncation"), "fixture never reached the cap");
   assert.equal(engine.validateRecord(record, "audit"), null);
 
-  const recorded = record.findings.map((f) => f.id).sort();
-  assert.deepEqual(embeddedRecord(html).findings.map((f) => f.id).sort(), recorded);
-  assert.deepEqual([...findingIdsIn(html)].sort(), recorded);
   for (const f of audit.findings) {
     assert.ok(namedInMarkdown(md, f), "markdown never names finding " + f.id + " (" + f.type + ")");
   }
@@ -373,9 +340,6 @@ test("release gate: Markdown, JSON and HTML agree on findings — Codex chain an
   assert.match(md, /## Instruction chain/);
   assert.match(md, /Chain total \d+ bytes against a documented \d+-byte cap/);
   assert.match(md, /## Maintainability/);
-  assert.match(html, /id="assay-chain"/);
-  assert.match(html, /id="assay-budget"/);
-  assert.match(html, /id="assay-maintainability"/);
 });
 
 // ---------------------------------------------------------------------------
@@ -430,7 +394,7 @@ test("release gate: default analysis performs no mutation", () => {
     "src/api/handler.ts": "export {};",
   });
   const before = snapshotTree(root);
-  for (const args of [["scan"], ["report"], ["artifact"], ["remeasure"], ["ci"], ["ci", "--json"]]) {
+  for (const args of [["scan"], ["report"], ["remeasure"], ["ci"], ["ci", "--json"]]) {
     const r = cli(root, args);
     assert.equal(r.code, 0, args.join(" ") + ": " + r.err);
   }
@@ -446,7 +410,6 @@ test("release gate: default analysis performs no mutation", () => {
 
 // ---------------------------------------------------------------------------
 // "every supported mutation is previewed, journaled, validated, and reversible"
-// "the source cannot be retired before validation"
 // ---------------------------------------------------------------------------
 
 const TX_CLAUDE = [
@@ -469,11 +432,6 @@ const PROMOTE_CHANGE = {
       'description: Updates CHANGELOG.md when a public API changes. Use when "update the changelog". Do NOT use for internal refactors.',
       "---", "", "# changelog", "", "Always update the changelog when you touch a public API.", ""].join("\n"),
   }],
-  retire: {
-    path: "CLAUDE.md",
-    old: "- Always update the changelog when you touch a public API.",
-    new: "<!-- retired: the `changelog` skill owns this duty. -->",
-  },
 };
 
 function txProject() {
@@ -524,59 +482,18 @@ test("release gate: every supported mutation is previewed, journaled and reversi
   assert.equal(fs.existsSync(path.join(root, ".claude", "skills", "changelog", "SKILL.md")), false);
 });
 
-test("release gate: the source cannot be retired before validation", () => {
-  const root = txProject();
-  assert.equal(cli(root, ["plan", "--from", "draft.json"]).code, 0);
-
-  const beforeApply = cli(root, ["retire", "--change", "c-skill"]);
-  assert.equal(beforeApply.code, 1);
-  assert.match(beforeApply.err, /the change has not been applied/);
-
-  assert.equal(cli(root, ["apply", "--change", "c-skill"]).code, 0);
-  const beforeValidate = cli(root, ["retire", "--change", "c-skill"]);
-  assert.equal(beforeValidate.code, 1);
-  assert.match(beforeValidate.err, /no validation evidence marking success/);
-  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE,
-    "the prose moved before its replacement was validated");
-
-  assert.equal(cli(root, ["validate", "--change", "c-skill"]).code, 0);
-  assert.equal(cli(root, ["retire", "--change", "c-skill"]).code, 0);
-  assert.doesNotMatch(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), /- Always update the changelog/);
-  // and the retirement is itself reversible
-  assert.equal(cli(root, ["rollback", "--change", "c-skill"]).code, 0);
-  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE);
-});
-
-// [Foreman: 093] A rolled-back change must refuse retirement by naming the
-// rollback — not "no write in the journal", and not only a missing retire patch.
-test("release gate: a rolled-back change refuses retirement by naming the rollback", () => {
+// The write that replaced a rule is never assay's to undo on the author's
+// behalf: a plan adds the mechanism, `apply` writes it, and taking the prose out
+// afterwards is the author's own edit — reversible through `rollback` like any
+// other write this transaction made.
+test("release gate: no command deactivates a source rule", () => {
   const root = txProject();
   assert.equal(cli(root, ["plan", "--from", "draft.json"]).code, 0);
   assert.equal(cli(root, ["apply", "--change", "c-skill"]).code, 0);
   assert.equal(cli(root, ["validate", "--change", "c-skill"]).code, 0);
-  assert.equal(cli(root, ["rollback", "--change", "c-skill"]).code, 0);
-
-  const afterRollback = cli(root, ["retire", "--change", "c-skill"]);
-  assert.equal(afterRollback.code, 1);
-  assert.match(afterRollback.err, /the change was rolled back/);
-  assert.doesNotMatch(afterRollback.err, /no write in the journal/);
+  // the rule the skill replaced is still exactly where the author left it
   assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), TX_CLAUDE);
-
-  // a change with no retire patch says so too, and still names the rollback
-  const bare = txProject();
-  const rewrite = {
-    id: "c-rw", kind: "rule-rewrite", rationale: "why",
-    patches: [{ path: "CLAUDE.md", old: CLEAN_RULE, new: "- Never use `var`; use `const` everywhere." }],
-  };
-  fs.writeFileSync(path.join(bare, "draft2.json"), JSON.stringify({ changes: [rewrite] }));
-  assert.equal(cli(bare, ["plan", "--from", "draft2.json"]).code, 0);
-  assert.equal(cli(bare, ["apply", "--change", "c-rw"]).code, 0);
-  assert.equal(cli(bare, ["validate", "--change", "c-rw"]).code, 0);
-  assert.equal(cli(bare, ["rollback", "--change", "c-rw"]).code, 0);
-  const noPatch = cli(bare, ["retire", "--change", "c-rw"]);
-  assert.equal(noPatch.code, 1);
-  assert.match(noPatch.err, /declares no retirement patch/);
-  assert.match(noPatch.err, /rolled back/);
+  assert.match(cli(root, ["validate", "--change", "c-skill"]).out, /source instruction is still active/);
 });
 
 // ---------------------------------------------------------------------------
@@ -827,8 +744,6 @@ test("release gate: installation and fresh-session end-to-end", () => {
   assert.equal(reported.code, 0, reported.err);
   assert.match(reported.out, /# Rule audit — /);
   assert.match(reported.out, /Write clean, maintainable code\./);
-  assert.equal(run("artifact").code, 0);
-  assert.ok(fs.existsSync(path.join(project, ".assay-tmp", "report.html")));
 
   // the startup directory is untouched: nothing was written where the session
   // happened to begin, and nothing was written into the installed plugin either
@@ -852,20 +767,15 @@ test("release gate: every public command and its exit codes", () => {
   // its arguments, and the code the contract promises.
   const root = tmpProject({ "CLAUDE.md": TX_CLAUDE });
   fs.writeFileSync(path.join(root, "draft.json"), JSON.stringify({ changes: [PROMOTE_CHANGE] }));
-  fs.writeFileSync(path.join(root, "fp.json"), JSON.stringify(PROOF_FP));
 
   const SUCCESS = [
     [["scan"], "reads the project and writes scan.json"],
     [["report"], "composes the audit from the scan"],
     [["remeasure"], "re-scans and compares against the prior audit"],
-    [["artifact"], "renders the HTML view of the audit"],
     [["ci"], "gates a clean project"],
-    [["link", "--list"], "lists an empty Proof store"],
     [["plan", "--from", "draft.json"], "canonicalizes a draft into a plan"],
-    [["link", "--proof", "fp.json", "--rule", "R001"], "attaches a measurement to a rule"],
     [["apply", "--change", "c-skill"], "writes only the named change"],
     [["validate", "--change", "c-skill"], "records validation evidence"],
-    [["retire", "--change", "c-skill"], "retires the replaced prose"],
     [["rollback", "--change", "c-skill"], "puts every write back"],
     [["clean"], "removes the disposable directory"],
   ];
@@ -882,14 +792,11 @@ test("release gate: every public command and its exit codes", () => {
     [["scan", "--host", "nope"], /Unknown host: nope/],
     [["report"], /run `scan` first|scan\.json/],
     [["remeasure", "--verbse"], /Unknown flag: --verbse/],
-    [["artifact"], /scan|audit/],
     [["clean", "--nope"], /Unknown flag: --nope/],
     [["plan", "--from", "absent.json"], /No draft plan at absent\.json/],
     [["apply", "--change", "nope"], /no plan in \.assay\/ defines change nope/],
     [["validate", "--change", "nope"], /no plan in \.assay\/ defines change nope/],
     [["rollback", "--change", "nope"], /No change nope in \.assay\/journal\.jsonl/],
-    [["retire", "--change", "nope"], /no plan in \.assay\/ defines change nope/],
-    [["link", "--proof", "absent.json", "--rule", "R001"], /audit|resolve/],
     [["ci", "--fail-on", "at-risk"], /The gate set is closed/],
   ];
   for (const [args, pattern] of USAGE) {
@@ -911,8 +818,8 @@ test("release gate: every public command and its exit codes", () => {
   assert.match(failed.out, /^gated findings: 1 \(stale-targets 1\)$/m);
 
   // every public command appeared in the matrix
-  assert.deepEqual([...seen].sort(), ["apply", "artifact", "ci", "clean", "link", "plan",
-    "remeasure", "report", "retire", "rollback", "scan", "validate"]);
+  assert.deepEqual([...seen].sort(), ["apply", "ci", "clean", "plan",
+    "remeasure", "report", "rollback", "scan", "validate"]);
 });
 
 test("release gate: schema versioning rejects an older record by name and round-trips the current one", () => {
@@ -1100,7 +1007,7 @@ test("release gate: the Codex profile's required fixtures", () => {
 // loaded chain disagrees with the adapter's model.
 // [Foreman: 094] Last run 2026-07-28 against codex-cli 0.145.0: OK — chain
 // order, fresh-session delivery, and AGENTS.override.md selection all held.
-const LIVE_CODEX_CHECK = " The manual live check is `node assay/scripts/live-host-codex.js` — " +
+const LIVE_CODEX_CHECK = " The manual live check is `node scripts/assay-live-host-codex.js` — " +
   "last run 2026-07-28 against codex-cli 0.145.0: OK.";
 test("release gate: Codex installed-host end-to-end", {
   skip: disclose("codex installed-host end-to-end", NO_LIVE_CODEX + LIVE_CODEX_CHECK),
@@ -1163,7 +1070,7 @@ test("release gate: a symlinked rule file is discovered", {
 // connection can never fail a suite. Naming it here keeps it in the checklist.
 test("release gate: host documentation provenance is current", {
   skip: disclose("host documentation provenance",
-    "checked by `node assay/scripts/doc-drift.js`, which needs the network and is therefore a manual pre-release step — " +
+    "checked by `node scripts/assay-doc-drift.js`, which needs the network and is therefore a manual pre-release step — " +
     "exit 0 means every documented claim is still stated on its page, exit 2 names the profile blocked for release"),
 }, () => {});
 
@@ -1183,7 +1090,9 @@ test("release gate: DISCLOSED GAPS", () => {
   // in the drift script that guards it.
   assert.ok(DISCLOSED_GAPS.length, "nothing was disclosed — a skip lost its reason");
   for (const gap of DISCLOSED_GAPS) assert.ok(gap.reason && gap.reason.length > 40, gap.cell);
-  const drift = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "doc-drift.js"), "utf-8");
+  // The drift probe is maintainer tooling and lives outside the plugin, so the
+  // gate reads it from the repository rather than from what ships to a user.
+  const drift = fs.readFileSync(path.join(PLUGIN_ROOT, "..", "scripts", "assay-doc-drift.js"), "utf-8");
   for (const profile of Object.keys(engine.ADAPTERS)) {
     for (const claim of engine.ADAPTERS[profile].docs()) {
       assert.ok(drift.includes(claim.url), profile + ": no drift probe guards " + claim.url);

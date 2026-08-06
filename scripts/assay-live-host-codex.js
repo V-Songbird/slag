@@ -15,9 +15,9 @@
 //
 // Deliberately NOT part of `node --test`: each run spends two live model
 // sessions (~35k tokens on the account the CLI is signed into). It is a manual
-// pre-release step, exactly like doc-drift.js.
+// pre-release step, exactly like assay-doc-drift.js.
 //
-// Usage: node assay/scripts/live-host-codex.js
+// Usage: node scripts/assay-live-host-codex.js
 //   exit 0  the live host loaded the chain exactly as the adapter models it
 //   exit 2  MISMATCH — the codex profile is blocked for release
 //   exit 1  could not run (no binary, no auth, timeout) — nothing disproved

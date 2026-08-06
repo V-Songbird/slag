@@ -85,8 +85,7 @@ assay also installs on Codex itself — point your Codex plugin install at this 
 > The Codex profile is encoded from the official Codex documentation and
 > exercised against fixtures. A live host has verified its core: real sessions
 > confirmed the chain order, session-start delivery, and `AGENTS.override.md`
-> selection. `node assay/scripts/live-host-codex.js` reruns that check against
-> your own install. Byte caps, skills, and hooks remain fixture-verified only.
+> selection. Byte caps, skills, and hooks remain fixture-verified only.
 
 ## What you can do
 
@@ -106,7 +105,6 @@ assay also installs on Codex itself — point your Codex plugin install at this 
 | You want to… | Command |
 | --- | --- |
 | Grade the repo's files only, not your own | `/assay:claude --project-only` |
-| Open the whole report as HTML, with search and filters | `/assay:claude --artifact` |
 | Audit a Codex session started in a subdirectory | `/assay:codex --startup <path>` |
 
 </details>
@@ -123,8 +121,7 @@ One scoring script and four skills — an audit per host, craft-skill with its t
 - `assay.js ci` is the build-pipeline entry point: deterministic, read-only, and it writes nothing at all. It exits non-zero only on findings a machine can prove — what the host won't load, a rule pointing at a file that isn't there, metadata that doesn't validate — and `--fail-on` narrows even that. Nothing heuristic or model-judged can fail a build, with no flag to opt in. Wire it into your CI when you want the report enforced rather than read.
 - Promotions are built at project scope, straight from the current official docs — fetched at promotion time, so the formats are never stale. You see each one before it's written, and nothing else gets installed.
 - The report lists what's already wired around the repo — skills, subagents, hooks, npm scripts, CI workflows — as an enforcement ladder, from advisory prose up to remote gates. Every entry says it is configured; none of them claim it runs, because assay reads files and never watches anything execute.
-- If [proof](../proof) has measured one of your rules, you can attach that saved result to the exact rule it was about, and the report shows it beside that rule — verdict, lift, interval, the tasks it covered, the date. assay never turns it into a score or a grade, and never guesses which rule a measurement belonged to: you attach it, or it isn't there.
-- Nothing assay does takes a rule away from you. A promotion adds the mechanism and leaves the prose active; parking only writes down the plan. The duty is then stated twice on purpose — assay says so rather than quietly deleting one copy. Deactivating the prose is a separate command that refuses to run until the replacement has been checked, and keeping it as documentation is a perfectly good answer.
+- Nothing assay does takes a rule away from you. A promotion adds the mechanism and leaves the prose active; parking only writes down the plan. The duty is then stated twice on purpose — assay says so rather than quietly deleting one copy. Deactivating the prose is your own edit to make, and keeping it as documentation is a perfectly good answer.
 - Every write goes through a plan you see first. If the file changed since the plan was drawn up, the whole thing stops rather than patching over someone else's edit. Whatever does land is recorded with the file exactly as it was, so one command puts it back — including after an interrupted run.
 - Some files score low because of their shape, not their wording — too much narrative, most of their rules buried low, or just too long. Those land under **Restructure candidates**, which names the fix a per-rule rewrite can't reach: fence the narrative, move the load-bearing rules up, or split the file into scoped rule files.
 - Block quotes are read as quoted content, not as rules — a pasted requirement or a retro line never grades as a mandate. State a rule in your own voice, outside a quote, if you want it graded.

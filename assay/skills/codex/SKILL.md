@@ -288,7 +288,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" clean
 
 Always run this last, whether or not fixes were applied. It removes
 `.assay-tmp/`, and the change journal too once every applied change has been
-validated, rolled back, or retired. It exits 1 and keeps the journal when one is
+validated or rolled back. It exits 1 and keeps the journal when one is
 still open — a journal holds the only copy of a pre-image, so it is never deleted
 while a write is unresolved. That exit is a prompt, not a failure: name the open
 changes it listed, and offer to validate or roll each one back. Parked plans

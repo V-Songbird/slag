@@ -4,6 +4,19 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.8.0] — 2026-08-01
+
+### Removed
+
+- **Breaking.** `--artifact` and the HTML report are gone. Every location in the markdown report is already a link that opens the rule where it lives, which is what the page was for
+- **Breaking.** The `retire` command is gone. Nothing assay runs takes a rule out of your files now — a promotion adds the mechanism beside the prose, and removing the prose afterwards is your own edit. `rollback` still undoes anything assay wrote
+- **Breaking.** Attaching a saved measurement to a rule is gone, along with the `link` command, the `--proof` argument to `validate`, and the report section that showed it. It only ever worked if you matched a record to the right rule by hand, and the short report never showed the result
+- The two release-tooling scripts no longer ship inside the plugin. They were never yours to run
+
+### Changed
+
+- The audit skill loads about 145 fewer lines every session: the instructions for writing and applying a fix moved back into a reference file the fix step opens when a fix is actually approved
+
 ## [1.7.0] — 2026-08-01
 
 ### Added
