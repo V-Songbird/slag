@@ -65,6 +65,13 @@ ask for what the user already said; only fill real gaps.
   thresholds.
 - Stakes: preference, standing mandate, or must-never-be-violated.
 
+Spend the limited rounds in order of what they void. Ask first about the answers
+that decide where the rule lives or which primitive owns it — scope, stakes,
+whether a command could check it instead — before wording-level specifics: a
+wrong answer of the first kind voids the draft, a missing specific only weakens
+it. This orders the real gaps; it never licenses re-asking what the user already
+said.
+
 Push back on vague answers. "Write clean code" is a wish, not a rule — ask
 what a violation looks like and write the rule against that. A wish with no
 actionable trigger and no actionable action is **not written**: name it a wish,

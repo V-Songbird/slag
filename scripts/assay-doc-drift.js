@@ -48,6 +48,11 @@ const PROBES = [
       { claim: "CLAUDE.md above the working directory loads in full at launch", any: ["above the working directory", "walking up the directory tree"] },
       { claim: "~/.claude/rules/ user rules load before project rules", any: ["~/.claude/rules"] },
       { claim: "nested memory in subdirectories loads on demand", any: ["subtree", "subdirector"] },
+      // [ADR 2026-08-05 B4/C2] The auto-memory surface and the per-file size guidance.
+      { claim: "auto memory lives at ~/.claude/projects/<project>/memory/", any: ["~/.claude/projects"] },
+      { claim: "the auto-memory index MEMORY.md loads at conversation start under a read limit", any: ["MEMORY.md"] },
+      { claim: "the MEMORY.md read limit is the first 200 lines or 25KB", any: ["25KB"] },
+      { claim: "CLAUDE.md size guidance: target under 200 lines per file", any: ["under 200 lines", "200 lines"] },
     ],
   },
   {
@@ -57,6 +62,27 @@ const PROBES = [
       { claim: "skill discovery and SKILL.md frontmatter", any: ["SKILL.md"] },
       { claim: "skill discovery and SKILL.md frontmatter", any: [".claude/skills"] },
       { claim: "skill discovery and SKILL.md frontmatter", any: ["description"] },
+      // [ADR 2026-08-05 C4] The listing cap is a documented, configurable default.
+      { claim: "the skill-listing entry truncates the combined text at 1,536 characters", any: ["1,536", "1536"] },
+      { claim: "the listing cap is configurable via skillListingMaxDescChars", any: ["skillListingMaxDescChars"] },
+    ],
+  },
+  {
+    profile: "claude-code",
+    url: "https://code.claude.com/docs/en/commands.md",
+    expect: [
+      // [ADR 2026-08-05 C2] The host's own documented CLAUDE.md remedy.
+      { claim: "/doctor trims a checked-in CLAUDE.md and migrates the remaining guidance", any: ["/doctor"] },
+      { claim: "the /doctor CLAUDE.md trim check requires v2.1.206 or later", any: ["v2.1.206"] },
+    ],
+  },
+  {
+    profile: "claude-code",
+    url: "https://code.claude.com/docs/en/workflows.md",
+    expect: [
+      // [ADR 2026-08-05 C5] Saved workflows are an explicit-invocation surface.
+      { claim: "saved workflow scripts live in .claude/workflows/", any: [".claude/workflows"] },
+      { claim: "workflow example prompts ask to adversarially verify each finding", any: ["adversarially"] },
     ],
   },
   {

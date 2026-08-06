@@ -72,6 +72,16 @@ Every description this plugin writes has exactly this shape:
 Things that do NOT help, measured directly: imperative framing ("Use this skill
 to…" vs "Generates…") and politeness padding. Spend the words on triggers.
 
+## The body
+
+The `description` routes the skill; the body under it is what runs once it fires,
+and it is a per-turn token cost every time. Keep it lean: skills.md says "Keep
+`SKILL.md` under 500 lines. Move detailed reference material to separate files."
+Reference files load only when the skill reaches for them, so long material
+costs almost nothing until it is needed. ("Progressive disclosure" is blog
+vocabulary, absent from the docs page — say the plain thing instead.) assay does
+not grade the body; this is authoring advice, not a scored contract.
+
 ## The reliability ladder
 
 A description — even a perfect one — is probabilistic routing. When the user

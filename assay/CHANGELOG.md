@@ -4,6 +4,19 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.10.0] — 2026-08-06
+
+### Added
+
+- assay now reads Claude Code's auto-memory — the `memory/` folder loaded at the start of every session. It grades the `MEMORY.md` index like any other always-loaded file and treats the topic files as loaded on demand. A rule sitting past the point where the index stops loading — its first 200 lines or 25 KB, whichever comes first — is reported as one the host will not actually load
+- On the Claude host, a mostly-prose memory or instruction file that could be trimmed now points you at `/doctor` for the cut; the tip never appears under Codex
+
+### Changed
+
+- Each wording severity in the report now names the model tier it applies to
+- A short, mostly-prose `CLAUDE.md` is no longer flagged as a restructure candidate
+- Refreshed what assay knows about the Claude host for the current model generation: the memory index budget, the skills description cap, and where `/doctor` and workflows now live
+
 ## [1.9.0] — 2026-08-05
 
 ### Added

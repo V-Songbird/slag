@@ -82,6 +82,9 @@ const POLICY = { wordingRubric: false, skillRecipe: false };
 const NOUNS = {
   primitive: "Codex primitive",
   scopedRules: "narrower `AGENTS.md` files further down the chain",
+  // [ADR 2026-08-05 D3] Codex has no `/doctor`; null suppresses the Claude
+  // default so the file-shape finding never offers it under this profile.
+  doctorRemedy: null,
 };
 
 // ---------------------------------------------------------------------------

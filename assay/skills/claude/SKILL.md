@@ -176,8 +176,16 @@ proposal never changes a rule's state, its score, or the grade.
 Then add at most 2 sentences of your own: the single most valuable fix, and
 anything project-specific the report cannot see. Never present a grade as a
 prediction that Claude will or won't follow a rule — it measures how the rule is
-written, scoped, and placed. If the command errors about judgments, fix
-`.assay-tmp/judgments.json` and rerun.
+written, scoped, and placed.
+
+Wording severities are reliability levers whose measured effects come from small
+pre-Claude-5 tiers (haiku 4.5) — weight them most where haiku-class models,
+subagents, and pipelines run. Availability gates and byte-cap findings are
+model-independent; conflict, duplicate, and stale-reference detection are
+deterministic checks on the corpus, reported at their own evidence levels, not
+compliance claims.
+
+If the command errors about judgments, fix `.assay-tmp/judgments.json` and rerun.
 
 If this run cannot put text in front of the user ahead of a tool call, **skip
 step 4**, go to step 6, and make the report the final message: a menu with no

@@ -284,6 +284,11 @@ function profilePolicy(record) {
 const DEFAULT_NOUNS = {
   primitive: "Claude Code primitive",
   scopedRules: "scoped `.claude/rules/` files",
+  // [ADR 2026-08-05 D3] The host's own documented remedy for a shape-broken
+  // memory file, offered as an extra safeAction on the file-shape finding. It
+  // rides the profile's nouns so a host without a `/doctor` (Codex, which nulls
+  // it) never prints it; the citation lives in the adapter's docs() row.
+  doctorRemedy: "or run the host's `/doctor` checkup — documented to trim a checked-in CLAUDE.md and migrate the always-loaded guidance that remains into skills and nested CLAUDE.md, with confirmation (v2.1.206+)",
 };
 
 function profileNouns(record) {
@@ -671,6 +676,10 @@ const BURIED_F5_THRESHOLD = 0.6;
 // instead. See docs/foreman/062.md for the threshold choices.
 const RESTRUCTURE_NARRATIVE_SHARE = 0.6; // 60%+ of the graded content is prose
 const RESTRUCTURE_BELOW_MIDPOINT = 0.5;  // half+ of its rules sit past the midpoint
+// [ADR 2026-08-05 D1] 200 also matches the memory docs' per-CLAUDE.md-file size
+// target (the adapter's docs() claim carries the citation; no second hardcoded
+// URL here). The docs state no line target for `.claude/rules/` files, so the
+// finding's limits clause naming that guidance only fires on a memory-kind file.
 const RESTRUCTURE_LONG_FILE_LINES = 200; // long enough that one file should be several
 const F8_HOOK_THRESHOLD = 0.4;
 const F4_NO_OVERLAP_SCORE = 0.85;
@@ -724,11 +733,18 @@ const PLACEMENT_SIGNALS = {
     { name: "named-procedure-trigger", weight: 0.3, pattern: /^\s*when\s+(deploying|releasing|publishing|shipping|cutting\s+a\s+release|preparing\s+a\s+release|creating\s+a\s+(new\s+)?(component|page|module|service)|scaffolding|bootstrapping)\b/i },
     { name: "pointer-shape", weight: 0.25, pointerShape: true },
   ],
+  // [ADR 2026-08-05 D7] Anthropic's context-engineering guidance articulates the
+  // subagent pattern these signals detect — a focused task, a clean context, a
+  // condensed summary back. The weights stay assay's own heuristics; this note
+  // records where the vocabulary is corroborated, and changes no number.
   subagent: [
     { name: "read-large-tree", weight: 0.4, pattern: /\b(read\s+the\s+(full|entire|whole)\s+[\w\s]+|read\s+the\s+source\s+(at|in)|check\s+every\s+[\w\s]+|scan\s+(all|every)\s+[\w\s]+|inspect\s+(all|every)\s+[\w\s]+|traverse\s+(all|every|the\s+entire))\b/i },
     { name: "audit-verb", weight: 0.4, pattern: /\b(audit|review|verify|check)\s+(the\s+)?(diff|code|changes?|coverage|implementation|module|component|feature|test\s+suite|pr|branch|commit)\b/i },
     { name: "judgment-verification-phrase", weight: 0.4, pattern: /\b(make\s+sure\s+(the\s+)?[\w\s]+?\s+(covers?|is\s+(tested|verified|asserted)|meets?)|ensure\s+(the\s+)?[\w\s]+?\s+(complies|satisfies|matches)|verify\s+(the\s+)?[\w\s]+?\s+(covers?|is\s+exercised))\b/i },
-    { name: "bias-independence-language", weight: 0.2, pattern: /\b(fresh\s+context|second\s+opinion|independent\s+review|without\s+(knowing|seeing)\s+what\s+was\s+written|unbiased\s+review|from\s+scratch\b|blind\s+review)\b/i },
+    // [ADR 2026-08-05 D6] "adversarially verify/review/check" is the workflows
+    // docs' own phrasing for the same independent-check intent — a rule written
+    // against current docs scored 0 on this signal without it.
+    { name: "bias-independence-language", weight: 0.2, pattern: /\b(fresh\s+context|second\s+opinion|independent\s+review|without\s+(knowing|seeing)\s+what\s+was\s+written|unbiased\s+review|from\s+scratch\b|blind\s+review|adversarial(?:ly)?\s+(?:verif|review|check)\w*)\b/i },
     { name: "delimited-summary-output", weight: 0.2, pattern: /\b(return\s+(a\s+)?(summary|verdict|list|inventory|report|contract|approved|ok)|report\s+back\s+with|produce\s+(a\s+)?(contract|inventory|summary|report|list\s+of))\b/i },
     { name: "context-heavy-reference", weight: 0.25, pattern: /\b(the\s+(full|entire|whole)\s+(repository|repo|codebase|source\s+tree)|sibling\s+(repo|codebase|project)|external\s+(repository|project|codebase))\b|[A-Za-z]:[\\/][\w\\/.\- ]+|(?<![\w/])\/[\w./-]+\/[\w./-]+/i },
     { name: "agent-invocation-phrase", weight: 0.65, pattern: /\b(run|invoke|delegate\s+to|call|use|spawn|launch)\s+(the\s+)?`?[\w][\w.-]*`?\s+(agent|subagent)\b/i },
@@ -764,6 +780,43 @@ function escapeRe(s) {
 
 function round3(x) {
   return Math.round(x * 1000) / 1000;
+}
+
+// [ADR 2026-08-05 B2] The documented MEMORY.md read cap is a per-file line/byte
+// limit — unlike the ambiguous chain-wide cap — measured over the content that
+// actually loads: a leading YAML frontmatter block and block-level HTML comments
+// are stripped before the host counts. This returns the real source line of the
+// last line still inside the cap (a rule after it is definitively never read at
+// session start), or null when the whole file fits. The engine owns the
+// arithmetic; the cap numbers and their provenance are adapter-declared.
+function memoryIndexBoundary(content, cap) {
+  const lines = content.split("\n");
+  let i = 0;
+  if (lines[0] === "---") {
+    let j = 1;
+    while (j < lines.length && lines[j] !== "---") j++;
+    if (j < lines.length) i = j + 1; // skip the frontmatter block, closing --- included
+  }
+  let measuredLines = 0;
+  let measuredBytes = 0;
+  let inComment = false;
+  for (; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (inComment) {
+      if (trimmed.includes("-->")) inComment = false;
+      continue;
+    }
+    if (trimmed.startsWith("<!--")) {
+      if (!trimmed.includes("-->")) inComment = true;
+      continue;
+    }
+    measuredLines += 1;
+    measuredBytes += Buffer.byteLength(lines[i] + "\n", "utf-8");
+    // The current raw line is the first past the cap; the last in-budget line
+    // is the previous one, whose 1-based number equals this 0-based index.
+    if (measuredLines > cap.lines || measuredBytes > cap.bytes) return i;
+  }
+  return null;
 }
 
 function grade(score) {
@@ -905,6 +958,12 @@ function readSources(sources, root, inaccessible = [], adapter = claudeAdapter, 
       const upTo = Buffer.from(content, "utf-8").subarray(0, source.truncatedAtByte).toString("utf-8");
       f.truncatedAtLine = upTo.split("\n").length;
     }
+    // [ADR 2026-08-05 B2] A per-source documented read cap (auto-memory's
+    // MEMORY.md today): the line past which content is dropped on the next load.
+    if (source.docCap) {
+      const line = memoryIndexBoundary(content, source.docCap);
+      if (line !== null) f.docCapLine = line;
+    }
     return f;
   };
 
@@ -986,6 +1045,10 @@ const SKILL_FILE_TYPE_NOUN = /(?:^|[\s(`"'])\.[a-z][a-z0-9]{0,5}\b|\b(?:markdown
 // many characters — and the exclusion clause sits last, so it is the first thing
 // lost. A fix that appends recipe parts can push a description over the cap; the
 // rewrite folds the parts in instead and comes out no longer than it started.
+// [ADR 2026-08-05 C4] This is the DOCUMENTED host default, not an assay
+// invention — skills.md states the 1,536-char cap and makes it configurable via
+// `skillListingMaxDescChars` (the adapter's docs() row carries the citation).
+// Reading a project's override is out of scope; the default is what assay grades.
 const DESCRIPTION_CAP = 1536;
 
 const SKILL_CHECK_LABELS = {
@@ -2406,6 +2469,11 @@ function scan(root, options = {}) {
       // [Foreman: 090] how this file entered the loaded set, when not directly
       ...(file.nested ? { nested: true } : {}),
       ...(file.imported ? { imported: true } : {}),
+      // [ADR 2026-08-05 B1/B2] the auto-memory labels ride the inventory so the
+      // record shows the surface and its documented read cap, not just its bytes
+      ...(file.autoMemory ? { autoMemory: true } : {}),
+      ...(file.docCap ? { docCap: file.docCap } : {}),
+      ...(Number.isInteger(file.docCapLine) ? { docCapLine: file.docCapLine } : {}),
       bytes: Buffer.byteLength(file.content, "utf-8"),
       sourceHash: hashContent(file.content),
       lineCount: file.lineCount,
@@ -2844,9 +2912,9 @@ const ADVISORY_F8_THRESHOLD = 0.9;
 // what that does not cover: a Claude-profile signal, never a cross-agent law.
 const WORDING_STUDY_EVIDENCE = {
   level: "experiment-supported",
-  tier: "small-model tier",
-  basis: "local wording studies (small-model tier, anti-default fixtures)",
-  limits: "measured on one host profile against fixtures built to defeat the model's defaults; it does not carry to other agents",
+  tier: "small-model tier (haiku 4.5)",
+  basis: "local wording studies, rule-lab 2026-07 (haiku 4.5 n=20/arm, sonnet 4.x n=5 spot checks, anti-default fixtures)",
+  limits: "measured on one host profile against fixtures built to defeat the model's defaults; it does not carry to other agents; measured 2026-07 on pre-Claude-5 model tiers under the host as it then shipped — Claude 5-generation hosts and their revised system prompt are unmeasured",
 };
 // [Foreman: 079] The same finding, for a profile the study never covered. A
 // prohibition with nothing named to do instead is a structural fact about the
@@ -2922,6 +2990,9 @@ function jaccard(a, b) {
 function hostReceives(rule, file) {
   const f = file || {};
   if (f.selected === false || f.loaded === false) return false;
+  // [ADR 2026-08-05 B2] Past the documented MEMORY.md read cap the rule is
+  // definitively dropped, so it leaves the relationship population entirely.
+  if (Number.isInteger(f.docCapLine) && rule.lineStart > f.docCapLine) return false;
   return !(Number.isInteger(f.truncatedAtLine) && rule.lineStart > f.truncatedAtLine);
 }
 
@@ -3014,6 +3085,12 @@ function duplicatePairs(audit) {
 // cannot be called directly — it fires on plain subject overlap, which a real
 // conflict has in full, so it would veto every true pair. Gate 3 is its
 // verb-level half, which is the discriminating one. See docs/foreman/076.md.
+//
+// [ADR 2026-08-05 D5] Vendor corroboration of the HARM, not the detector:
+// Anthropic transcript analysis (context-engineering post, claude.com/blog,
+// 2026-07-24) reports that conflicting instructions in one request force extra
+// deliberation on Claude 5-generation models. It strengthens why this check
+// earns its place; the rendered finding and its evidence level are unchanged.
 const CONFLICT_JACCARD = 0.6;
 const CONFLICT_MIN_TOKENS = 4;
 // The words that carry polarity rather than action; the action verb is whatever
@@ -3155,14 +3232,21 @@ function precedenceNote(fileA, fileB) {
 
 // Which copy looks worth keeping — advisory, never an instruction to delete.
 // A scoped `.claude/rules/` file is a more specific home than a memory file;
-// between two of the same kind the higher-scoring copy; a tie goes to the one
-// that comes first. `a` is always the earlier-positioned rule.
+// [ADR 2026-08-05 B6] then the checked-in project copy over a machine-local,
+// host-rewritable one — an auto-memory note and a project rule are both kind
+// `memory`, and without this the tie could advise keeping the host-owned copy;
+// then the higher-scoring copy; then the one that comes first. `a` is always
+// the earlier-positioned rule.
+const KEEP_WHY = ["a scoped rules file", "the checked-in project copy", "the higher-scoring copy"];
 function keepSuggestion(pair, files) {
-  const rank = (r) => [((files[r.fileIndex] || {}).kind === "rules" ? 1 : 0), r.score == null ? 0 : r.score];
+  const rank = (r) => {
+    const f = files[r.fileIndex] || {};
+    return [f.kind === "rules" ? 1 : 0, f.scope === "project" ? 1 : 0, r.score == null ? 0 : r.score];
+  };
   const ra = rank(pair.a), rb = rank(pair.b);
   for (let i = 0; i < ra.length; i++) {
     if (ra[i] !== rb[i]) {
-      const why = i === 0 ? "a scoped rules file" : "the higher-scoring copy";
+      const why = KEEP_WHY[i];
       return ra[i] > rb[i] ? { keep: pair.a, drop: pair.b, why } : { keep: pair.b, drop: pair.a, why };
     }
   }
@@ -3194,6 +3278,22 @@ function deriveRuleState(rule, file, conflicted = new Map(), policy = DEFAULT_PO
       explanation: "The host reads its instruction sources in order until a documented byte limit is reached and stops adding files. Everything in this one falls after that point, so no wording change reaches this rule while the files ahead of it stay this large.",
       evidence: { level: "documented", basis: "the host's documented combined instruction byte limit, applied over the discovered read order" },
       safeActions: ["raise the configured limit", "shorten a source read earlier in the chain", "move the rule into a file the host reaches"],
+    };
+  }
+  // [ADR 2026-08-05 B2] The documented MEMORY.md read cap lands above this rule.
+  // Unlike the chain-wide cap this is a per-file limit the docs state definitively
+  // ("content beyond that threshold is not loaded"), so the state is inactive,
+  // not the ambiguous at-risk the crossing-file case gets.
+  if (file && Number.isInteger(file.docCapLine) && rule.lineStart > file.docCapLine && file.docCap) {
+    return {
+      state: "inactive", severity: "high", analyzer: "memory-index-cap",
+      summary: "`" + rule.file + "` sits past line " + file.docCapLine + ", the documented MEMORY.md read limit — it is never loaded at session start",
+      explanation: "Only the first 200 lines or 25KB of the auto-memory index load at the start of a conversation, measured over the content that loads (frontmatter and block HTML comments stripped). Everything after that is dropped on the next load, so no wording change reaches this rule until the index is shortened.",
+      evidence: {
+        level: "documented", basis: file.docCap.claim, url: file.docCap.url,
+        limits: "the byte value behind \"25KB\" is not stated on the page and is read as 25×1024",
+      },
+      safeActions: ["move this entry into the first 200 lines / 25KB of MEMORY.md", "move the detail into a topic file"],
     };
   }
   if (globs.length && file.globMatchCount === 0) {
@@ -3301,7 +3401,10 @@ function deriveRuleState(rule, file, conflicted = new Map(), policy = DEFAULT_PO
       state: "at-risk", severity: "medium", analyzer: "verb-strength",
       summary: "hedged force — `" + factors.F1.matchedVerb + "` governs the directive",
       explanation: "A hedge sets the whole sentence's force, however firm the rest of it sounds, so the rule reads as optional.",
-      evidence: { level: "heuristic", basis: "hedge-marker lookup" },
+      evidence: {
+        level: "heuristic", basis: "hedge-marker lookup",
+        limits: "the force gap behind this check was measured only on a pre-Claude-5 small tier (haiku 4.5, rule-lab 2026-07) and had already saturated on sonnet 4.x",
+      },
       safeActions: ["rewrite with a firm verb", "restate it as a preference on purpose"],
     };
   }
@@ -3373,6 +3476,12 @@ function byPathOf(files, wanted) {
 // documents no byte cap — `budgets()` returns `{ documented: null }` — so the
 // number below is assay's own heuristic line and every finding built on it says
 // so. It is not a limit Claude Code enforces.
+// [ADR 2026-08-05 D4] Set under the pre-Claude-5 host and re-affirmed against the
+// 2026 docs, which still document no CLAUDE.md byte cap (only per-file line
+// guidance). Not rescaled off the blog's 80% system-prompt figure — that would
+// be category confusion, since this threshold counts user-corpus bytes, not
+// system-prompt tokens. S4 corroborates the direction only: context-rot degrades
+// recall as a gradient with total tokens. Comment note; the number stands.
 const CONTEXT_PRESSURE_BYTES = 40_000;
 
 function alwaysLoadedBytes(audit) {
@@ -3889,7 +3998,7 @@ function deriveFindings(audit) {
       explanation: "Every session pays for these bytes before it reads a single file of yours. Nothing here is broken; it is a cost worth knowing, and scoping the largest file to the paths it applies to is what reduces it.",
       evidence: {
         level: "heuristic", basis: "summed bytes of always-loaded sources against assay's own threshold",
-        limits: "the host documents no byte cap, so this threshold is assay's line, not a limit the host enforces",
+        limits: "the nearest documented host statement is per-file adherence guidance (target under 200 lines per CLAUDE.md, memory docs); it is about lines per file, not total bytes, and neither sets nor confirms this figure — the 40k line stays assay's own",
       },
       sources: pressure.largest.map((s) => ({ path: s.path, lineStart: 1, lineEnd: s.lineCount || 1 })),
       safeActions: ["scope the largest file with `paths:` frontmatter", "split it into scoped rules files"],
@@ -3925,7 +4034,24 @@ function deriveFindings(audit) {
     });
   }
   const byPath = new Map(files.map((f) => [f.path, f]));
+  const doctorRemedy = profileNouns(audit).doctorRemedy;
   for (const candidate of restructureCandidates(audit)) {
+    const file = byPath.get(candidate.path);
+    const memoryKind = Boolean(file) && file.kind === "memory";
+    // [ADR 2026-08-05 D1] The 200-line reason echoes the memory docs' per-file
+    // line guidance, but only on a memory-kind file under a profile that grades
+    // position — the docs set no line target for `.claude/rules/`, and Codex
+    // (wordingRubric false) never prints it.
+    const evidence = { level: "heuristic", basis: "narrative share, rule position, and file length thresholds" };
+    const wordingProfile = !(audit.profile && audit.profile.policy && audit.profile.policy.wordingRubric === false);
+    if (memoryKind && wordingProfile && file.lineCount > RESTRUCTURE_LONG_FILE_LINES) {
+      evidence.limits = "the >200 line reason echoes the memory docs' per-CLAUDE.md-file size guidance (lines per file, not a byte cap); the other reasons and every threshold stay assay's own";
+    }
+    // [ADR 2026-08-05 D3] The host's documented `/doctor` remedy, memory-kind
+    // gated and offered only where the profile carries the noun.
+    const safeActions = memoryKind && doctorRemedy
+      ? [...candidate.restructures, doctorRemedy]
+      : candidate.restructures;
     push({
       type: "file-shape", severity: "medium", analyzer: "file-shape",
       // [Foreman: 078] carried so the renderer lists the reasons without
@@ -3933,9 +4059,9 @@ function deriveFindings(audit) {
       reasons: candidate.reasons,
       summary: "the file's shape holds its rules back: " + candidate.reasons.join(", "),
       explanation: "This is a property of the file, not of any one rule in it, so no per-rule rewrite reaches it.",
-      evidence: { level: "heuristic", basis: "narrative share, rule position, and file length thresholds" },
-      sources: fileSpan(byPath.get(candidate.path) || { path: candidate.path }),
-      safeActions: candidate.restructures,
+      evidence,
+      sources: fileSpan(file || { path: candidate.path }),
+      safeActions,
     });
   }
   for (const source of audit.sources || []) {
@@ -4282,7 +4408,11 @@ function restructureCandidates(audit) {
     const belowShare = own.length ? belowMid.length / own.length : 0;
     const reasons = [];
     const restructures = [];
-    if (f.narrativeShare != null && f.narrativeShare >= RESTRUCTURE_NARRATIVE_SHARE) {
+    // [ADR 2026-08-05 D2] Gated on file length like the below-midpoint reason
+    // just below: a short, mostly-prose CLAUDE.md is a fine repo description, not
+    // a restructure. This is assay's own consistency call (F5 already exempts
+    // ≤50-line files), backed by a labeled fixture — no host doc is cited.
+    if (f.narrativeShare != null && f.narrativeShare >= RESTRUCTURE_NARRATIVE_SHARE && f.lineCount > LONG_FILE_LINES) {
       reasons.push(`${Math.round(f.narrativeShare * 100)}% narrative`);
       restructures.push("Fence the narrative with an `<!-- assay-ignore-start -->` / `<!-- assay-ignore-end -->` span, or move it out of the rule file.");
     }

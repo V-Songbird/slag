@@ -151,6 +151,31 @@ test("release gate: the effective-source inventory matches labeled fixtures", ()
   assert.ok(codex.files[2].precedence > codex.files[0].precedence);
 });
 
+// [ADR 2026-08-05 B1] The auto-memory surface is an effective source with its
+// own labels: the index loads always (under a documented read cap), topic files
+// load on demand. The gate proves the inventory carries those labels rather than
+// leaving the surface invisible.
+test("release gate: auto memory is a labeled effective source", () => {
+  const root = tmpProject({ "CLAUDE.md": CLEAN_CLAUDE });
+  const userDir = fs.mkdtempSync(path.join(os.tmpdir(), "assay-gate-automem-"));
+  const slug = path.resolve(root).replace(/[\\/:]/g, "-");
+  const memDir = path.join(userDir, "projects", slug, "memory");
+  fs.mkdirSync(memDir, { recursive: true });
+  fs.writeFileSync(path.join(memDir, "MEMORY.md"), "# Memory\n\n" + CLEAN_RULE + "\n");
+  fs.writeFileSync(path.join(memDir, "debugging.md"), "# Debugging\n\n- The tests need a local Redis.\n");
+
+  const scan = engine.scan(root, { userDir });
+  const index = scan.sources.find((s) => s.autoMemory && s.path.endsWith("MEMORY.md"));
+  assert.ok(index, "the auto-memory index is not in the effective-source inventory");
+  assert.equal(index.alwaysLoaded, true);
+  assert.equal(index.scope, "user");
+  assert.equal(index.docCap.lines, 200);
+  const topic = scan.sources.find((s) => s.autoMemory && s.path.endsWith("debugging.md"));
+  assert.ok(topic && topic.alwaysLoaded === false, "the topic file is missing or mislabeled");
+  // and the adapter discloses the residuals a file read cannot close
+  assert.ok(scan.coverage.profileNotes.some((n) => /auto memory/.test(n)));
+});
+
 test("release gate: unsupported and inaccessible sources are disclosed", () => {
   const root = tmpProject({
     ".claude/rules/basics.md": "---\ndescription: Use when: broken\n---\n\n- Run `npm test` before committing.\n",
@@ -598,10 +623,12 @@ const BRIEF_FIXTURE = {
   // host cannot apply, which is the one shape that reaches the stale bucket.
   "guides/handbook.md": "# Handbook\n",
   // A long file whose rules all sit in the bottom half — file shape, not wording.
+  // [ADR 2026-08-05 D2] Kept over LONG_FILE_LINES on purpose: the narrative and
+  // below-midpoint reasons are both length-gated now.
   ".claude/rules/shape.md": [
     "# Background",
     "",
-    ...new Array(30).fill("Some narrative about why this project exists and how it grew."),
+    ...new Array(55).fill("Some narrative about why this project exists and how it grew."),
     "",
     ...VAGUE.slice(0, 6),
     "",

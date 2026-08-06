@@ -21,9 +21,11 @@ const { spawnSync } = require("child_process");
 const { discoverRepoChecks: sharedRepoChecks } = require("./repo-checks.js");
 
 const NAME = "claude-code";
+// 3 = adds the auto-memory surface (~/.claude/projects/<project>/memory/).
 // 2 = the whole documented project surface plus user-scope memory. 1 saw only
-// ./CLAUDE.md and .claude/rules/.
-const PROFILE_VERSION = 2;
+// ./CLAUDE.md and .claude/rules/. The constant exists to date-stamp surface
+// coverage, so a record naming an older version is known to have seen less.
+const PROFILE_VERSION = 3;
 
 // Documented load order, broadest scope first, so a later source is read after
 // (and outranks) an earlier one. `precedence` is that ranking as a number;
@@ -31,10 +33,30 @@ const PROFILE_VERSION = 2;
 const PRECEDENCE = {
   userMemory: 1,
   userRules: 1, // "loaded before project rules, giving project rules higher priority"
+  // Auto memory loads at the start of every conversation, same as user memory.
+  // Its rank RELATIVE to the other user-scope sources is not documented — the
+  // docs say only that both load at conversation start — so this shares the
+  // user-memory number and coverageNotes discloses the ordering as observed.
+  userAutoMemory: 1,
   ancestorMemory: 2, // "ordered from the filesystem root down to your working directory"
   projectMemory: 3,
   projectRules: 3, // "same priority as .claude/CLAUDE.md"
   localMemory: 4, // appended after CLAUDE.md at the project level, so read last
+};
+
+// The documented MEMORY.md read limit. Only the first 200 lines OR 25KB of the
+// auto-memory index load at conversation start, "whichever comes first",
+// measured over the content that loads — YAML frontmatter and block-level HTML
+// comments are stripped first (documented v2.1.211+). The docs are definitive
+// that content past the boundary is dropped on the next load, so the engine
+// derives an inactive (never-read) state for a rule past it, not the ambiguous
+// at-risk the chain-wide cap gets. The byte value behind "25KB" is not spelled
+// out on the page; 25×1024 is assay's reading of it, marked unverified.
+const MEMORY_INDEX_CAP = {
+  lines: 200,
+  bytes: 25 * 1024, // "25KB" — exact byte constant unverified; see comment above
+  claim: "the auto-memory index MEMORY.md loads only its first 200 lines or first 25KB, whichever comes first, measured with frontmatter and block HTML comments stripped",
+  url: "https://code.claude.com/docs/en/memory.md",
 };
 
 // ---------------------------------------------------------------------------
@@ -161,6 +183,86 @@ function exists(abs) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Auto memory — the always-loaded surface added in PROFILE_VERSION 3
+// ---------------------------------------------------------------------------
+
+// OBSERVED, NOT DOCUMENTED. The host derives the auto-memory directory from a
+// project path by dash-encoding it: the drive colon and every path separator
+// become "-" (D:\a\b -> "D--a-b"; /home/u -> "-home-u"). The docs say only that
+// <project> is "derived from the git repository", so this is a best-effort
+// match. When the derived directory is absent — a slug mismatch, no memory yet,
+// a relocated directory assay could not read — discovery fails open and emits
+// nothing, and coverageNotes discloses the encoding as observed.
+function autoMemorySlug(root) {
+  return root.replace(/[\\/:]/g, "-");
+}
+
+// `autoMemoryEnabled` and `autoMemoryDirectory`, read with settings precedence
+// (local > project > user). Managed policy is not read here (disclosed). The
+// project/local values are honored by the host only after its workspace-trust
+// dialog, which no static read can confirm — also disclosed.
+function autoMemorySettings(ctx) {
+  const files = [
+    path.join(ctx.projectRoot, ".claude", "settings.local.json"),
+    path.join(ctx.projectRoot, ".claude", "settings.json"),
+    ...(ctx.userDir ? [path.join(ctx.userDir, "settings.json")] : []),
+  ];
+  let enabled = true, enabledSet = false, dir = null, dirSet = false;
+  for (const abs of files) {
+    let cfg;
+    try { cfg = JSON.parse(fs.readFileSync(abs, "utf-8")); } catch { continue; }
+    if (!enabledSet && typeof cfg.autoMemoryEnabled === "boolean") { enabled = cfg.autoMemoryEnabled; enabledSet = true; }
+    if (!dirSet && typeof cfg.autoMemoryDirectory === "string" && cfg.autoMemoryDirectory) { dir = cfg.autoMemoryDirectory; dirSet = true; }
+  }
+  if (process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY === "1") enabled = false;
+  return { enabled, dir };
+}
+
+// The auto-memory sources for this project. `MEMORY.md` is the always-loaded
+// index (subject to the documented read cap on MEMORY_INDEX_CAP); sibling topic
+// files load on demand, so they are inventoried but never counted as
+// always-loaded. When auto memory is switched off the index still sits on disk
+// yet the host ignores it, so it is emitted `selected: false` with the reason
+// rather than as a false always-loaded claim.
+function discoverAutoMemory(ctx, inaccessible) {
+  const out = [];
+  const { enabled, dir } = autoMemorySettings(ctx);
+  const base = dir
+    ? (dir.startsWith("~/") ? path.join(os.homedir(), dir.slice(2)) : path.resolve(dir))
+    : path.join(ctx.userDir, "projects", autoMemorySlug(ctx.projectRoot), "memory");
+  const indexPath = path.join(base, "MEMORY.md");
+  if (!exists(indexPath)) return out; // fail open
+  out.push({
+    path: indexPath, absPath: indexPath, scope: "user", kind: "memory",
+    autoMemory: true,
+    alwaysLoaded: enabled,
+    ...(enabled ? {} : { selected: false }),
+    precedence: PRECEDENCE.userAutoMemory,
+    docCap: MEMORY_INDEX_CAP,
+    selectionReason: enabled
+      ? "auto-memory index — loads at the start of every conversation (first 200 lines or 25KB)"
+      : "auto memory is disabled (autoMemoryEnabled false or CLAUDE_CODE_DISABLE_AUTO_MEMORY=1) — the index is not loaded",
+  });
+  let names = [];
+  try {
+    names = fs.readdirSync(base).sort();
+  } catch (err) {
+    inaccessible.push({ path: base, reason: err.code || err.message });
+  }
+  for (const name of names) {
+    if (name === "MEMORY.md" || !name.endsWith(".md")) continue;
+    const abs = path.join(base, name);
+    out.push({
+      path: abs, absPath: abs, scope: "user", kind: "memory",
+      autoMemory: true, alwaysLoaded: false,
+      precedence: PRECEDENCE.userAutoMemory,
+      selectionReason: "auto-memory topic file — loads when Claude follows the memory index, not at conversation start",
+    });
+  }
+  return out;
+}
+
 // Every documented instruction source Claude Code loads for this project, in
 // load order. Discovery only: no file is opened, so a path that exists but
 // cannot be read still arrives here and is reported by the engine's reader as a
@@ -207,6 +309,10 @@ function discoverSources(ctx) {
         });
       }
     }
+    // Auto memory: ~/.claude/projects/<project>/memory/. An always-loaded,
+    // instruction-bearing surface the earlier profile could not see. User-scope,
+    // so --project-only (userDir null) excludes it with the rest of user scope.
+    for (const s of discoverAutoMemory(ctx, inaccessible)) sources.push(s);
   }
 
   // "CLAUDE.md and CLAUDE.local.md files in the directory hierarchy above the
@@ -639,10 +745,13 @@ const TARGETS = {
 // Budgets and provenance
 // ---------------------------------------------------------------------------
 
-// Claude Code documents no hard byte cap for memory files — CLAUDE.md is loaded
-// in full whatever its length, and the 200-line guidance is adherence advice,
-// not a limit the host enforces. The adapter reports none rather than inventing
-// one and grading against a number the host never applies.
+// Claude Code documents no hard byte cap for the instruction CHAIN — CLAUDE.md
+// files are loaded in full whatever their length, and the 200-line guidance is
+// adherence advice, not a limit the host enforces. So the corpus budget stays
+// null and no rule is graded against a chain-wide number the host never applies.
+// The one documented per-file limit — MEMORY.md's first-200-lines/25KB read cap
+// — is NOT a chain budget: it rides the auto-memory source record on `docCap`
+// (MEMORY_INDEX_CAP), and the engine derives an inactive state per rule past it.
 function budgets() {
   return { documented: null };
 }
@@ -650,16 +759,44 @@ function budgets() {
 // What this profile encodes and where the documentation says so. Every claim is
 // re-read before the date below moves.
 function docs() {
+  const memory = "https://code.claude.com/docs/en/memory.md";
   return [
-    { claim: "user, project, and local memory files and their load order", url: "https://code.claude.com/docs/en/memory.md", verified: "2026-07-28" },
-    { claim: "CLAUDE.md and CLAUDE.local.md above the working directory load in full at launch, filesystem root first", url: "https://code.claude.com/docs/en/memory.md", verified: "2026-07-28" },
-    { claim: "~/.claude/rules/ user rules load before project rules", url: "https://code.claude.com/docs/en/memory.md", verified: "2026-07-28" },
-    { claim: "@path imports recurse to a maximum depth of four hops", url: "https://code.claude.com/docs/en/memory.md", verified: "2026-07-28" },
-    { claim: ".claude/rules/ recursive discovery, symlinks, and paths scoping", url: "https://code.claude.com/docs/en/memory.md", verified: "2026-07-28" },
+    // The memory.md claims were re-read live 2026-08-05; the pages below them
+    // were not re-read that day and keep their earlier date, per profile.
+    { claim: "user, project, and local memory files and their load order", url: memory, verified: "2026-08-05" },
+    { claim: "CLAUDE.md and CLAUDE.local.md above the working directory load in full at launch, filesystem root first", url: memory, verified: "2026-08-05" },
+    { claim: "~/.claude/rules/ user rules load before project rules", url: memory, verified: "2026-08-05" },
+    { claim: "@path imports recurse to a maximum depth of four hops", url: memory, verified: "2026-08-05" },
+    { claim: ".claude/rules/ recursive discovery, symlinks, and paths scoping", url: memory, verified: "2026-08-05" },
+    // [ADR 2026-08-05 B4] The auto-memory surface.
+    { claim: "auto memory at ~/.claude/projects/<project>/memory/ — MEMORY.md index loads at conversation start (first 200 lines or 25KB, whichever first), topic files load on demand, on by default", url: memory, verified: "2026-08-05" },
+    // [ADR 2026-08-05 C2/C3] Documented guidance assay's placement direction rests on.
+    { claim: "CLAUDE.md size guidance: target under 200 lines per file — adherence advice, not an enforced cap", url: memory, verified: "2026-08-05" },
+    { claim: "host guidance: keep CLAUDE.md lightweight and move procedural/verification guidance into skills or path-scoped rules that load on demand", url: memory, verified: "2026-08-05" },
     { claim: "skill discovery and SKILL.md frontmatter", url: "https://code.claude.com/docs/en/skills.md", verified: "2026-07-28" },
+    // [ADR 2026-08-05 C4] The listing cap is a documented host default, not an assay constant.
+    { claim: "the skill-listing entry truncates the combined description + when_to_use text at 1,536 characters, configurable via skillListingMaxDescChars", url: "https://code.claude.com/docs/en/skills.md", verified: "2026-08-05" },
     { claim: "hook configuration in settings files", url: "https://code.claude.com/docs/en/hooks.md", verified: "2026-07-28" },
     { claim: "subagent definitions in .claude/agents/", url: "https://code.claude.com/docs/en/sub-agents.md", verified: "2026-07-28" },
     { claim: "hooks require a trusted workspace, which no static read can confirm", url: "https://code.claude.com/docs/en/hooks.md", verified: "2026-07-28" },
+    // [ADR 2026-08-05 C2] The host's own documented CLAUDE.md remedy.
+    { claim: "/doctor checkup trims checked-in CLAUDE.md and migrates the always-loaded guidance that remains into skills and nested CLAUDE.md, with confirmation (v2.1.206+)", url: "https://code.claude.com/docs/en/commands.md", verified: "2026-08-05" },
+    // [ADR 2026-08-05 C5] Saved workflows — an explicit-invocation surface assay does not discover.
+    { claim: "saved workflow scripts in .claude/workflows/, ~/.claude/workflows/, and plugin workflows/ directories run as explicit /<name> slash commands (invoke-only since v2.1.218)", url: "https://code.claude.com/docs/en/workflows.md", verified: "2026-08-05" },
+  ];
+}
+
+// What the audit must disclose about this profile whatever it finds, in the
+// adapter's own words. Coverage is a promise about what was looked at, so the
+// residual limits travel with the adapter that owns them.
+// [ADR 2026-08-05 B5] Discovery of auto memory (B1) still leaves gaps a file
+// read cannot close; C5's saved-workflows line rides here too.
+function coverageNotes() {
+  return [
+    "auto memory: topic files load on demand and assay cannot observe which of them a session actually followed",
+    "auto memory: the ~/.claude/projects/<project> directory encoding, and auto memory's position in the loaded context relative to other user-scope sources, are observed, not documented — an absent directory is treated as no auto memory rather than a discovery failure",
+    "auto memory: an `autoMemoryDirectory` relocation is honored only where a settings file was read, and its project/local trust gate cannot be confirmed by a static read",
+    "saved workflow scripts (.claude/workflows/, ~/.claude/workflows/, plugin workflows/) are documented but explicit-invocation only, so assay does not discover them — their absence never falsifies the always-loaded byte total or the load order",
   ];
 }
 
@@ -678,6 +815,7 @@ module.exports = {
   IMPORT_MAX_DEPTH,
   budgets,
   docs,
+  coverageNotes,
   // exported for the engine's compatibility re-export and its own tests
   findRuleMarkdownFiles,
 };

@@ -540,6 +540,16 @@ test("a mechanical half conjoined with a judgment half is compound", () => {
   assert.equal(p.bestFit, "compound");
 });
 
+// [ADR 2026-08-05 D6] The workflows docs' own phrasing — "adversarially verify"
+// — is the independent-check intent the subagent signal exists to catch. Before
+// this it scored 0 and a rule written against current docs missed the signal.
+test("adversarial verification vocabulary is a subagent independence signal", () => {
+  const p = engine.detectPlacement("Review the diff, and adversarially verify each finding before reporting it.", 0.9);
+  assert.ok(p);
+  assert.ok(p.detections.subagent.evidence.includes("bias-independence-language"), "adversarial vocab did not fire the signal");
+  assert.equal(p.bestFit, "subagent");
+});
+
 // ---------------------------------------------------------------------------
 // Skill descriptions
 // ---------------------------------------------------------------------------
@@ -1070,8 +1080,32 @@ test("scan measures each file's narrative share of the graded content", () => {
   assert.ok(file.narrativeShare >= 0.6, `narrativeShare was ${file.narrativeShare}`);
 });
 
-// [Foreman: 062]
-test("a mostly-narrative file is a restructure candidate, not a per-rule fix", () => {
+// [Foreman: 062] [ADR 2026-08-05 D2] The narrative reason is gated on file
+// length now, like the below-midpoint reason — so a mostly-narrative file only
+// restructures once it is long enough for the prose to be a real cost.
+test("a long mostly-narrative file is a restructure candidate, not a per-rule fix", () => {
+  const root = tmpProject({
+    "CLAUDE.md": [
+      "# Overview",
+      "",
+      ...new Array(55).fill("Background prose about why this repository exists and how it grew."),
+      "",
+      "- Run the tests before every commit.",
+    ].join("\n"),
+  });
+  const scanData = engine.scan(root);
+  const judgments = {};
+  for (const r of scanData.rules) judgments[r.key] = { F3: 0.8, F8: 0.9 };
+  const report = engine.renderReport(engine.composeAudit(scanData, judgments));
+  assert.match(report, /## Restructure candidates/);
+  assert.match(report, /narrative/);
+  assert.match(report, /assay-ignore/);
+});
+
+// [ADR 2026-08-05 D2] The labeled fixture the gate is backed by: a short,
+// mostly-prose CLAUDE.md is a fine repo description, not a restructure, so it no
+// longer flags. This is assay's own threshold call — no host doc is cited.
+test("a short mostly-prose file is not a restructure candidate", () => {
   const root = tmpProject({
     "CLAUDE.md": [
       "# Overview",
@@ -1085,12 +1119,11 @@ test("a mostly-narrative file is a restructure candidate, not a per-rule fix", (
     ].join("\n"),
   });
   const scanData = engine.scan(root);
+  assert.ok(scanData.files[0].narrativeShare >= 0.6, "fixture lost its prose majority");
   const judgments = {};
   for (const r of scanData.rules) judgments[r.key] = { F3: 0.8, F8: 0.9 };
   const report = engine.renderReport(engine.composeAudit(scanData, judgments));
-  assert.match(report, /## Restructure candidates/);
-  assert.match(report, /narrative/);
-  assert.match(report, /assay-ignore/);
+  assert.doesNotMatch(report, /## Restructure candidates/);
 });
 
 // [Foreman: 062]
@@ -1560,9 +1593,10 @@ test("the experiment-supported finding discloses its tier and its limits", () =>
   const audit = auditOf({ "CLAUDE.md": "- Never use `var`.\n" });
   const finding = primaryState(audit);
   assert.equal(finding.evidence.level, "experiment-supported");
-  assert.equal(finding.evidence.tier, "small-model tier");
+  assert.equal(finding.evidence.tier, "small-model tier (haiku 4.5)");
   assert.match(finding.evidence.limits, /does not carry to other agents/);
-  assert.equal(engine.evidenceTag(finding.evidence), "[experiment-supported: small-model tier]");
+  assert.match(finding.evidence.limits, /pre-Claude-5 model tiers/);
+  assert.equal(engine.evidenceTag(finding.evidence), "[experiment-supported: small-model tier (haiku 4.5)]");
   assert.equal(engine.evidenceTag({ level: "heuristic" }), "[heuristic]");
 });
 
@@ -1684,7 +1718,7 @@ test("the report leads with the risk topology and carries an evidence tag on eve
   assert.ok(report.indexOf("## Coverage") < report.indexOf("## Hard gates"));
   assert.ok(report.indexOf("corpus grade") > report.indexOf("## Policy placement"));
   assert.match(report, /None — every rule the audit found can load in this context\./);
-  assert.match(report, /\[experiment-supported: small-model tier\]/);
+  assert.match(report, /\[experiment-supported: small-model tier \(haiku 4\.5\)\]/);
 });
 
 // ---------------------------------------------------------------------------
@@ -1897,7 +1931,7 @@ test("the always-loaded byte count always prints; only real heft is a finding", 
   assert.equal(pressure.length, 1);
   assert.equal(pressure[0].severity, "low");
   assert.equal(pressure[0].evidence.level, "heuristic");
-  assert.match(pressure[0].evidence.limits, /the host documents no byte cap/);
+  assert.match(pressure[0].evidence.limits, /neither sets nor confirms this figure — the 40k line stays assay's own/);
   assert.match(pressure[0].summary, /largest: `CLAUDE\.md`/);
   assert.ok(pressure[0].sources.length <= 3);
   assert.match(engine.renderReport(heavy), /bytes of instructions load before every session/);
@@ -2465,6 +2499,8 @@ test("scan exits 0 and writes a parseable scan.json carrying coverage", () => {
     filesDiscovered: 1, filesParsed: 1, inaccessible: [], proseChunks: 1, excludedLines: 0,
     // [Foreman: 074] what the audit saw and did not grade
     userFilesIncluded: false, userSkills: [], agents: [],
+    // [ADR 2026-08-05 B5] the Claude adapter now discloses its residual coverage
+    profileNotes: engine.ADAPTERS["claude-code"].coverageNotes(),
   });
 });
 
@@ -3581,6 +3617,115 @@ test("detectContext fixes the context from overrides and never probes the host b
   assert.equal(adapter.detectContext({ root }).userDir, path.resolve(process.env.ASSAY_USER_DIR));
 });
 
+// ---------------------------------------------------------------------------
+// Auto memory — [ADR 2026-08-05 B1/B2/B6]
+// ---------------------------------------------------------------------------
+
+// The host derives the memory directory from the project path with the observed
+// dash encoding; the adapter and this fixture must agree on it, so it is the one
+// place the test replicates the rule.
+function writeAutoMemory(userDir, root, files) {
+  const slug = path.resolve(root).replace(/[\\/:]/g, "-");
+  const dir = path.join(userDir, "projects", slug, "memory");
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), content);
+  return dir;
+}
+
+test("auto memory is discovered as an always-loaded user surface, topic files on demand", () => {
+  const root = tmpProject({ "CLAUDE.md": "- Use `const`.\n" });
+  const userDir = tmpUserDir({});
+  writeAutoMemory(userDir, root, {
+    "MEMORY.md": "# Memory index\n\n- Always run `npm test` before committing.\n",
+    "debugging.md": "# Debugging\n\n- The API tests need a local Redis.\n",
+  });
+  const { sources } = adapter.discoverSources(adapter.detectContext({ root, userDir }));
+  const index = sources.find((s) => s.path.endsWith("MEMORY.md"));
+  assert.ok(index, "MEMORY.md was not discovered");
+  assert.equal(index.scope, "user");
+  assert.equal(index.kind, "memory");
+  assert.equal(index.autoMemory, true);
+  assert.equal(index.alwaysLoaded, true);
+  assert.equal(index.docCap.lines, 200);
+  const topic = sources.find((s) => s.path.endsWith("debugging.md"));
+  assert.ok(topic, "the topic file was not discovered");
+  assert.equal(topic.alwaysLoaded, false, "a topic file must not count as always-loaded");
+  // --project-only drops it with the rest of user scope
+  const projectOnly = adapter.discoverSources(adapter.detectContext({ root, userDir, projectOnly: true })).sources;
+  assert.equal(projectOnly.some((s) => s.autoMemory), false);
+});
+
+test("auto memory switched off is emitted not-loaded, never a false always-loaded claim", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "- Use `const`.\n",
+    ".claude/settings.json": JSON.stringify({ autoMemoryEnabled: false }),
+  });
+  const userDir = tmpUserDir({});
+  writeAutoMemory(userDir, root, { "MEMORY.md": "- Always run `npm test` before committing.\n" });
+  const { sources } = adapter.discoverSources(adapter.detectContext({ root, userDir }));
+  const index = sources.find((s) => s.autoMemory);
+  assert.ok(index);
+  assert.equal(index.alwaysLoaded, false);
+  assert.equal(index.selected, false);
+
+  // and the environment off-switch reaches the same state
+  const prev = process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY;
+  process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
+  try {
+    const on = tmpProject({ "CLAUDE.md": "- Use `const`.\n" });
+    const onUser = tmpUserDir({});
+    writeAutoMemory(onUser, on, { "MEMORY.md": "- Always run `npm test`.\n" });
+    const s = adapter.discoverSources(adapter.detectContext({ root: on, userDir: onUser })).sources.find((x) => x.autoMemory);
+    assert.equal(s.alwaysLoaded, false);
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY;
+    else process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = prev;
+  }
+});
+
+test("a rule past the documented MEMORY.md read cap is inactive, definitively unread", () => {
+  const root = tmpProject({ "CLAUDE.md": "- Use `const`.\n" });
+  const userDir = tmpUserDir({});
+  const filler = Array.from({ length: 205 }, (_, i) => "- memory note number " + i + ".").join("\n");
+  writeAutoMemory(userDir, root, {
+    "MEMORY.md": filler + "\n- Always run `npm test` before committing.\n",
+  });
+  const audit = engine.composeAudit(engine.scan(root, { userDir }), {});
+  const memFile = audit.files.find((f) => f.path.endsWith("MEMORY.md"));
+  assert.equal(memFile.docCapLine, 200);
+  const capped = audit.findings.find((f) => f.analyzer === "memory-index-cap" && f.state === "inactive");
+  assert.ok(capped, "no memory-index-cap finding fired");
+  assert.equal(capped.evidence.level, "documented");
+  assert.ok(capped.sources[0].lineStart > 200, "the cap finding points before the boundary");
+});
+
+test("the MEMORY.md cap measures only the content that loads: frontmatter and comments are stripped", () => {
+  const root = tmpProject({ "CLAUDE.md": "- Use `const`.\n" });
+  const userDir = tmpUserDir({});
+  const bigComment = ["<!--", ...Array.from({ length: 250 }, (_, i) => "note " + i), "-->"].join("\n");
+  writeAutoMemory(userDir, root, {
+    // frontmatter + a 250-line block comment push the raw line count past 200,
+    // but the measured content is a handful of lines, so nothing is past the cap
+    "MEMORY.md": "---\nmodified: 2026-08-05\n---\n\n" + bigComment + "\n\n- Always run `npm test` before committing.\n",
+  });
+  const audit = engine.composeAudit(engine.scan(root, { userDir }), {});
+  const memFile = audit.files.find((f) => f.path.endsWith("MEMORY.md"));
+  assert.equal("docCapLine" in memFile, false, "the cap fired even though the loaded content fits");
+  assert.equal(audit.findings.some((f) => f.analyzer === "memory-index-cap"), false);
+});
+
+test("a duplicate across a project rule and an auto-memory note keeps the checked-in project copy", () => {
+  const rule = "- Always run `npm test` before committing.";
+  const root = tmpProject({ "CLAUDE.md": "# Rules\n\n" + rule + "\n" });
+  const userDir = tmpUserDir({});
+  writeAutoMemory(userDir, root, { "MEMORY.md": "# Memory\n\n" + rule + "\n" });
+  const audit = engine.composeAudit(engine.scan(root, { userDir }), {});
+  const dup = audit.findings.find((f) => f.type === "duplicate");
+  assert.ok(dup, "the cross-scope duplicate was not detected");
+  assert.equal(dup.keepWhy, "the checked-in project copy");
+  assert.equal(dup.keep.path, "CLAUDE.md");
+});
+
 test("discoverSources returns the documented Claude surface in load order with precedence", () => {
   const root = tmpProject({
     "CLAUDE.md": "- Use `const`.\n",
@@ -3992,7 +4137,9 @@ test("--host names the profile discovery runs under, and an unknown one is a usa
   assert.deepEqual(profile, {
     host: "codex", version: 2,
     policy: { wordingRubric: false, skillRecipe: false },
-    nouns: { primitive: "Codex primitive", scopedRules: "narrower `AGENTS.md` files further down the chain" },
+    // [ADR 2026-08-05 D3] doctorRemedy is nulled so the file-shape finding never
+    // offers a `/doctor` Codex has no equivalent of.
+    nouns: { primitive: "Codex primitive", scopedRules: "narrower `AGENTS.md` files further down the chain", doctorRemedy: null },
   });
   assert.equal(targets.skill.dir, ".agents/skills/<name>/");
   assert.deepEqual(record.files.map((f) => f.path), ["AGENTS.md"]);
@@ -4016,11 +4163,12 @@ test("no --host is the Claude profile, and the record it writes is the one it al
   // context, same coverage as before the registry existed. [Foreman: 082]
   // `targets` is declared by every profile and is checked separately.
   const { targets, ...profile } = implicit.profile;
-  assert.deepEqual(profile, { host: "claude-code", version: 2 });
+  assert.deepEqual(profile, { host: "claude-code", version: 3 });
   assert.equal(targets.rule.places[0].path, "CLAUDE.md");
   assert.deepEqual(Object.keys(implicit.context), ["projectRoot", "startupDirectory", "userDir", "projectOnly", "ancestorStop", "hostVersion", "analysisTime"]);
   assert.equal("budget" in implicit.coverage, false);
-  assert.equal("profileNotes" in implicit.coverage, false);
+  // [ADR 2026-08-05 B5] the Claude adapter now discloses residual coverage
+  assert.deepEqual(implicit.coverage.profileNotes, engine.ADAPTERS["claude-code"].coverageNotes());
   assert.equal(implicit.files.some((f) => "startsAtByte" in f || "loaded" in f), false);
 
   for (const r of [implicit, explicit]) {
