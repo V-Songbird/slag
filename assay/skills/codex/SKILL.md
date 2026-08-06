@@ -28,8 +28,9 @@ off the journal and take no host.
 
 `--startup <path>` belongs to this skill: Codex reads the chain from the project
 root down to the directory the session began in, so auditing a session that
-starts in a subdirectory needs that directory named. Pass it alongside
-`--host codex` on every one of those calls when `$ARGUMENTS` carries it.
+starts in a subdirectory needs that directory named. Pass it to `scan` alongside
+`--host codex` when `$ARGUMENTS` carries it — the scan fixes it in the saved
+context every later command reads.
 
 Other flags in `$ARGUMENTS`: `--fix` (apply repairs without the menu),
 `--verbose` (the full report), `--json` (the machine-readable record),
@@ -75,7 +76,7 @@ its own mechanisms. Never assume a filename or a primitive from the host's name.
 
 ## 2. Judge, then verify
 
-Read [../claude/references/rubrics.md](../claude/references/rubrics.md), then
+Read [../../references/rubrics.md](../../references/rubrics.md), then
 score every rule in the `judge` list on both factors:
 
 - **F3 — trigger-action distance**: will the agent recognize the moment this rule
@@ -130,8 +131,9 @@ collide once you know what each is for — into a `_candidates` key beside
 ] }
 ```
 
-`kind` is `paraphrase-duplicate` or `indirect-conflict`, and any other kind fails
-the run. `accepted` is always `null` here — it is the user's answer, not yours.
+`kind` is `paraphrase-duplicate` or `indirect-conflict` — the two kinds this
+pass proposes; a kind the engine does not recognize fails the run. `accepted`
+is always `null` here — it is the user's answer, not yours.
 Without the flag, write no `_candidates` key at all.
 
 ## 3. Report
@@ -245,9 +247,10 @@ this flow is going to write.
   structure, not style. A prohibition with no alternative can stall a task, so
   restoring the escape hatch is fair game; polishing verbs against weights this
   profile withdrew is not.
-- **Promotion** → `placement-promotion` carrying `mechanism` and `provenance`
-  (the doc URL and the date you fetched it). Both are required; a plan without
-  them is rejected. Read the target from `profile.targets`, fetch that page live
+- **Promotion** → `placement-promotion` carrying `mechanism` and `provenance` —
+  a non-empty list of `{ "claim": "<what the page documents>", "url": "<the
+  page>" }` entries. Both are required, and `plan` rejects a provenance entry
+  missing either field. Read the target from `profile.targets`, fetch that page live
   with `WebFetch` at `profile.targets.<primitive>.docs` — never a remembered
   format — and park the candidate instead if the fetch fails. **The source rule
   stays exactly where it is**: no kind deletes or deactivates prose.

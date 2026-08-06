@@ -4,6 +4,18 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.9.0] — 2026-08-05
+
+### Added
+
+- Installed on Codex, assay now has a front door of its own: the `$assay` skill audits what that host loads — the `AGENTS.md` chain, the skills it lists, the hooks wired around them — then judges, reports, and runs the same reviewable fix transaction the Claude Code commands use. Nothing a Codex session loads mentions Claude Code. The engine CLI is still there underneath
+
+### Fixed
+
+- `remeasure` on a project with no `.assay-tmp/` directory no longer crashes with a stack trace; it scans and reports the way `scan` already did
+- Validating a fix from a `--startup` audit now re-checks the same root-to-startup chain the audit read, not the project root alone
+- `report`, `plan`, `apply` and `rollback` now refuse `--startup` instead of accepting it and quietly doing nothing with it — the flag belongs to the commands that scan
+
 ## [1.8.0] — 2026-08-01
 
 ### Removed

@@ -81,8 +81,10 @@ plan stale and the journal blind.
   means delete the reference or repoint it at the current source of truth. Only
   ever point at a file you have confirmed exists; never invent a path.
 - **Promotion** → `placement-promotion` carrying `mechanism`
-  (`{ "type": "skill", "name": "<name>" }`) and `provenance` (the doc URL and the
-  date you fetched it). Both are required; a plan without them is rejected. Fetch
+  (`{ "type": "skill", "name": "<name>" }`) and `provenance` — a non-empty list
+  of `{ "claim": "<what the page documents>", "url": "<the page>" }` entries.
+  Both are required, and `plan` rejects a provenance entry missing either
+  field. Fetch
   the format live with `WebFetch`, once per primitive per run, from
   `https://code.claude.com/docs/en/hooks.md` (with `hooks-guide.md`),
   `https://code.claude.com/docs/en/skills.md`, or

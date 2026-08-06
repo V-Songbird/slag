@@ -119,7 +119,7 @@ const TMP_DIR = ".assay-tmp";
 // A release cut keeps ANALYZER_VERSION in step with assay's version in
 // .claude-plugin/marketplace.json, which owns the published number.
 const SCHEMA_VERSION = 1;
-const ANALYZER_VERSION = "1.8.0";
+const ANALYZER_VERSION = "1.9.0";
 const PARSER_NAME = "assay-markdown";
 // [Foreman: 073] 2 = markdown-it 14.1.0 + js-yaml 4.1.0 behind assay's adapter.
 // 1 was the handwritten line scanner; a record naming version 1 was produced by
@@ -132,7 +132,7 @@ const PROFILE_VERSION = claudeAdapter.profileVersion;
 // [Foreman: 071] The semantic pass's other cache axis. Judgment keys are content
 // hashes, so an edited rule re-judges by construction; a changed RUBRIC is what
 // that cannot see. The number here is the one printed at the top of
-// skills/claude/references/rubrics.md, and the two move together — bump both or
+// references/rubrics.md, and the two move together — bump both or
 // neither. A judgments file recorded under a different one still composes; the
 // report says the judgments predate the current rubric.
 const RUBRIC_VERSION = "2";
@@ -4891,12 +4891,18 @@ function renderBrief(audit) {
     out.push("");
   }
 
-  // One command per host, so the closing line names the door the reader came
-  // through rather than the one this engine happens to default to.
-  const cmd = ((audit.profile || {}).host === "codex") ? "/assay:codex" : "/assay:claude";
+  // The claude profile has one door, so its closing line can name it. The codex
+  // profile is driven from two — one on each install host — and this engine
+  // cannot know which one the reader came through, so its line names only the
+  // flag: the one thing true behind both.
+  const codexHost = (audit.profile || {}).host === "codex";
   out.push(weak.length
-    ? `Run \`${cmd} --fix\` to rewrite the weak ones, or \`--verbose\` to see everything assay found.`
-    : `Run \`${cmd} --verbose\` to see everything assay found.`);
+    ? (codexHost
+      ? "Rerun with `--fix` to apply the repairs, or `--verbose` to see everything assay found."
+      : "Run `/assay:claude --fix` to rewrite the weak ones, or `--verbose` to see everything assay found.")
+    : (codexHost
+      ? "Rerun with `--verbose` to see everything assay found."
+      : "Run `/assay:claude --verbose` to see everything assay found."));
 
   return out.join("\n");
 }
@@ -5528,6 +5534,7 @@ function cmdReport(root, opts) {
 // why the audit skill no longer bans a second pass — it bounds it to one instead.
 function cmdRemeasure(root, opts) {
   const tmp = path.join(root, TMP_DIR);
+  fs.mkdirSync(tmp, { recursive: true });
   const judgeFile = path.join(tmp, "judgments.json");
   // [Foreman: 071] With no judgments to reuse there is nothing to re-judge:
   // remeasure stays deterministic end to end and goes straight to the report.
@@ -6307,7 +6314,7 @@ function validationEvidence(root, opts, change) {
       // deliberately leaves its rule and its placement finding in place. Deciding
       // which surviving finding is wrong is a judgment, and the judgment belongs
       // to the developer reading this row.
-      const audit = composeAudit(scan(root, { projectOnly: true, adapter: opts.adapter }), null);
+      const audit = composeAudit(scan(root, { projectOnly: true, adapter: opts.adapter, startup: opts.startup }), null);
       const states = {};
       // A rule finding names a `state`; a file or corpus finding names a `type`.
       for (const f of audit.findings) {
@@ -6344,7 +6351,7 @@ function validationEvidence(root, opts, change) {
 
 function hostDiscoveryEvidence(root, opts, change) {
   const mech = change.mechanism || {};
-  const scanData = scan(root, { projectOnly: true, adapter: opts.adapter });
+  const scanData = scan(root, { projectOnly: true, adapter: opts.adapter, startup: opts.startup });
   let seen = false;
   if (mech.type === "hook") {
     seen = scanData.hookInventory.some((h) => change.files.includes(h.source) ||
@@ -6367,6 +6374,12 @@ function hostDiscoveryEvidence(root, opts, change) {
 
 function cmdValidate(root, opts) {
   if (opts.changes.length !== 1) fail("validate takes exactly one --change <id>.");
+  // [Foreman: 096] validate re-scans, so the startup guarantee holds here too:
+  // a named startup directory must be one this profile models. Checked before
+  // the journal grows, and threaded into every scan this command runs.
+  if (opts.startup) {
+    requireStartupHonored(opts, opts.adapter.detectContext({ root, startup: opts.startup, projectOnly: true }));
+  }
   const id = opts.changes[0];
   const found = findChange(root, id);
   if (found.problem) fail(found.problem);
@@ -6696,7 +6709,8 @@ const VALUE_FLAGS = new Map([
   ["--root", "path"], ["--host", "profile name"],
   // The startup directory a session is modeled as beginning in. Only a profile
   // whose host reads a root-to-startup chain consumes it; the engine refuses it
-  // for any profile that ignores it, so the flag can never silently do nothing.
+  // for any profile that ignores it, and for any command that would not read
+  // it, so the flag can never silently do nothing.
   ["--startup", "startup directory (inside the root)"],
   // [Foreman: 081] The transaction's arguments. `--change` repeats, and that
   // repetition IS the approval boundary — every id written out by hand.
@@ -6712,7 +6726,7 @@ const USAGE = [
   "  clean",
   "  plan            --from <draft.json>",
   "  apply           --change <id> [--change <id> …] | --batch <id>",
-  "  validate        --change <id> [--external \"<kind>: <result>\"]",
+  "  validate        --change <id> [--startup <dir>] [--external \"<kind>: <result>\"]",
   "  rollback        --change <id> [--change <id> …] | --transaction <id>  [--force]",
   "  ci              [--host <" + Object.keys(ADAPTERS).join("|") + ">] [--startup <dir>] [--project-only] [--fail-on <gate>[,<gate>…]] [--json]",
   "                  deterministic, writes nothing; exit 0 clean, 2 a gate failed, 1 usage error",
@@ -6784,6 +6798,13 @@ function main() {
     if (!fs.existsSync(startup) || !fs.statSync(startup).isDirectory()) {
       usageError("--startup: " + args[startupIdx + 1] + " is not a directory.");
     }
+  }
+  // [Foreman: 096] The other half of the startup guarantee: only the commands
+  // that run a scan can read the flag, so any other command refuses it instead
+  // of accepting a label it would never honor.
+  if (startup && !["scan", "remeasure", "ci", "validate"].includes(command)) {
+    usageError("--startup belongs to the commands that scan (scan, remeasure, ci, validate); " +
+      command + " works from the saved records, which already carry it.");
   }
   const opts = {
     verbose: args.includes("--verbose"),

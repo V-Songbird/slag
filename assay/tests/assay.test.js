@@ -2668,6 +2668,15 @@ test("remeasure without judgments stays deterministic instead of demanding a mod
   assert.equal("semantic" in readJson(root, "audit.json"), false);
 });
 
+// [Foreman: 094]
+test("remeasure on a project with no .assay-tmp/ runs instead of throwing ENOENT", () => {
+  const root = cliFixture();
+  const { code, out, err } = cli(root, "remeasure");
+  assert.equal(code, 0, err);
+  assert.doesNotMatch(err, /ENOENT/);
+  assert.match(out, /· deterministic only$/m);
+});
+
 // [Foreman: 071]
 // The renormalization contract: a factor nobody measured leaves the numerator
 // AND the denominator, so the composite stays a weighted mean over the factors
@@ -2773,7 +2782,7 @@ test("the report warns when the judgments predate the engine's rubric version", 
 
   // the rubric file's own header is what the skill copies into promptVersion —
   // the two must not drift apart
-  const rubrics = fs.readFileSync(path.join(__dirname, "..", "skills", "claude", "references", "rubrics.md"), "utf-8");
+  const rubrics = fs.readFileSync(path.join(__dirname, "..", "references", "rubrics.md"), "utf-8");
   assert.equal(rubrics.split("\n")[0], "Rubric version: " + engine.RUBRIC_VERSION);
 });
 
@@ -4538,20 +4547,19 @@ test("assay's own .codex-plugin/plugin.json carries every documented required fi
     assert.match(asset, /^\.\//);
     assert.ok(fs.existsSync(path.resolve(pluginRoot, asset)), `${key} points at ${asset}, which does not exist`);
   }
-  // This manifest advertises NO skills directory. The packaged skills are
-  // written against Claude Code's tooling — ${CLAUDE_PLUGIN_ROOT},
-  // AskUserQuestion, Agent, Artifact — so none of them can run here, and a
-  // manifest that pointed at them would be selling a surface that does not work.
-  // On this host assay is the engine CLI.
-  assert.equal(manifest.skills, undefined);
+  // This manifest advertises ONLY the Codex-native skill directory. The Claude
+  // skills stay unadvertised here — they are written against the other host's
+  // tooling and could not run — while codex-skills/ carries the door that can.
+  assert.equal(manifest.skills, "./codex-skills/");
   // the Claude manifest still owns no version — the marketplace does
   assert.equal(JSON.parse(fs.readFileSync(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf-8")).version, undefined);
 
   // and a plugin manifest is a discovery surface too: pointed at this directory,
-  // the adapter finds no plugin skills through it, because it declares none
+  // the adapter finds exactly the advertised skill through it, and nothing else
   const found = codex.discoverSkills(codexContext(pluginRoot));
-  assert.deepEqual(found.project.filter((s) => s.scope === "plugin"), [],
-    JSON.stringify(found.project.map((s) => s.path)));
+  const pluginSkills = found.project.filter((s) => s.scope === "plugin");
+  assert.equal(pluginSkills.length, 1, JSON.stringify(found.project.map((s) => s.path)));
+  assert.ok(pluginSkills[0].path.endsWith("codex-skills/assay/SKILL.md"), pluginSkills[0].path);
 });
 
 test("repository checks come from one place, and both profiles return what they returned", () => {
@@ -6044,6 +6052,53 @@ test("the brief report says what it looked at and what needs doing, in plain wor
   // the reader is told where to go next, never left with a bare table
   assert.match(out, /--fix/);
   assert.match(out, /--verbose/);
+});
+
+// [Foreman: 096] validate re-scans, so it honors the startup chain the audit
+// ran under — a change to a file below the root is validated against the chain
+// that contains it — and a command that runs no scan refuses the flag instead
+// of wearing a label it would never honor.
+test("validate honors --startup on the codex host, and non-scanning commands refuse it", () => {
+  const root = tmpProject({
+    "AGENTS.md": "# Rules\n\n- Keep the build green by running `npm test` before pushing.\n",
+    "sub/AGENTS.md": "# Sub rules\n\n- Follow `docs/release.md` before tagging.\n",
+  });
+  assert.equal(cli(root, "scan", "--host", "codex", "--startup", "sub").code, 0);
+  fs.writeFileSync(path.join(root, ".assay-tmp", "draft-plan.json"), JSON.stringify({
+    changes: [{
+      id: "c-sub", kind: "stale-reference-repair", rationale: "the referenced path is gone",
+      patches: [{ path: "sub/AGENTS.md", old: "- Follow `docs/release.md` before tagging.", new: "- Keep the tagging steps in this file." }],
+    }],
+  }));
+  assert.equal(cli(root, "plan", "--from", ".assay-tmp/draft-plan.json", "--host", "codex").code, 0);
+  assert.equal(cli(root, "apply", "--change", "c-sub", "--host", "codex").code, 0);
+
+  // the re-scan reads the root-to-startup chain: both files, both rules
+  const validated = cli(root, "validate", "--change", "c-sub", "--host", "codex", "--startup", "sub");
+  assert.equal(validated.code, 0, validated.err);
+  const reanalysis = JSON.parse(validated.out).evidence.find((e) => e.kind === "static-reanalysis");
+  assert.match(reanalysis.detail, /across 2 rule\(s\)/);
+
+  // a profile that models the startup directory as the root still refuses it
+  const claude = cli(root, "validate", "--change", "c-sub", "--startup", "sub");
+  assert.equal(claude.code, 1);
+  assert.match(claude.err, /--startup is not supported by the .* profile/);
+
+  // and a command that runs no scan refuses the flag outright
+  const report = cli(root, "report", "--host", "codex", "--startup", "sub");
+  assert.equal(report.code, 1);
+  assert.match(report.err, /--startup belongs to the commands that scan/);
+});
+
+// [Foreman: 095] The codex-host brief is read behind two different front doors
+// — one per install host — so it may name flags but never a slash command.
+test("the codex brief names flags, never a front door another host owns", () => {
+  const root = tmpProject({ "AGENTS.md": "# Rules\n\n- Keep things tidy.\n- Follow `docs/missing.md` before tagging.\n" });
+  assert.equal(cli(root, "scan", "--host", "codex").code, 0);
+  const { code, out } = cli(root, "report", "--host", "codex");
+  assert.equal(code, 0);
+  assert.match(out, /--verbose/);
+  assert.doesNotMatch(out, /\/assay:/);
 });
 
 test("a clean corpus says so instead of printing empty sections", () => {

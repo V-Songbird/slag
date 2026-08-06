@@ -79,13 +79,13 @@ Nothing to configure. Works at the next session.
 
 `--startup <path>` audits a session that begins in a subdirectory, since the chain runs from the project root down to wherever the session started.
 
-assay also installs on Codex itself — point your Codex plugin install at this repository's `assay/` directory. There it is the engine CLI and nothing else: `scan`, `report`, `ci`, and the transaction commands. The packaged skills are written for Claude Code's tooling and are not offered to Codex.
+assay also installs on Codex itself — the same plugin, pointed at this repository's `assay/` directory. There the front door is the `$assay` skill: the same audit, the same report, and the same reviewable fixes, written for that host's own tooling — nothing a Codex session loads mentions Claude Code. The engine CLI sits underneath it, as it does here.
 
 > [!NOTE]
-> The Codex profile is encoded from the official Codex documentation and
-> exercised against fixtures. A live host has verified its core: real sessions
-> confirmed the chain order, session-start delivery, and `AGENTS.override.md`
-> selection. Byte caps, skills, and hooks remain fixture-verified only.
+> Codex support is built from the official Codex documentation, and a real
+> Codex install has confirmed the core of it: which files load, in what order,
+> from the start of a session. The size caps, skills, and hooks are checked
+> against the documentation only, not yet against a live host.
 
 ## What you can do
 
@@ -95,6 +95,7 @@ assay also installs on Codex itself — point your Codex plugin install at this 
 | Apply the rewrites without the menu | `/assay:claude --fix` |
 | See the full analysis behind the short report | `/assay:claude --verbose` |
 | Audit what Codex loads instead | `/assay:codex` |
+| The same audit, from inside Codex | `$assay` |
 | Write a new rule that sticks | `/assay:craft-rules` |
 | Build a skill that reliably triggers | `/assay:craft-skill` |
 | Fix a skill Claude keeps ignoring | `/assay:craft-skill <skill name>` |
@@ -111,7 +112,7 @@ assay also installs on Codex itself — point your Codex plugin install at this 
 
 ## Under the hood
 
-One scoring script and four skills — an audit per host, craft-skill with its trigger recipe, craft-rules with its rule recipe — all there to read in the plugin's files. It reads your Markdown and YAML with real parsers and ships them with it; there is still nothing to install.
+One scoring script and five skills — an audit per host from Claude Code, one native door on Codex, craft-skill with its trigger recipe, craft-rules with its rule recipe — all there to read in the plugin's files. It reads your Markdown and YAML with real parsers and ships them with it; there is still nothing to install.
 
 ## Good to know
 

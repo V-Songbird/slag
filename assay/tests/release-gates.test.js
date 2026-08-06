@@ -516,7 +516,8 @@ const NEGATION = /\b(never|not|no|without|isn't|won't|cannot|can't|rather than)\
 test("release gate: public language does not imply static compliance prediction", () => {
   const skills = fs.readdirSync(path.join(PLUGIN_ROOT, "skills"))
     .map((name) => path.join("skills", name, "SKILL.md"));
-  const files = ["README.md", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ...skills];
+  const files = ["README.md", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json",
+    "codex-skills/assay/SKILL.md", ...skills];
 
   const offenders = [];
   for (const rel of files) {
@@ -1152,4 +1153,52 @@ test("release gate: four commands, each named by its own skill, none taking --ho
     // host has. It belongs to that one command and nowhere else.
     assert.equal(/--startup/.test(hint), dir === "codex", dir + " gets --startup wrong");
   }
+});
+
+// ---------------------------------------------------------------------------
+// dual-host packaging: the Codex install carries its own front door
+// ---------------------------------------------------------------------------
+
+// [Foreman: 095] One plugin directory installs on either host, and each host
+// sees only its own surface. The Codex manifest names the Codex skill
+// directory, the one skill in it drives the same engine, and nothing a Codex
+// session is handed speaks the other host's name.
+test("release gate: the Codex manifest advertises the Codex-native skill", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, ".codex-plugin", "plugin.json"), "utf-8"));
+  assert.equal(manifest.skills, "./codex-skills/");
+  const dirs = fs.readdirSync(path.join(PLUGIN_ROOT, "codex-skills")).sort();
+  assert.deepEqual(dirs, ["assay"]);
+  const fm = engine.parseFrontmatter(fs.readFileSync(path.join(PLUGIN_ROOT, "codex-skills", "assay", "SKILL.md"), "utf-8"));
+  assert.equal(fm.name, "assay", "the Codex skill names itself something else");
+  assert.ok(String(fm.description || "").trim().length, "the Codex skill ships no description");
+});
+
+test("release gate: the Codex-facing surface never names the other host", () => {
+  // Everything a Codex session is told to read: the skill directory, the
+  // manifest that advertises it, and the shared rubric the skill opens.
+  const offenders = [];
+  const check = (full) => {
+    if (/claude/i.test(fs.readFileSync(full, "utf-8"))) offenders.push(path.relative(PLUGIN_ROOT, full));
+  };
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else check(full);
+    }
+  };
+  walk(path.join(PLUGIN_ROOT, "codex-skills"));
+  walk(path.join(PLUGIN_ROOT, "references"));
+  check(path.join(PLUGIN_ROOT, ".codex-plugin", "plugin.json"));
+  assert.deepEqual(offenders, [], "the other host leaks into the Codex surface:\n" + offenders.join("\n"));
+});
+
+// [Foreman: 095] The published number and the engine's self-identity move
+// together, or every record a release writes introduces itself as the release
+// before it. The codex manifest carries the published number inside the plugin
+// (the repo's own check keeps it equal to the marketplace entry), so the gate
+// can hold without reaching outside the shipped directory.
+test("release gate: the engine's analyzer version matches the shipped manifest", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, ".codex-plugin", "plugin.json"), "utf-8"));
+  assert.equal(engine.ANALYZER_VERSION, manifest.version);
 });

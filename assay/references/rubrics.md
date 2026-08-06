@@ -8,7 +8,7 @@ corpus — if two rules feel equally distant, they get the same F3.
 
 ## F3 — trigger-action distance
 
-Will Claude recognize the firing moment? The closer the trigger sits to the
+Will the agent recognize the firing moment? The closer the trigger sits to the
 action, the more reliably the rule fires.
 
 **Level 4 (0.90–1.00) Immediate** — action is the same operation as the trigger.
@@ -25,7 +25,7 @@ action, the more reliably the rule fires.
 > "Use functional components for all new React files." — creating the file IS
 > writing the component, but "new" needs recognizing. 0.80.
 
-**Level 2 (0.40–0.60) Distant** — a future moment Claude must independently
+**Level 2 (0.40–0.60) Distant** — a future moment the agent must independently
 remember to check, many steps after reading the rule.
 
 > "Every commit modifying src/ MUST end with [State: SYNCED]" — read at session
@@ -76,9 +76,10 @@ rule is a stopgap.
 
 > "NEVER edit files in src/main/gen/ directly." — a file-matcher hook blocks
 > this entirely. 0.35.
-> "Note every src/ change in CHANGELOG.md." — a PostToolUse hook fires on every
-> edit deterministically; prose has to be remembered. 0.30. Keep-file-in-sync
-> duties like this belong at Level 1 even when no hook exists yet.
+> "Note every src/ change in CHANGELOG.md." — a hook that fires after every
+> edit does this deterministically; prose has to be remembered. 0.30.
+> Keep-file-in-sync duties like this belong at Level 1 even when no hook exists
+> yet.
 
 **Level 0 (0.10–0.25) Fully** — a command verifies compliance with an exit code.
 

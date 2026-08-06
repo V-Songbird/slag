@@ -60,7 +60,7 @@ is needed to interpret the rule. Judge the rule with that context, but keep
 
 ## 2. Judge F3 and F8, then verify
 
-Read [references/rubrics.md](references/rubrics.md), then score every rule in the
+Read [../../references/rubrics.md](../../references/rubrics.md), then score every rule in the
 `judge` list on both factors:
 
 - **F3 — trigger-action distance**: will Claude recognize the moment this rule
@@ -132,8 +132,9 @@ each is for — into a `_candidates` key beside `_provenance`:
 ] }
 ```
 
-`kind` is `paraphrase-duplicate` or `indirect-conflict`, and any other kind fails
-the run. `keys` names the rules involved. `summary` and `reason` are one sentence
+`kind` is `paraphrase-duplicate` or `indirect-conflict` — the two kinds this
+pass proposes; a kind the engine does not recognize fails the run. `keys` names
+the rules involved. `summary` and `reason` are one sentence
 each, in your own words. `accepted` is always `null` here — it is the user's
 answer, not yours. Propose only what you would defend, and without the flag write
 no `_candidates` key at all.
