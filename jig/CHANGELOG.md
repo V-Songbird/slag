@@ -4,7 +4,17 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
-## [0.2.0-alpha] — 2026-08-11
+## [0.3.0-alpha] — 2026-08-11
+
+### Added
+
+- jig now drafts for your own toolchain, in any language it knows the tools for. A repo carrying eslint or tsc gets a ready side-config plus the one wiring line; a Kotlin build carrying detekt gets a detekt config the same way. Every side-file targets a tool the repository already has — jig never downloads one, and a missing tool is named as a gap instead.
+- The install's closing proof now covers toolchain files too: the eslint config is proven live through your own eslint, and tools too expensive to spawn get the exact command to run and what to look for.
+- The interview now opens by naming what you may not know you're deciding — the loudest problem in your history jig can't guard yet, a slot another plugin holds, a tool that would close a gap — and then asks in rounds, each question carrying a recommended answer. Two new questions: whether to add the CI workflow, and whether to weave the hook line into a committed pre-commit.
+
+### Changed
+
+- The coverage matrix now grades toolchain coverage per repository: the same class reads as covered where the tool exists and as a named gap where it does not.
 
 ### Added
 

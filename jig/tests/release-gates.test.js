@@ -477,3 +477,28 @@ test("release gate: an assumed install cannot deny, however the config is edited
   });
   assert.deepEqual(Object.keys(JSON.parse(run.stdout)), ["jig"]);
 });
+
+// ---------------------------------------------------------------------------
+// Toolchain honesty (0.3.0)
+// ---------------------------------------------------------------------------
+
+test("release gate: jig never reaches for the network to get a tool", () => {
+  for (const [stack, entry] of Object.entries(catalogue.toolchains)) {
+    if (stack === "note") continue;
+    for (const tool of entry.tools) {
+      const words = tool.verify.argv.join(" ");
+      for (const banned of ["npx", "curl", "wget", "http://", "https://", "iwr", "install"]) {
+        assert.equal(words.includes(banned), false,
+          stack + "/" + tool.id + " verify reaches for the network: " + words);
+      }
+    }
+  }
+  // And a repo with no tools gets no toolchain artifact at all — the absent
+  // rows say why instead.
+  const root = tmpProject({ "package.json": "{ \"private\": true }\n" });
+  const plan = engine.cmdPlan(root, { _: [], change: [], select: ALL_FOUR, "no-ci": true });
+  assert.equal(plan.changes.some((c) => c.path.includes("eslint") || c.path.includes("detekt") ||
+    c.path.includes("tsconfig")), false);
+  assert.ok(plan.toolchain.absent.length > 0);
+  for (const row of plan.toolchain.absent) assert.match(row.why, /never downloads/);
+});
