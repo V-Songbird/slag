@@ -194,27 +194,37 @@ function validateConfig(raw) {
       problems.push(label + ": the class " + cls.id + " ships as data at v1 and is not installable");
       return;
     }
-    if (!Number.isInteger(g.detector) || g.detector < 0 || g.detector >= cls.detectors.length) {
-      problems.push(label + ": `detector` must be an index into " + cls.id + "'s " +
-        cls.detectors.length + " detectors");
+    // A detector is named by its stable id, or by its index for configs written
+    // before ids existed. Both resolve to the same row; the id survives a
+    // reorder of the catalogue and the index does not, which is why generated
+    // configs carry the id.
+    let detIndex = -1;
+    if (typeof g.detector === "string") {
+      detIndex = cls.detectors.findIndex((d) => d.id === g.detector);
+    } else if (Number.isInteger(g.detector)) {
+      detIndex = g.detector >= 0 && g.detector < cls.detectors.length ? g.detector : -1;
+    }
+    if (detIndex < 0) {
+      problems.push(label + ": `detector` must be one of " + cls.id + "'s detector ids (" +
+        cls.detectors.map((d) => d.id).join(", ") + ") or an index below " + cls.detectors.length);
       return;
     }
-    const det = cls.detectors[g.detector];
+    const det = cls.detectors[detIndex];
     if (!HOOK_RUNNERS.includes(det.runner)) {
-      problems.push(label + ": " + cls.id + " detector " + g.detector + " runs on `" + det.runner +
+      problems.push(label + ": " + cls.id + " detector " + det.id + " runs on `" + det.runner +
         "`, which is not a hook runner");
       return;
     }
     if (g.runner !== det.runner) {
       problems.push(label + ": declares runner " + JSON.stringify(g.runner) + " but " + cls.id +
-        " detector " + g.detector + " runs on `" + det.runner + "`");
+        " detector " + det.id + " runs on `" + det.runner + "`");
       return;
     }
     if (g.mode !== undefined && !CONFIG_MODES.includes(g.mode)) {
       problems.push(label + ": unknown mode " + JSON.stringify(g.mode));
       return;
     }
-    guards.push({ id, classId: cls.id, detector: g.detector, runner: det.runner, det });
+    guards.push({ id, classId: cls.id, detector: detIndex, detectorId: det.id, runner: det.runner, det });
   });
 
   // Deterministic order, computed from the guard's identity rather than taken

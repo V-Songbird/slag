@@ -788,17 +788,19 @@ function occupancyProblem(root, rel, states) {
 // ---------------------------------------------------------------------------
 
 // The committed guard configuration. Every guard names a catalogue class and a
-// detector index and carries nothing else — the config is a trust boundary a
+// detector id and carries nothing else — the config is a trust boundary a
 // teammate edits by design, and the only thing that survives a round trip
-// through it is a pointer into data jig shipped.
+// through it is a pointer into data jig shipped. The id, not the index, is
+// what goes in the file: it survives a reorder of the catalogue, and the
+// ledger and manifest inherit it, so guard identity is stable across releases.
 function configFromSelection(selection) {
   const guards = [];
   for (const classId of selection) {
     const cls = catalogueClass(classId);
-    cls.detectors.forEach((det, i) => {
-      if (!HOOK_RUNNERS.includes(det.runner)) return;
-      guards.push({ id: classId + "-" + i, classId, detector: i, runner: det.runner });
-    });
+    for (const det of cls.detectors) {
+      if (!HOOK_RUNNERS.includes(det.runner)) continue;
+      guards.push({ id: classId + "-" + det.id, classId, detector: det.id, runner: det.runner });
+    }
   }
   return { schemaVersion: SCHEMA_VERSION, mode: MANIFEST_MODE, guards };
 }

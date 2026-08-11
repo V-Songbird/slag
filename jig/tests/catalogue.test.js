@@ -284,3 +284,21 @@ test("the reference file names every installable class", () => {
     assert.ok(md.includes(id), `reference never mentions ${id}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Stable detector ids
+//
+// Guard identity is `<classId>-<detectorId>` in the generated config, the
+// manifest, the ledger and the matrix. The id is what survives a reorder of a
+// class's detectors array — which is the whole reason it exists.
+
+test("every detector carries a kebab-case id, unique within its class", () => {
+  for (const cls of catalogue.classes) {
+    const ids = cls.detectors.map((d) => d.id);
+    for (const id of ids) {
+      assert.equal(typeof id, "string", `${cls.id} has a detector with no id`);
+      assert.match(id, /^[a-z][a-z0-9-]*$/, `${cls.id} detector id "${id}" is not kebab-case`);
+    }
+    assert.equal(new Set(ids).size, ids.length, `${cls.id} has duplicate detector ids`);
+  }
+});
