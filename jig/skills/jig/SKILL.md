@@ -110,54 +110,56 @@ template is in [references/interview.md](references/interview.md).
 The columns exist so the user can see the boundary. Anything in column one that
 you then put to them as a question is a defect in the run.
 
-## 4. Call 1 — persona and posture
+## 4. The blind-spot pass
 
-Make ONE `AskUserQuestion` call carrying two questions: who the guardrails
-protect against, and what phase the project is in. Neither is multi-select.
-Wording and options are in [references/interview.md](references/interview.md).
+Before asking anything, name the unknown unknowns. Read the profile and the
+forensics record and write down, as short numbered findings, everything the
+user probably does not know they have to decide: a forensics leader jig cannot
+install yet, a hook slot another plugin holds, a toolchain tool the repo does
+not carry, a history signal nobody mentioned. The template and the quadrant
+rule are in [references/interview.md](references/interview.md).
 
-**Under `--quick`, skip this call too.** Quick start is one interaction, and
-that interaction is the plan review at step 6. Persona and phase only order the
-Call 2 list, which quick start does not ask, so nothing downstream reads them.
+Print the findings under the contract printout. Each one seeds a branch of the
+interview tree — a finding is never silently folded into a default.
 
-There is no arming question here. Nothing installs armed — arming belongs to
-`/jig:review`, later, after a guard has a clean observed record to show.
+## 5. The grilling rounds
 
-## 5. Call 2 — the error classes
+The interview is a design tree worked in rounds, not a fixed script. Each
+round asks the whole **frontier** — every question whose prerequisites are
+already answered — as ONE `AskUserQuestion` call, numbered `Q1…`, each
+question's recommended answer listed first and marked `(Recommended)`. A
+question whose answer depends on another question still open this round waits
+for the next round. The close is mechanical: the interview ends exactly when
+the frontier is empty.
 
-Make ONE `AskUserQuestion` call carrying three questions: the four installable
-classes (`multiSelect: true`, header `"Guard against"`, ordered by the forensics
-ranking), the agent-axis question, and the free-text question. Options, wording,
-and the classification protocol are in
+Round one is always: who this protects, project phase, the class multi-select
+ordered by the forensics ranking, and the agent-damage anchor. Round two opens
+with what round one settled: the worst-bug free-text, the CI workflow
+decision, and the hook-weave offer when the scan found a committed hook.
+Wording, options, and what may unlock a round three are all in
 [references/interview.md](references/interview.md).
 
-Three rules bind this step:
+Three rules bind every round:
 
+- **Facts are never questions.** Anything the scan or the forensics read is
+  already settled (D21). A finding from step 4 becomes a question about what
+  to DO, never a question about what is true.
 - **Free text never becomes a pattern.** A sentence the user typed can only
-  select a class the catalogue already ships. It is never compiled into a
-  matcher, never written into `.jig/config.json`, and never reaches an installed
-  guard.
-- **The classification is pinned to Sonnet or better.** Run it through one
-  `Agent` call with `model: "sonnet"`. If that model is unavailable, say so in
-  one line and fall back to the multi-select alone. Never infer a class from
-  free text on a smaller model.
-- **A classified class is a pre-tick, not a selection.** The user confirms it in
-  the multi-select, or it does not get installed.
+  select a class the catalogue already ships — classification is pinned to
+  Sonnet or better through one `Agent` call, degrades hard to the multi-select,
+  and a classified class is a pre-tick the user must confirm in a later round.
+  The whole protocol is in the reference.
+- **Disclose an enforcement gap the moment one is named**, mid-round, with the
+  reference's own lines — never in a summary at the end.
 
-**Under `--quick`**, skip this call. Select all four installable classes, plan
-with `--provenance assumed`, and tag every value you assumed rather than asked
-with the word `assumed` in the printout. Say the consequence once: an `assumed`
-row can never arm a deny lever, in this release or any later one.
+**Under `--quick`, skip the rounds entirely.** Select all four installable
+classes, plan with `--provenance assumed`, tag every assumed value in the
+printout, and say the consequence once: an `assumed` row can never arm a deny
+lever, in this release or any later one. Quick start's one interaction is the
+plan review at step 6.
 
-**Disclose an enforcement gap the moment one is named.** The catalogue carries
-twenty-two classes and installs four; the rest ship as data so the matrix can be
-honest about what nobody watches. When the user names a class that is not
-installable, or selects `pipe-to-shell`, say right then what jig can and cannot
-see for it — the lines are in
-[references/interview.md](references/interview.md), and
-[references/catalogue-node.md](references/catalogue-node.md) explains what each
-of the four detectors still misses. jig writes no prose rule to cover the
-difference, for any class, in this release.
+There is no arming question in any round. Nothing installs armed — arming
+belongs to `/jig:review`, after a guard has a clean observed record to show.
 
 ## 6. Plan and review
 

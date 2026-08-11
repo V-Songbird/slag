@@ -1,12 +1,73 @@
 # The interview, word for word
 
-Everything the two `AskUserQuestion` calls say, the protocol for the one
-free-text answer, and the disclosures that must land the moment they become
+The blind-spot pass, the round protocol, every question's wording, the
+free-text firewall, and the disclosures that must land the moment they become
 true. The flow that calls all of this is [../SKILL.md](../SKILL.md).
 
 One rule sits above every line below. The scan and the forensics run first, and
 whatever they read is never asked. If a question here duplicates something
 `.jig/profile.json` already holds, drop the question, not the fact.
+
+## The blind-spot pass
+
+Four quadrants split the interview's material, and each has exactly one home:
+
+- **Known knowns** — what the scan and forensics read. Printed in the
+  contract's first column, never asked.
+- **Known unknowns** — the questions below. Asked, round by round.
+- **Unknown knowns** — the defaults the user would recognize on sight. They
+  ride as the `(Recommended)` first option on every question, so agreeing
+  costs one click.
+- **Unknown unknowns** — what the user does not know they have to decide.
+  This pass finds them and turns each into a branch.
+
+Walk these sources and write one numbered finding per hit, in plain words:
+
+1. A forensics `ranking` leader that is **not installable** — the repository's
+   loudest problem may be one jig can only put on the backlog. Say so.
+2. Every slot in `occupied` — coverage the user may believe they would get and
+   will not.
+3. Every tool in the stack's `toolchain` facts that is **absent** but would
+   carry a deterministic cell for a likely selection — name the gap and what
+   installing the tool would close.
+4. An attribution or deletion signal nobody raised — for example most commits
+   agent-authored plus test files deleted by agents.
+5. `node.onPath` false or managed — the pre-commit floor is at risk; CI is
+   the floor that holds.
+
+Print them as:
+
+```
+What you may not know you're deciding
+  B1  <finding, one sentence, ending with the decision it seeds>
+  B2  …
+```
+
+A finding seeds a QUESTION (what to do), never a fact-check. A finding with no
+decision behind it is a disclosure, printed and not numbered.
+
+## The round protocol
+
+Work the tree in rounds. The **frontier** is every question whose
+prerequisites are already settled. Ask the whole frontier in one
+`AskUserQuestion` call (it carries at most four questions — a larger frontier
+splits into consecutive calls in the same round). Number questions `Q1…`
+continuously across rounds. The recommended answer is always the FIRST option
+and carries `(Recommended)` in its label. The interview closes exactly when
+the frontier is empty; nothing is left silently assumed.
+
+- **Round one** — no prerequisites: persona, phase, the class multi-select,
+  the agent-damage anchor. Blind-spot findings that are selection-shaped
+  (an absent tool, an uninstallable leader) inform descriptions here, not new
+  questions yet.
+- **Round two** — unlocked by round one: the worst-bug free text; the CI
+  workflow decision; the hook-weave offer when the scan found a committed
+  pre-commit (`scripts/git-hooks/` or `.husky/`); any decision a blind-spot
+  finding seeded that round one's answers left standing.
+- **Round three** — only when round two created it: confirming a class the
+  free-text classifier surfaced (a pre-tick is confirmed here, never
+  auto-selected), or any branch a round-two answer opened. Most interviews
+  never have a round three.
 
 ## The contract printout
 
@@ -33,9 +94,9 @@ nothing in it was asked.
 Then print every line of `disclosures` verbatim, one per line, under the two
 columns. Those are the engine's own words about what it cannot promise.
 
-## Call 1 — persona and posture
+## Round one — persona, posture, classes, anchor
 
-Make ONE `AskUserQuestion` call carrying two questions. Neither is multi-select.
+One `AskUserQuestion` call, four questions. The first two are single-select.
 
 **Question one**, header `"Protecting"`: "Who are these guardrails protecting
 this project against?"
@@ -53,18 +114,14 @@ this project against?"
 - `Normal` — "Shipping and maintained. The usual floor."
 - `Locked down` — "Breakage is expensive. Every class jig can cover, covered."
 
-Both answers shape which classes lead the Call 2 list and how insistently an
-enforcement gap is stated. Neither answer arms anything, and there is no arming
-question, because nothing arms in this release.
+Both answers shape which classes lead the class list and how insistently an
+enforcement gap is stated. Neither answer arms anything; arming is
+`/jig:review`'s, later, on evidence.
 
-## Call 2 — the error classes
-
-Make ONE `AskUserQuestion` call carrying three questions. Order the first
-question's options by the forensics `ranking`, highest `hits` first, and put the
-class's real hit count into its description when `basis` is `"forensics"`.
-
-**Question one**, header `"Guard against"`, `multiSelect: true`: "Which of these
-should jig watch for?"
+**Question three**, header `"Guard against"`, `multiSelect: true` — order the
+options by the forensics `ranking`, highest `hits` first, and put the class's
+real hit count into its description when `basis` is `"forensics"`: "Which of
+these should jig watch for?"
 
 - `Swallowed errors` — "A catch block that throws the error away, so nothing
   downstream can tell anything went wrong. Caught in committed code and as it is
@@ -80,7 +137,7 @@ should jig watch for?"
   and in committed scripts and workflows by the check driver." Class
   `pipe-to-shell`.
 
-**Question two**, header `"Agent damage"`: "What has an AI session done here
+**Question four**, header `"Agent damage"`: "What has an AI session done here
 that you had to undo?"
 
 - `Deleted or gutted a test` — "It made the suite green by removing what was
@@ -91,7 +148,13 @@ that you had to undo?"
   later."
 - `Nothing I noticed` — "No incident to anchor on. The ranking stands as it is."
 
-**Question three**, header `"Worst bug"`: "What was the last bug that cost you a
+## Round two — the anchor's tail, the workflow, the weave
+
+Asked only after round one settles; drop any question whose subject the
+answers already closed (no committed hook means no weave question, a repo with
+no `.github/workflows/` support need not be asked about CI it cannot run).
+
+**Question five**, header `"Worst bug"`: "What was the last bug that cost you a
 day?"
 
 - `Something the list above covers` — "Take the selection as it stands."
@@ -101,6 +164,24 @@ day?"
 
 The free-text option `AskUserQuestion` appends is where the user's own sentence
 arrives. Everything it can do is in the next section.
+
+**Question six**, header `"CI floor"`: "Should jig add its CI workflow, so the
+checks run on every push with no plugin and no local node?"
+
+- `Yes (Recommended)` — "One workflow file under `.github/workflows/`, owned
+  by jig, running the committed check driver. The floor that holds when
+  everything else is missing."
+- `No` — "Plan with `--no-ci`. The committed checks still run wherever you run
+  them."
+
+**Question seven**, header `"Hook weave"`, only when the scan found a
+committed pre-commit: "Your pre-commit hook is committed at `<path>`. Weave
+the one jig line into it?"
+
+- `Yes, show me the change (Recommended)` — "An `include-line` change: one
+  marked line, item-approved at the plan review, journaled, reversible."
+- `No, print it instead` — "The line stays in `.jig/activation.md` for you to
+  paste."
 
 ## What free text is allowed to do
 
@@ -120,9 +201,10 @@ reply is one id or `none`. Then:
 1. Discard anything that is not an `id` present in the catalogue. A regular
    expression, a path, a glob, a new class name, or prose all count as not
    present. There is no repair step and no second attempt.
-2. A surviving id **pre-ticks** its option in question one. It never selects
-   anything. The user confirms it in the multi-select or it is not installed.
-3. A surviving id for a class that is not installable at v1 gets the
+2. A surviving id **pre-ticks**, never selects. It opens a round-three
+   confirmation question naming the class and the sentence it matched; the
+   user ticks it there or it is not installed.
+3. A surviving id for a class that is not installable gets the
    enforcement-gap disclosure below, and goes to the backlog, not the plan.
 
 If the `Agent` call cannot be made, or the model cannot be pinned to Sonnet or
