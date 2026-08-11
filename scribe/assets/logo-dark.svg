@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 72" role="img" aria-label="scribe">
+  <text x="2" y="52" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="46" font-weight="700" letter-spacing="-1.5" fill="#ffffff">scribe</text>
+  <path d="M226 12 L188 52" fill="none" stroke="#E5582B" stroke-width="4" stroke-linecap="round"/>
+  <path d="M148 52 H230" fill="none" stroke="#E5582B" stroke-width="4" stroke-linecap="round" stroke-dasharray="10 8"/>
+  <circle cx="188" cy="52" r="4" fill="#E5582B"/>
+</svg>

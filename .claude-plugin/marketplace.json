@@ -191,6 +191,41 @@
       "strict": true
     },
     {
+      "name": "scribe",
+      "source": "./scribe",
+      "description": "Stops Claude from guessing at an unclear request. When the task could honestly go several ways, Claude asks one focused round of questions — options, recommendation first — until the work is defined well enough to execute cleanly. Every ask is logged locally so the asking bar tunes from evidence.",
+      "version": "0.1.0-alpha",
+      "license": "MIT",
+      "author": {
+        "name": "Victor Villegas",
+        "email": "victor.villegas@tuta.com"
+      },
+      "homepage": "https://github.com/V-Songbird/slag/tree/main/scribe",
+      "repository": "https://github.com/V-Songbird/slag",
+      "category": "workflow",
+      "keywords": [
+        "clarify",
+        "questions",
+        "ambiguity",
+        "requirements",
+        "scoping",
+        "prompt",
+        "unknowns",
+        "interview"
+      ],
+      "tags": [
+        "clarify",
+        "questions",
+        "ambiguity",
+        "requirements",
+        "scoping",
+        "prompt",
+        "unknowns",
+        "interview"
+      ],
+      "strict": true
+    },
+    {
       "name": "brink",
       "source": "./brink",
       "description": "Watches how full the context window is getting and, once you near the edge, nudges you to run /compact with a ready-made instruction — so the summary keeps the current task, decisions, and errors instead of an automatic guess.",

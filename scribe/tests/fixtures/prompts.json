@@ -1,0 +1,35 @@
+{
+  "categories": ["ambiguous", "precise", "near-miss"],
+  "prompts": [
+    { "label": "ambiguous", "text": "improve the function",
+      "why": "speed, readability, robustness, and memory are four different diffs" },
+    { "label": "ambiguous", "text": "clean up this file",
+      "why": "formatting-only vs restructuring vs deleting dead code differ in files touched and risk" },
+    { "label": "ambiguous", "text": "make the tests better",
+      "why": "coverage vs speed vs flakiness are different definitions of done" },
+    { "label": "ambiguous", "text": "add caching to the API layer",
+      "why": "cache location, keys, and invalidation are unstated and materially fork the design" },
+    { "label": "ambiguous", "text": "handle errors properly in the importer",
+      "why": "log-and-continue vs fail-fast vs retry differ in behavior and risk" },
+
+    { "label": "precise", "text": "rename getUserById to fetchUserById across the repo and update every call site",
+      "why": "one honest reading" },
+    { "label": "precise", "text": "fix the typo 'recieve' in README.md",
+      "why": "a single deterministic edit" },
+    { "label": "precise", "text": "delete the unused os import from hooks/gate.js",
+      "why": "a single deterministic edit" },
+    { "label": "precise", "text": "add a failing test reproducing issue 42's empty-input crash, then make it pass",
+      "why": "the definition of done is stated in the prompt" },
+
+    { "label": "near-miss", "text": "fix the thing where the button doesn't work",
+      "why": "vague wording, but the code has one honest reading once opened — precise, not ambiguous" },
+    { "label": "near-miss", "text": "make this faster",
+      "why": "reads ambiguous, but with a single hot loop in view every reading lands the same edit" },
+    { "label": "near-miss", "text": "just do it",
+      "why": "a wave-off, not a request — honored and logged, never judged" },
+    { "label": "near-miss", "text": "/compact",
+      "why": "slash command — precise by construction, mechanically stood down" },
+    { "label": "near-miss", "text": "yes, option 2 — but only for the staging config",
+      "why": "an answer to a question the assistant asked — never judged" }
+  ]
+}

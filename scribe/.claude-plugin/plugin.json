@@ -1,0 +1,12 @@
+{
+  "name": "scribe",
+  "description": "Stops Claude from guessing at an unclear request. When the task could honestly go several ways, Claude asks one focused round of questions — options, recommendation first — until the work is defined well enough to execute cleanly. Every ask is logged locally so the asking bar tunes from evidence.",
+  "license": "MIT",
+  "author": {
+    "name": "Victor Villegas",
+    "email": "victor.villegas@tuta.com"
+  },
+  "homepage": "https://github.com/V-Songbird/slag/tree/main/scribe",
+  "repository": "https://github.com/V-Songbird/slag",
+  "keywords": ["clarify", "questions", "ambiguity", "requirements", "scoping", "prompt", "unknowns", "interview"]
+}
