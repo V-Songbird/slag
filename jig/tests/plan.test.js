@@ -187,14 +187,21 @@ test("every covered cell names an artifact this plan actually writes", () => {
   }
 });
 
-test("the Codex column is GAP in every row, because no detector names codex-session", () => {
-  assert.equal(catalogue.classes.some((c) => c.detectors.some((d) => d.actor === "codex-session")), false);
+test("the Codex column is GAP without the region, and PROB the moment the plan writes it", () => {
   const root = project({});
   planOnly(root, ALL_FOUR);
   for (const row of readJson(root, ".jig/plan.json").rows) {
     assert.equal(row.cells["codex-session"].grade, "GAP");
     assert.equal(row.cells["codex-session"].artifact, null);
-    assert.match(row.cells["codex-session"].why, /no detector in the catalogue names codex-session/);
+    assert.match(row.cells["codex-session"].why, /writes no agents-region artifact/);
+  }
+
+  const wired = project({});
+  planOnly(wired, ALL_FOUR, { "agents-region": true, provenance: "elicited" });
+  for (const row of readJson(wired, ".jig/plan.json").rows) {
+    assert.equal(row.cells["codex-session"].grade, "PROB");
+    assert.equal(row.cells["codex-session"].artifact, "AGENTS.md");
+    assert.equal(row.cells["codex-session"].ceiling, "unmeasured");
   }
 });
 
@@ -252,13 +259,13 @@ test("a probabilistic lever says its ceiling is unmeasured rather than inventing
 test("AVAILABLE_NOW picks out exactly the levers this build can emit an artifact for", () => {
   const now = Object.keys(catalogue.levers).filter((id) => engine.leverAvailable(catalogue.levers[id]));
   assert.deepEqual(now.sort(), [
-    "bash-guard", "check-driver", "ci-workflow", "detekt-rule",
+    "agents-region", "bash-guard", "check-driver", "ci-workflow", "detekt-rule",
     "edit-observe-guard", "eslint-rule", "prose-rule", "test-suite", "type-system",
   ]);
   // …and the ordering really is an ordering: an earlier release's lever stays
   // available, a later one does not.
   assert.equal(engine.leverAvailable({ availableAt: "0.1.0-alpha" }), true);
-  assert.equal(engine.leverAvailable({ availableAt: "0.5.0-alpha" }), false);
+  assert.equal(engine.leverAvailable({ availableAt: "1.0.0" }), false);
   assert.equal(engine.leverAvailable({ availableAt: "never" }), false);
 });
 

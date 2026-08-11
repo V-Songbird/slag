@@ -92,6 +92,12 @@
       "probabilistic": false,
       "availableAt": "0.3.0-alpha",
       "description": "A rule in a jig-authored detekt side-config, run by the project own detekt through Gradle. Absent tool means ENFORCEMENT GAP, never a download."
+    },
+    "agents-region": {
+      "hostNeutral": false,
+      "probabilistic": true,
+      "availableAt": "0.5.0-alpha",
+      "description": "A marker-fenced region jig owns inside AGENTS.md, pointing a Codex session at the committed checks. Probabilistic by construction; capped by the 32 KiB loadability ceiling."
     }
   },
   "classes": [
@@ -183,6 +189,16 @@
             "tool": "detekt",
             "rule": "EmptyCatchBlock",
             "config": ".jig/detekt.jig.yml"
+          }
+        },
+        {
+          "id": "agents-region",
+          "actor": "codex-session",
+          "lever": "agents-region",
+          "runner": "none",
+          "confidence": "heuristic",
+          "params": {
+            "note": "The region names the class and points at the check driver; a Codex session reads it as instructions, which is probabilistic by definition."
           }
         }
       ],
@@ -279,6 +295,16 @@
             "tool": "eslint",
             "rule": "no-restricted-syntax",
             "config": ".jig/eslint.jig.config.mjs"
+          }
+        },
+        {
+          "id": "agents-region",
+          "actor": "codex-session",
+          "lever": "agents-region",
+          "runner": "none",
+          "confidence": "heuristic",
+          "params": {
+            "note": "The region names the class and points at the check driver; a Codex session reads it as instructions, which is probabilistic by definition."
           }
         }
       ],
@@ -808,6 +834,16 @@
             ],
             "stripComments": true
           }
+        },
+        {
+          "id": "agents-region",
+          "actor": "codex-session",
+          "lever": "agents-region",
+          "runner": "none",
+          "confidence": "heuristic",
+          "params": {
+            "note": "The region names the class and points at the check driver; a Codex session reads it as instructions, which is probabilistic by definition."
+          }
         }
       ],
       "fixtures": {
@@ -890,6 +926,16 @@
             "reason": "This command removes a test file; a failing test is fixed or visibly skipped, never deleted.",
             "alternative": "Fix the test, or mark it skipped with a note and open an issue.",
             "override": "set the guard to observe in .jig/config.json, or create .jig/off"
+          }
+        },
+        {
+          "id": "agents-region",
+          "actor": "codex-session",
+          "lever": "agents-region",
+          "runner": "none",
+          "confidence": "heuristic",
+          "params": {
+            "note": "The region names the class and points at the check driver; a Codex session reads it as instructions, which is probabilistic by definition."
           }
         }
       ],

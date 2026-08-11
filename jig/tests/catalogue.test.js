@@ -263,11 +263,21 @@ test("no detector claims v1 coverage through a lever that does not exist yet", (
   }
 });
 
-test("the Codex column has no detector behind it yet", () => {
-  const codex = catalogue.classes.flatMap((c) =>
-    c.detectors.filter((d) => d.actor === "codex-session"),
-  );
-  assert.deepEqual(codex, []);
+test("the Codex column is real from 0.5.0: every installable class carries an agents-region detector", () => {
+  for (const cls of catalogue.classes) {
+    const codex = cls.detectors.filter((d) => d.actor === "codex-session");
+    if (cls.installableAtV1) {
+      assert.equal(codex.length, 1, cls.id + " has no codex-session detector");
+      assert.equal(codex[0].lever, "agents-region");
+      // Honest by construction: a region a session READS is instructions, and
+      // instructions are probabilistic — never deterministic, never armable.
+      assert.equal(codex[0].confidence, "heuristic");
+      assert.equal(codex[0].runner, "none");
+    } else {
+      assert.deepEqual(codex, [], cls.id + " gained a codex detector nothing installs");
+    }
+  }
+  assert.equal(catalogue.levers["agents-region"].probabilistic, true);
 });
 
 // ---------------------------------------------------------------------------

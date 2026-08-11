@@ -559,3 +559,53 @@ test("a red or malformed probe record keeps the gate closed", () => {
     delete process.env.JIG_PROBE_RESULTS;
   }
 });
+
+// ---------------------------------------------------------------------------
+// The AGENTS.md region (0.5.0, the Codex column)
+
+const REGION_SELECT = "silent-catch,test-file-deletion";
+
+function regionPlan(root) {
+  return engine.cmdPlan(root, {
+    _: [], change: [], select: REGION_SELECT, "no-ci": true,
+    "agents-region": true, provenance: "elicited",
+  });
+}
+
+test("the region lands fenced, replaces only itself, and never touches the user's own text", () => {
+  const root = tmpProject({ "AGENTS.md": "# My rules\n\n- Mine stays mine.\n" });
+  const plan = regionPlan(root);
+  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  const first = fs.readFileSync(path.join(root, "AGENTS.md"), "utf-8");
+  assert.match(first, /# My rules/);
+  assert.match(first, /jig:begin/);
+  assert.match(first, /node \.jig\/checks\/run\.mjs/);
+
+  // Re-planning with a different selection rewrites ONLY the region.
+  const wider = engine.cmdPlan(root, {
+    _: [], change: [], select: "silent-catch", "no-ci": true,
+    "agents-region": true, provenance: "elicited",
+  });
+  engine.cmdApply(root, { _: [], change: [], plan: wider.planId });
+  const second = fs.readFileSync(path.join(root, "AGENTS.md"), "utf-8");
+  assert.match(second, /# My rules/);
+  assert.equal(second.match(/jig:begin/g).length, 1, "the region duplicated instead of replacing itself");
+  assert.equal(second.includes("test-file-deletion."), false);
+});
+
+test("a repository with no AGENTS.md gets one holding only the region, and revert removes it", () => {
+  const root = tmpProject({});
+  const plan = regionPlan(root);
+  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  const text = fs.readFileSync(path.join(root, "AGENTS.md"), "utf-8");
+  assert.ok(text.startsWith(engine.AGENTS_BEGIN || "<!-- jig:begin"), "the file holds more than the region");
+  engine.cmdRevert(root, { _: [], change: [], all: true });
+  assert.equal(fs.existsSync(path.join(root, "AGENTS.md")), false);
+});
+
+test("the loadability ceiling refuses a region that would push AGENTS.md past 32 KiB", () => {
+  const root = tmpProject({ "AGENTS.md": "# Mine\n" + "x".repeat(32700) + "\n" });
+  const plan = regionPlan(root);
+  assert.throws(() => engine.cmdApply(root, { _: [], change: [], plan: plan.planId }),
+    /loadability ceiling/);
+});
