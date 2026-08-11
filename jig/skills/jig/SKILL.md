@@ -3,12 +3,12 @@ name: jig
 description: >-
   Interviews the owner of a project, then installs a reviewed, reversible set of
   guardrails against the mistakes juniors and drifting AI sessions actually make
-  — a committed check driver and two observe-only session guards under `.jig/`,
-  plus a CI workflow under `.github/workflows/`. Reads the repository and its
-  git history first, so it never asks for a fact it can already see. Nothing
-  arms in this release: a
-  guard records what it would have blocked and lets the call through, and jig
-  writes zero bytes into any file the user owns. Use when the user wants
+  — a committed check driver and two session guards under `.jig/`, plus a CI
+  workflow under `.github/workflows/`. Reads the repository and its git
+  history first, so it never asks for a fact it can already see. Every guard
+  starts observing — recording what it would have blocked and letting the
+  call through — and can only be armed later from /jig:review once its ledger
+  shows a clean record. jig writes zero bytes into any file the user owns. Use when the user wants
   guardrails set up, or a repeat mistake caught before it lands — e.g. "set up
   guardrails", "stop the AI deleting my tests", "add checks to this repo", "what
   keeps breaking here", "catch skipped tests before they merge", "guard this
@@ -29,10 +29,12 @@ computed, and never put to a human a fact the scan already read.
 Two contracts hold for the whole run, and both are structural rather than a
 promise you have to remember. jig writes only under `.jig/` and
 `.github/workflows/` — the pre-commit activation line and the permission rules
-are printed and saved as proposals, so you never edit a settings file, a rule
-file, or a git hook. And nothing this release installs can refuse a tool call: a
-guard that matches writes `would-deny` to the ledger and the call proceeds. Say
-both plainly when the user asks what they just installed.
+are printed and saved as proposals, so you never edit a settings file or a rule
+file, and a git hook is touched only through the consent-gated weave in step 7.
+And nothing installs armed: a guard that matches writes `would-deny` to the
+ledger and the call proceeds, until the user arms it from `/jig:review` after
+its clean record is in. Say both plainly when the user asks what they just
+installed.
 
 Flags in `$ARGUMENTS`: `--quick` (skip Call 2, take all four classes, plan as
 `assumed`), `--select <classId,…>` (the user already named the classes, so skip
@@ -118,8 +120,8 @@ Wording and options are in [references/interview.md](references/interview.md).
 that interaction is the plan review at step 6. Persona and phase only order the
 Call 2 list, which quick start does not ask, so nothing downstream reads them.
 
-There is no arming question. Nothing arms in this release, so offering that
-choice would be offering something jig cannot deliver.
+There is no arming question here. Nothing installs armed — arming belongs to
+`/jig:review`, later, after a guard has a clean observed record to show.
 
 ## 5. Call 2 — the error classes
 
@@ -223,6 +225,15 @@ deliberately left with the user: the pre-commit line to paste, saved at
 `.jig/proposed-permissions.json` and never applied. Do not do either of them on
 the user's behalf.
 
+One exception, offered rather than done: when the scan found a pre-commit hook
+COMMITTED to the repository (`scripts/git-hooks/` or `.husky/`), jig can weave
+the activation line into it as a reviewed, journaled, reversible change. Ask
+first, then build a draft using the catalogue's own `activation` entry — the
+`sh` line for an sh hook, the `node` line for a node-shebang hook — as an
+`include-line` change, plan it with `--from`, and apply it only on the user's
+yes. It is always item-approve. A hook under `.git/hooks/` is machine-local
+and stays a printed proposal.
+
 ## 8. The witnessed catch
 
 The interview is not finished until a guard has been seen catching something and
@@ -249,10 +260,12 @@ coverage as demonstrated.
 ## 9. Close, and how to undo any of it
 
 Say what is now installed, which actors it covers, what it cannot see, and that
-every guard observes rather than blocks. Describe that coverage as demonstrated
-only when step 8 returned `witnessed: true`; otherwise say plainly that nothing
-has been seen catching anything yet. Name the two things still waiting on the
-user: the pre-commit line, and the proposed permission rules.
+every guard observes rather than blocks until it is armed from `/jig:review`.
+Describe that coverage as demonstrated only when step 8 returned
+`witnessed: true`; otherwise say plainly that nothing has been seen catching
+anything yet. Name the two things still waiting on the user: the pre-commit
+line, and the proposed permission rules. Point at `/jig:review` as the place
+the guards' record accrues and arming is eventually offered.
 
 What is installed, any time, reading the journal and writing nothing ever:
 

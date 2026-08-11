@@ -4,6 +4,20 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.2.0-alpha] — 2026-08-11
+
+### Added
+
+- `/jig:review` — see what every guard has done: fired, never fired, or waved off as a false alarm. It offers arming exactly when a guard has earned it, and records false alarms.
+- Guards can now block. A guard becomes armable after ten clean observed sessions with zero recorded false alarms — twenty-five for a heuristic one — and only if its install came from a real answer, never from a quick-start default. A blocked call always shows the reason, an alternative, and how to override.
+- A recorded false alarm pulls an armed guard straight back to observing and resets its clock.
+- If your pre-commit hook is committed to the repo, jig can now weave the one activation line into it — asked first, approved by name, journaled, reversible. Machine-local hooks still get the printed proposal only.
+- Installs now also drop `.jig/hooks/pre-commit`, a ready shim for `core.hooksPath`.
+
+### Changed
+
+- Every guard now has a stable name that survives catalogue updates, so its ledger history stays its own.
+
 ## [0.1.0-alpha] — 2026-08-11
 
 ### Added

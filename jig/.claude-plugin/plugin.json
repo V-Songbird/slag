@@ -1,6 +1,6 @@
 {
   "name": "jig",
-  "description": "Interviews you about the mistakes that keep landing in your repo, then installs reviewed, reversible guardrails: a committed check script any teammate or CI can run, plus observe-only session guards that record what an agent would have been stopped from doing. Writes nothing into any file you own.",
+  "description": "Interviews you about the mistakes that keep landing in your repo, then installs reviewed, reversible guardrails: a committed check script any teammate or CI can run, plus session guards that observe first and can be armed to block once their clean record is in. Writes nothing into any file you own.",
   "license": "MIT",
   "author": {
     "name": "Victor Villegas",
