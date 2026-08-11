@@ -2623,8 +2623,6 @@ function main(argv) {
   }
 }
 
-if (require.main === module) main(process.argv.slice(2));
-
 module.exports = {
   SCHEMA_VERSION, STATE_DIR, JOURNAL_FILE, PREIMAGE_DIR, PROFILE_FILE,
   CONFIG_FILE, MANIFEST_FILE, PERMISSIONS_FILE, ACTIVATION_FILE, LEDGER_FILE, HOOK_RUNNERS,
@@ -2646,3 +2644,9 @@ module.exports = {
   matcherMatches, hookRows, collectHooks, nodeOnPath, stackFacts, ruleCorpus, conflictPreflight, readProfile,
   cmdScan, cmdPlan, cmdApply, cmdStatus, cmdRevert, cmdSelftest, main,
 };
+
+// Run the CLI only after module.exports exists: a command that lazy-requires
+// jig-lib re-enters this module through the require cache, and jig-lib reads
+// SCHEMA_VERSION and STATE_DIR off these exports — calling main() above the
+// assignment handed it an empty object. Found live by jig.js review.
+if (require.main === module) main(process.argv.slice(2));

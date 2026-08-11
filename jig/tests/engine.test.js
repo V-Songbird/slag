@@ -609,3 +609,26 @@ test("the loadability ceiling refuses a region that would push AGENTS.md past 32
   assert.throws(() => engine.cmdApply(root, { _: [], change: [], plan: plan.planId }),
     /loadability ceiling/);
 });
+
+// ---------------------------------------------------------------------------
+// The CLI entry itself (1.0.1)
+
+test("every command runs through the real CLI entry, not just through require", () => {
+  // The require cycle bug: jig-lib reads SCHEMA_VERSION and STATE_DIR off this
+  // module's exports, and main() used to run BEFORE the exports assignment —
+  // so any command that lazy-requires jig-lib worked under require (tests,
+  // the runner) and broke only when invoked as `node jig.js <command>`.
+  const root = tmpProject({ "package.json": "{ \"private\": true }\n" });
+  const cli = (args) => spawnSync(process.execPath, [CLI, ...args, "--root", root],
+    { encoding: "utf-8", windowsHide: true });
+
+  const plan = JSON.parse(cli(["plan", "--select", "silent-catch", "--no-ci",
+    "--provenance", "elicited"]).stdout);
+  assert.equal(plan.ok, true);
+  assert.equal(cli(["apply", "--plan", plan.planId]).status, 0);
+  const review = cli(["review"]);
+  assert.equal(review.status, 0, "the review CLI died: " + review.stderr);
+  assert.equal(JSON.parse(review.stdout).ok, true);
+  assert.equal(cli(["rerun"]).status, 0);
+  assert.equal(cli(["status"]).status, 0);
+});

@@ -4,6 +4,12 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.0.1] — 2026-08-11
+
+### Fixed
+
+- `review`, `arm`, `disarm`, `fp`, `rerun` and `retire` failed when run from the command line — while working perfectly from tests and hooks, which is exactly why it slipped through. Caught on a real project run.
+
 ## [1.0.0] — 2026-08-11
 
 ### Changed
