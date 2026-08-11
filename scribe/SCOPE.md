@@ -1,9 +1,9 @@
 # scribe scope
 
-- **Status:** proposed target scope — the three foundation forks (name, mechanism,
-  v1 posture) were ratified by the owner on 2026-08-11 in the scaffold interview;
-  the rest of this document awaits sign-off item S1 in
-  `docs/research/scribe/00-BRIEF.md`
+- **Status:** ratified — the three foundation forks (name, mechanism, v1
+  posture) on 2026-08-11 in the scaffold interview; the full contract, the
+  standing tax, and autonomy precedence (S1, S2, S4) by the owner on
+  2026-08-11 at the 1.0.0 cut
 - **Product:** scribe
 - **Host:** Claude Code
 - **Default mode:** advisory, local, log-everything
