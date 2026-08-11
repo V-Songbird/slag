@@ -91,6 +91,7 @@ One engine that journals every write, a committed check script that owes jig not
 - jig writes only under `.jig/` and `.github/workflows/`. The pre-commit hookup is printed as a proposal — and if your hook file is committed to the repo, jig can weave the one line in for you, item-approved, reversibly.
 - If something else already watches the same events in your repo, jig says so and leaves that slot alone. The committed checks and the CI workflow cover you regardless.
 - Rules are the exception, not the habit. jig writes one only when you ask, under its own `jig-` name, with a small hard byte cap — because every session pays to carry prose.
+- Working with another AI tool too? On request jig keeps one clearly-fenced block in `AGENTS.md` pointing it at the same checks. Your own text in that file is never touched.
 - Kill switch: create a file named `.jig/off` and every guard goes silent.
 
 ## License

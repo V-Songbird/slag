@@ -4,6 +4,12 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.0.0] — 2026-08-11
+
+### Changed
+
+- First stable release. Nothing new to learn: every file an earlier install wrote still reads, and future releases keep that promise — your config, ledger, and installed checks never need migrating.
+
 ## [0.5.0-alpha] — 2026-08-11
 
 ### Added
@@ -16,15 +22,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 - The coverage matrix's fourth column is honest in both directions now: covered as "probably" where the block is installed — instructions are never a guarantee — and a plain gap where it is not.
 
+## [0.4.0-alpha] — 2026-08-11
+
 ### Added
 
 - jig can now write rules — carefully. On explicit request it emits a short, paths-scoped rule for a mistake no tool can watch, or one pointer rule naming the governance docs nothing references. Every rule lands as its own `jig-` file under `.claude/rules/`, is approved by name, carries its origin label, and reverts clean. One install may never add more than a small stated byte budget, because every session pays to carry prose.
 - The scan now finds your ADRs, scopes, roadmaps and north stars, and tells you which ones no loaded surface references — documents every session is blind to. The interview turns each one into a decision.
-- Writing permission rules into settings is now a capability with a lock on it: a probe series must first prove, against a pinned CLI version, how the host really behaves. Until someone runs it green, permission rules stay a printed proposal.
+- Permission rules still never land in your settings by themselves. jig writes them up as a proposal you apply yourself, and that stays true in every configuration it ships in.
 
 ### Changed
 
 - A default install still adds zero always-loaded text, and the release gate that proves it still runs. Prose only ever arrives because you asked.
+
+## [0.3.0-alpha] — 2026-08-11
 
 ### Added
 
@@ -35,6 +45,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 ### Changed
 
 - The coverage matrix now grades toolchain coverage per repository: the same class reads as covered where the tool exists and as a named gap where it does not.
+
+## [0.2.0-alpha] — 2026-08-11
 
 ### Added
 

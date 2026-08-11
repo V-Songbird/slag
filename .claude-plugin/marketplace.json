@@ -157,7 +157,7 @@
       "name": "jig",
       "source": "./jig",
       "description": "Interviews you about the mistakes that keep landing in your repo, then installs reviewed, reversible guardrails: a committed check script any teammate or CI can run, plus session guards that observe first and can be armed to block once their clean record is in. Writes nothing into any file you own.",
-      "version": "0.5.0-alpha",
+      "version": "1.0.0",
       "license": "MIT",
       "author": {
         "name": "Victor Villegas",
