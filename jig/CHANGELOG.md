@@ -4,7 +4,17 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
-## [0.4.0-alpha] — 2026-08-11
+## [0.5.0-alpha] — 2026-08-11
+
+### Added
+
+- Coming back is now one question. On a repository jig already guards, `/jig:jig` shows what drifted, what fired, what never did, and what waits in the backlog — then asks: arm the quiet, take the next thing, retire the dead, or refresh. Retiring a guard is journaled and reversible, and its history stays in the ledger.
+- jig can now brief other AI tools. On request it writes one fenced, clearly-marked block into `AGENTS.md` pointing any session that reads it at the committed checks. It only ever rewrites its own block, never your text, and refuses to grow the file past the size where it stops being read at all.
+- The scan now warns when a nested `AGENTS.md` shadows the root one for part of the tree.
+
+### Changed
+
+- The coverage matrix's fourth column is honest in both directions now: covered as "probably" where the block is installed — instructions are never a guarantee — and a plain gap where it is not.
 
 ### Added
 

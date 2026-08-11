@@ -43,6 +43,7 @@ jig reads your repo and its git history, asks which of these you actually want g
 | A session slips later | The guard writes down what it would have blocked and lets the call through |
 | A guard earns its record | Ten clean sessions, no false alarms — `/jig:review` offers to arm it, and armed means blocked |
 | A guard cries wolf | Mark the false alarm in review — the guard drops back to observing and its clock resets |
+| You come back a month later | One question: arm the quiet, take the next thing, retire the dead, or refresh |
 | You want out | One command reverts every byte |
 
 ## Install
