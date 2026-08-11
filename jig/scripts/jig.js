@@ -2440,9 +2440,91 @@ function cmdDisarm(root, opts) {
   return { ok: true, disarmed: guardId, plan: planId };
 }
 
+// ---------------------------------------------------------------------------
+// The re-run regimen (0.5.0)
+// ---------------------------------------------------------------------------
+//
+// One command reads everything the ritual needs — drift, firing record,
+// never-fired guards, the ranked backlog — so the skill can ask its ONE
+// question (arm the quiet, take the next backlog row, retire the dead,
+// refresh everything) from data instead of impressions.
+
+function cmdRerun(root) {
+  const manifest = readManifest(root);
+  if (!manifest.artifacts.length) {
+    throw expected("nothing is installed here — rerun is the ritual for a repository jig already guards");
+  }
+  const states = manifestStates(root, manifest);
+  const installedAt = manifest.artifacts.map((a) => a.installedAt).sort()[0] || null;
+
+  let guards = [];
+  try {
+    guards = cmdReview(root).guards;
+  } catch {
+    guards = [];
+  }
+  let backlog = [];
+  try {
+    const record = JSON.parse(stripBom(fs.readFileSync(statePath(root, BACKLOG_FILE), "utf8")));
+    backlog = (record.backlog || []).slice(0, 5);
+  } catch {
+    backlog = [];
+  }
+  return {
+    ok: true,
+    schemaVersion: SCHEMA_VERSION,
+    installedAt,
+    drifted: states.filter((s) => s.state === "drifted").map((s) => s.path),
+    guards,
+    neverFired: guards.filter((g) => g.fired === 0).map((g) => g.guardId),
+    armable: guards.filter((g) => g.armable).map((g) => g.guardId),
+    backlog,
+    ledgerLines: ledgerLines(root),
+  };
+}
+
+// Retiring is for a guard that never earned its keep: the row leaves the
+// config through the same journaled door arming uses, so `revert` can put it
+// back. The ledger keeps its history — evidence is never deleted.
+function cmdRetire(root, opts) {
+  const { guards } = configuredGuards(root);
+  const guardId = typeof opts.guard === "string" ? opts.guard : opts._[1];
+  if (!guardId) throw expected("retire needs the guard id: jig.js retire <guardId>");
+  if (!guards.some((g) => g.id === guardId)) {
+    throw expected(guardId + " is not a configured guard. Configured: " +
+      guards.map((g) => g.id).join(", "));
+  }
+  const rel = STATE_DIR + "/" + CONFIG_FILE;
+  const config = JSON.parse(stripBom(readIfExists(path.join(root, rel)).toString("utf8")));
+  const row = config.guards.find((g) => g && g.id === guardId);
+  config.guards = config.guards.filter((g) => g && g.id !== guardId);
+  const content = JSON.stringify(config, null, 2) + "\n";
+  const draft = {
+    changes: [{
+      id: "retire-" + guardId + "-" + hashBytes(Buffer.from(content, "utf8")).slice(0, 8),
+      kind: "write-config",
+      path: rel,
+      content,
+      classIds: [row.classId],
+      ownership: "schema",
+      provenance: row.provenance || "assumed",
+      template: { name: "config", version: "1.0.0" },
+      rationale: "retire " + guardId + " — it never fired",
+    }],
+  };
+  const { problems, payload } = planFromDraft(draft, root);
+  if (problems.length) throw expected("the retirement was rejected:\n  - " + problems.join("\n  - "));
+  ensureStateDir(root);
+  fs.writeFileSync(path.join(root, STATE_DIR, "plan-" + payload.planId + ".json"),
+    JSON.stringify(payload, null, 2) + "\n");
+  cmdApply(root, { _: [], change: [], plan: payload.planId });
+  return { ok: true, retired: guardId, plan: payload.planId };
+}
+
 const COMMANDS = {
   scan: cmdScan, plan: cmdPlan, apply: cmdApply, status: cmdStatus, revert: cmdRevert, selftest: cmdSelftest,
   review: cmdReview, arm: cmdArm, disarm: cmdDisarm, fp: cmdFp,
+  rerun: cmdRerun, retire: cmdRetire,
 };
 
 function main(argv) {
@@ -2480,7 +2562,7 @@ module.exports = {
   formatOf, verifyByFor, verifyWritten,
   planFromDraft, readPlan, planFiles, readJournal, replayJournal, changeState,
   includeLineText, journalledWrite, restoreWrite,
-  cmdReview, cmdArm, cmdDisarm, cmdFp,
+  cmdReview, cmdArm, cmdDisarm, cmdFp, cmdRerun, cmdRetire,
   templateIndex, templateBody, draftFromTemplates, configFromSelection, permissionsProposal,
   readManifest, manifestStates, occupancyProblem, installedClasses,
   matcherMatches, hookRows, collectHooks, nodeOnPath, stackFacts, ruleCorpus, conflictPreflight, readProfile,

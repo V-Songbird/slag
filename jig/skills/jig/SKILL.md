@@ -49,7 +49,23 @@ a,b`, never `--select=a,b`, which the parser reads as a flag named
 `select=a,b`. Every command accepts `--root <path>`; without it the working
 directory is the project.
 
-## 1. Scan
+## 1. Scan — or the re-run ritual
+
+When `.jig/manifest.json` already exists this is a re-run, and the whole visit
+is ONE question. Run:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" rerun
+```
+
+Show the drift report — `drifted`, `neverFired`, `armable`, the top of
+`backlog` — then ask one `AskUserQuestion`: arm the quiet (`arm` each id in
+`armable`, via `/jig:review`'s rules), take the next backlog row (`plan
+--select` it), retire the dead (`retire <guardId>` for each never-fired guard
+the user confirms), or refresh (fall through to the full flow below). Then do
+exactly the chosen one and stop.
+
+On a fresh repository:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" scan

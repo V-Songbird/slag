@@ -771,3 +771,42 @@ test("wire-governance emits one computed pointer rule from the scan's own orphan
     _: [], change: [], select: "silent-catch", "no-ci": true, "wire-governance": true,
   }), /no orphaned governance docs/);
 });
+
+// ---------------------------------------------------------------------------
+// The re-run regimen (0.5.0)
+
+test("rerun reports drift, the firing record, the quiet guards and the backlog in one read", () => {
+  const root = project({ "package.json": "{ \"private\": true }\n" });
+  install(root, "silent-catch,focused-or-skipped-test", { provenance: "elicited", "no-ci": true });
+
+  fs.appendFileSync(path.join(root, ".jig", "ledger.jsonl"),
+    JSON.stringify({ session: "s1", guardId: GUARD, decision: "would-deny" }) + "\n");
+  fs.appendFileSync(path.join(root, ".jig", "checks", "run.mjs"), "\n// drifted\n");
+
+  const report = engine.cmdRerun(root);
+  assert.ok(report.installedAt, "no install timestamp");
+  assert.deepEqual(report.drifted, [".jig/checks/run.mjs"]);
+  const quiet = report.guards.find((g) => g.guardId === "focused-or-skipped-test-edit-observe-guard");
+  assert.equal(quiet.fired, 0);
+  assert.ok(report.neverFired.includes("focused-or-skipped-test-edit-observe-guard"));
+  assert.equal(report.neverFired.includes(GUARD), false, "a fired guard was called dead");
+  assert.ok(report.backlog.length > 0);
+});
+
+test("retiring a guard is a journaled config change the ledger survives", () => {
+  const root = project({ "package.json": "{ \"private\": true }\n" });
+  install(root, "silent-catch", { provenance: "elicited", "no-ci": true });
+  const before = engine.readJournal(root).length;
+
+  const out = engine.cmdRetire(root, { _: [], change: [], guard: GUARD });
+  assert.equal(out.retired, GUARD);
+  const config = readJson(root, ".jig/config.json");
+  assert.equal(config.guards.some((g) => g.id === GUARD), false);
+  assert.ok(engine.readJournal(root).length > before);
+  assert.throws(() => engine.cmdRetire(root, { _: [], change: [], guard: GUARD }), /not a configured guard/);
+});
+
+test("rerun on a bare repository refuses with the reason", () => {
+  const root = project({});
+  assert.throws(() => engine.cmdRerun(root), /nothing is installed here/);
+});
