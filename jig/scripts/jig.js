@@ -793,13 +793,18 @@ function occupancyProblem(root, rel, states) {
 // through it is a pointer into data jig shipped. The id, not the index, is
 // what goes in the file: it survives a reorder of the catalogue, and the
 // ledger and manifest inherit it, so guard identity is stable across releases.
-function configFromSelection(selection) {
+function configFromSelection(selection, provenance) {
   const guards = [];
   for (const classId of selection) {
     const cls = catalogueClass(classId);
     for (const det of cls.detectors) {
       if (!HOOK_RUNNERS.includes(det.runner)) continue;
-      guards.push({ id: classId + "-" + det.id, classId, detector: det.id, runner: det.runner });
+      const guard = { id: classId + "-" + det.id, classId, detector: det.id, runner: det.runner };
+      // Provenance rides each row so the runtime arming gate can read it. Only
+      // the armable values are worth writing; anything else is the default the
+      // runner already assumes.
+      if (PROVENANCES.includes(provenance) && provenance !== "assumed") guard.provenance = provenance;
+      guards.push(guard);
     }
   }
   return { schemaVersion: SCHEMA_VERSION, mode: MANIFEST_MODE, guards };
@@ -893,7 +898,7 @@ function draftFromTemplates(root, opts) {
 
   // The two computed artifacts ride the same path as the copied ones: same
   // change kinds, same occupancy rule, same journal.
-  const config = configFromSelection(selection);
+  const config = configFromSelection(selection, provenance);
   add({ name: "config", version: "1.0.0", target: STATE_DIR + "/" + CONFIG_FILE, kind: "write-config", ownership: "schema" },
     JSON.stringify(config, null, 2) + "\n", selection);
   const permissions = permissionsProposal(selection);

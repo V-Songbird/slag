@@ -146,6 +146,11 @@
               "catch\\s*(\\([^)]*\\))?\\s*\\{\\s*\\}"
             ],
             "onlyWhenIntroduced": true
+          },
+          "deny": {
+            "reason": "This edit introduces a catch block that swallows the error, so nothing downstream can tell it failed.",
+            "alternative": "Rethrow, log with rethrow, or return a visibly degraded value.",
+            "override": "set the guard to observe in .jig/config.json, or create .jig/off"
           }
         },
         {
@@ -238,6 +243,11 @@
               "\\bit\\.todo\\s*\\("
             ],
             "onlyWhenIntroduced": true
+          },
+          "deny": {
+            "reason": "This edit introduces a focused or skipped test, which quietly stops the rest of the suite from counting.",
+            "alternative": "Run the one test from the command line instead of focusing it in the file.",
+            "override": "set the guard to observe in .jig/config.json, or create .jig/off"
           }
         }
       ],
@@ -692,6 +702,11 @@
               "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba|z|k)?sh\\b",
               "\\biwr\\b[^|]*\\|\\s*iex\\b"
             ]
+          },
+          "deny": {
+            "reason": "A remote script piped straight into a shell runs unreviewed code with your permissions.",
+            "alternative": "Download to a file first, read it, then run the file you read.",
+            "override": "set the guard to observe in .jig/config.json, or create .jig/off"
           }
         },
         {
@@ -708,6 +723,11 @@
               "<default>"
             ],
             "note": "--force-with-lease is excluded by the pattern itself; it is the reconciling form, not the destructive one."
+          },
+          "deny": {
+            "reason": "A force-push to the default branch rewrites history your team already pulled.",
+            "alternative": "Use git push --force-with-lease, or push the work to a branch and merge it.",
+            "override": "set the guard to observe in .jig/config.json, or create .jig/off"
           }
         },
         {
@@ -805,6 +825,11 @@
               "\\b(rm|git\\s+rm|Remove-Item)\\b[^\\n]*(tests?|__tests__)[/\\\\]",
               "\\b(rm|git\\s+rm|Remove-Item)\\b[^\\n]*\\.(test|spec)\\."
             ]
+          },
+          "deny": {
+            "reason": "This command removes a test file; a failing test is fixed or visibly skipped, never deleted.",
+            "alternative": "Fix the test, or mark it skipped with a note and open an issue.",
+            "override": "set the guard to observe in .jig/config.json, or create .jig/off"
           }
         }
       ],

@@ -38,14 +38,26 @@ const OFF_FILE = "off";
 const HOOK_RUNNERS = ["PreToolUse", "PostToolUse"];
 const EVENT_TOOLS = { PreToolUse: ["Bash"], PostToolUse: ["Edit", "Write"] };
 
-// The v1 clamp. Not a default — the value every guard runs at, whatever the
-// config says. Deny capability lands at 0.2.0 with the ledger-driven arming
-// gate it depends on.
+// The default mode, and the only reachable one until a guard passes the
+// arming gate. Deny is capability earned from ledger evidence, never a
+// configuration default — see effectiveState below for the whole truth table.
 const V1_MODE = "observe";
 
-const CONFIG_KEYS = ["schemaVersion", "mode", "guards", "defaultBranches"];
+// The arming gate's evidence thresholds: how many clean observed sessions a
+// guard needs, with zero recorded false positives, before "armed" in the
+// config means what it says. A heuristic detector can be wrong by design, so
+// it needs a longer clean record than a deterministic one. Any recorded false
+// positive resets the count to the sessions after it.
+const ARM_SESSIONS = { deterministic: 10, heuristic: 25 };
+
+// Provenances that may ever arm. `assumed` is structurally barred forever
+// (jig-brief §4.6) — quick-start installs observe until someone re-runs the
+// interview and answers for real.
+const ARMABLE_PROVENANCE = ["elicited", "forensic"];
+
+const CONFIG_KEYS = ["schemaVersion", "mode", "guards", "defaultBranches", "zones"];
 const CONFIG_MODES = ["observe", "armed"];
-const GUARD_KEYS = ["id", "classId", "detector", "runner", "mode"];
+const GUARD_KEYS = ["id", "classId", "detector", "runner", "mode", "provenance"];
 
 // Keys that would smuggle a matcher into the config. Listed by name and refused
 // loudly, rather than ignored as "unknown", because silently dropping one would
@@ -224,7 +236,11 @@ function validateConfig(raw) {
       problems.push(label + ": unknown mode " + JSON.stringify(g.mode));
       return;
     }
-    guards.push({ id, classId: cls.id, detector: detIndex, detectorId: det.id, runner: det.runner, det });
+    // Provenance rides the guard row so the arming gate can read it at
+    // runtime. Anything unrecognized degrades to `assumed`, the value that can
+    // never arm — the safe direction, same as the plan's own rule.
+    const provenance = ARMABLE_PROVENANCE.includes(g.provenance) ? g.provenance : "assumed";
+    guards.push({ id, classId: cls.id, detector: detIndex, detectorId: det.id, runner: det.runner, provenance, mode: g.mode, det });
   });
 
   // Deterministic order, computed from the guard's identity rather than taken
@@ -344,6 +360,107 @@ function blankRegions(text, rel) {
 }
 
 // ---------------------------------------------------------------------------
+// The arming gate
+// ---------------------------------------------------------------------------
+//
+// Deny is earned, never configured. effectiveState is a pure truth table:
+// every input arrives as an argument, nothing is read from disk here, and the
+// tests walk every row. The order below is the order of authority — a bar
+// earlier in the list cannot be argued past by anything later.
+
+// Enough glob for a zone path: `**` crosses separators, `*` does not. A zone
+// can only ever force observe — it weakens, never matches content — which is
+// why a glob in the committed config is not a matcher-smuggling hole.
+function globToRegExp(glob) {
+  let out = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        out += glob[i + 2] === "/" ? "(?:.*/)?" : ".*";
+        i += glob[i + 2] === "/" ? 2 : 1;
+      } else {
+        out += "[^/]*";
+      }
+    } else if (c === "?") {
+      out += "[^/]";
+    } else {
+      out += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp("^" + out + "$", "i");
+}
+
+function zoneForcesObserve(zones, filePath) {
+  if (!isObject(zones) || !Array.isArray(zones.observe) || !filePath) return false;
+  const rel = String(filePath).replace(/\\/g, "/");
+  return zones.observe.some((g) => typeof g === "string" && globToRegExp(g).test(rel));
+}
+
+// stats: { sessionsSinceReset, falsePositives } for this guard, from
+// ledgerStats below. Returns { mode, why } — `why` is the bar that held, so a
+// review surface can say why a guard is still observing without re-deriving.
+function effectiveState(guard, config, filePath, stats) {
+  const wanted = guard.mode || config.mode || V1_MODE;
+  if (wanted !== "armed") return { mode: "observe", why: "not asked to arm" };
+  if (!ARMABLE_PROVENANCE.includes(guard.provenance)) {
+    return { mode: "observe", why: "provenance `" + guard.provenance + "` can never arm" };
+  }
+  const det = guard.det || {};
+  if (!det.deny || !det.deny.reason || !det.deny.alternative || !det.deny.override) {
+    return { mode: "observe", why: "the catalogue ships no complete deny reply for this detector" };
+  }
+  if (zoneForcesObserve(config.zones, filePath)) {
+    return { mode: "observe", why: "a zone in the config forces observe for this path" };
+  }
+  const needed = ARM_SESSIONS[det.confidence] || ARM_SESSIONS.heuristic;
+  const s = stats || { sessionsSinceReset: 0, falsePositives: 0 };
+  if (s.falsePositives > 0 && s.sessionsSinceReset < needed) {
+    return { mode: "observe", why: "a recorded false positive reset the clock at " +
+      s.sessionsSinceReset + " of " + needed + " clean sessions" };
+  }
+  if (s.sessionsSinceReset < needed) {
+    return { mode: "observe", why: "observed in " + s.sessionsSinceReset + " of " + needed +
+      " clean sessions" };
+  }
+  return { mode: "armed", why: needed + " clean sessions and no standing false positive" };
+}
+
+// One pass over the ledger, stats for every guard at once. A false positive is
+// a line the review skill wrote ({decision:"false-positive", guardId}); the
+// clock restarts at the session after the latest one.
+function ledgerStats(root) {
+  let lines = [];
+  try {
+    lines = fs.readFileSync(statePath(root, LEDGER_FILE), "utf-8")
+      .split("\n").filter((l) => l.trim());
+  } catch {
+    return {};
+  }
+  const stats = {};
+  for (const line of lines) {
+    let row;
+    try { row = JSON.parse(line); } catch { continue; }
+    if (!row.guardId) continue;
+    const s = stats[row.guardId] || (stats[row.guardId] = {
+      sessions: new Set(), sessionsSinceReset: 0, falsePositives: 0, fired: 0,
+    });
+    if (row.decision === "false-positive") {
+      s.falsePositives++;
+      s.sessions = new Set();
+      continue;
+    }
+    if (row.decision === "would-deny" || row.decision === "deny") s.fired++;
+    if (row.session) s.sessions.add(row.session);
+  }
+  for (const s of Object.values(stats)) {
+    s.sessionsSinceReset = s.sessions.size;
+    delete s.sessions;
+  }
+  return stats;
+}
+
+// ---------------------------------------------------------------------------
 // Guard evaluation
 // ---------------------------------------------------------------------------
 
@@ -427,7 +544,7 @@ function ledgerRow(base, extra) {
     actor: extra.actor,
     guardId: extra.guardId,
     classId: extra.classId,
-    mode: V1_MODE,
+    mode: extra.mode || V1_MODE,
     decision: extra.decision,
     tool: base.tool,
     matched: extra.matched,
@@ -468,36 +585,66 @@ function runEvent(root, event, payload, warn) {
 
   const tools = EVENT_TOOLS[event] || [];
   const running = check.guards.filter((g) => g.runner === event && (!base.tool || tools.includes(base.tool)));
+  // The ledger is read once, and only when some guard is asking to arm — the
+  // pure-observe path never pays for it.
+  const wantsArming = running.some((g) => (g.mode || read.config.mode) === "armed");
+  const stats = wantsArming ? ledgerStats(root) : {};
   const results = [];
+  let deny = null;
   for (const guard of running) {
     const started = process.hrtime.bigint();
+    const eff = effectiveState(guard, read.config, base.path, stats[guard.id]);
     const matched = evaluateGuard(guard, event, payload, read.config);
     const durMs = Number(process.hrtime.bigint() - started) / 1e6;
-    // The clamp, in the only place a decision is ever named: a match is a
-    // would-deny, which is a record. "deny" is unreachable at v1.
-    const decision = matched ? "would-deny" : "pass";
+    // The only place a decision is ever named. "deny" is reachable through
+    // exactly one door: effectiveState said armed, which means the provenance,
+    // the deny reply, the zone, and the ledger evidence all held.
+    const decision = matched ? (eff.mode === "armed" ? "deny" : "would-deny") : "pass";
     appendLedger(root, ledgerRow(base, {
       actor: guard.det.actor, guardId: guard.id, classId: guard.classId, decision, matched,
+      mode: eff.mode,
       durMs: Math.round(durMs * 1000) / 1000, rest: { confidence: guard.det.confidence },
     }));
-    results.push({ guardId: guard.id, classId: guard.classId, decision, matched });
+    results.push({ guardId: guard.id, classId: guard.classId, decision, matched, mode: eff.mode });
+    if (decision === "deny" && !deny) deny = guard;
   }
 
-  return {
+  const out = {
     jig: {
       event,
-      mode: V1_MODE,
-      decision: results.some((r) => r.decision === "would-deny") ? "would-deny" : "pass",
+      mode: results.some((r) => r.mode === "armed") ? "armed" : "observe",
+      decision: results.some((r) => r.decision === "deny") ? "deny"
+        : results.some((r) => r.decision === "would-deny") ? "would-deny" : "pass",
       guards: results,
     },
   };
+  // The deny reply is schema-complete by construction: effectiveState refuses
+  // to arm a detector whose catalogue entry lacks any of the three parts, so a
+  // deny that reaches here always carries reason, alternative and override.
+  if (deny) {
+    const d = deny.det.deny;
+    const reason = d.reason + " Instead: " + d.alternative + " To override: " + d.override + ".";
+    if (event === "PreToolUse") {
+      out.hookSpecificOutput = {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: reason,
+      };
+    } else {
+      out.decision = "block";
+      out.reason = reason;
+    }
+  }
+  return out;
 }
 
 module.exports = {
   HOOK_RUNNERS, EVENT_TOOLS, V1_MODE, CONFIG_KEYS, GUARD_KEYS, MATCHER_KEYS, DEFAULT_BRANCHES,
+  ARM_SESSIONS, ARMABLE_PROVENANCE,
   CONFIG_FILE, LEDGER_FILE, OFF_FILE,
   statePath, isOff, isConfigured, readInput,
   classById, readConfig, validateConfig,
   blankRegions, pushBranch, branchInScope, evaluateGuard,
+  effectiveState, ledgerStats, zoneForcesObserve,
   appendLedger, runEvent,
 };

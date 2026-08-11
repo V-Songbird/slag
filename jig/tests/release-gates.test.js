@@ -306,12 +306,12 @@ test("release gate: readers ignore-and-warn on a key they do not know", () => {
   // A field a later jig added: warned about by name, and every guard still runs.
   const wider = lib.validateConfig({
     ...good,
-    zones: { edges: ["bin/**"] },
+    telemetry: { level: "verbose" },
     guards: good.guards.map((g) => ({ ...g, note: "added by a later jig" })),
   });
   assert.deepEqual(wider.problems, []);
   assert.equal(wider.guards.length, clean.guards.length);
-  assert.ok(wider.warnings.some((w) => /ignoring unknown key `zones`/.test(w)));
+  assert.ok(wider.warnings.some((w) => /ignoring unknown key `telemetry`/.test(w)));
   assert.ok(wider.warnings.some((w) => /ignoring unknown key `note`/.test(w)));
 
   // The one exception, and it is the injection firewall: a key that could
