@@ -59,8 +59,23 @@ const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 // activation, it only ever targets a committed hook file, and it always lands
 // in the item consent tier — an edit to a file jig does not own is approved by
 // name or not at all.
-const CHANGE_KINDS = ["write-side-file", "write-config", "include-line"];
-const INSTALLABLE_KINDS = ["write-side-file", "write-config", "include-line"];
+const CHANGE_KINDS = ["write-side-file", "write-config", "include-line", "write-settings"];
+const INSTALLABLE_KINDS = ["write-side-file", "write-config", "include-line", "write-settings"];
+
+// write-settings is additionally gated behind the permissions probe series
+// (jig-brief §5, 0.4.0): the capability exists only after a human has run
+// scripts/probes/permissions.js against a pinned CLI and a green results.json
+// sits beside it. Probes first, capability second — a missing or red record
+// keeps the gate closed. JIG_PROBE_RESULTS points tests at a fixture.
+function probeGreen() {
+  const file = process.env.JIG_PROBE_RESULTS || path.join(__dirname, "probes", "results.json");
+  try {
+    const record = JSON.parse(stripBom(fs.readFileSync(file, "utf8")));
+    return record.green === true && typeof record.cliVersion === "string" && record.cliVersion.length > 0;
+  } catch {
+    return false;
+  }
+}
 
 // The per-kind target allowlist — the second half of the path guard. Containment
 // under the project root stops a write escaping the repository; this stops a
@@ -70,6 +85,7 @@ const KIND_TARGETS = {
   "write-side-file": [STATE_DIR + "/", ".github/workflows/"],
   "write-config": [STATE_DIR + "/config.json"],
   "include-line": ["scripts/git-hooks/", ".husky/"],
+  "write-settings": [".claude/settings.json"],
 };
 
 // Files the engine owns. A plan that could write these could rewrite the record
@@ -434,8 +450,13 @@ function planFromDraft(draft, root) {
       continue;
     }
     if (!INSTALLABLE_KINDS.includes(raw.kind)) {
-      problems.push(label + ": the kind " + raw.kind + " is implemented but reserved for 0.2.0 — nothing installs" +
-        " through it at v1");
+      problems.push(label + ": the kind " + raw.kind + " is implemented but not installable in this release");
+      continue;
+    }
+    if (raw.kind === "write-settings" && !probeGreen()) {
+      problems.push(label + ": write-settings is gated behind the permissions probe series — run" +
+        " scripts/probes/permissions.js against a pinned CLI and land a green results.json first." +
+        " Until then, permission rules stay a printed proposal.");
       continue;
     }
     const rel = toPosix(typeof raw.path === "string" ? raw.path.trim() : "");
@@ -1197,6 +1218,9 @@ function consentFor(change, guards) {
   }
   if (change.kind === "include-line") {
     return { tier: "item", why: "edits one line into a file jig does not own" };
+  }
+  if (change.kind === "write-settings") {
+    return { tier: "item", why: "writes into the host's own settings file — the probe-gated capability" };
   }
   if (toPosix(change.path).startsWith(".github/workflows/")) {
     return { tier: "item", why: "fails the build for everyone who pushes" };

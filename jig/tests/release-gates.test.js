@@ -190,12 +190,14 @@ test("release gate: no template targets an instruction file, and jig ships none 
       assert.equal(entry.target.endsWith(path.basename(rel)), false, entry.name + " targets " + entry.target);
     }
   }
-  // A change kind that could reach a host settings file does not exist yet.
-  for (const kind of engine.CHANGE_KINDS) {
+  // Exactly one kind may ever reach a settings file, and it sits behind the
+  // permissions probe gate. Every other kind still cannot name one.
+  for (const kind of engine.CHANGE_KINDS.filter((k) => k !== "write-settings")) {
     for (const target of engine.KIND_TARGETS[kind] || []) {
       assert.equal(String(target).includes("settings.json"), false, kind + " can target " + target);
     }
   }
+  assert.deepEqual(engine.KIND_TARGETS["write-settings"], [".claude/settings.json"]);
   const shipped = listFiles(PLUGIN_ROOT, ["fixtures", "node_modules"]);
   for (const rel of shipped) {
     const base = path.basename(rel);

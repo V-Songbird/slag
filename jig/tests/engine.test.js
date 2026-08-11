@@ -516,3 +516,46 @@ test("an sh hook takes the sh line and is stamped a gap, because jig cannot pars
   const after = fs.readFileSync(path.join(root, "scripts/git-hooks/pre-commit"), "utf-8");
   assert.ok(after.trimEnd().endsWith(ACTIVATION.sh.line));
 });
+
+// ---------------------------------------------------------------------------
+// write-settings, behind the permissions probe gate (0.4.0)
+
+test("write-settings is refused until the probe series is green, then installs item-approved", () => {
+  const settingsDraft = [{ id: "perm", kind: "write-settings", path: ".claude/settings.json",
+    content: '{\n  "permissions": { "deny": ["Bash(curl * | sh)"] }\n}\n' }];
+
+  const gated = tmpProject({ ".claude/settings.json": "{}\n" });
+  delete process.env.JIG_PROBE_RESULTS;
+  const refused = engine.planFromDraft({ changes: settingsDraft }, gated);
+  assert.match(refused.problems.join(" "), /gated behind the permissions probe series/);
+
+  const green = tmpProject({ ".claude/settings.json": "{}\n" });
+  const results = path.join(green, "probe-results.json");
+  fs.writeFileSync(results, JSON.stringify({ cliVersion: "9.9.9 (probe fixture)", green: true, checks: [] }));
+  process.env.JIG_PROBE_RESULTS = results;
+  try {
+    draft(green, settingsDraft);
+    const applied = apply(green, ["perm"]);
+    assert.equal(applied.applied[0].outcome, "applied");
+    const written = JSON.parse(fs.readFileSync(path.join(green, ".claude", "settings.json"), "utf-8"));
+    assert.deepEqual(written.permissions.deny, ["Bash(curl * | sh)"]);
+    engine.cmdRevert(green, { _: [], change: [], all: true });
+    assert.equal(fs.readFileSync(path.join(green, ".claude", "settings.json"), "utf-8"), "{}\n");
+  } finally {
+    delete process.env.JIG_PROBE_RESULTS;
+  }
+});
+
+test("a red or malformed probe record keeps the gate closed", () => {
+  const root = tmpProject({ ".claude/settings.json": "{}\n" });
+  const results = path.join(root, "probe-results.json");
+  fs.writeFileSync(results, JSON.stringify({ cliVersion: "9.9.9", green: false }));
+  process.env.JIG_PROBE_RESULTS = results;
+  try {
+    const refused = engine.planFromDraft({ changes: [{ id: "perm", kind: "write-settings",
+      path: ".claude/settings.json", content: "{}\n" }] }, root);
+    assert.match(refused.problems.join(" "), /probe/);
+  } finally {
+    delete process.env.JIG_PROBE_RESULTS;
+  }
+});
