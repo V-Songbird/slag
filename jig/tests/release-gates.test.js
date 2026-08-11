@@ -375,7 +375,8 @@ test("release gate: a hook fired below the project root silently guards nothing"
 
 // jig-brief §2 amendment 2: 0.1.0 structurally cannot deny. It is the property
 // that makes a false positive cost a ledger line instead of a blocked tool
-// call, which is what lets the efficacy gate report 4 of 8 and still ship.
+// call, which is what lets the efficacy gate disclose a heuristic miss and
+// still ship.
 test("release gate: nothing jig emits can refuse a tool call", () => {
   const root = fullyInstalled();
   const armed = JSON.parse(fs.readFileSync(path.join(root, ".jig", "config.json"), "utf-8"));
