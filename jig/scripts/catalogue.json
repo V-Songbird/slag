@@ -1035,5 +1035,53 @@
         "generation": "claude-opus-5, 2026-08"
       }
     }
-  ]
+  ],
+  "activation": {
+    "sh": {
+      "line": "command -v node >/dev/null 2>&1 && { node .jig/checks/run.mjs || exit 1; } # jig:checks",
+      "marker": "jig:checks",
+      "note": "One line for an existing sh pre-commit. Skips silently when node is off PATH; the CI workflow is the floor."
+    },
+    "node": {
+      "line": "require(\"child_process\").spawnSync(process.execPath, [\".jig/checks/run.mjs\"], { stdio: \"inherit\" }).status && process.exit(1); // jig:checks",
+      "marker": "jig:checks",
+      "note": "One line for an existing node-shebang pre-commit (CommonJS). Uses the running node, so no PATH hazard."
+    }
+  },
+  "commandPresets": {
+    "windowsNote": "npm, npx, pnpm and yarn are .cmd shims on Windows — spawn the resolved real path or process.execPath, never shell:true.",
+    "presets": {
+      "run-checks": {
+        "any": [
+          "node",
+          ".jig/checks/run.mjs"
+        ]
+      },
+      "run-checks-selftest": {
+        "any": [
+          "node",
+          ".jig/checks/run.mjs",
+          "--selftest"
+        ]
+      },
+      "test": {
+        "npm": [
+          "npm",
+          "test"
+        ],
+        "pnpm": [
+          "pnpm",
+          "test"
+        ],
+        "yarn": [
+          "yarn",
+          "test"
+        ],
+        "node": [
+          "node",
+          "--test"
+        ]
+      }
+    }
+  }
 }

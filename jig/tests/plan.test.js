@@ -367,7 +367,7 @@ test("the stamped classes and the unverifiable artifacts both reach the rendered
   planOnly(root, ALL_FOUR);
   const md = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
   const matrix = readJson(root, ".jig/plan.json");
-  assert.deepEqual(matrix.enforcementGaps.sort(), [".github/workflows/jig.yml", ".jig/activation.md"]);
+  assert.deepEqual(matrix.enforcementGaps.sort(), [".github/workflows/jig.yml", ".jig/activation.md", ".jig/hooks/pre-commit"]);
   for (const p of matrix.enforcementGaps) assert.ok(md.includes("`" + p + "`"), p + " is not on the page");
   for (const row of matrix.rows.filter((r) => r.enforcementGap)) {
     assert.ok(md.includes("`" + row.classId + "` — no host-neutral deterministic lever"));
@@ -409,6 +409,7 @@ test("everything that only reports is approved in one go", () => {
     ".jig/checks/run.mjs",
     ".jig/checks/silent-catch.check.mjs",
     ".jig/checks/test-file-deletion.check.mjs",
+    ".jig/hooks/pre-commit",
     ".jig/proposed-permissions.json",
   ]);
   for (const a of batch) assert.match(a.why, /reports only, and refuses nothing/);

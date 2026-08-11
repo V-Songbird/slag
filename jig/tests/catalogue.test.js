@@ -302,3 +302,37 @@ test("every detector carries a kebab-case id, unique within its class", () => {
     assert.equal(new Set(ids).size, ids.length, `${cls.id} has duplicate detector ids`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Activation lines and command presets (0.2.0)
+
+test("both activation lines carry their marker, and the node one parses as JavaScript", () => {
+  for (const key of ["sh", "node"]) {
+    const entry = catalogue.activation[key];
+    assert.ok(entry.line.includes(entry.marker), key + ": the marker is not in the line");
+    assert.ok(entry.note && entry.note.length > 20, key + " has no note");
+  }
+  const { spawnSync } = require("child_process");
+  const os = require("os");
+  const tmp = path.join(os.tmpdir(), "jig-activation-check.js");
+  fs.writeFileSync(tmp, catalogue.activation.node.line + "\n");
+  const run = spawnSync(process.execPath, ["--check", tmp], { encoding: "utf-8", windowsHide: true });
+  fs.rmSync(tmp, { force: true });
+  assert.equal(run.status, 0, "the node activation line does not parse: " + run.stderr);
+});
+
+test("every command preset is an argv array of plain strings, never a shell string", () => {
+  const { presets, windowsNote } = catalogue.commandPresets;
+  assert.match(windowsNote, /shell:true/);
+  for (const [id, byStack] of Object.entries(presets)) {
+    for (const [stack, argv] of Object.entries(byStack)) {
+      assert.ok(Array.isArray(argv) && argv.length > 0, id + "/" + stack + " is not an argv array");
+      for (const word of argv) {
+        assert.equal(typeof word, "string");
+        assert.equal(/\s/.test(word), false, id + "/" + stack + " smuggles a shell string: " + word);
+      }
+      assert.notEqual(argv[0], "sh");
+      assert.notEqual(argv[1], "-c");
+    }
+  }
+});

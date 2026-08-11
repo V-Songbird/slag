@@ -54,13 +54,13 @@ const JOURNAL_FILE = "journal.jsonl";
 const PREIMAGE_DIR = "preimages";
 const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 
-// The change kinds the engine can execute. `include-line` is implemented and
-// tested from day one but is NOT installable at v1 — the 0.2.0 git-hook
-// activation work is its first real caller (jig-brief §3, amendment 1). Keeping
-// it out of INSTALLABLE_KINDS is what "reserved" means mechanically: `plan`
-// refuses to fingerprint one, so no catalogue class can route to it by accident.
+// The change kinds the engine can execute. `include-line` was reserved through
+// the 0.1.0 line and is installable from 0.2.0: its one caller is git-hook
+// activation, it only ever targets a committed hook file, and it always lands
+// in the item consent tier — an edit to a file jig does not own is approved by
+// name or not at all.
 const CHANGE_KINDS = ["write-side-file", "write-config", "include-line"];
-const INSTALLABLE_KINDS = ["write-side-file", "write-config"];
+const INSTALLABLE_KINDS = ["write-side-file", "write-config", "include-line"];
 
 // The per-kind target allowlist — the second half of the path guard. Containment
 // under the project root stops a write escaping the repository; this stops a
@@ -441,7 +441,23 @@ function planFromDraft(draft, root) {
     const rel = toPosix(typeof raw.path === "string" ? raw.path.trim() : "");
     const badTarget = targetProblem(root, raw.kind, rel);
     if (badTarget) { problems.push(label + ": " + badTarget); continue; }
-    if (typeof raw.content !== "string") { problems.push(label + ": " + rel + " has no `content` string"); continue; }
+    // An include-line change carries the line and its marker instead of whole
+    // file content — the final bytes are woven from the host file at apply
+    // time, because the host may legitimately change between plan and apply.
+    if (raw.kind === "include-line") {
+      if (typeof raw.line !== "string" || !raw.line.trim()) {
+        problems.push(label + ": an include-line change needs a `line` string"); continue;
+      }
+      if (typeof raw.marker !== "string" || !raw.marker.trim()) {
+        problems.push(label + ": an include-line change needs a `marker` string the line contains"); continue;
+      }
+      if (!raw.line.includes(raw.marker)) {
+        problems.push(label + ": the marker must appear in the line itself, or idempotency has nothing to key on");
+        continue;
+      }
+    } else if (typeof raw.content !== "string") {
+      problems.push(label + ": " + rel + " has no `content` string"); continue;
+    }
 
     const full = path.join(root, rel);
     const current = readIfExists(full);
@@ -462,7 +478,10 @@ function planFromDraft(draft, root) {
       // D17: an artifact jig cannot read back is a gap, stamped at plan time so
       // the matrix can render it before anybody approves anything.
       enforcementGap: verifyBy === "none",
-      content: raw.content,
+      content: raw.kind === "include-line" ? raw.line : raw.content,
+      marker: raw.kind === "include-line" ? raw.marker : undefined,
+      anchor: raw.kind === "include-line" && typeof raw.anchor === "string" ? raw.anchor : undefined,
+      line: raw.kind === "include-line" ? raw.line : undefined,
       rationale: typeof raw.rationale === "string" ? raw.rationale.trim() : "",
       // The manifest's half of the row, carried rather than computed, because
       // only the caller knows which classes an artifact is for and where its
@@ -616,7 +635,32 @@ function restoreWrite(root, ctx, changeId, write, cause) {
 function applyChange(root, ctx, change) {
   const full = path.join(root, change.path);
   const current = readIfExists(full);
-  const bytes = intendedBytes(change);
+
+  let bytes;
+  if (change.kind === "include-line") {
+    // Woven from the host as it is NOW — the marker is the idempotency check,
+    // and the anchor refusals catch a host that drifted out from under the
+    // plan. A missing host file is a refusal, never a create: include-line
+    // exists to edit a file somebody else owns, and a file that is not there
+    // is not theirs to have a line added to.
+    if (current === null) {
+      appendJournal(root, { event: "reject", tx: ctx.tx, plan: ctx.plan, change: change.id, path: change.path, cause: "missing-host" });
+      throw expected("Refusing to apply change " + change.id + ": " + change.path + " does not exist, and an" +
+        " include-line change never creates the file it edits.");
+    }
+    const host = stripBom(current.toString("utf8")).replace(/\r\n/g, "\n");
+    const woven = includeLineText(host, change);
+    if (woven.noop) {
+      return { change: change.id, path: change.path, outcome: "already-applied", enforcementGap: change.enforcementGap };
+    }
+    if (woven.problem) {
+      appendJournal(root, { event: "reject", tx: ctx.tx, plan: ctx.plan, change: change.id, path: change.path, cause: "anchor" });
+      throw expected("Refusing to apply change " + change.id + ": " + woven.problem);
+    }
+    bytes = applyStyle(woven.text, { eol: change.eol, bom: change.bom });
+  } else {
+    bytes = intendedBytes(change);
+  }
 
   // Idempotency before staleness, deliberately: a re-run of an already-applied
   // change reads as "stale" to a naive hash check, and refusing it would make
@@ -625,8 +669,11 @@ function applyChange(root, ctx, change) {
     return { change: change.id, path: change.path, outcome: "already-applied", enforcementGap: change.enforcementGap };
   }
 
+  // include-line is exempt from the hash check on purpose: weaving at apply
+  // time exists precisely because the host may change between plan and apply,
+  // and the marker plus the anchor refusals are its staleness semantics.
   const currentHash = current === null ? null : hashBytes(current);
-  if (currentHash !== change.sourceHash) {
+  if (change.kind !== "include-line" && currentHash !== change.sourceHash) {
     const was = change.sourceHash === null ? "did not exist when the plan was made" : "was fingerprinted at plan time";
     appendJournal(root, { event: "reject", tx: ctx.tx, plan: ctx.plan, change: change.id, path: change.path, cause: "stale" });
     throw expected("Refusing to apply change " + change.id + ": " + change.path + " has changed since it " + was +
@@ -888,7 +935,7 @@ function draftFromTemplates(root, opts) {
     });
   };
 
-  const wanted = ["check-driver", ...selection.map((id) => "check-" + id), "activation"];
+  const wanted = ["check-driver", ...selection.map((id) => "check-" + id), "activation", "hook-shim"];
   if (!opts["no-ci"]) wanted.push("ci-workflow");
   for (const name of wanted) {
     const entry = byName.get(name);
@@ -1065,6 +1112,9 @@ function consentFor(change, guards) {
       why: "wires " + guards.length + " guard" + (guards.length === 1 ? "" : "s") +
         " into a hook that can refuse a tool call",
     };
+  }
+  if (change.kind === "include-line") {
+    return { tier: "item", why: "edits one line into a file jig does not own" };
   }
   if (toPosix(change.path).startsWith(".github/workflows/")) {
     return { tier: "item", why: "fails the build for everyone who pushes" };

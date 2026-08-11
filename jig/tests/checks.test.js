@@ -336,7 +336,7 @@ test("apply records every generated artifact with the whole row shape", () => {
   assert.equal(applied.manifest, ".jig/manifest.json");
   const manifest = engine.readManifest(root);
   assert.equal(manifest.schemaVersion, 1);
-  assert.equal(manifest.artifacts.length, 9);
+  assert.equal(manifest.artifacts.length, 10);
   for (const row of manifest.artifacts) {
     assert.deepEqual(Object.keys(row).sort(), [
       "classIds", "hash", "id", "installedAt", "kind", "mode", "ownership", "path",
@@ -708,7 +708,7 @@ test("no host settings file is written, read back, or named as a target", () => 
 test("an artifact jig cannot read back is stamped a gap rather than reported as a guarantee", () => {
   const root = project({});
   const { plan } = install(root, ALL_FOUR);
-  assert.deepEqual(plan.enforcementGaps.sort(), [".github/workflows/jig.yml", ".jig/activation.md"]);
+  assert.deepEqual(plan.enforcementGaps.sort(), [".github/workflows/jig.yml", ".jig/activation.md", ".jig/hooks/pre-commit"]);
   const manifest = engine.readManifest(root);
   assert.ok(manifest.artifacts.every((a) => a.hash !== null));
 });

@@ -339,15 +339,23 @@ test("a node shebang makes an extensionless file JavaScript", () => {
 // include-line — implemented, tested, reserved for 0.2.0
 // ---------------------------------------------------------------------------
 
-test("include-line is a known kind that nothing may install through at v1", () => {
+test("include-line is installable from 0.2.0, and only into a committed hook location", () => {
   assert.equal(engine.CHANGE_KINDS.includes("include-line"), true);
-  assert.equal(engine.INSTALLABLE_KINDS.includes("include-line"), false);
-  const root = tmpProject({});
-  const rejected = engine.planFromDraft(
-    { changes: [{ id: "c1", kind: "include-line", path: "scripts/git-hooks/pre-commit", content: "x" }] },
+  assert.equal(engine.INSTALLABLE_KINDS.includes("include-line"), true);
+  const root = tmpProject({ "scripts/git-hooks/pre-commit": "#!/bin/sh\nexit 0\n" });
+  const accepted = engine.planFromDraft(
+    { changes: [{ id: "c1", kind: "include-line", path: "scripts/git-hooks/pre-commit",
+      line: "node .jig/checks/run.mjs # jig:checks", marker: "jig:checks" }] },
     root
   );
-  assert.match(rejected.problems.join(" "), /reserved for 0\.2\.0/);
+  assert.deepEqual(accepted.problems, []);
+  // …and nowhere else: the allowlist still refuses an instruction file.
+  const rejected = engine.planFromDraft(
+    { changes: [{ id: "c2", kind: "include-line", path: "CLAUDE.md",
+      line: "x # jig:checks", marker: "jig:checks" }] },
+    root
+  );
+  assert.match(rejected.problems.join(" "), /include-line/);
 });
 
 test("include-line refuses on a drifted or ambiguous anchor and no-ops on its own marker", () => {
@@ -447,4 +455,64 @@ test("the state directory jig creates keeps its own machine-local files out of g
   const ignore = fs.readFileSync(path.join(root, ".jig", ".gitignore"), "utf8");
   assert.match(ignore, /journal\.jsonl/);
   assert.match(ignore, /preimages\//);
+});
+
+// ---------------------------------------------------------------------------
+// include-line, applied for real (0.2.0 git-hook activation)
+
+const NODE_HOOK = fs.readFileSync(path.join(__dirname, "fixtures", "precommit-node"), "utf-8");
+const ACTIVATION = require("../scripts/catalogue.json").activation;
+
+function hookProject(body) {
+  return tmpProject({ "scripts/git-hooks/pre-commit": body });
+}
+
+function includeDraft(entry, anchor) {
+  return [{ id: "wire-hook", kind: "include-line", path: "scripts/git-hooks/pre-commit",
+    line: entry.line, marker: entry.marker, anchor }];
+}
+
+
+test("the node activation line lands after the anchor in a node-shebang hook, and verifies as JavaScript", () => {
+  const root = hookProject(NODE_HOOK);
+  draft(root, includeDraft(ACTIVATION.node, '"use strict";'));
+  const applied = apply(root, ["wire-hook"]);
+  assert.equal(applied.applied[0].outcome, "applied");
+  assert.equal(applied.applied[0].verifyBy, "exec");
+  const after = fs.readFileSync(path.join(root, "scripts/git-hooks/pre-commit"), "utf-8");
+  assert.ok(after.includes(ACTIVATION.node.line));
+  assert.ok(after.indexOf(ACTIVATION.node.line) < after.indexOf("process.exit(0)"),
+    "the line landed after the early exit, where it would never run");
+});
+
+test("re-applying the activation is a no-op, and an edited host still accepts the weave", () => {
+  const root = hookProject(NODE_HOOK);
+  draft(root, includeDraft(ACTIVATION.node, '"use strict";'));
+  apply(root, ["wire-hook"]);
+  const again = apply(root, ["wire-hook"]);
+  assert.equal(again.applied[0].outcome, "already-applied");
+
+  const edited = hookProject(NODE_HOOK);
+  draft(edited, includeDraft(ACTIVATION.node, '"use strict";'));
+  fs.appendFileSync(path.join(edited, "scripts/git-hooks/pre-commit"), "// edited after the plan\n");
+  const applied = apply(edited, ["wire-hook"]);
+  assert.equal(applied.applied[0].outcome, "applied");
+});
+
+test("revert restores the hook byte for byte after an include-line apply", () => {
+  const root = hookProject(NODE_HOOK);
+  draft(root, includeDraft(ACTIVATION.node, '"use strict";'));
+  apply(root, ["wire-hook"]);
+  engine.cmdRevert(root, { _: [], change: [], all: true });
+  assert.equal(fs.readFileSync(path.join(root, "scripts/git-hooks/pre-commit"), "utf-8"), NODE_HOOK);
+});
+
+test("an sh hook takes the sh line and is stamped a gap, because jig cannot parse sh back", () => {
+  const root = hookProject("#!/bin/sh\nset -e\n");
+  draft(root, includeDraft(ACTIVATION.sh));
+  const applied = apply(root, ["wire-hook"]);
+  assert.equal(applied.applied[0].outcome, "applied");
+  assert.equal(applied.applied[0].enforcementGap, true);
+  const after = fs.readFileSync(path.join(root, "scripts/git-hooks/pre-commit"), "utf-8");
+  assert.ok(after.trimEnd().endsWith(ACTIVATION.sh.line));
 });
