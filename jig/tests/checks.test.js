@@ -712,3 +712,51 @@ test("an artifact jig cannot read back is stamped a gap rather than reported as 
   const manifest = engine.readManifest(root);
   assert.ok(manifest.artifacts.every((a) => a.hash !== null));
 });
+
+// ---------------------------------------------------------------------------
+// Toolchain probes in the witnessed catch (0.3.0)
+
+test("selftest --live runs the repo's own eslint against the side-file and shows the catch", () => {
+  const root = project({
+    "package.json": "{ \"private\": true }\n",
+    "node_modules/eslint/package.json": "{ \"name\": \"eslint\", \"bin\": { \"eslint\": \"bin/eslint.js\" } }\n",
+    // A stub with eslint's shape: reads stdin, exits 1 when the seeded
+    // violation is present. It proves jig resolves and spawns the REPO'S tool
+    // with the side-file config — the mechanics, not eslint itself.
+    "node_modules/eslint/bin/eslint.js":
+      'let s = "";\n' +
+      'process.stdin.on("data", (d) => { s += d; }).on("end", () => {\n' +
+      '  process.exit(s.includes("catch") ? 1 : 0);\n' +
+      "});\n",
+  });
+  const plan = engine.cmdPlan(root, {
+    _: [], change: [], select: "silent-catch", provenance: "elicited", "no-ci": true,
+  });
+  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+
+  const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
+  const probe = result.probes.find((p) => p.probe === "toolchain-eslint");
+  assert.ok(probe, "no toolchain probe ran for the installed eslint side-file");
+  assert.equal(probe.ran, true);
+  assert.equal(probe.caught, true);
+  assert.equal(probe.exitCode, 1);
+  assert.match(probe.command, /eslint\.jig\.config\.mjs/);
+});
+
+test("a detekt side-file probe degrades to the exact command instead of spawning a build", () => {
+  const root = project({
+    "build.gradle.kts": 'plugins { id("io.gitlab.arturbosch.detekt") version "1.23.6" }\n',
+  });
+  const plan = engine.cmdPlan(root, {
+    _: [], change: [], select: "silent-catch", provenance: "forensic", "no-ci": true,
+  });
+  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+
+  const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
+  const probe = result.probes.find((p) => p.probe === "toolchain-detekt");
+  assert.ok(probe);
+  assert.equal(probe.ran, false);
+  assert.match(probe.why, /does not spawn/);
+  assert.match(probe.command, /gradlew detekt/);
+  assert.ok(result.notes.some((n) => n.includes("toolchain-detekt")));
+});

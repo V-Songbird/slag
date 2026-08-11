@@ -186,6 +186,13 @@ Then take consent in two tiers, read off `consent` on the result:
 - `consent.item` — anything that wires a guard into a hook, or fails somebody's
   build. Approve these one at a time, by id.
 
+`toolchain` on the result is the consultant half: `included` lists the
+side-files this plan writes for tools the repository already carries — print
+each `wiring` line verbatim, it is the one line the user pastes to make their
+own tool run jig's config. `absent` names every tool the selection wanted that
+the repo does not carry; say plainly that jig never downloads one, and that
+installing the tool and re-running `plan` closes the gap.
+
 Two more keys on the result are reported, never swallowed. `refused` names each
 slot this selection wanted and could not have, and why; a plan that quietly
 installs three of the four things somebody asked for is the plan that lies to

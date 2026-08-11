@@ -80,6 +80,36 @@
       "ownership": "file",
       "classId": null,
       "sha256": "5fbce14380de41ea1a181fb5440a038cbf36f929306e4cf4358e03d0966b0dde"
+    },
+    {
+      "name": "toolchain-eslint",
+      "version": "1.0.0",
+      "file": "toolchain-eslint.config.mjs",
+      "target": ".jig/eslint.jig.config.mjs",
+      "kind": "write-side-file",
+      "ownership": "file",
+      "classId": null,
+      "sha256": "0b7afab94875bf3ac437f30ada46e839b64231210d81e3e8ed19035164bb313b"
+    },
+    {
+      "name": "toolchain-tsconfig",
+      "version": "1.0.0",
+      "file": "toolchain-tsconfig.json",
+      "target": ".jig/tsconfig.strict.json",
+      "kind": "write-side-file",
+      "ownership": "file",
+      "classId": null,
+      "sha256": "720b825c42ef404354b8f34c36104e0a05c932a90a9a80ed49e9a1c17e8610be"
+    },
+    {
+      "name": "toolchain-detekt",
+      "version": "1.0.0",
+      "file": "toolchain-detekt.yml",
+      "target": ".jig/detekt.jig.yml",
+      "kind": "write-side-file",
+      "ownership": "file",
+      "classId": null,
+      "sha256": "7b6643f5214149d0ba94cc6943873bc7040672573023029baddf43d44e3e2409"
     }
   ]
 }

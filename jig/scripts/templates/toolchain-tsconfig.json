@@ -1,0 +1,10 @@
+{
+  "_jig": "jig:owned — generated from jig's tsconfig side-file template. Extend it from your own tsconfig.json ({ \"extends\": \"./.jig/tsconfig.strict.json\" }); jig never edits yours. Verified by running the repository's own tsc; absent tool means ENFORCEMENT GAP, never a download.",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noEmit": true
+  }
+}

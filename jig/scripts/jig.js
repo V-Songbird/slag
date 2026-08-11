@@ -937,6 +937,32 @@ function draftFromTemplates(root, opts) {
 
   const wanted = ["check-driver", ...selection.map((id) => "check-" + id), "activation", "hook-shim"];
   if (!opts["no-ci"]) wanted.push("ci-workflow");
+
+  // Toolchain side-files ride along exactly when the selected classes route to
+  // a tool the repository actually carries. An absent tool is a named note,
+  // never a silent drop and never a download.
+  const facts = toolchainFacts(root);
+  const toolchain = { included: [], absent: [] };
+  for (const classId of selection) {
+    for (const det of catalogueClass(classId).detectors) {
+      if (!TOOLCHAIN_LEVER_TEMPLATES[det.lever]) continue;
+      const tool = toolchainToolFor(det);
+      if (!tool) continue;
+      const templateName = TOOLCHAIN_LEVER_TEMPLATES[det.lever];
+      if (toolPresent(facts, tool.id)) {
+        if (!toolchain.included.some((t) => t.template === templateName)) {
+          toolchain.included.push({ tool: tool.id, template: templateName, wiring: tool.wiring, verify: tool.verify });
+          wanted.push(templateName);
+        }
+      } else if (!toolchain.absent.some((t) => t.tool === tool.id && t.classId === classId)) {
+        toolchain.absent.push({
+          tool: tool.id, classId,
+          why: "the repository does not carry " + tool.id + ", so the " + det.lever +
+            " lever for " + classId + " is an enforcement gap until it does — jig never downloads a tool",
+        });
+      }
+    }
+  }
   for (const name of wanted) {
     const entry = byName.get(name);
     if (!entry) continue;
@@ -957,7 +983,7 @@ function draftFromTemplates(root, opts) {
   if (!changes.length) {
     throw expected("Every slot this selection needs is already taken:\n  - " + refused.join("\n  - "));
   }
-  return { draft: { changes }, refused, selection, provenance };
+  return { draft: { changes }, refused, selection, provenance, toolchain };
 }
 
 // ---------------------------------------------------------------------------
@@ -978,10 +1004,63 @@ const PLAN_MD_FILE = "plan.md";
 const PLAN_JSON_FILE = "plan.json";
 const BACKLOG_FILE = "backlog.json";
 
-// The release whose artifacts this build can actually generate. A detector on a
-// lever that ships later describes coverage jig cannot deliver today, so its
-// cell reads GAP naming the version — never DET on a promise.
-const AVAILABLE_NOW = "0.1.0-alpha";
+// The release whose artifacts this build can actually generate, and the order
+// releases arrive in. A detector on a lever that ships later describes
+// coverage jig cannot deliver today, so its cell reads GAP naming the version
+// — never DET on a promise. A lever from an EARLIER release stays available;
+// availability is an ordering, not an equality.
+const RELEASE_ORDER = ["0.1.0-alpha", "0.2.0-alpha", "0.3.0-alpha", "0.4.0-alpha", "0.5.0-alpha", "1.0.0"];
+const AVAILABLE_NOW = "0.3.0-alpha";
+
+function leverAvailable(lever) {
+  const at = RELEASE_ORDER.indexOf(lever.availableAt);
+  return at !== -1 && at <= RELEASE_ORDER.indexOf(AVAILABLE_NOW);
+}
+
+// Toolchain levers write one side-file each, named here so the matrix can read
+// which plan artifact does the catching. The tool itself is the repo's own —
+// jig ships the config, never the binary.
+const TOOLCHAIN_LEVER_TEMPLATES = {
+  "eslint-rule": "toolchain-eslint",
+  "type-system": "toolchain-tsconfig",
+  "detekt-rule": "toolchain-detekt",
+};
+
+// What the repository's own toolchain can run, read from disk at plan time.
+// Facts, not configuration: jig ships configs for tools that are here, and
+// stamps a gap for tools that are not — it never downloads one (locked in the
+// 2026-08-11 direction decision, roadmap 109).
+function toolchainFacts(root) {
+  const gradleKts = readIfExists(path.join(root, "build.gradle.kts"));
+  const gradle = readIfExists(path.join(root, "build.gradle"));
+  const gradleText = (gradleKts ? gradleKts.toString("utf8") : "") + (gradle ? gradle.toString("utf8") : "");
+  return {
+    eslint: fs.existsSync(path.join(root, "node_modules", "eslint")),
+    typescript: fs.existsSync(path.join(root, "node_modules", "typescript")),
+    gradle: gradleText.length > 0,
+    detekt: /detekt/i.test(gradleText),
+  };
+}
+
+// The catalogue's toolchain row for a detector, found by the tool the detector
+// names — so the wiring text and the verify command always come from data.
+function toolchainToolFor(det) {
+  const toolId = det.params && det.params.tool;
+  if (!toolId || !catalogue.toolchains) return null;
+  for (const [stack, entry] of Object.entries(catalogue.toolchains)) {
+    if (stack === "note" || !entry || !Array.isArray(entry.tools)) continue;
+    const hit = entry.tools.find((t) => t.id === toolId);
+    if (hit) return { stack, ...hit };
+  }
+  return null;
+}
+
+function toolPresent(facts, toolId) {
+  if (toolId === "eslint") return facts.eslint;
+  if (toolId === "typescript") return facts.typescript;
+  if (toolId === "detekt") return facts.detekt;
+  return false;
+}
 
 const CELL_RANK = { GAP: 0, PROB: 1, DET: 2 };
 const CONSENT_TIERS = ["batch", "item"];
@@ -1017,7 +1096,7 @@ function floorProblem(cls) {
 
 function detectorGrade(det) {
   const lever = leverOf(det.lever);
-  if (!lever || lever.availableAt !== AVAILABLE_NOW) return "GAP";
+  if (!lever || !leverAvailable(lever)) return "GAP";
   return lever.probabilistic || det.confidence !== "deterministic" ? "PROB" : "DET";
 }
 
@@ -1040,10 +1119,13 @@ function detectorArtifact(cls, det, index, changes, guards) {
   if (det.lever === "check-driver") return templated("check-" + cls.id);
   if (det.lever === "ci-workflow") return templated("ci-workflow");
   if (denyCapable(det)) {
-    const id = cls.id + "-" + index;
+    // The guard id is `<classId>-<detectorId>` — the stable identity the
+    // config, the manifest and the ledger all carry since 108.
+    const id = cls.id + "-" + det.id;
     const wired = guards.some((g) => g.id === id) && changes.some((c) => c.kind === "write-config");
     return wired ? id : null;
   }
+  if (TOOLCHAIN_LEVER_TEMPLATES[det.lever]) return templated(TOOLCHAIN_LEVER_TEMPLATES[det.lever]);
   return null;
 }
 
@@ -1364,6 +1446,9 @@ function cmdPlan(root, opts) {
     // rather than swallowed, because a plan that quietly installs three of the
     // four things you asked for is the plan that lies to you.
     refused: generated ? generated.refused : [],
+    // Toolchain side-files this plan includes (with their wiring lines), and
+    // the tools the selection wanted that the repository does not carry.
+    toolchain: generated ? generated.toolchain : null,
   };
 }
 
@@ -1670,6 +1755,51 @@ function runDriverProbe(root, live) {
   return { ...base, ran: true, caught: run.status === 0, exitCode: run.status, output: (run.stdout || "").trim() };
 }
 
+// One probe per installed toolchain side-file. Only the eslint probe is ever
+// spawned live — it takes its seeded violation on stdin and its exit code is
+// the whole verdict. The others cost a build (tsc) or a JVM (detekt), so they
+// degrade to the exact command and the expected outcome, never a stall.
+function runToolchainProbes(root, live) {
+  let artifacts = [];
+  try {
+    artifacts = readManifest(root).artifacts.filter((a) =>
+      a.template && a.template.name && a.template.name.startsWith("toolchain-") && a.state !== "retired");
+  } catch {
+    return [];
+  }
+  const facts = toolchainFacts(root);
+  const out = [];
+  const seen = new Set();
+  for (const artifact of artifacts) {
+    const templateName = artifact.template.name;
+    if (seen.has(templateName)) continue;
+    seen.add(templateName);
+    const lever = Object.keys(TOOLCHAIN_LEVER_TEMPLATES).find((l) => TOOLCHAIN_LEVER_TEMPLATES[l] === templateName);
+    const tool = toolchainToolFor({ params: { tool: { "toolchain-eslint": "eslint", "toolchain-tsconfig": "typescript", "toolchain-detekt": "detekt" }[templateName] } });
+    if (!tool) continue;
+    const command = tool.verify.argv.join(" ");
+    const base = {
+      probe: "toolchain-" + tool.id, kind: "toolchain", lever, artifact: artifact.path,
+      command, expected: tool.verify.expected,
+    };
+    if (!live) { out.push({ ...base, ran: false, why: "selftest was not run with --live" }); continue; }
+    if (!toolPresent(facts, tool.id)) {
+      out.push({ ...base, ran: false, why: "the repository does not carry " + tool.id + " — the side-file is a gap until it does" });
+      continue;
+    }
+    if (tool.id !== "eslint") {
+      out.push({ ...base, ran: false, why: "jig does not spawn " + tool.id + " (a full build) — run it yourself" });
+      continue;
+    }
+    const run = spawnSync(process.execPath, tool.verify.argv.slice(1), {
+      cwd: root, input: "try { x(); } catch (e) {}\n", encoding: "utf-8", windowsHide: true,
+    });
+    if (run.error) { out.push({ ...base, ran: false, why: "node could not be spawned (" + run.error.message + ")" }); continue; }
+    out.push({ ...base, ran: true, caught: run.status === 1, exitCode: run.status, output: (run.stdout || "").trim() || null });
+  }
+  return out;
+}
+
 function cmdSelftest(root, opts) {
   const live = opts.live === true || opts.live === "true";
   const classes = installedClasses(root);
@@ -1678,6 +1808,7 @@ function cmdSelftest(root, opts) {
     .filter((id) => LIVE_PROBES[id])
     .map((id) => runProbe(root, id, LIVE_PROBES[id], live));
   probes.push(runDriverProbe(root, live));
+  probes.push(...runToolchainProbes(root, live));
 
   const after = ledgerLines(root);
   const caught = probes.filter((p) => p.caught === true);
@@ -1866,6 +1997,9 @@ function stackFacts(root) {
     typescript: fs.existsSync(path.join(root, "tsconfig.json")),
     eslintConfig: firstExisting(root, ESLINT_CONFIGS),
     ciWorkflows: fs.existsSync(path.join(root, ".github", "workflows")),
+    // Which toolchain binaries the repo itself carries — what 0.3.0's
+    // side-file levers key on. Facts only; jig never downloads a tool.
+    toolchain: toolchainFacts(root),
   };
 }
 
@@ -2174,7 +2308,8 @@ module.exports = {
   SCHEMA_VERSION, STATE_DIR, JOURNAL_FILE, PREIMAGE_DIR, PROFILE_FILE,
   CONFIG_FILE, MANIFEST_FILE, PERMISSIONS_FILE, ACTIVATION_FILE, LEDGER_FILE, HOOK_RUNNERS,
   PLAN_MD_FILE, PLAN_JSON_FILE, BACKLOG_FILE, AVAILABLE_NOW, CELL_RANK, CONSENT_TIERS,
-  leverOf, denyCapable, hostNeutralFloor, floorProblem, floorCheck, detectorGrade, detectorCeiling,
+  leverOf, leverAvailable, toolchainFacts, toolchainToolFor, toolPresent, RELEASE_ORDER,
+  denyCapable, hostNeutralFloor, floorProblem, floorCheck, detectorGrade, detectorCeiling,
   detectorCell, matrixRow, consentFor, bestGrade, backlogFor, buildReview, cellText, renderReviewMd,
   PROFILE_KEYS, FILE_SLOTS, HOOK_SLOTS, RULE_FILES,
   CHANGE_KINDS, INSTALLABLE_KINDS, KIND_TARGETS, VALIDATORS,

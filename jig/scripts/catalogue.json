@@ -86,6 +86,12 @@
       "probabilistic": true,
       "availableAt": "never",
       "description": "Human reading. Recorded so the matrix can say honestly that nothing mechanical covers this class."
+    },
+    "detekt-rule": {
+      "hostNeutral": true,
+      "probabilistic": false,
+      "availableAt": "0.3.0-alpha",
+      "description": "A rule in a jig-authored detekt side-config, run by the project own detekt through Gradle. Absent tool means ENFORCEMENT GAP, never a download."
     }
   },
   "classes": [
@@ -157,13 +163,26 @@
           "id": "eslint-rule",
           "actor": "human-ci",
           "lever": "eslint-rule",
-          "runner": "checks",
+          "runner": "ci",
           "confidence": "deterministic",
           "params": {
+            "tool": "eslint",
             "rule": "no-empty",
             "options": {
               "allowEmptyCatch": false
             }
+          }
+        },
+        {
+          "id": "detekt-rule",
+          "actor": "human-ci",
+          "lever": "detekt-rule",
+          "runner": "ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "detekt",
+            "rule": "EmptyCatchBlock",
+            "config": ".jig/detekt.jig.yml"
           }
         }
       ],
@@ -249,6 +268,18 @@
             "alternative": "Run the one test from the command line instead of focusing it in the file.",
             "override": "set the guard to observe in .jig/config.json, or create .jig/off"
           }
+        },
+        {
+          "id": "eslint-rule",
+          "actor": "human-ci",
+          "lever": "eslint-rule",
+          "runner": "ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "no-restricted-syntax",
+            "config": ".jig/eslint.jig.config.mjs"
+          }
         }
       ],
       "fixtures": {
@@ -308,9 +339,10 @@
           "id": "type-system",
           "actor": "human-ci",
           "lever": "type-system",
-          "runner": "checks",
+          "runner": "ci",
           "confidence": "heuristic",
           "params": {
+            "tool": "typescript",
             "requires": "typescript"
           }
         }
@@ -337,9 +369,10 @@
           "id": "type-system",
           "actor": "human-ci",
           "lever": "type-system",
-          "runner": "checks",
+          "runner": "ci",
           "confidence": "heuristic",
           "params": {
+            "tool": "typescript",
             "requires": "typescript"
           }
         }
@@ -366,9 +399,10 @@
           "id": "eslint-rule",
           "actor": "human-ci",
           "lever": "eslint-rule",
-          "runner": "checks",
+          "runner": "ci",
           "confidence": "deterministic",
           "params": {
+            "tool": "eslint",
             "rule": "no-nested-ternary"
           }
         }
@@ -467,9 +501,10 @@
           "id": "eslint-rule",
           "actor": "human-ci",
           "lever": "eslint-rule",
-          "runner": "checks",
+          "runner": "ci",
           "confidence": "deterministic",
           "params": {
+            "tool": "eslint",
             "rule": "no-magic-numbers"
           }
         }
@@ -499,9 +534,10 @@
           "id": "eslint-rule",
           "actor": "human-ci",
           "lever": "eslint-rule",
-          "runner": "checks",
+          "runner": "ci",
           "confidence": "deterministic",
           "params": {
+            "tool": "eslint",
             "rule": "@typescript-eslint/no-floating-promises",
             "requires": "typescript type information"
           }
@@ -532,9 +568,10 @@
           "id": "eslint-rule",
           "actor": "human-ci",
           "lever": "eslint-rule",
-          "runner": "checks",
+          "runner": "ci",
           "confidence": "heuristic",
           "params": {
+            "tool": "eslint",
             "rule": "max-lines-per-function"
           }
         }
@@ -561,9 +598,10 @@
           "id": "type-system",
           "actor": "human-ci",
           "lever": "type-system",
-          "runner": "checks",
+          "runner": "ci",
           "confidence": "heuristic",
           "params": {
+            "tool": "typescript",
             "requires": "typescript"
           }
         }
@@ -876,9 +914,10 @@
           "id": "eslint-rule",
           "actor": "human-ci",
           "lever": "eslint-rule",
-          "runner": "checks",
+          "runner": "ci",
           "confidence": "heuristic",
           "params": {
+            "tool": "eslint",
             "rule": "no-undef"
           }
         }
@@ -1010,9 +1049,10 @@
           "id": "eslint-rule",
           "actor": "human-ci",
           "lever": "eslint-rule",
-          "runner": "checks",
+          "runner": "ci",
           "confidence": "deterministic",
           "params": {
+            "tool": "eslint",
             "rule": "import/no-unresolved",
             "requires": "eslint-plugin-import"
           }
@@ -1082,6 +1122,72 @@
           "--test"
         ]
       }
+    }
+  },
+  "toolchains": {
+    "note": "Detection facts jig reads at plan time. The tool is always the repository own install; jig ships configs, never binaries.",
+    "node": {
+      "detect": {
+        "file": "package.json"
+      },
+      "tools": [
+        {
+          "id": "eslint",
+          "resolve": "node_modules/eslint",
+          "template": "toolchain-eslint",
+          "verify": {
+            "argv": [
+              "node",
+              "node_modules/eslint/bin/eslint.js",
+              "--no-config-lookup",
+              "--config",
+              ".jig/eslint.jig.config.mjs",
+              "--stdin"
+            ],
+            "expected": "exit 1 on a seeded empty catch piped to stdin"
+          },
+          "wiring": "add to package.json scripts: \"lint:jig\": \"eslint --no-config-lookup --config .jig/eslint.jig.config.mjs .\""
+        },
+        {
+          "id": "typescript",
+          "resolve": "node_modules/typescript",
+          "template": "toolchain-tsconfig",
+          "verify": {
+            "argv": [
+              "node",
+              "node_modules/typescript/bin/tsc",
+              "--project",
+              ".jig/tsconfig.strict.json",
+              "--noEmit"
+            ],
+            "expected": "exit 0 on a strict-clean tree"
+          },
+          "wiring": "extend your tsconfig.json: { \"extends\": \"./.jig/tsconfig.strict.json\" }"
+        }
+      ]
+    },
+    "kotlin-gradle": {
+      "detect": {
+        "file": "build.gradle.kts"
+      },
+      "tools": [
+        {
+          "id": "detekt",
+          "resolveText": {
+            "file": "build.gradle.kts",
+            "contains": "detekt"
+          },
+          "template": "toolchain-detekt",
+          "verify": {
+            "argv": [
+              "./gradlew",
+              "detekt"
+            ],
+            "expected": "the detekt task fails on a seeded empty catch block"
+          },
+          "wiring": "point the detekt Gradle extension at config from files(\".jig/detekt.jig.yml\")"
+        }
+      ]
     }
   }
 }

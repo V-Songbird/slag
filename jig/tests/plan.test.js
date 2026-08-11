@@ -199,17 +199,17 @@ test("the Codex column is GAP in every row, because no detector names codex-sess
 });
 
 test("a detector on a lever that ships later reads GAP, naming the release", () => {
-  const later = { actor: "human-ci", lever: "eslint-rule", runner: "checks", confidence: "deterministic" };
-  assert.notEqual(catalogue.levers["eslint-rule"].availableAt, engine.AVAILABLE_NOW);
+  const later = { actor: "human-ci", lever: "prose-rule", runner: "ci", confidence: "deterministic" };
+  assert.notEqual(catalogue.levers["prose-rule"].availableAt, engine.AVAILABLE_NOW);
   const cell = engine.detectorCell(synthetic({}), later, 0, "elicited", [], []);
   assert.equal(cell.grade, "GAP");
-  assert.match(cell.why, /eslint-rule lever ships at 0\.3\.0-alpha/);
+  assert.match(cell.why, /prose-rule lever ships at 0\.4\.0-alpha/);
 });
 
 test("a class covered by both a shipping lever and a later one is graded on the shipping one", () => {
   const cls = classOf("silent-catch");
   const ci = cls.detectors.filter((d) => d.actor === "human-ci").map((d) => d.lever).sort();
-  assert.deepEqual(ci, ["ci-workflow", "eslint-rule"]);
+  assert.deepEqual(ci, ["ci-workflow", "detekt-rule", "eslint-rule"]);
   const root = project({});
   planOnly(root, "silent-catch");
   const cell = readJson(root, ".jig/plan.json").rows[0].cells["human-ci"];
@@ -250,8 +250,16 @@ test("a probabilistic lever says its ceiling is unmeasured rather than inventing
 });
 
 test("AVAILABLE_NOW picks out exactly the levers this build can emit an artifact for", () => {
-  const now = Object.keys(catalogue.levers).filter((id) => catalogue.levers[id].availableAt === engine.AVAILABLE_NOW);
-  assert.deepEqual(now.sort(), ["bash-guard", "check-driver", "ci-workflow", "edit-observe-guard"]);
+  const now = Object.keys(catalogue.levers).filter((id) => engine.leverAvailable(catalogue.levers[id]));
+  assert.deepEqual(now.sort(), [
+    "bash-guard", "check-driver", "ci-workflow", "detekt-rule",
+    "edit-observe-guard", "eslint-rule", "test-suite", "type-system",
+  ]);
+  // …and the ordering really is an ordering: an earlier release's lever stays
+  // available, a later one does not.
+  assert.equal(engine.leverAvailable({ availableAt: "0.1.0-alpha" }), true);
+  assert.equal(engine.leverAvailable({ availableAt: "0.4.0-alpha" }), false);
+  assert.equal(engine.leverAvailable({ availableAt: "never" }), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -632,4 +640,59 @@ test("an assumed install can never reach arm, and the refusal says so", () => {
   seedSessions(root, 50);
   assert.throws(() => engine.cmdArm(root, { _: [], change: [], guard: GUARD }),
     /assumed.*never arm/s);
+});
+
+// ---------------------------------------------------------------------------
+// Toolchain levers (0.3.0) — the repo's own tools, side-files, never a download
+
+test("a repo carrying eslint gets the side-file, the wiring line, and a DET ci cell", () => {
+  const root = project({
+    "package.json": "{ \"private\": true }\n",
+    "node_modules/eslint/package.json": "{ \"name\": \"eslint\" }\n",
+  });
+  const plan = engine.cmdPlan(root, {
+    _: [], change: [], select: "silent-catch,focused-or-skipped-test", provenance: "elicited", "no-ci": true,
+  });
+  assert.equal(plan.toolchain.included.length, 1);
+  assert.equal(plan.toolchain.included[0].tool, "eslint");
+  assert.match(plan.toolchain.included[0].wiring, /lint:jig/);
+  assert.ok(plan.changes.some((c) => c.path === ".jig/eslint.jig.config.mjs"));
+
+  const matrix = readJson(root, ".jig/plan.json");
+  const sc = matrix.rows.find((r) => r.classId === "silent-catch");
+  assert.equal(sc.cells["human-ci"].grade, "DET");
+  assert.equal(sc.cells["human-ci"].artifact, ".jig/eslint.jig.config.mjs");
+});
+
+test("an absent tool is a named note that says jig never downloads, and the cell stays honest", () => {
+  const root = project({ "package.json": "{ \"private\": true }\n" });
+  const plan = engine.cmdPlan(root, {
+    _: [], change: [], select: "silent-catch", provenance: "elicited", "no-ci": true,
+  });
+  assert.equal(plan.toolchain.included.length, 0);
+  const absent = plan.toolchain.absent.map((t) => t.tool).sort();
+  assert.deepEqual([...new Set(absent)], ["detekt", "eslint"]);
+  for (const row of plan.toolchain.absent) assert.match(row.why, /never downloads/);
+  assert.equal(plan.changes.some((c) => c.path.startsWith(".jig/eslint")), false);
+  const sc = readJson(root, ".jig/plan.json").rows.find((r) => r.classId === "silent-catch");
+  assert.equal(sc.cells["human-ci"].grade, "GAP");
+});
+
+test("a Kotlin-Gradle repo carrying detekt gets the detekt side-file and a DET ci cell", () => {
+  const root = project({
+    "build.gradle.kts": 'plugins { id("io.gitlab.arturbosch.detekt") version "1.23.6" }\n',
+  });
+  const plan = engine.cmdPlan(root, {
+    _: [], change: [], select: "silent-catch", provenance: "forensic", "no-ci": true,
+  });
+  assert.deepEqual(plan.toolchain.included.map((t) => t.tool), ["detekt"]);
+  assert.ok(plan.changes.some((c) => c.path === ".jig/detekt.jig.yml"));
+
+  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  const sc = readJson(root, ".jig/plan.json").rows.find((r) => r.classId === "silent-catch");
+  assert.equal(sc.cells["human-ci"].grade, "DET");
+  assert.equal(sc.cells["human-ci"].artifact, ".jig/detekt.jig.yml");
+  // A yml side-file cannot be read back without a dependency, so it is a
+  // stamped gap — D17 the same way activation.md is.
+  assert.ok(plan.enforcementGaps.includes(".jig/detekt.jig.yml"));
 });
