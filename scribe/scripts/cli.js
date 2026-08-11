@@ -132,6 +132,74 @@ function review(root, json) {
       out.push("No suggestions — the bar looks right for how you work.");
     }
   }
+  const remembered = readMemory(root);
+  if (remembered.size) {
+    out.push("");
+    out.push("Remembered answers (stated as assumptions, never re-asked):");
+    for (const [term, v] of remembered) out.push("  " + term + " = " + v.meaning);
+  }
+  process.stdout.write(out.join("\n") + "\n");
+}
+
+// ---------------------------------------------------------------------------
+// Memory — remembered answers per repo
+// ---------------------------------------------------------------------------
+//
+// Append-only JSONL, folded on read: the latest line for a term wins, and a
+// `forgotten` line is a tombstone. Nothing is ever rewritten in place, so a
+// crash mid-write can cost at most the line being written, and the file
+// doubles as its own audit trail. A remembered answer is a stated assumption
+// at the next round, never a question — and never more than that: the clarify
+// skill states it and the user can veto it in the same breath.
+
+const fs = require("fs");
+const MEMORY_FILE = "memory.jsonl";
+
+function appendMemory(root, row) {
+  fs.mkdirSync(lib.statePath(root), { recursive: true });
+  fs.appendFileSync(
+    lib.statePath(root, MEMORY_FILE),
+    JSON.stringify({ schemaVersion: lib.SCHEMA_VERSION, ts: new Date().toISOString(), ...row }) + "\n",
+  );
+}
+
+function readMemory(root) {
+  let lines;
+  try {
+    lines = fs.readFileSync(lib.statePath(root, MEMORY_FILE), "utf-8").split("\n");
+  } catch {
+    return new Map();
+  }
+  const folded = new Map();
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let row;
+    try { row = JSON.parse(line); } catch { continue; }
+    if (typeof row.term !== "string" || !row.term) continue;
+    const term = row.term.toLowerCase();
+    if (row.forgotten) folded.delete(term);
+    else if (typeof row.meaning === "string" && row.meaning) folded.set(term, { meaning: row.meaning, ts: row.ts });
+  }
+  return folded;
+}
+
+function memory(root, json) {
+  const m = readMemory(root);
+  if (json) {
+    process.stdout.write(JSON.stringify(Object.fromEntries(
+      [...m].map(([term, v]) => [term, v.meaning]),
+    )) + "\n");
+    return;
+  }
+  if (!m.size) {
+    process.stdout.write("scribe remembers nothing in this project yet.\n");
+    return;
+  }
+  const out = ["scribe's remembered answers — " + lib.statePath(root, MEMORY_FILE)];
+  for (const [term, v] of m) {
+    out.push("  " + term + " = " + v.meaning + "   (since " + (v.ts || "").slice(0, 10) + ")");
+  }
+  out.push("Forget one with: node <scribe>/scripts/cli.js forget <term>");
   process.stdout.write(out.join("\n") + "\n");
 }
 
@@ -139,11 +207,40 @@ function main(argv) {
   const cmd = argv[0];
   const root = process.cwd();
   if (cmd === "review") return review(root, argv.includes("--json"));
+  if (cmd === "memory") return memory(root, argv.includes("--json"));
+  if (cmd === "remember") {
+    const term = (argv[1] || "").trim();
+    const meaning = argv.slice(2).join(" ").trim();
+    if (!term || !meaning) {
+      process.stderr.write("scribe: remember needs a term and a meaning: remember <term> <meaning...>\n");
+      process.exitCode = 2;
+      return;
+    }
+    appendMemory(root, { term: term.toLowerCase(), meaning });
+    process.stdout.write("remembered: " + term.toLowerCase() + " = " + meaning + "\n");
+    return;
+  }
+  if (cmd === "forget") {
+    const term = (argv[1] || "").trim().toLowerCase();
+    if (!term) {
+      process.stderr.write("scribe: forget needs a term: forget <term>\n");
+      process.exitCode = 2;
+      return;
+    }
+    if (!readMemory(root).has(term)) {
+      process.stderr.write("scribe: nothing remembered for " + JSON.stringify(term) + "\n");
+      process.exitCode = 1;
+      return;
+    }
+    appendMemory(root, { term, forgotten: true });
+    process.stdout.write("forgotten: " + term + "\n");
+    return;
+  }
   process.stderr.write("scribe: unknown command " + JSON.stringify(cmd || "") +
-    " (known: review)\n");
+    " (known: review, memory, remember, forget)\n");
   process.exitCode = 2;
 }
 
 if (require.main === module) main(process.argv.slice(2));
 
-module.exports = { analyze, STREAK_WINDOW, STREAK_WAVES, QUIET_JUDGED };
+module.exports = { analyze, readMemory, STREAK_WINDOW, STREAK_WAVES, QUIET_JUDGED, MEMORY_FILE };

@@ -4,6 +4,15 @@ All notable changes to scribe are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [0.3.0-alpha] - 2026-08-11
+
+The memory: never the same question twice.
+
+### Added
+
+- Remembered answers, per project: when you answer the same question the same way in a second session, scribe offers to remember it. A remembered answer shows up as a stated assumption you can veto in a word — never as a question again.
+- `/scribe:review` lists everything remembered; "forget that" (or the `forget` command) deletes an entry. The memory file is append-only and stays in your project.
+
 ## [0.2.0-alpha] - 2026-08-11
 
 The bar: tune scribe from what it actually did.

@@ -194,7 +194,7 @@
       "name": "scribe",
       "source": "./scribe",
       "description": "Stops Claude from guessing at an unclear request. When the task could honestly go several ways, Claude asks one focused round of questions — options, recommendation first — until the work is defined well enough to execute cleanly. Every ask is logged locally so the asking bar tunes from evidence.",
-      "version": "0.2.0-alpha",
+      "version": "0.3.0-alpha",
       "license": "MIT",
       "author": {
         "name": "Victor Villegas",

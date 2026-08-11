@@ -24,6 +24,11 @@ permitted case: you are blocked on input only the user can provide.
 
 ## The round
 
+0. **Check the project's remembered answers.** If `.scribe/memory.jsonl`
+   exists, read it (latest line per term wins; a `forgotten` line removes the
+   term). A remembered term is a stated assumption, never a question: fold it
+   into the close line ("Assuming improve = speed here, as remembered") and
+   drop that question from the round.
 1. **Blind-spot pass first.** Before asking anything, name to yourself what
    the request never mentions but the work will hit: neighboring code, tests,
    callers, docs, error paths. A finding becomes a question only if it changes

@@ -37,6 +37,7 @@ scribe is the measuring. When your request could honestly go several ways, Claud
 | You ask for something that could go several ways | One numbered question round, options with a recommendation first |
 | Your answer opens a new fork | The follow-up gets asked — until nothing is left to ask |
 | You say "just do it" | scribe stands down for the turn, no argument |
+| You answer the same question the same way twice | It offers to remember; from then on it's a stated assumption you can veto, not a question |
 | It has already asked three rounds this session | It stops asking — question fatigue is worse than a guess |
 | You're running Claude unattended | scribe stands down rather than stall your run on a question |
 
@@ -55,7 +56,7 @@ Works immediately — nothing to configure, nothing to initialize.
 
 | You want to… | Say |
 | --- | --- |
-| See what scribe has asked, passed, and been waved off on | `/scribe:review` |
+| See what scribe has asked, passed, been waved off on, and remembers | `/scribe:review` |
 | Change how eagerly it asks | `/scribe:review` — it suggests the change and applies it if you agree |
 | Run a clarify round on demand | `/scribe:clarify` |
 

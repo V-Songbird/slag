@@ -79,6 +79,29 @@ When the frontier is empty or the user waves off:
 - Then execute without further ceremony. The one-liner is the veto window;
   do not wait for approval.
 
+## Memory
+
+Asking the same question twice in one repo is a bug. The fix is one file,
+`.scribe/memory.jsonl`, owned by the CLI so its shape stays valid:
+
+- **Before a round:** read the file (fold: latest line per term wins,
+  `forgotten` tombstones remove). Every remembered term that would have been
+  a question becomes a stated assumption in the close line instead — worded
+  so one word from the user vetoes it ("say otherwise and I'll drop it").
+- **After a round:** if the answer you just received matches how the same
+  question was answered in an earlier session (the ledger's `asked` lines
+  carry `answers`), offer once, in one line, to remember it:
+  "Remember improve = speed for this repo? (yes / no)". On yes, run
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/cli.js" remember <term> <meaning>`
+  from the project root. Never offer on a first-time answer, and never
+  re-offer after a no in the same session.
+- **Vetoes:** if the user contradicts a stated assumption or says "forget
+  that", run `... forget <term>` immediately and ask the question normally.
+
+Remembered answers are reviewable (`/scribe:review` lists them) and
+deletable (`forget`). Never edit the memory file by hand; the append-only
+CLI keeps it an audit trail.
+
 ## Stand-downs, restated
 
 - Unattended session (headless, goal loop, background agent): no round.

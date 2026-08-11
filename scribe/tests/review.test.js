@@ -119,3 +119,59 @@ describe("the cli entry", () => {
     assert.match(r.stderr, /unknown command/);
   });
 });
+
+describe("memory", () => {
+  test("remember, list, forget round-trip through the real cli", () => {
+    const root = tmpRoot();
+    assert.strictEqual(runCli(root, ["remember", "Improve", "speed, profile first"]).status, 0);
+    assert.strictEqual(runCli(root, ["remember", "tests", "node:test only"]).status, 0);
+    let out = runCli(root, ["memory", "--json"]);
+    assert.deepStrictEqual(JSON.parse(out.stdout),
+      { improve: "speed, profile first", tests: "node:test only" });
+    assert.strictEqual(runCli(root, ["forget", "improve"]).status, 0);
+    out = runCli(root, ["memory", "--json"]);
+    assert.deepStrictEqual(JSON.parse(out.stdout), { tests: "node:test only" });
+  });
+
+  test("the latest line for a term wins the fold", () => {
+    const root = tmpRoot();
+    runCli(root, ["remember", "improve", "speed"]);
+    runCli(root, ["remember", "improve", "readability"]);
+    assert.deepStrictEqual(JSON.parse(runCli(root, ["memory", "--json"]).stdout),
+      { improve: "readability" });
+  });
+
+  test("remembering after a forget resurrects the term", () => {
+    const root = tmpRoot();
+    runCli(root, ["remember", "improve", "speed"]);
+    runCli(root, ["forget", "improve"]);
+    runCli(root, ["remember", "improve", "memory use"]);
+    assert.deepStrictEqual(JSON.parse(runCli(root, ["memory", "--json"]).stdout),
+      { improve: "memory use" });
+  });
+
+  test("forgetting the unremembered exits 1; bad args exit 2", () => {
+    const root = tmpRoot();
+    assert.strictEqual(runCli(root, ["forget", "nothing"]).status, 1);
+    assert.strictEqual(runCli(root, ["remember", "onlyterm"]).status, 2);
+    assert.strictEqual(runCli(root, ["forget"]).status, 2);
+  });
+
+  test("review lists remembered answers", () => {
+    const root = tmpRoot();
+    lib.appendLedger(root, judged("a"));
+    runCli(root, ["remember", "improve", "speed"]);
+    const r = runCli(root, ["review"]);
+    assert.match(r.stdout, /Remembered answers/);
+    assert.match(r.stdout, /improve = speed/);
+  });
+
+  test("memory lines carry the v1 schema fields", () => {
+    const root = tmpRoot();
+    runCli(root, ["remember", "improve", "speed"]);
+    const line = JSON.parse(fs.readFileSync(path.join(root, ".scribe", "memory.jsonl"), "utf-8").trim());
+    assert.strictEqual(line.schemaVersion, 1);
+    assert.ok(line.ts);
+    assert.strictEqual(line.term, "improve");
+  });
+});
