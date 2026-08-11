@@ -1,0 +1,670 @@
+{
+  "schemaVersion": 1,
+  "verifiedOn": "2026-08-07",
+  "axes": ["human", "agent"],
+  "actors": ["human-editor", "human-ci", "claude-session", "codex-session"],
+  "severities": ["hygiene", "safety"],
+  "confidences": ["deterministic", "heuristic"],
+  "evidenceTiers": ["experiment-supported", "documented", "inherited", "reasoned"],
+  "runners": ["checks", "ci", "PreToolUse", "PostToolUse", "none"],
+  "levers": {
+    "check-driver": {
+      "hostNeutral": true,
+      "probabilistic": false,
+      "availableAt": "0.1.0-alpha",
+      "description": "A module under .jig/checks/ run by .jig/checks/run.mjs. Any human, any CI, no agent host required."
+    },
+    "ci-workflow": {
+      "hostNeutral": true,
+      "probabilistic": false,
+      "availableAt": "0.1.0-alpha",
+      "description": "The jig-owned workflow that runs the check driver on push and pull request. The activation-free human floor."
+    },
+    "bash-guard": {
+      "hostNeutral": false,
+      "probabilistic": false,
+      "availableAt": "0.1.0-alpha",
+      "description": "PreToolUse[Bash] guard evaluated by jig's single-dispatch runner. Clamped to observe for the whole 0.1.0 line."
+    },
+    "edit-observe-guard": {
+      "hostNeutral": false,
+      "probabilistic": false,
+      "availableAt": "0.1.0-alpha",
+      "description": "PostToolUse[Edit|Write] guard evaluated by jig's single-dispatch runner. Clamped to observe for the whole 0.1.0 line."
+    },
+    "eslint-rule": {
+      "hostNeutral": true,
+      "probabilistic": false,
+      "availableAt": "0.3.0-alpha",
+      "description": "A rule in a jig-authored eslint flat-config side-file, exec-verified against the project's own installed eslint. Absent tool means ENFORCEMENT GAP, never a download."
+    },
+    "type-system": {
+      "hostNeutral": true,
+      "probabilistic": false,
+      "availableAt": "0.3.0-alpha",
+      "description": "A tsconfig strictness flag, exec-verified against the project's own installed typescript."
+    },
+    "test-suite": {
+      "hostNeutral": true,
+      "probabilistic": false,
+      "availableAt": "0.3.0-alpha",
+      "description": "The project's own tests. jig can point at the gap but never authors the project's test cases."
+    },
+    "prose-rule": {
+      "hostNeutral": false,
+      "probabilistic": true,
+      "availableAt": "0.4.0-alpha",
+      "description": "A paths-scoped instruction in the agent rule corpus. Probabilistic by construction, and emitted only when the measured always-loaded budget has room to spare."
+    },
+    "review": {
+      "hostNeutral": true,
+      "probabilistic": true,
+      "availableAt": "never",
+      "description": "Human reading. Recorded so the matrix can say honestly that nothing mechanical covers this class."
+    }
+  },
+  "classes": [
+    {
+      "id": "silent-catch",
+      "title": "A catch block that swallows the error",
+      "axes": ["human", "agent"],
+      "agentModes": ["makes a failing call pass by wrapping it", "hides an error it could not diagnose"],
+      "severity": "safety",
+      "installableAtV1": true,
+      "enforcementGap": false,
+      "detectors": [
+        {
+          "actor": "human-editor",
+          "lever": "check-driver",
+          "runner": "checks",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": ["catch\\s*(\\([^)]*\\))?\\s*\\{\\s*\\}"],
+            "paths": ["**/*.js", "**/*.mjs", "**/*.cjs", "**/*.ts", "**/*.tsx"],
+            "stripComments": true,
+            "stripStrings": true
+          }
+        },
+        {
+          "actor": "human-ci",
+          "lever": "ci-workflow",
+          "runner": "ci",
+          "confidence": "deterministic",
+          "params": { "runs": "check-driver" }
+        },
+        {
+          "actor": "claude-session",
+          "lever": "edit-observe-guard",
+          "runner": "PostToolUse",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": ["catch\\s*(\\([^)]*\\))?\\s*\\{\\s*\\}"],
+            "onlyWhenIntroduced": true
+          }
+        },
+        {
+          "actor": "human-ci",
+          "lever": "eslint-rule",
+          "runner": "checks",
+          "confidence": "deterministic",
+          "params": { "rule": "no-empty", "options": { "allowEmptyCatch": false } }
+        }
+      ],
+      "fixtures": {
+        "kind": "source",
+        "violation": ["jig/tests/fixtures/classes/silent-catch/violation.js"],
+        "nearMiss": ["jig/tests/fixtures/classes/silent-catch/near-miss.js"]
+      },
+      "gapNotes": "The empty-body regex sees an empty catch, not a useless one. A catch whose body only logs and continues is the same defect and is invisible here; that shape needs AST work and is deliberately out of scope at v1. Comment and string stripping is where the false positives live, so the near-miss fixture exercises both.",
+      "evidence": { "tier": "inherited", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "focused-or-skipped-test",
+      "title": "A focused or skipped test left in the suite",
+      "axes": ["human", "agent"],
+      "agentModes": ["focuses one test to iterate, then never unfocuses it", "skips a test it could not make pass"],
+      "severity": "safety",
+      "installableAtV1": true,
+      "enforcementGap": false,
+      "detectors": [
+        {
+          "actor": "human-editor",
+          "lever": "check-driver",
+          "runner": "checks",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": ["\\b(describe|it|test)\\.only\\s*\\(", "\\b(describe|it|test)\\.skip\\s*\\(", "\\bit\\.todo\\s*\\("],
+            "paths": ["**/*.test.js", "**/*.test.mjs", "**/*.test.ts", "**/*.spec.js", "**/*.spec.ts"],
+            "stripComments": true,
+            "stripStrings": true
+          }
+        },
+        {
+          "actor": "human-ci",
+          "lever": "ci-workflow",
+          "runner": "ci",
+          "confidence": "deterministic",
+          "params": { "runs": "check-driver" }
+        },
+        {
+          "actor": "claude-session",
+          "lever": "edit-observe-guard",
+          "runner": "PostToolUse",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": ["\\b(describe|it|test)\\.only\\s*\\(", "\\b(describe|it|test)\\.skip\\s*\\(", "\\bit\\.todo\\s*\\("],
+            "onlyWhenIntroduced": true
+          }
+        }
+      ],
+      "fixtures": {
+        "kind": "source",
+        "violation": ["jig/tests/fixtures/classes/focused-or-skipped-test/violation.test.js"],
+        "nearMiss": ["jig/tests/fixtures/classes/focused-or-skipped-test/near-miss.test.js"]
+      },
+      "gapNotes": "Runner-specific focus mechanisms outside this pattern set are missed: a `--grep` argument in a package script, jest's `fdescribe`/`fit`, a config-level testNamePattern. The pattern list is Node-flavoured and pinned in references/catalogue-node.md.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "boolean-flag-param",
+      "title": "A boolean parameter that switches what a function does",
+      "axes": ["human"],
+      "agentModes": [],
+      "severity": "hygiene",
+      "installableAtV1": false,
+      "enforcementGap": true,
+      "detectors": [
+        {
+          "actor": "human-editor",
+          "lever": "review",
+          "runner": "none",
+          "confidence": "heuristic",
+          "params": {}
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "ENFORCEMENT GAP. Telling a mode switch apart from an honest boolean needs to read the function body, and no lever in jig's inventory does that. A call-site regex for literal true/false arguments was considered and rejected: it fires on every honest boolean argument in the repo.",
+      "evidence": { "tier": "inherited", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "raw-scalar-api",
+      "title": "A public signature that takes bare strings and numbers where a named type belongs",
+      "axes": ["human"],
+      "agentModes": [],
+      "severity": "hygiene",
+      "installableAtV1": false,
+      "enforcementGap": true,
+      "detectors": [
+        {
+          "actor": "human-ci",
+          "lever": "type-system",
+          "runner": "checks",
+          "confidence": "heuristic",
+          "params": { "requires": "typescript" }
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "ENFORCEMENT GAP on any untyped stack, which includes this repo. Even with typescript installed, no compiler flag distinguishes a deliberate string from one that should have been a branded type — the lever is listed to make the honest ceiling visible in the matrix, not to claim coverage.",
+      "evidence": { "tier": "inherited", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "optional-field-state-bag",
+      "title": "One object with many optional fields standing in for several real states",
+      "axes": ["human"],
+      "agentModes": [],
+      "severity": "hygiene",
+      "installableAtV1": false,
+      "enforcementGap": true,
+      "detectors": [
+        {
+          "actor": "human-ci",
+          "lever": "type-system",
+          "runner": "checks",
+          "confidence": "heuristic",
+          "params": { "requires": "typescript" }
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "ENFORCEMENT GAP. A discriminated union is the fix, and no tool can tell that a wide optional record should have been one. Counting optional members would flag every options bag in the codebase.",
+      "evidence": { "tier": "inherited", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "nested-ternary",
+      "title": "A conditional expression nested inside another conditional expression",
+      "axes": ["human"],
+      "agentModes": [],
+      "severity": "hygiene",
+      "installableAtV1": false,
+      "enforcementGap": false,
+      "detectors": [
+        {
+          "actor": "human-ci",
+          "lever": "eslint-rule",
+          "runner": "checks",
+          "confidence": "deterministic",
+          "params": { "rule": "no-nested-ternary" }
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "Deterministic, but only from 0.3.0 and only where eslint is already installed. This repo has no eslint, so the class renders as GAP in slag's own matrix.",
+      "evidence": { "tier": "inherited", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "implicit-clock",
+      "title": "Current time read straight from the global clock inside logic",
+      "axes": ["human", "agent"],
+      "agentModes": ["reaches for Date.now() rather than threading a timestamp through"],
+      "severity": "hygiene",
+      "installableAtV1": false,
+      "enforcementGap": true,
+      "detectors": [
+        {
+          "actor": "human-editor",
+          "lever": "check-driver",
+          "runner": "checks",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": ["\\bDate\\.now\\s*\\(", "\\bnew\\s+Date\\s*\\(\\s*\\)"],
+            "paths": ["**/*.js", "**/*.mjs", "**/*.ts"],
+            "stripComments": true,
+            "stripStrings": true
+          }
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "Heuristic, and deliberately not installable at v1. The pattern is exact but the judgment is not: one clock read at a program's edge is correct and the identical call deep in a pure function is the defect. Without a zone configuration saying which files are edges, arming this would be a false-positive engine.",
+      "evidence": { "tier": "inherited", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "narrator-comment",
+      "title": "A comment that restates the line below it",
+      "axes": ["human", "agent"],
+      "agentModes": ["narrates each step of generated code back to the reader"],
+      "severity": "hygiene",
+      "installableAtV1": false,
+      "enforcementGap": true,
+      "detectors": [
+        {
+          "actor": "human-editor",
+          "lever": "review",
+          "runner": "none",
+          "confidence": "heuristic",
+          "params": {}
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "ENFORCEMENT GAP. Judging whether a comment adds anything over the code it sits above is exactly the judgment no deterministic lever makes. Comment-density thresholds were considered and rejected: they punish the comments worth keeping.",
+      "evidence": { "tier": "inherited", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "magic-number",
+      "title": "An unnamed literal standing in for a threshold or a limit",
+      "axes": ["human"],
+      "agentModes": [],
+      "severity": "hygiene",
+      "installableAtV1": false,
+      "enforcementGap": false,
+      "detectors": [
+        {
+          "actor": "human-ci",
+          "lever": "eslint-rule",
+          "runner": "checks",
+          "confidence": "deterministic",
+          "params": { "rule": "no-magic-numbers" }
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "Deterministic from 0.3.0 where eslint exists, and noisy by default — the rule needs an ignore list per project before it is worth arming.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "floating-promise",
+      "title": "An async call whose result is never awaited or handled",
+      "axes": ["human", "agent"],
+      "agentModes": ["drops an await when refactoring a synchronous function into an async one"],
+      "severity": "safety",
+      "installableAtV1": false,
+      "enforcementGap": false,
+      "detectors": [
+        {
+          "actor": "human-ci",
+          "lever": "eslint-rule",
+          "runner": "checks",
+          "confidence": "deterministic",
+          "params": { "rule": "@typescript-eslint/no-floating-promises", "requires": "typescript type information" }
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "The one lever that catches this reliably needs both eslint and typescript type information. On a plain JavaScript project it is an ENFORCEMENT GAP, and no regex substitute exists — the defect is the absence of a token, not the presence of one.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "god-function",
+      "title": "One function carrying several unrelated jobs",
+      "axes": ["human", "agent"],
+      "agentModes": ["keeps appending to the function it is already editing"],
+      "severity": "hygiene",
+      "installableAtV1": false,
+      "enforcementGap": true,
+      "detectors": [
+        {
+          "actor": "human-ci",
+          "lever": "eslint-rule",
+          "runner": "checks",
+          "confidence": "heuristic",
+          "params": { "rule": "max-lines-per-function" }
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "A line count is a proxy, not the class. Long-but-cohesive functions trip it and short-but-tangled ones do not, so the detector stays heuristic no matter how the threshold is set.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "stringly-typed-state",
+      "title": "A closed set of states carried as free-form strings",
+      "axes": ["human"],
+      "agentModes": [],
+      "severity": "hygiene",
+      "installableAtV1": false,
+      "enforcementGap": true,
+      "detectors": [
+        {
+          "actor": "human-ci",
+          "lever": "type-system",
+          "runner": "checks",
+          "confidence": "heuristic",
+          "params": { "requires": "typescript" }
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "ENFORCEMENT GAP on untyped stacks. A union type fixes it where typescript exists, but nothing detects that a plain string parameter should have been one.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "duplicated-constant",
+      "title": "The same value defined in two places that must agree",
+      "axes": ["human", "agent"],
+      "agentModes": ["redeclares a constant locally rather than importing the existing one"],
+      "severity": "safety",
+      "installableAtV1": false,
+      "enforcementGap": true,
+      "detectors": [
+        {
+          "actor": "human-editor",
+          "lever": "review",
+          "runner": "none",
+          "confidence": "heuristic",
+          "params": {}
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "ENFORCEMENT GAP in general. Where the duplicate is a version string or a pinned id, a project-specific check-driver module can compare the two exact locations — that is a per-project artifact the interview elicits, not a shipped detector.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "env-read-at-use-site",
+      "title": "Environment variables read deep inside logic instead of at the program edge",
+      "axes": ["human", "agent"],
+      "agentModes": ["reads process.env where the value is needed rather than threading configuration in"],
+      "severity": "hygiene",
+      "installableAtV1": false,
+      "enforcementGap": true,
+      "detectors": [
+        {
+          "actor": "human-editor",
+          "lever": "check-driver",
+          "runner": "checks",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": ["\\bprocess\\.env\\b"],
+            "paths": ["**/*.js", "**/*.mjs", "**/*.ts"],
+            "excludePaths": ["**/bin/**", "**/scripts/**"],
+            "stripComments": true,
+            "stripStrings": true
+          }
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "Heuristic because the exclusion list is the whole judgment. Which directories count as the edge differs per project, so this class only becomes installable once zones are configured.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "mutable-shared-default",
+      "title": "A module-level mutable value handed out as a default",
+      "axes": ["human"],
+      "agentModes": [],
+      "severity": "safety",
+      "installableAtV1": false,
+      "enforcementGap": true,
+      "detectors": [
+        {
+          "actor": "human-editor",
+          "lever": "review",
+          "runner": "none",
+          "confidence": "heuristic",
+          "params": {}
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "ENFORCEMENT GAP. Detecting it means knowing that a shared object is mutated by one of its consumers, which is a whole-program question no shipped lever answers.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "pipe-to-shell",
+      "title": "A remote script piped straight into a shell, or a force-push to the default branch",
+      "axes": ["agent"],
+      "agentModes": ["installs a tool the fastest way it knows", "clears a rejected push instead of reconciling it"],
+      "severity": "safety",
+      "installableAtV1": true,
+      "enforcementGap": true,
+      "detectors": [
+        {
+          "actor": "claude-session",
+          "lever": "bash-guard",
+          "runner": "PreToolUse",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": ["\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba|z|k)?sh\\b", "\\biwr\\b[^|]*\\|\\s*iex\\b"]
+          }
+        },
+        {
+          "actor": "claude-session",
+          "lever": "bash-guard",
+          "runner": "PreToolUse",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": ["git\\s+push\\b(?![^\\n]*--force-with-lease)[^\\n]*\\s(--force|-f)\\b"],
+            "onlyBranches": ["<default>"],
+            "note": "--force-with-lease is excluded by the pattern itself; it is the reconciling form, not the destructive one."
+          }
+        },
+        {
+          "actor": "human-editor",
+          "lever": "check-driver",
+          "runner": "checks",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": ["\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba|z|k)?sh\\b"],
+            "paths": ["**/*.sh", "**/*.yml", "**/*.yaml", "**/Dockerfile"],
+            "stripComments": true
+          }
+        }
+      ],
+      "fixtures": {
+        "kind": "command-lines",
+        "violation": ["jig/tests/fixtures/classes/pipe-to-shell/violation.txt"],
+        "nearMiss": ["jig/tests/fixtures/classes/pipe-to-shell/near-miss.txt"]
+      },
+      "gapNotes": "ENFORCEMENT GAP at v1: this class is installable without a host-neutral deterministic lever, so it carries the explicit stamp the plan floor requires. Coverage is Claude-session only for commands an agent runs — nothing observes a human typing the same line into their own terminal, and the check-driver detector only sees commands already committed into scripts and workflows, which makes it heuristic. Force-push detection is heuristic for a second reason: the default-branch test happens at evaluation time, not in the pattern. Two defects also share one class id because brief section 2 lists them as one installable row; the id under-names the force-push half, and any consumer reading ids alone will miss it.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "test-file-deletion",
+      "title": "A test file deleted rather than fixed",
+      "axes": ["agent"],
+      "agentModes": ["removes the test that will not pass", "deletes a suite while cleaning up files it thinks are unused"],
+      "severity": "safety",
+      "installableAtV1": true,
+      "enforcementGap": false,
+      "detectors": [
+        {
+          "actor": "human-editor",
+          "lever": "check-driver",
+          "runner": "checks",
+          "confidence": "deterministic",
+          "params": {
+            "command": ["git", "diff", "--cached", "--diff-filter=D", "--name-only"],
+            "pathPatterns": ["**/*.test.js", "**/*.test.mjs", "**/*.test.ts", "**/*.spec.js", "**/*.spec.ts", "**/tests/**", "**/__tests__/**"]
+          }
+        },
+        {
+          "actor": "human-ci",
+          "lever": "ci-workflow",
+          "runner": "ci",
+          "confidence": "deterministic",
+          "params": { "runs": "check-driver" }
+        },
+        {
+          "actor": "claude-session",
+          "lever": "bash-guard",
+          "runner": "PreToolUse",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": ["\\b(rm|git\\s+rm|Remove-Item)\\b[^\\n]*(tests?|__tests__)[/\\\\]", "\\b(rm|git\\s+rm|Remove-Item)\\b[^\\n]*\\.(test|spec)\\."]
+          }
+        }
+      ],
+      "fixtures": {
+        "kind": "staged-paths",
+        "violation": ["jig/tests/fixtures/classes/test-file-deletion/violation.txt"],
+        "nearMiss": ["jig/tests/fixtures/classes/test-file-deletion/near-miss.txt"]
+      },
+      "gapNotes": "PostToolUse never reports a deletion, so the staged-diff check in the check driver is the only deterministic catcher and it fires at commit time, not at deletion time. The bash-guard pattern is a labeled heuristic: it misses a deletion done through any path it does not name, and it fires on a Bash command that merely mentions a test path.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "hallucinated-api",
+      "title": "A call to a function, option or package that does not exist",
+      "axes": ["agent"],
+      "agentModes": ["invents the method the task needed", "carries an API across from a different library"],
+      "severity": "safety",
+      "installableAtV1": false,
+      "enforcementGap": false,
+      "detectors": [
+        {
+          "actor": "human-ci",
+          "lever": "test-suite",
+          "runner": "checks",
+          "confidence": "deterministic",
+          "params": { "note": "A project that runs its own code catches this. jig points at the gap and never authors the project's tests." }
+        },
+        {
+          "actor": "human-ci",
+          "lever": "eslint-rule",
+          "runner": "checks",
+          "confidence": "heuristic",
+          "params": { "rule": "no-undef" }
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "Not installable because the honest lever is the project's own test suite, which jig does not write. no-undef catches only the bare-identifier form, never a bad method on a real object.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "weakened-assertion",
+      "title": "An assertion loosened until the test passes",
+      "axes": ["agent"],
+      "agentModes": ["relaxes an exact match into a truthiness check", "widens an expected value to whatever was produced"],
+      "severity": "safety",
+      "installableAtV1": false,
+      "enforcementGap": true,
+      "detectors": [
+        {
+          "actor": "human-editor",
+          "lever": "check-driver",
+          "runner": "checks",
+          "confidence": "heuristic",
+          "params": {
+            "note": "Needs a diff, not a file: the class is a reduction in assertion count or specificity inside a test file. jig's forensics reads this shape from history; no single-snapshot detector exists."
+          }
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "ENFORCEMENT GAP at v1. The defect only exists relative to the previous version of the file, so a snapshot detector cannot see it. Forensics surfaces it as an incident during the interview, which is evidence for ranking, not enforcement.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "scope-creep",
+      "title": "Files changed well beyond what the task asked for",
+      "axes": ["agent"],
+      "agentModes": ["tidies adjacent code while completing a narrow request", "reformats a file it only needed one line from"],
+      "severity": "hygiene",
+      "installableAtV1": false,
+      "enforcementGap": true,
+      "detectors": [
+        {
+          "actor": "claude-session",
+          "lever": "prose-rule",
+          "runner": "none",
+          "confidence": "heuristic",
+          "params": { "note": "An expected-file-surface instruction. Probabilistic by construction." }
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "ENFORCEMENT GAP. There is no mechanical statement of what a task asked for, so nothing can measure the overshoot. The only lever is prose, which does not arrive until 0.4.0 and never becomes deterministic.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "overwritten-config",
+      "title": "A configuration file rewritten whole instead of amended",
+      "axes": ["agent"],
+      "agentModes": ["regenerates a config from its own template rather than editing the existing one"],
+      "severity": "safety",
+      "installableAtV1": false,
+      "enforcementGap": true,
+      "detectors": [
+        {
+          "actor": "claude-session",
+          "lever": "edit-observe-guard",
+          "runner": "PostToolUse",
+          "confidence": "heuristic",
+          "params": {
+            "watchPaths": ["**/*.json", "**/*.yml", "**/*.yaml", "**/*.toml", "**/.*rc"],
+            "signal": "whole-file Write to a tracked config file"
+          }
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "Not installable at v1: distinguishing a legitimate rewrite from a clobber needs the previous content, and the PostToolUse payload carries no reliable pre-image. jig's own engine solves this for jig-owned files only.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    },
+    {
+      "id": "invented-file-path",
+      "title": "A reference to a file or module that is not there",
+      "axes": ["agent"],
+      "agentModes": ["cites a path it expected to exist", "imports a module it planned to write and did not"],
+      "severity": "safety",
+      "installableAtV1": false,
+      "enforcementGap": false,
+      "detectors": [
+        {
+          "actor": "human-ci",
+          "lever": "eslint-rule",
+          "runner": "checks",
+          "confidence": "deterministic",
+          "params": { "rule": "import/no-unresolved", "requires": "eslint-plugin-import" }
+        },
+        {
+          "actor": "human-ci",
+          "lever": "test-suite",
+          "runner": "checks",
+          "confidence": "deterministic",
+          "params": { "note": "Any test that loads the module fails on a bad import path." }
+        }
+      ],
+      "fixtures": null,
+      "gapNotes": "Deterministic for import specifiers from 0.3.0 where eslint-plugin-import is installed. Paths mentioned in prose, in documentation, or in a string argument stay uncovered.",
+      "evidence": { "tier": "reasoned", "generation": "claude-opus-5, 2026-08" }
+    }
+  ]
+}

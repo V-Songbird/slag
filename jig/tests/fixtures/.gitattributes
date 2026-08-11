@@ -1,0 +1,4 @@
+# These fixtures exist to prove the engine preserves CRLF line endings and a
+# leading BOM byte-for-byte. Git normalising them on checkout would delete the
+# very property under test, so nothing in this directory is ever text.
+* -text

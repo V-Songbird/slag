@@ -1,0 +1,4 @@
+{
+  "guard": "focused-or-skipped-test",
+  "mode": "observe"
+}
