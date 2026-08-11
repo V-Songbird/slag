@@ -27,6 +27,7 @@ jig reads your repo and its git history, asks which of these you actually want g
 - **It reads before it asks.** The scan and the history mining run first, so the interview never asks a question your repo already answers.
 - **Checks that outlive the plugin.** The main guardrail is a small script committed to your repo. Any teammate, any CI, any machine with node runs it — no plugin, no account, no jig.
 - **It drafts for your own tools.** Carry eslint, tsc, or detekt and jig writes them a ready config plus the one line that wires it in. No tool? jig says so and never downloads one.
+- **It finds the documents your sessions never read.** ADRs, scopes, roadmaps — jig checks whether anything actually points Claude at them, and can wire in one small pointer rule when nothing does.
 - **It watches the AI too.** Session guards see what an agent is about to do: the downloaded script piped into a shell, the force-push to main, the test file on its way out.
 - **Blocking is earned, never assumed.** Every guard starts by observing — recording what it *would* have stopped. Only after ten clean sessions with zero false alarms can you arm one, and then it really blocks, with a reason, an alternative, and the way to override.
 - **One command undoes everything.** Every write is journaled with the original bytes — arming included. Revert puts your repo back exactly as it was.
@@ -88,6 +89,7 @@ One engine that journals every write, a committed check script that owes jig not
 - Guards start observing and stay that way until you arm them in `/jig:review`. Arming is offered only once the evidence is in, a quick-start install can never arm, and a recorded false alarm pulls an armed guard straight back to observe.
 - jig writes only under `.jig/` and `.github/workflows/`. The pre-commit hookup is printed as a proposal — and if your hook file is committed to the repo, jig can weave the one line in for you, item-approved, reversibly.
 - If something else already watches the same events in your repo, jig says so and leaves that slot alone. The committed checks and the CI workflow cover you regardless.
+- Rules are the exception, not the habit. jig writes one only when you ask, under its own `jig-` name, with a small hard byte cap — because every session pays to carry prose.
 - Kill switch: create a file named `.jig/off` and every guard goes silent.
 
 ## License

@@ -246,6 +246,14 @@ first, then build a draft using the catalogue's own `activation` entry — the
 yes. It is always item-approve. A hook under `.git/hooks/` is machine-local
 and stays a printed proposal.
 
+Prose is the same shape of exception. When the user asked for a rule during
+the rounds — for a class no tool can watch, or to wire orphaned governance
+docs — re-run `plan` with `--prose <classId,…>` or `--wire-governance` on top
+of the same `--select`. Every emitted rule is item-approve, lands as
+`.claude/rules/jig-<slug>.md`, and the plan refuses past the byte budget —
+report a budget refusal verbatim and drop a rule rather than arguing with it.
+Never pass `--prose` for a class the user did not ask about.
+
 ## 8. The witnessed catch
 
 The interview is not finished until a guard has been seen catching something and
