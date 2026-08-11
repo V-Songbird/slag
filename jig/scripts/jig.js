@@ -1849,7 +1849,7 @@ function cmdSelftest(root, opts) {
 
 const PROFILE_FILE = "profile.json";
 
-const PROFILE_KEYS = ["schemaVersion", "scannedAt", "stack", "node", "guardrails", "slots", "occupied", "disclosures"];
+const PROFILE_KEYS = ["schemaVersion", "scannedAt", "stack", "node", "guardrails", "governance", "slots", "occupied", "disclosures"];
 
 // The files jig writes at v1 — the same targets the engine's per-kind
 // allowlist permits, named here as slots a human can be shown.
@@ -2047,6 +2047,69 @@ function conflictPreflight(root, hooks) {
   return slots;
 }
 
+// Governance documents by shape — ADRs, scopes, roadmaps, north stars — and
+// whether any surface a session actually loads points at them. A doc nothing
+// references is invisible however good it is; the scan calls that an orphan
+// and the interview turns it into a decision (roadmap 110).
+const GOVERNANCE_SHAPES = [
+  { kind: "adr", globs: ["adr/**", "adrs/**", "docs/adr/**", "docs/adrs/**", "docs/decisions/**", "DECISIONS.md"] },
+  { kind: "scope", globs: ["SCOPE.md", "docs/SCOPE.md"] },
+  { kind: "roadmap", globs: ["ROADMAP.md", "ROADMAP.jsonl", "docs/ROADMAP.md"] },
+  { kind: "north-star", globs: ["NORTH-STAR.md", "NORTHSTAR.md", "VISION.md", "docs/north-star.md"] },
+  { kind: "context", globs: ["CONTEXT.md", "docs/CONTEXT.md"] },
+  { kind: "phases", globs: ["PHASES.md", "docs/phases/**", "docs/PLAN.md"] },
+];
+
+function governanceFacts(root, rules, hooks) {
+  const found = [];
+  const seen = new Set();
+  const tryPath = (rel, kind) => {
+    if (seen.has(rel) || !fs.existsSync(path.join(root, rel))) return;
+    seen.add(rel);
+    found.push({ path: rel, kind });
+  };
+  for (const shape of GOVERNANCE_SHAPES) {
+    for (const glob of shape.globs) {
+      if (!glob.includes("*")) { tryPath(glob, shape.kind); continue; }
+      const dir = glob.slice(0, glob.indexOf("*")).replace(/\/$/, "");
+      const full = path.join(root, dir);
+      if (!fs.existsSync(full)) continue;
+      let names = [];
+      try { names = fs.readdirSync(full); } catch { continue; }
+      for (const name of names) {
+        if (/\.(md|jsonl|adoc|txt)$/i.test(name)) tryPath(dir + "/" + name, shape.kind);
+      }
+    }
+  }
+  if (!found.length) return { docs: [], orphans: [] };
+
+  // The loaded surfaces: every rule file's text, every hook command line, and
+  // every in-tree skill body. A doc is referenced when any of them carries its
+  // path or its basename.
+  const surfaces = [];
+  for (const rule of rules.files) {
+    const buf = readIfExists(path.join(root, rule.path));
+    if (buf) surfaces.push({ name: rule.path, text: buf.toString("utf8") });
+  }
+  surfaces.push({ name: "hooks", text: hooks.map((h) => (h.commands || []).join(" ")).join("\n") });
+  const skillsDir = path.join(root, ".claude", "skills");
+  if (fs.existsSync(skillsDir)) {
+    for (const name of fs.readdirSync(skillsDir)) {
+      const skill = path.join(skillsDir, name, "SKILL.md");
+      const buf = readIfExists(skill);
+      if (buf) surfaces.push({ name: ".claude/skills/" + name, text: buf.toString("utf8") });
+    }
+  }
+
+  for (const doc of found) {
+    const base = path.basename(doc.path);
+    doc.referencedBy = surfaces
+      .filter((s) => s.text.includes(doc.path) || s.text.toLowerCase().includes(base.toLowerCase()))
+      .map((s) => s.name);
+  }
+  return { docs: found, orphans: found.filter((d) => !d.referencedBy.length).map((d) => d.path) };
+}
+
 function cmdScan(root) {
   const hooks = collectHooks(root);
   const slots = conflictPreflight(root, hooks);
@@ -2069,12 +2132,20 @@ function cmdScan(root) {
     disclosures.push(node.note);
   }
 
+  const rules = ruleCorpus(root);
+  const governance = governanceFacts(root, rules, hooks);
+  for (const orphan of governance.orphans) {
+    disclosures.push(orphan + " is a governance document no loaded surface references — a session that never" +
+      " hears about it will never read it, however good it is.");
+  }
+
   const profile = {
     schemaVersion: SCHEMA_VERSION,
     scannedAt: new Date().toISOString(),
     stack: stackFacts(root),
     node,
-    guardrails: { hooks, coreHooksPath: gitConfig(root, "core.hooksPath"), rules: ruleCorpus(root) },
+    guardrails: { hooks, coreHooksPath: gitConfig(root, "core.hooksPath"), rules },
+    governance,
     slots,
     occupied: occupied.map((s) => s.slot),
     disclosures,

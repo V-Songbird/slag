@@ -34,6 +34,10 @@ Walk these sources and write one numbered finding per hit, in plain words:
    agent-authored plus test files deleted by agents.
 5. `node.onPath` false or managed — the pre-commit floor is at risk; CI is
    the floor that holds.
+6. Every path in `governance.orphans` — an ADR, scope, roadmap or north-star
+   no loaded surface references. The doc exists and every session is blind to
+   it. The decision it seeds: wire it in (a paths-scoped rule, once prose
+   emission ships), or accept that it is documentation for humans only.
 
 Print them as:
 

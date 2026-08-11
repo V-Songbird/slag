@@ -563,3 +563,37 @@ test("unreadable settings are skipped rather than crashing the scan", () => {
   assert.equal(out.ok, true);
   assert.deepEqual(out.guardrails.hooks, []);
 });
+
+// ---------------------------------------------------------------------------
+// Governance-doc reachability (roadmap 110)
+
+test("a governance doc no loaded surface references is an orphan, and the scan says so", () => {
+  const root = project({
+    "CLAUDE.md": "# House rules\n\n- Keep functions small.\n",
+    "docs/adr/0001-storage.md": "# ADR 0001 — storage\n\nDecided.\n",
+    "SCOPE.md": "# Scope\n\nWhat this project is.\n",
+  });
+  const scan = engine.cmdScan(root, { _: [], change: [] });
+  const paths = scan.governance.docs.map((d) => d.path).sort();
+  assert.deepEqual(paths, ["SCOPE.md", "docs/adr/0001-storage.md"]);
+  assert.deepEqual(scan.governance.orphans.sort(), ["SCOPE.md", "docs/adr/0001-storage.md"]);
+  assert.ok(scan.disclosures.some((d) => d.includes("docs/adr/0001-storage.md") && d.includes("never read it")));
+});
+
+test("a referenced governance doc is not an orphan, and names its referencing surface", () => {
+  const root = project({
+    "CLAUDE.md": "# House rules\n\nRead docs/adr/0001-storage.md before touching storage.\n",
+    "docs/adr/0001-storage.md": "# ADR 0001 — storage\n",
+  });
+  const scan = engine.cmdScan(root, { _: [], change: [] });
+  const doc = scan.governance.docs.find((d) => d.path === "docs/adr/0001-storage.md");
+  assert.deepEqual(doc.referencedBy, ["CLAUDE.md"]);
+  assert.deepEqual(scan.governance.orphans, []);
+});
+
+test("a project with no governance docs scans clean and quiet", () => {
+  const root = project({ "src/index.js": "module.exports = 1;\n" });
+  const scan = engine.cmdScan(root, { _: [], change: [] });
+  assert.deepEqual(scan.governance, { docs: [], orphans: [] });
+  assert.equal(scan.disclosures.some((d) => d.includes("governance")), false);
+});

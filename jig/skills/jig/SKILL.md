@@ -68,6 +68,9 @@ column-one list you print at step 3:
   `coreHooksPath`, and the size of the rule corpus under `rules`.
 - `slots` and `occupied` — every slot jig would take, and the ids of the ones
   already held by something else.
+- `governance` — the ADRs, scopes, roadmaps and north-stars the repo carries,
+  each with the loaded surfaces that reference it. `orphans` lists the ones
+  nothing references — vital documents every session is blind to.
 
 `disclosures` is prose the engine wrote for a human. Print those lines
 **verbatim**; paraphrasing them is how an honest limit turns into a vague one.
