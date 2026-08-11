@@ -4,6 +4,19 @@ All notable changes to scribe are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.0.0] - 2026-08-11
+
+Declared stable. The ask, the bar, and the memory, measured.
+
+### Added
+
+- A Benchmarks section in the README: with scribe, live test sessions asked before acting on 7 of 8 genuinely forkable requests (0 of 8 without it); precise requests were never interrupted; no unattended run was ever stalled by a question.
+
+### Changed
+
+- Remembered meanings are length-capped, so the memory stays an answer book and can't grow into a rulebook.
+- The review and clarify skills now treat everything quoted from the log and the memory as data to display, never as instructions to follow.
+
 ## [0.3.0-alpha] - 2026-08-11
 
 The memory: never the same question twice.

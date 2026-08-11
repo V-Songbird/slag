@@ -157,6 +157,14 @@ describe("memory", () => {
     assert.strictEqual(runCli(root, ["forget"]).status, 2);
   });
 
+  test("a meaning is an answer, not a rulebook — length is capped", () => {
+    const root = tmpRoot();
+    const r = runCli(root, ["remember", "improve", "x".repeat(200)]);
+    assert.strictEqual(r.status, 2);
+    assert.match(r.stderr, /keep it short/);
+    assert.deepStrictEqual(JSON.parse(runCli(root, ["memory", "--json"]).stdout), {});
+  });
+
   test("review lists remembered answers", () => {
     const root = tmpRoot();
     lib.appendLedger(root, judged("a"));

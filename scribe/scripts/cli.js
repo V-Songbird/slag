@@ -216,6 +216,13 @@ function main(argv) {
       process.exitCode = 2;
       return;
     }
+    // A meaning is a short reading of a term, not a place to store standing
+    // instructions — the cap keeps the memory an answer book, not a rulebook.
+    if (term.length > 60 || meaning.length > 120) {
+      process.stderr.write("scribe: keep it short — term <= 60 chars, meaning <= 120 chars\n");
+      process.exitCode = 2;
+      return;
+    }
     appendMemory(root, { term: term.toLowerCase(), meaning });
     process.stdout.write("remembered: " + term.toLowerCase() + " = " + meaning + "\n");
     return;

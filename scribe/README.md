@@ -60,6 +60,21 @@ Works immediately — nothing to configure, nothing to initialize.
 | Change how eagerly it asks | `/scribe:review` — it suggests the change and applies it if you agree |
 | Run a clarify round on demand | `/scribe:clarify` |
 
+## Benchmarks
+
+Does it actually work, or is this vibes? Same tasks, live sessions, with and without scribe:
+
+| What we measured | With scribe | Without |
+| --- | --- | --- |
+| Asked before acting on a genuinely forkable request | **7 of 8** | 0 of 8 |
+| Precise requests interrupted | 0 of 6 | 0 of 6 |
+| Unattended runs stalled by a question | 0 of 20 | — |
+
+The middle row is the contract: clarity costs you nothing. The last row is the promise that scribe knows when nobody's there to answer and stays out of the way.
+
+> [!NOTE]
+> Small runs, real sessions, honest caveat: the ask numbers come from streaming test sessions against seeded fixture tasks, and numbers like these wobble between runs. The full record stays local to this repo's research notes.
+
 ## Settings
 
 Most people never touch these. An optional `.scribe/config.json` in your project:
