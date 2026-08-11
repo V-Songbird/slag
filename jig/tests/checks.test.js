@@ -142,13 +142,13 @@ test("every template lands somewhere the engine's own allowlist permits", () => 
 });
 
 test("each installable class ships exactly one check template", () => {
-  const shipped = INDEX.templates.filter((t) => t.classId).map((t) => t.classId).sort();
+  const shipped = INDEX.templates.filter((t) => t.classId && t.name.startsWith("check-")).map((t) => t.classId).sort();
   const installable = catalogue.classes.filter((c) => c.installableAtV1).map((c) => c.id).sort();
   assert.deepEqual(shipped, installable);
 });
 
 test("a check template's patterns are the catalogue's, character for character", async () => {
-  for (const entry of INDEX.templates.filter((t) => t.classId)) {
+  for (const entry of INDEX.templates.filter((t) => t.classId && t.name.startsWith("check-"))) {
     const mod = await import(pathToFileURL(path.join(TEMPLATE_DIR, entry.file)).href);
     const cls = classOf(entry.classId);
     const fromCatalogue = cls.detectors
@@ -166,7 +166,7 @@ test("a check template's patterns are the catalogue's, character for character",
 });
 
 test("a check template's path globs are the catalogue's too", async () => {
-  for (const entry of INDEX.templates.filter((t) => t.classId)) {
+  for (const entry of INDEX.templates.filter((t) => t.classId && t.name.startsWith("check-"))) {
     const mod = await import(pathToFileURL(path.join(TEMPLATE_DIR, entry.file)).href);
     const cls = classOf(entry.classId);
     const det = cls.detectors.find((d) => d.runner === "checks" && (d.params.paths || d.params.pathPatterns));

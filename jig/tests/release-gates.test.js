@@ -184,6 +184,13 @@ test("release gate: assay measures a delta of zero always-loaded findings across
 // instruction file, and the plugin itself carries none.
 test("release gate: no template targets an instruction file, and jig ships none of its own", () => {
   for (const entry of engine.templateIndex()) {
+    // write-rule templates are 0.4.0's one sanctioned instruction surface:
+    // namespaced jig-*.md under .claude/rules/, emitted only on request,
+    // budgeted and evidence-labeled. Everything else stays out entirely.
+    if (entry.kind === "write-rule") {
+      assert.match(entry.target, /^\.claude\/rules\/jig-[a-z0-9-]+\.md$/, entry.name + " targets " + entry.target);
+      continue;
+    }
     assert.ok(entry.target.startsWith(engine.STATE_DIR + "/") || entry.target.startsWith(".github/workflows/"),
       entry.name + " targets " + entry.target);
     for (const rel of Object.keys(INSTRUCTION_FILES)) {

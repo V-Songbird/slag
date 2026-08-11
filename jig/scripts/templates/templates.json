@@ -110,6 +110,36 @@
       "ownership": "file",
       "classId": null,
       "sha256": "7b6643f5214149d0ba94cc6943873bc7040672573023029baddf43d44e3e2409"
+    },
+    {
+      "name": "jig-env-read",
+      "version": "1.0.0",
+      "file": "rule-env-read.md",
+      "target": ".claude/rules/jig-env-read.md",
+      "kind": "write-rule",
+      "ownership": "file",
+      "classId": "env-read-at-use-site",
+      "sha256": "38b8df19b87fbf7dfebe1c99f3cc78197350bb76019b8d957cac2cf4ab662636"
+    },
+    {
+      "name": "jig-implicit-clock",
+      "version": "1.0.0",
+      "file": "rule-implicit-clock.md",
+      "target": ".claude/rules/jig-implicit-clock.md",
+      "kind": "write-rule",
+      "ownership": "file",
+      "classId": "implicit-clock",
+      "sha256": "da01de08dbc0864ee616bd2764e39ddb4f6fbccf95e4c85889036a040734d55e"
+    },
+    {
+      "name": "jig-weakened-assertion",
+      "version": "1.0.0",
+      "file": "rule-weakened-assertion.md",
+      "target": ".claude/rules/jig-weakened-assertion.md",
+      "kind": "write-rule",
+      "ownership": "file",
+      "classId": "weakened-assertion",
+      "sha256": "fabe53070462936447f21bc532dfd5cf122b27bee8e9f1a7c198c062430c00f2"
     }
   ]
 }

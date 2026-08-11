@@ -447,6 +447,17 @@
             "stripComments": true,
             "stripStrings": true
           }
+        },
+        {
+          "id": "prose-rule",
+          "actor": "claude-session",
+          "lever": "prose-rule",
+          "runner": "none",
+          "confidence": "heuristic",
+          "params": {
+            "template": "jig-implicit-clock",
+            "note": "A paths-scoped instruction. Probabilistic by construction; emitted only inside the measured prose budget, evidence-labeled."
+          }
         }
       ],
       "fixtures": null,
@@ -678,6 +689,17 @@
             ],
             "stripComments": true,
             "stripStrings": true
+          }
+        },
+        {
+          "id": "prose-rule",
+          "actor": "claude-session",
+          "lever": "prose-rule",
+          "runner": "none",
+          "confidence": "heuristic",
+          "params": {
+            "template": "jig-env-read",
+            "note": "A paths-scoped instruction. Probabilistic by construction; emitted only inside the measured prose budget, evidence-labeled."
           }
         }
       ],
@@ -951,6 +973,17 @@
           "confidence": "heuristic",
           "params": {
             "note": "Needs a diff, not a file: the class is a reduction in assertion count or specificity inside a test file. jig's forensics reads this shape from history; no single-snapshot detector exists."
+          }
+        },
+        {
+          "id": "prose-rule",
+          "actor": "claude-session",
+          "lever": "prose-rule",
+          "runner": "none",
+          "confidence": "heuristic",
+          "params": {
+            "template": "jig-weakened-assertion",
+            "note": "A paths-scoped instruction. Probabilistic by construction; emitted only inside the measured prose budget, evidence-labeled."
           }
         }
       ],
