@@ -29,18 +29,34 @@ function main() {
       }))
     : [];
 
+  // The response's shape varies by host version; harvest the short strings
+  // wherever they sit — those are the picked labels and typed answers — so the
+  // review can show what a round actually settled (additive field, schema v1).
+  const answers = [];
+  (function harvest(v, depth) {
+    if (answers.length >= 8 || depth > 4) return;
+    if (typeof v === "string") {
+      const s = v.trim();
+      if (s && s.length <= 80) answers.push(s);
+    } else if (Array.isArray(v)) {
+      for (const x of v) harvest(x, depth + 1);
+    } else if (lib.isObject(v)) {
+      for (const x of Object.values(v)) harvest(x, depth + 1);
+    }
+  })(payload.tool_response, 0);
+
   lib.appendLedger(root, {
     session, kind: "asked", source: "mechanical",
-    count: questions.length, questions,
+    count: questions.length, questions, answers,
   });
 
-  let answers = "";
+  let raw = "";
   try {
-    answers = JSON.stringify(payload.tool_response) || "";
+    raw = JSON.stringify(payload.tool_response) || "";
   } catch {
     /* unserializable response — nothing to scan */
   }
-  if (lib.WAVE_OFF_RE.test(answers)) {
+  if (lib.WAVE_OFF_RE.test(raw)) {
     lib.appendLedger(root, { session, kind: "waved-off", source: "mechanical", via: "answer" });
   }
 }

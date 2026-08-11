@@ -51,6 +51,14 @@ Inside Claude Code, run:
 
 Works immediately — nothing to configure, nothing to initialize.
 
+## What you can do
+
+| You want to… | Say |
+| --- | --- |
+| See what scribe has asked, passed, and been waved off on | `/scribe:review` |
+| Change how eagerly it asks | `/scribe:review` — it suggests the change and applies it if you agree |
+| Run a clarify round on demand | `/scribe:clarify` |
+
 ## Settings
 
 Most people never touch these. An optional `.scribe/config.json` in your project:

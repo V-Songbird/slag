@@ -58,6 +58,7 @@ describe("observer", () => {
     assert.strictEqual(row.count, 1);
     assert.strictEqual(row.questions[0].header, "Meaning");
     assert.match(row.questions[0].question, /Improve/);
+    assert.ok(row.answers.includes("Speed (Recommended)"), "the picked answer is harvested");
     assert.ok(row.ts);
   });
 

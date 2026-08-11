@@ -85,19 +85,21 @@ describe("gate: the standing tax", () => {
     assert.deepStrictEqual(requires, ["fs", "path"], "scribe-lib may require only node built-ins");
   });
 
-  test("zero always-loaded surface beyond the rubric and one skill listing", () => {
+  test("zero always-loaded surface beyond the rubric and the skill listings", () => {
     assert.ok(!fs.existsSync(path.join(ROOT, "commands")), "no commands directory");
     assert.ok(!fs.existsSync(path.join(ROOT, "agents")), "no agents directory");
     assert.ok(!fs.existsSync(path.join(ROOT, "CLAUDE.md")), "no plugin CLAUDE.md");
-    assert.deepStrictEqual(fs.readdirSync(path.join(ROOT, "skills")), ["clarify"]);
+    assert.deepStrictEqual(fs.readdirSync(path.join(ROOT, "skills")).sort(), ["clarify", "review"]);
 
-    // The skill's frontmatter description rides every session's skill listing;
-    // that is always-loaded cost too, so it gets a cap of its own.
-    const skill = fs.readFileSync(path.join(ROOT, "skills", "clarify", "SKILL.md"), "utf-8");
-    const fm = /^---\n([\s\S]*?)\n---/.exec(skill);
-    assert.ok(fm, "SKILL.md must open with frontmatter");
-    assert.ok(Buffer.byteLength(fm[1], "utf-8") <= 1024,
-      "skill frontmatter is " + Buffer.byteLength(fm[1], "utf-8") + " bytes, cap 1024");
+    // Each skill's frontmatter description rides every session's skill
+    // listing; that is always-loaded cost too, so it gets a cap of its own.
+    for (const name of ["clarify", "review"]) {
+      const skill = fs.readFileSync(path.join(ROOT, "skills", name, "SKILL.md"), "utf-8");
+      const fm = /^---\n([\s\S]*?)\n---/.exec(skill);
+      assert.ok(fm, name + "/SKILL.md must open with frontmatter");
+      assert.ok(Buffer.byteLength(fm[1], "utf-8") <= 1024,
+        name + " frontmatter is " + Buffer.byteLength(fm[1], "utf-8") + " bytes, cap 1024");
+    }
   });
 });
 
