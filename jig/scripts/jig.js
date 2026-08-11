@@ -1946,8 +1946,158 @@ function parseArgs(argv) {
   return opts;
 }
 
+// ---------------------------------------------------------------------------
+// The review surface and the arming commands (0.2.0)
+// ---------------------------------------------------------------------------
+//
+// jig-lib is required lazily inside these functions: it requires this module
+// for the shared vocabulary, and a top-level require here would make that a
+// cycle with half-initialized exports.
+
+function configuredGuards(root) {
+  const lib = require("../hooks/jig-lib.js");
+  const read = lib.readConfig(root);
+  if (read.problems.length) {
+    throw expected("no readable guard config — " + read.problems.join("; "));
+  }
+  const check = lib.validateConfig(read.config);
+  if (check.problems.length) {
+    throw expected("the config is invalid:\n  - " + check.problems.join("\n  - "));
+  }
+  return { lib, config: read.config, guards: check.guards };
+}
+
+// fired / never fired / waved off, per guard, straight from the ledger — plus
+// what arming would say right now, so a review can offer it exactly when it
+// would hold and name the barrier when it would not.
+function cmdReview(root) {
+  const { lib, config, guards } = configuredGuards(root);
+  const stats = lib.ledgerStats(root);
+  const rows = guards.map((g) => {
+    const s = stats[g.id] || { sessionsSinceReset: 0, falsePositives: 0, fired: 0 };
+    const now = lib.effectiveState(g, config, null, s);
+    const ifArmed = lib.effectiveState({ ...g, mode: "armed" }, config, null, s);
+    return {
+      guardId: g.id,
+      classId: g.classId,
+      detector: g.detectorId,
+      actor: g.det.actor,
+      confidence: g.det.confidence,
+      provenance: g.provenance,
+      fired: s.fired,
+      cleanSessions: s.sessionsSinceReset,
+      wavedOff: s.falsePositives,
+      mode: now.mode,
+      why: now.why,
+      armable: ifArmed.mode === "armed",
+      barrier: ifArmed.mode === "armed" ? null : ifArmed.why,
+    };
+  });
+  return {
+    ok: true,
+    schemaVersion: SCHEMA_VERSION,
+    guards: rows,
+    ledger: { file: STATE_DIR + "/" + LEDGER_FILE, lines: ledgerLines(root) },
+  };
+}
+
+// A false positive is a human judgment, recorded as its own ledger line. The
+// arming gate reads it as the reset it is.
+function cmdFp(root, opts) {
+  const { lib, guards } = configuredGuards(root);
+  const guardId = typeof opts.guard === "string" ? opts.guard : opts._[1];
+  if (!guardId) throw expected("fp needs the guard id: jig.js fp <guardId>");
+  const guard = guards.find((g) => g.id === guardId);
+  if (!guard) {
+    throw expected(guardId + " is not a configured guard. Configured: " +
+      guards.map((g) => g.id).join(", "));
+  }
+  lib.appendLedger(root, {
+    session: typeof opts.session === "string" ? opts.session : null,
+    actor: "user",
+    guardId,
+    classId: guard.classId,
+    mode: "observe",
+    decision: "false-positive",
+    tool: null,
+    matched: null,
+    path: null,
+    durMs: 0,
+  });
+  return { ok: true, recorded: "false-positive", guardId, stats: lib.ledgerStats(root)[guardId] };
+}
+
+// The one journaled way a guard's mode changes. The whole config is rewritten
+// through the engine — plan file, pre-image, journal row — so `revert` can put
+// the previous mode back byte for byte.
+function rewriteGuardMode(root, guardId, mode) {
+  const rel = STATE_DIR + "/" + CONFIG_FILE;
+  const raw = readIfExists(path.join(root, rel));
+  if (raw === null) throw expected("no " + rel + " here — run the interview first");
+  const config = JSON.parse(stripBom(raw.toString("utf8")));
+  const row = (Array.isArray(config.guards) ? config.guards : []).find((g) => g && g.id === guardId);
+  if (!row) throw expected(guardId + " is not in " + rel);
+  if (mode) row.mode = mode;
+  else delete row.mode;
+  const content = JSON.stringify(config, null, 2) + "\n";
+  const draft = {
+    changes: [{
+      id: (mode === "armed" ? "arm-" : "disarm-") + guardId + "-" + hashBytes(Buffer.from(content, "utf8")).slice(0, 8),
+      kind: "write-config",
+      path: rel,
+      content,
+      classIds: [row.classId],
+      ownership: "schema",
+      provenance: row.provenance || "assumed",
+      template: { name: "config", version: "1.0.0" },
+      rationale: (mode === "armed" ? "arm " : "return to observe: ") + guardId,
+    }],
+  };
+  const { problems, payload } = planFromDraft(draft, root);
+  if (problems.length) throw expected("the mode change was rejected:\n  - " + problems.join("\n  - "));
+  ensureStateDir(root);
+  fs.writeFileSync(path.join(root, STATE_DIR, "plan-" + payload.planId + ".json"),
+    JSON.stringify(payload, null, 2) + "\n");
+  cmdApply(root, { _: [], change: [], plan: payload.planId });
+  return payload.planId;
+}
+
+// Arming is offered only when it would hold. Asking to arm past the gate is
+// refused with the same `why` the runner would compute — there is exactly one
+// truth table, and both ends read it.
+function cmdArm(root, opts) {
+  const { lib, config, guards } = configuredGuards(root);
+  const guardId = typeof opts.guard === "string" ? opts.guard : opts._[1];
+  if (!guardId) throw expected("arm needs the guard id: jig.js arm <guardId>");
+  const guard = guards.find((g) => g.id === guardId);
+  if (!guard) {
+    throw expected(guardId + " is not a configured guard. Configured: " +
+      guards.map((g) => g.id).join(", "));
+  }
+  const stats = lib.ledgerStats(root)[guardId] || { sessionsSinceReset: 0, falsePositives: 0, fired: 0 };
+  const ifArmed = lib.effectiveState({ ...guard, mode: "armed" }, config, null, stats);
+  if (ifArmed.mode !== "armed") {
+    throw expected("the arming gate is not met for " + guardId + ": " + ifArmed.why);
+  }
+  const planId = rewriteGuardMode(root, guardId, "armed");
+  return { ok: true, armed: guardId, plan: planId, evidence: ifArmed.why };
+}
+
+function cmdDisarm(root, opts) {
+  const { guards } = configuredGuards(root);
+  const guardId = typeof opts.guard === "string" ? opts.guard : opts._[1];
+  if (!guardId) throw expected("disarm needs the guard id: jig.js disarm <guardId>");
+  if (!guards.some((g) => g.id === guardId)) {
+    throw expected(guardId + " is not a configured guard. Configured: " +
+      guards.map((g) => g.id).join(", "));
+  }
+  const planId = rewriteGuardMode(root, guardId, null);
+  return { ok: true, disarmed: guardId, plan: planId };
+}
+
 const COMMANDS = {
   scan: cmdScan, plan: cmdPlan, apply: cmdApply, status: cmdStatus, revert: cmdRevert, selftest: cmdSelftest,
+  review: cmdReview, arm: cmdArm, disarm: cmdDisarm, fp: cmdFp,
 };
 
 function main(argv) {
@@ -1984,6 +2134,7 @@ module.exports = {
   formatOf, verifyByFor, verifyWritten,
   planFromDraft, readPlan, planFiles, readJournal, replayJournal, changeState,
   includeLineText, journalledWrite, restoreWrite,
+  cmdReview, cmdArm, cmdDisarm, cmdFp,
   templateIndex, templateBody, draftFromTemplates, configFromSelection, permissionsProposal,
   readManifest, manifestStates, occupancyProblem, installedClasses,
   matcherMatches, hookRows, collectHooks, nodeOnPath, stackFacts, ruleCorpus, conflictPreflight, readProfile,

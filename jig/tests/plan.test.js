@@ -553,3 +553,82 @@ test("the review surface never claims coverage the manifest does not hold", () =
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// The review surface and the arming cycle (0.2.0)
+
+const GUARD = "silent-catch-edit-observe-guard";
+
+function armProject() {
+  const root = project({ "package.json": "{ \"private\": true }\n" });
+  const plan = engine.cmdPlan(root, {
+    _: [], change: [], select: "silent-catch", provenance: "elicited", "no-ci": true,
+  });
+  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  return root;
+}
+
+function seedSessions(root, n) {
+  const rows = Array.from({ length: n }, (_, i) =>
+    JSON.stringify({ session: "s" + i, guardId: GUARD, decision: "pass" }));
+  fs.appendFileSync(path.join(root, ".jig", "ledger.jsonl"), rows.join("\n") + "\n");
+}
+
+function configRow(root) {
+  const config = JSON.parse(fs.readFileSync(path.join(root, ".jig", "config.json"), "utf-8"));
+  return config.guards.find((g) => g.id === GUARD);
+}
+
+test("review names the barrier while the gate is unmet, and arm refuses with the same words", () => {
+  const root = armProject();
+  const review = engine.cmdReview(root);
+  const row = review.guards.find((g) => g.guardId === GUARD);
+  assert.equal(row.provenance, "elicited");
+  assert.equal(row.mode, "observe");
+  assert.equal(row.armable, false);
+  assert.match(row.barrier, /0 of 10/);
+  assert.throws(() => engine.cmdArm(root, { _: [], change: [], guard: GUARD }),
+    /arming gate is not met.*0 of 10/s);
+});
+
+test("ten clean sessions arm the guard through a journaled config change", () => {
+  const root = armProject();
+  seedSessions(root, 10);
+  assert.equal(engine.cmdReview(root).guards.find((g) => g.guardId === GUARD).armable, true);
+
+  const journalBefore = engine.readJournal(root).length;
+  const armed = engine.cmdArm(root, { _: [], change: [], guard: GUARD });
+  assert.equal(armed.ok, true);
+  assert.equal(configRow(root).mode, "armed");
+  assert.equal(configRow(root).provenance, "elicited");
+  assert.ok(engine.readJournal(root).length > journalBefore, "the arm was not journaled");
+
+  const review = engine.cmdReview(root);
+  assert.equal(review.guards.find((g) => g.guardId === GUARD).mode, "armed");
+});
+
+test("a recorded false positive resets the gate, and disarm returns the guard to observe", () => {
+  const root = armProject();
+  seedSessions(root, 10);
+  engine.cmdArm(root, { _: [], change: [], guard: GUARD });
+
+  const fp = engine.cmdFp(root, { _: [], change: [], guard: GUARD });
+  assert.equal(fp.recorded, "false-positive");
+  const review = engine.cmdReview(root);
+  const row = review.guards.find((g) => g.guardId === GUARD);
+  assert.equal(row.wavedOff, 1);
+  assert.equal(row.mode, "observe", "the false positive did not pull the guard back to observe");
+  assert.match(row.why, /false positive reset/);
+
+  engine.cmdDisarm(root, { _: [], change: [], guard: GUARD });
+  assert.equal(configRow(root).mode, undefined);
+});
+
+test("an assumed install can never reach arm, and the refusal says so", () => {
+  const root = project({ "package.json": "{ \"private\": true }\n" });
+  const plan = engine.cmdPlan(root, { _: [], change: [], select: "silent-catch", "no-ci": true });
+  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  seedSessions(root, 50);
+  assert.throws(() => engine.cmdArm(root, { _: [], change: [], guard: GUARD }),
+    /assumed.*never arm/s);
+});
