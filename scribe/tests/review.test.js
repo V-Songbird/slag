@@ -76,10 +76,10 @@ describe("analyze", () => {
   test("a quiet gate on the conservative bar earns the standard-bar note", () => {
     const rows = [];
     for (let i = 0; i < QUIET_JUDGED; i++) rows.push(judged("s" + i));
-    const r = analyze(rows, cfg);
-    assert.ok(r.suggestions.some((s) => /quiet gate/.test(s)));
-    const std = analyze(rows, { ...cfg, bar: "standard" });
-    assert.ok(!std.suggestions.some((s) => /quiet gate/.test(s)));
+    const con = analyze(rows, { ...cfg, bar: "conservative" });
+    assert.ok(con.suggestions.some((s) => /quiet gate/.test(s)));
+    const std = analyze(rows, cfg);
+    assert.ok(!std.suggestions.some((s) => /quiet gate/.test(s)), "the default bar already asks more");
   });
 });
 

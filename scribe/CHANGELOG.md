@@ -4,6 +4,16 @@ All notable changes to scribe are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.1.0] - 2026-08-13
+
+Asking is the point. The defaults now say so.
+
+### Changed
+
+- scribe asks whenever a request could genuinely go more than one way. The old, quieter bar is still there as `"bar": "conservative"` for projects that want less.
+- The three-round-per-session limit is off by default. A session that keeps forking gets the questions it needs; set `"fatigueCap"` yourself if you want a ceiling back.
+- Questions now keep coming until nothing material is left to settle. Previously a follow-up only happened when one of your answers opened a new fork, so anything that did not fit in the first round was dropped. Now the leftovers come back in the next round.
+
 ## [1.0.0] - 2026-08-11
 
 Declared stable. The ask, the bar, and the memory, measured.

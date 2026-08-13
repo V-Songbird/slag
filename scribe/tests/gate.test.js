@@ -107,7 +107,7 @@ describe("the judged path", () => {
     assert.strictEqual(row.kind, "judged");
     assert.strictEqual(row.source, "mechanical");
     assert.strictEqual(row.session, "s1");
-    assert.strictEqual(row.bar, "conservative");
+    assert.strictEqual(row.bar, "standard");
     assert.strictEqual(row.prompt, "improve the function");
     assert.ok(row.ts);
   });
@@ -119,14 +119,20 @@ describe("the judged path", () => {
     assert.strictEqual(r.ledger[0].prompt.length, lib.PROMPT_KEEP);
   });
 
-  test("config bar standard changes the rubric line and the ledger", () => {
+  test("the default bar is the one that asks more", () => {
+    const root = tmpRoot();
+    const r = runGate(root, AMBIGUOUS);
+    assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /genuinely torn/);
+  });
+
+  test("config bar conservative changes the rubric line and the ledger", () => {
     const root = tmpRoot();
     fs.mkdirSync(path.join(root, ".scribe"));
     fs.writeFileSync(path.join(root, ".scribe", "config.json"),
-      JSON.stringify({ schemaVersion: 1, bar: "standard" }));
+      JSON.stringify({ schemaVersion: 1, bar: "conservative" }));
     const r = runGate(root, AMBIGUOUS);
-    assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /genuinely torn/);
-    assert.strictEqual(r.ledger[0].bar, "standard");
+    assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /cost real rework/);
+    assert.strictEqual(r.ledger[0].bar, "conservative");
   });
 
   test("both bars stay under the byte cap, envelope included", () => {
@@ -144,28 +150,28 @@ describe("fail-open config", () => {
     fs.writeFileSync(path.join(root, ".scribe", "config.json"), "{nope");
     const r = runGate(root, AMBIGUOUS);
     assert.match(r.stderr, /scribe: .*not valid JSON.*using defaults/);
-    assert.strictEqual(r.ledger[0].bar, "conservative");
+    assert.strictEqual(r.ledger[0].bar, "standard");
     assert.ok(r.stdout.length > 0);
   });
 
-  test("unknown bar warns and falls back to conservative", () => {
+  test("unknown bar warns and falls back to the default", () => {
     const root = tmpRoot();
     fs.mkdirSync(path.join(root, ".scribe"));
     fs.writeFileSync(path.join(root, ".scribe", "config.json"),
       JSON.stringify({ schemaVersion: 1, bar: "aggressive" }));
     const r = runGate(root, AMBIGUOUS);
     assert.match(r.stderr, /unknown bar/);
-    assert.strictEqual(r.ledger[0].bar, "conservative");
+    assert.strictEqual(r.ledger[0].bar, "standard");
   });
 
   test("a future schemaVersion is refused into defaults, not half-read", () => {
     const root = tmpRoot();
     fs.mkdirSync(path.join(root, ".scribe"));
     fs.writeFileSync(path.join(root, ".scribe", "config.json"),
-      JSON.stringify({ schemaVersion: 2, bar: "standard", off: true }));
+      JSON.stringify({ schemaVersion: 2, bar: "conservative", off: true }));
     const r = runGate(root, AMBIGUOUS);
     assert.match(r.stderr, /schemaVersion/);
-    assert.strictEqual(r.ledger[0].bar, "conservative");
+    assert.strictEqual(r.ledger[0].bar, "standard");
     assert.ok(r.stdout.length > 0, "off:true from a future schema must not be honored");
   });
 });
@@ -202,9 +208,12 @@ describe("wave-off and fatigue", () => {
     assert.ok(r.stdout.length > 0);
   });
 
-  test("the fatigue cap stands the gate down and logs the decision", () => {
+  test("an opted-in fatigue cap stands the gate down and logs the decision", () => {
     const root = tmpRoot();
-    seedAsks(root, "s1", lib.DEFAULT_FATIGUE_CAP);
+    fs.mkdirSync(path.join(root, ".scribe"));
+    fs.writeFileSync(path.join(root, ".scribe", "config.json"),
+      JSON.stringify({ schemaVersion: 1, fatigueCap: 3 }));
+    seedAsks(root, "s1", 3);
     const r = runGate(root, AMBIGUOUS);
     assert.strictEqual(r.stdout, "");
     const last = r.ledger[r.ledger.length - 1];
@@ -212,12 +221,10 @@ describe("wave-off and fatigue", () => {
     assert.strictEqual(last.capped, true);
   });
 
-  test("fatigueCap 0 disables the cap", () => {
+  test("no fatigue cap by default — asking is never rationed", () => {
     const root = tmpRoot();
-    fs.mkdirSync(path.join(root, ".scribe"));
-    fs.writeFileSync(path.join(root, ".scribe", "config.json"),
-      JSON.stringify({ schemaVersion: 1, fatigueCap: 0 }));
-    seedAsks(root, "s1", 10);
+    assert.strictEqual(lib.DEFAULT_FATIGUE_CAP, 0);
+    seedAsks(root, "s1", 25);
     const r = runGate(root, AMBIGUOUS);
     assert.ok(r.stdout.length > 0);
   });

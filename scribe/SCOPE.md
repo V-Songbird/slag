@@ -17,7 +17,7 @@ migration work, not exceptions to the scope.
 scribe is a clarify-first gate for ambiguous requests.
 
 > When a request could honestly be executed several materially different ways,
-> scribe has Claude ask one focused question round — numbered questions, each
+> scribe has Claude ask focused question rounds — numbered questions, each
 > with options and a recommended answer first — and repeat until the task is
 > defined well enough to execute cleanly. A precise request passes untouched.
 
@@ -37,8 +37,9 @@ Before Claude acts on an ambiguous request, the user can answer three things:
 
 1. **What did Claude think I meant?** — the recommended reading, stated.
 2. **What else could I have meant?** — the live alternatives, as options.
-3. **What does my answer unlock?** — follow-ups appear only when an answer
-   opens them; the loop closes when the frontier is empty.
+3. **What is still unresolved?** — questions keep coming, whether they spilled
+   over or an answer unlocked them; the loop closes only when the frontier is
+   empty.
 
 ## Who scribe is for
 
@@ -52,8 +53,9 @@ New capability must preserve these expectations:
 
 - scribe works immediately after installation with no initialization step;
 - a precise request is never interrupted — the gate's default is silence;
-- at most one question round fires before work starts; follow-ups ride the
-  conversation, not a queue of separate interruptions;
+- rounds continue until no material gap is left, so nothing consequential is
+  guessed at; they ride the conversation, not a queue of separate
+  interruptions, and a round that would change nothing is never asked;
 - every question leads with a recommended answer, so agreement is one click;
 - "just do it" (and any equivalent) is always honored, that turn, without
   argument, and is itself logged;

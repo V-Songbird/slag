@@ -35,12 +35,14 @@ const PROMPT_KEEP = 200;
 const QUESTION_KEEP = 120;
 
 const BARS = ["conservative", "standard"];
-const DEFAULT_BAR = "conservative";
+// Asking is the product. The default bar asks whenever readings genuinely
+// fork; `conservative` is the opt-in for projects that want less.
+const DEFAULT_BAR = "standard";
 
 // Rounds of questions per session before the gate stops asking (0 disables the
-// cap). Question fatigue converts consent into noise — after this many rounds
-// the gate stands down for the rest of the session and logs that it did.
-const DEFAULT_FATIGUE_CAP = 3;
+// cap). Off by default: a session that keeps forking has earned the questions,
+// and a user who disagrees has the wave-off, the cap, and the kill switch.
+const DEFAULT_FATIGUE_CAP = 0;
 
 // Wave-off phrases. Matched against the user's next prompt (only when this
 // session already saw an ask) and against answers typed into a question round.
@@ -65,10 +67,11 @@ const RUBRIC_CORE = [
     " different ways: different files touched, different definition of done, or" +
     " different risk. Vague wording that still lands the same change is precise.",
   "Precise -> proceed in silence. Never mention scribe.",
-  "Ambiguous -> invoke the scribe:clarify skill and follow it: one round of" +
-    " numbered questions via AskUserQuestion (max 4), each with options, your best" +
-    " guess first labeled \"(Recommended)\". Never ask what the prompt, the code," +
-    " or the configuration already answers.",
+  "Ambiguous -> invoke the scribe:clarify skill and follow it: numbered questions" +
+    " via AskUserQuestion (max 4 per call), each with options, your best guess" +
+    " first labeled \"(Recommended)\". Keep asking until no material gap is left;" +
+    " a wider frontier spills into the next round. Never ask what the prompt, the" +
+    " code, or the configuration already answers.",
   "If the user waves questions off (\"just do it\"), comply that turn, no argument.",
 ].join("\n");
 

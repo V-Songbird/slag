@@ -61,14 +61,23 @@ cannot answer it ("the test asserts the old behavior — is that test wrong?").
 ## Frontier discipline
 
 The frontier is every question currently askable. Ask all of it in one
-AskUserQuestion call (up to 4 questions, numbered by the tool). Holding a
-known question back for a second round is dripping; inventing follow-ups to
-feel thorough is padding. Both erode consent.
+AskUserQuestion call — but the tool carries at most 4 questions, so a frontier
+wider than that spills into the next round. Holding a question back for any
+other reason is dripping; inventing follow-ups to feel thorough is padding.
+Both erode consent.
 
-A follow-up is legitimate only when an ANSWER unlocked it: the fork it asks
-about did not exist until the user picked a branch. State what unlocked it in
-the question text ("Speed means the hot path matters — it is inside
-`normalize()`, which has three other callers…").
+A follow-up is legitimate on either of two grounds:
+
+1. **Spillover** — the question was on the frontier already and did not fit in
+   the last call. Ask it plainly, highest materiality first.
+2. **Unlocked** — the fork did not exist until the user picked a branch. State
+   what unlocked it in the question text ("Speed means the hot path matters —
+   it is inside `normalize()`, which has three other callers…").
+
+Keep going until neither ground produces a question. An unanswered gap is the
+one thing worse than an extra round: the whole point is that nothing material
+is left to guess at. A round that answers nothing you would build differently
+on is padding — that is the only limit.
 
 ## Closing
 

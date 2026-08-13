@@ -32,7 +32,7 @@ keeping the current value as an option. On acceptance, write the change into
 `.scribe/config.json`, creating it as:
 
 ```json
-{ "schemaVersion": 1, "bar": "conservative" }
+{ "schemaVersion": 1, "bar": "standard" }
 ```
 
 with only the keys being set (`bar`, `fatigueCap`, `off`). Preserve any keys

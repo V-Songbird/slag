@@ -20,7 +20,7 @@
 
 Every vague request forces a coin flip. "Improve this", "clean it up", "make it better" — Claude has to guess what you meant, and a wrong guess costs you a rework plus the archaeology of undoing it. The old carpenter's rule applies: measure twice, cut once.
 
-scribe is the measuring. When your request could honestly go several ways, Claude asks — one numbered round of focused questions, each with options and its recommended answer first. You pick, it asks whatever your answer unlocked, and when nothing's left to ask it gets to work. A precise request skips all of this and goes straight through.
+scribe is the measuring. When your request could honestly go several ways, Claude asks — numbered, focused questions, each with options and its recommended answer first. You pick, it asks whatever is still open, and only when nothing material is left does it get to work. A precise request skips all of this and goes straight through.
 
 ## Why you'd want it
 
@@ -34,11 +34,11 @@ scribe is the measuring. When your request could honestly go several ways, Claud
 | Moment | What happens |
 | --- | --- |
 | You ask for something clear | Nothing. It goes straight through. |
-| You ask for something that could go several ways | One numbered question round, options with a recommendation first |
-| Your answer opens a new fork | The follow-up gets asked — until nothing is left to ask |
+| You ask for something that could go several ways | A numbered question round, options with a recommendation first |
+| More is open than one round can hold | The rest comes in the next round, nothing quietly dropped |
+| Your answer opens a new fork | The follow-up gets asked — until nothing material is left |
 | You say "just do it" | scribe stands down for the turn, no argument |
 | You answer the same question the same way twice | It offers to remember; from then on it's a stated assumption you can veto, not a question |
-| It has already asked three rounds this session | It stops asking — question fatigue is worse than a guess |
 | You're running Claude unattended | scribe stands down rather than stall your run on a question |
 
 ## Install
@@ -68,7 +68,7 @@ Does it actually work, or is this vibes? Same tasks, live sessions, with and wit
 | --- | --- | --- |
 | Asked before acting on a genuinely forkable request | **7 of 8** | 0 of 8 |
 | Precise requests interrupted | 0 of 6 | 0 of 6 |
-| Unattended runs stalled by a question | 0 of 20 | — |
+| Unattended runs stalled by a question | 0 of 12 | — |
 
 The middle row is the contract: clarity costs you nothing. The last row is the promise that scribe knows when nobody's there to answer and stays out of the way.
 
@@ -81,8 +81,8 @@ Most people never touch these. An optional `.scribe/config.json` in your project
 
 | Key | What it does |
 | --- | --- |
-| `bar` | `"conservative"` (default) asks only when a wrong guess costs real rework; `"standard"` asks whenever readings genuinely fork |
-| `fatigueCap` | Question rounds per session before scribe stops asking (default 3, `0` = no cap) |
+| `bar` | `"standard"` (default) asks whenever readings genuinely fork; `"conservative"` asks only when a wrong guess would cost real rework |
+| `fatigueCap` | Question rounds per session before scribe stops asking (default `0`, no cap) |
 | `off` | `true` silences scribe in this project |
 
 Prefer a switch? `SCRIBE_OFF=1` in the environment or an empty `.scribe/off` file does the same as `off`.
