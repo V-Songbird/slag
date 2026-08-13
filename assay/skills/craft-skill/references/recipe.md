@@ -12,10 +12,9 @@ user's actual phrasing the description covers. Every part below is there because
 it measurably changes whether the skill fires; nothing here is style.
 
 Write the whole recipe into `description` alone — never add a separate
-`when_to_use` field. A proof A/B (`docs/research/proof/skill-trim/`, confirmed
-on sonnet) found no firing penalty from dropping `when_to_use` entirely, and a
-measurable recall lift over keeping it: the field just dilutes routing. The
-listing entry is capped at 1,536 characters — write to fit well under it. Past
+`when_to_use` field. Dropping it entirely cost no firing in measurement and
+lifted recall on sonnet: the field just dilutes routing. The listing entry is
+capped at 1,536 characters — write to fit well under it. Past
 the cap the tail truncates, and the exclusion clause sits last, so it is the
 first thing lost. More words is not more recall: spend the budget on distinct
 trigger phrasings, never on repeating one.
@@ -40,12 +39,18 @@ Every description this plugin writes has exactly this shape:
    words are the single most common reason a skill exists but never runs.
 
    Keep it **short and specific — do not enumerate the domain's whole surface.**
-   An "authoritative reference for X — the full command set and constant
-   registry, scoping rules, event labels, …" opener measurably *lowers* firing
-   against a terse "`<domain>` — `<key commands/nouns>`" one. The enumeration
-   reads as breadth and routes worse than a narrow, concrete claim. This is the
-   largest single effect measured on description wording, and it bites hardest
-   on niche domains, where routing is least certain.
+   An "authoritative reference for X — the full command set, the constant
+   registry, scoping rules, event labels, sidecar formats, and budget
+   arithmetic" opener measurably *lowers* firing against a terse "`<domain>` —
+   `<key commands/nouns>`" one. The enumeration reads as breadth and routes
+   worse than a narrow, concrete claim. This is the largest single effect
+   measured on description wording, and it bites hardest on niche domains, where
+   routing is least certain.
+
+   assay checks this: five or more commas in the text before the `Use when`
+   clause is reported as `enumerated`. The opener above trips it; cut the list to
+   one narrow claim. A shorter list stays under the line and still routes worse,
+   so the check catches the plain cases, not every one.
 
 2. **Trigger clause — and quoted phrasings only if they fit.** The explicit
    "Use when the user asks to X, Y, or Z" clause is required. The **quoted
@@ -122,8 +127,9 @@ first miss, re-check:
 
 1. Base sentence names zero concrete artifacts → rewrite it with the real
    file types and outputs.
-2. Base sentence enumerates the domain's whole surface ("the full command set
-   and constant registry, scoping, event labels, …") → cut it to a terse
+2. Base sentence enumerates the domain's whole surface, reported as
+   `enumerated` ("the full command set, the constant registry, scoping, event
+   labels, sidecar formats, …") → cut it to a terse
    `<domain> — <key commands/nouns>` opener. This is the fix that matters most.
 3. No "Use when…" clause → fold part 2's trigger in, turning any existing prose
    trigger into the clause form rather than adding a second one.

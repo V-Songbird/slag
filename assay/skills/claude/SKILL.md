@@ -12,7 +12,7 @@ description: >-
   with any flags. Do NOT use to review code,
   PRs, non-Claude config like eslint, or the AGENTS.md chain — auditing that is
   /assay:codex.
-argument-hint: "[--fix] [--verbose] [--json] [--no-verify] [--deterministic] [--semantic] [--project-only]"
+argument-hint: "[--fix] [--verbose] [--json] [--top <n>] [--no-verify] [--deterministic] [--semantic] [--project-only]"
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent
 ---
 
@@ -22,7 +22,8 @@ The script measures everything mechanical; you judge two factors and present the
 result. Never re-derive by hand what the script already computed.
 
 Flags in `$ARGUMENTS`: `--fix` (apply rewrites without the menu), `--verbose`
-(the full report), `--json` (the machine-readable record), `--no-verify` (skip
+(the full report), `--json` (the machine-readable record), `--top <n>` (show
+more than the default 8 rows in the fix table), `--no-verify` (skip
 the subagent in step 2, which otherwise runs), `--deterministic` (skip every
 model step and report what the script alone can see), `--semantic` (also propose
 paraphrased duplicates and indirect conflicts the script cannot see),
@@ -60,8 +61,10 @@ it behind is litter in someone's repository. If only `ruleCount` is 0, write
 
 Under `--deterministic`, go straight to step 3 and write no judgments file at
 all. The engine has no such flag and never needs one — the absence of
-`.assay-tmp/judgments.json` *is* the mode, and the report lands complete,
-labelled `deterministic only`, with the model-judged checks named as not run.
+`.assay-tmp/judgments.json` *is* the mode, and the report lands complete, and
+its provenance line says what did not run — "Did not check: whether each rule
+names a clear moment to act, and whether a script could do the job instead."
+(`--verbose` adds a `deterministic only` banner on top of that).
 
 A `judge` entry can include `context` when a heading or following clarification
 is needed to interpret the rule. Judge the rule with that context, but keep
@@ -108,8 +111,11 @@ retrospective, so a lessons file can arrive graded as a page of mandates.
 
 Send **one** `Agent` call — `subagent_type: "general-purpose"`, `model:
 "sonnet"`, `run_in_background: false` — carrying every rule from the `judge` list
-whose text you doubt is a rule at all, its `key` and text each. Ask for exactly
-one verdict per entry: is this an instruction to follow, or is it narration,
+whose text you doubt is a rule at all: its `key`, `text`, `file`, `scope`, and
+`autoMemory` when the entry has it. An `autoMemory: true` entry is a note the
+assistant wrote about this project, not an instruction the user authored, and
+the subagent needs that to answer at all. Ask for exactly one verdict per
+entry: is this an instruction to follow, or is it narration,
 history, an example, or a description of what the project does? Ask for a
 one-sentence reason on every entry it rejects, in its own words.
 
@@ -155,20 +161,20 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" report
 ```
 
 Bare, this prints the **short report** — the default, and what the user reads:
-what was looked at, **Fix these first**, **Could be automatic instead**, **Also
+one headline of counts, a provenance line saying what was read and which whole
+checks did not run, **Fix these first**, **Could be automatic instead**, **Also
 worth a look**, and one closing line. It names each rule **once**, under its
 worst problem, and carries no score, factor code or evidence tag. That is gated:
 a release test fails if it runs past 40 lines, repeats a rule, or uses a word
 that needs Claude Code internals.
 
 Add a flag only when `$ARGUMENTS` carried it. `--json` prints the whole record —
-over a thousand lines on a four-rule project, and unreadable in a chat. Redirect
-it to a file, then tell the user the path and how big it is and print none of the
-body:
+over a thousand lines on a four-rule project, and unreadable in a chat. `report`
+has already written that same record to `.assay-tmp/audit.json` on its own, so
+run the bare command, print none of the body, and name that path and how big it
+is instead. Do not redirect anything over that file — step 7's before/after
+reads it.
 
-```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" report --json > .assay-tmp/audit.json
-```
 **`--verbose` prints the full report** — coverage, hard gates, every finding with
 its evidence tag, the enforcement ladder, per-file grades, User scope, weak
 descriptions, and everything the verify pass suppressed. Pass it when the user
@@ -213,7 +219,7 @@ report behind it asks the user to choose blind.
 ## 4. Offer fixes
 
 Skip to step 6 when the report has no weak rules, no weak descriptions, no dead
-references and no placement candidates.
+references, and nothing under **Could be automatic instead**.
 
 Under `--fix`, skip the question instead: put every **wording rewrite** into one
 batch named `fix-batch` in the draft plan and apply that batch by name, which is
@@ -231,19 +237,33 @@ before they installed anything — never "quality floor", "plan artifact",
 
 - `Reword [N] unclear rules` — "Rewrite the rules the report calls too vague or
   says have no clear action. You see each change before it lands, and any of them
-  can be undone." N counts rules whose problem is **wording**: the short report's
-  "N rules need work" is exactly that count, since dead paths, duplicates and
-  disagreements each have their own line now.
+  can be undone." N is the number of rows in **Fix these first** whose Fix cell
+  offers a wording fix. It is *not* the headline's "N rules need work" — that
+  count also covers rows whose Fix cell reads "A hook … could do this on every
+  run — build that instead of rewording it" or "A hook is already wired for
+  this", and a rewrite is the one thing those rows say not to do. If the table
+  ends with "N more not shown here", rerun `report --top <n>` past that total so
+  every row prints before you count. Those mechanism-owned rows are missing from
+  **Could be automatic instead** as well — the report names each rule once, under
+  its worst problem — so add them to `Build the mechanism now` and `Just write
+  down the plan` rather than dropping them. Dead paths, duplicates and
+  disagreements have their own rows and their own headline clauses, and none of
+  them count here.
 - `Repair [N] dead references` — "Repoint the rules naming a file that is not
   there, or drop the mention. You see each change first." This is the
   `stale-reference-repair` kind the engine already implements; offer it whenever
   the report has a "points at … which is not there" row, and rank it above the
   rewrites, exactly as the report does.
 - `Rewrite [N] skill descriptions` and `Rewrite [N] subagent descriptions` — two
-  separate options, mirroring the report's two headings. "A description is how
-  Claude decides to reach for it, and these read as summaries instead." Never
-  fold subagents under a label that says skill: they are different files, and the
-  count then matches no number the user has seen.
+  separate options. "A description is how Claude decides to reach for it, and
+  these read as summaries instead." The two headings that carry those counts are
+  in the full report, not the short one — a default run merges skills and
+  subagents into the capped **Also worth a look** list — so take both from
+  `report --verbose`, whose `## Weak skill descriptions (N to fix)` and
+  `## Weak subagent descriptions (N to fix)` headings state them directly. Never
+  count them yourself off the short report. Never fold subagents under a label
+  that says skill: they are different files, and the count then matches no
+  number the user has seen.
 - `Build the mechanism now (N)` — "Preview the hook, skill, or subagent built
   from the current official docs, and install the ones you approve. The rules
   stay where they are."
@@ -273,8 +293,9 @@ may be stated twice on purpose.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" clean
 ```
 
-Run this last. It removes `.assay-tmp/`, and the change journal too once every
-applied change has been validated or rolled back.
+Run this after step 7's remeasure, when there was one — remeasure reads
+`.assay-tmp/`, and this deletes it. It removes `.assay-tmp/`, and the change
+journal too once every applied change has been validated or rolled back.
 
 **Say what it destroys before running it.** Removing the journal removes the
 undo — after this, `git diff` is the only way back. While the user is still

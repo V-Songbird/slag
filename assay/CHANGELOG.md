@@ -15,6 +15,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - A skill or subagent description whose opening sentence lists too much is now flagged. That opening is what a description is routed on
 - `scan` writes a `.gitignore` into its own temp directory, so a first run leaves nothing in your working tree
 - `scan`, `report` and `ci` now say up front when an earlier fix was left half-finished
+- The requirement is stated where you install: Node 18 or newer on your PATH, and the one line that installs assay on Codex
 
 ### Changed
 
@@ -23,7 +24,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - Before applying a rewrite, assay points out any path, name or number the new wording introduces that the old one did not have
 - Approval is collected in a surface that has one — a question with the changes as options, or a numbered list you answer
 - `clean` says what it destroys: removing the change journal removes the undo, and it names any plan it kept instead of counting them
-- Validating a rewrite finds the rewritten rule and says where it is now. It used to report that the rule "no longer exists" beside a pass
 - A broken judgments file reports its problems grouped by cause, with each rule's file and line, and names the recovery that needs no model at all
 - Error messages name commands you can actually type
 - craft-rules asks its questions in one order, says why each answer matters, and has an answer for "I don't know". A request it will not write as a rule now comes back with the closest rule it could write, the one answer that would unlock it, and where else to take it
@@ -32,28 +32,37 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - On a monorepo, the report says how many of the rules load only when Claude works in their own folder, and puts the always-loaded ones first
 - On Codex the report no longer offers a flag that host does not take
 - "Claude keeps ignoring my instructions" now routes to the audit rather than to writing a new rule
+- The audit says what it found and roughly how long the grading takes before it goes quiet, and cleans up after itself when there was nothing to grade
+
+### Fixed
+
+- Validating a rewrite finds the rewritten rule and says where it is now. It used to report that the rule "no longer exists" beside a pass
 
 ## [1.14.0] — 2026-08-13
 
 ### Changed
 
-- `--verbose` is roughly half the length it was, and a release test now holds it there. Limits true of every wired mechanism are stated once per section, the enforcement ladder is one line per mechanism carrying what it reaches, and mechanisms inherited from your settings and installed plugins are summarized by source; the rest is still in `--json`
+- `--verbose` is roughly half the length it was. Limits true of every wired mechanism are stated once per section, the enforcement ladder is one line per mechanism carrying what it reaches, and mechanisms inherited from your settings and installed plugins are summarized by source; the rest is still in `--json`
 - The full report opens with a one-line contents list
 - "All rules" covers this project's rules; everything else is still in `--json`
-- The weak-rules table no longer prints a per-rule state beside the grade — a rule with nothing else wrong read as "healthy" in a table headed "Weak rules"
 - Both reports now use the same words for the same problem. The full one adds the score and the kind of evidence around that sentence instead of replacing it with a terser one
 - Every state word in the full report gets a one-line legend, and the tick-and-cross chain after each mechanism is gone — a state that is switched off is named, and the rest is stated once
+- The full report drops the terms that needed the rubric to read: the first rung of the ladder is "the rules themselves", and a run with no model behind it says so in plain words
 - Lists of rules from outside the repository are capped, with the count and a pointer at `--json`
 - Notes about a surface your project does not have — auto memory, saved workflows — no longer open the report
-- Paths render the same way everywhere: no raw backslashes in a link, no full home directory in a shareable report
 - "3 could be handled by a script instead" says what it is counting
+
+### Fixed
+
+- The weak-rules table no longer prints a per-rule state beside the grade — a rule with nothing else wrong read as "healthy" in a table headed "Weak rules"
+- Paths render the same way everywhere: no raw backslashes in a link, no full home directory in a shareable report
 
 ## [1.13.0] — 2026-08-13
 
 ### Changed
 
 - Claude's own memory notes for a project are no longer graded as project rules. They are read and listed, so you can see what is in your context, and they stay out of the fix list, out of the counts the grade averages, and out of the restructure advice
-- A dated note citing a file that has since moved is no longer reported as a rule the host cannot apply. That is the note working
+- A dated note citing a file that has since been deleted is no longer reported as a rule the host cannot apply. That is the note working
 - Nothing outside the repository can fail a `ci` run any more — not your own instruction files, not the ones above the project root, not the memory notes. They are still reported, and `ci` says how many files it saw that the checkout does not contain
 - The short report says how many rules load from outside the repo, and names the flag that leaves them out. That sentence used to be pushed last into a capped list and cut
 - "Rules across N files" in the full report now counts the rules the grade beside it actually averages

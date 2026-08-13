@@ -42,11 +42,14 @@ go; never assume a filename:
 - `profile.targets.rule.places[]` — every file a new rule may be written into,
   each with its `scope` and a `scoping` sentence saying what it reaches. This is
   your placement menu in step 4.
-- `sources[]` and `files[]` — what already exists, with `selected` and `loaded`.
-  A source with `selected: false` is shadowed and never read; writing into it
-  would be writing nowhere.
+- `sources[]` and `files[]` — what already exists, with `selected`. A source
+  with `selected: false` is shadowed and never read; writing into it would be
+  writing nowhere.
 - `rules[]` — the ACTIVE corpus: every rule loaded here, with its exact `text`,
   `file`, and `lineStart`. Step 3 checks your draft against this list.
+
+`rules[]` carries no `scope` — join a rule's `file` to `files[]` to learn whether
+it is project, user, or auto-memory.
 
 ## 2. Grill
 
@@ -55,9 +58,9 @@ ask for what the user already said; only fill real gaps.
 
 Ask in this order, and say in one short clause WHY each answer matters — a
 question with no stated reason reads as a form to fill in. The order is by what a
-wrong answer costs: the first three decide where the rule lives and whether it
-should be a rule at all, so a wrong answer there throws the draft away; the rest
-only weaken it.
+wrong answer costs: 1-3 decide where the rule lives and whether it should be a
+rule at all; 4 and 5 decide whether there is a rule to write at all — with
+neither, you refuse below; 6 and 7 only sharpen it.
 
 1. **Scope** — the whole project, or bound to file types, paths, or one
    subdirectory? *This picks the file it goes in, and a rule in the wrong file
@@ -80,11 +83,13 @@ only weaken it.
 **"I don't know" is a real answer, and it never ends the interview.** Offer the
 fallback that fits:
 
-- Scope unknown → offer a file glob as the firing moment: "shall we bind it to
+- Scope unknown → offer to bind it to the files it is about: "shall we bind it to
   the files it is about — say `src/**/*.ts` — so it only loads there?" Confirm
-  the glob matches a real file with `Glob` before you use it.
-- Firing moment unknown → offer the same glob, or the nearest lifecycle moment
-  they can name ("before committing", "when you open a pull request").
+  the glob matches a real file with `Glob` before you use it. That settles where
+  it lives, not when it fires — still ask 4.
+- Firing moment unknown → offer the nearest lifecycle moment they can name
+  ("before committing", "when you open a pull request"), or turn the scope
+  answer's file type into a `When editing <type>…` opener.
 - Stakes unknown → default to the words they used and say so; never promote a
   "prefer" into a "must" on their behalf.
 
@@ -102,9 +107,10 @@ and refusing is not the end of the turn. Give all three of these, in this order:
    request, run `npm run lint` and fix what it reports.* Is that the duty?"
 2. **The one answer that would unlock it** — name the single missing piece, not
    a list. Usually the firing moment or one concrete artifact.
-3. **The redirect**, if the ask belongs somewhere else — step 3's table below
-   holds those, and a wish is exactly the case that never reaches it. A procedure
-   goes to `/assay:craft-skill`; something a command can check goes to a hook.
+3. **The redirect**, if the ask belongs somewhere else — step 3's redirect list
+   below holds those, and a wish is exactly the case that never reaches it. A
+   procedure goes to `/assay:craft-skill`; something a command can check goes to
+   a hook.
 
 Stop only after all three, and only if the user declines them.
 
@@ -122,6 +128,8 @@ Check the ask against the recipe's "not a rule" table before writing:
   through step 5 like everything else; otherwise write the rule as a stopgap
   and say so.
 - A procedure or follow-the-doc duty → suggest `/assay:craft-skill` instead.
+- An audit or review duty that needs fresh context → suggest a subagent; it
+  gets its own context window instead of competing with the session's.
 - Must-never-be-violated → say plainly that only a hook guarantees; a rule is
   probabilistic on every model size.
 
@@ -141,6 +149,10 @@ Then compose the draft bullet per the recipe's anatomy and check it against
   the existing one reworded instead. A second copy of a rule is corpus noise,
   not enforcement.
 - Neither → continue.
+
+Name the scope of any conflict or duplicate you report. A hit in a user-scope
+file is a real collision, but it is outside this repository and the user may
+prefer to keep both.
 
 This is the reading you can do before anything is written. The engine's own
 conflict and duplicate detectors run over the corpus **after** the write, in
@@ -236,7 +248,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" scan
 ```
 
 `validate` re-parses what was written and re-runs the static analysis, recording
-the finding delta. Then find the new rule by its exact text in
+the corpus state that results. Then find the new rule by its exact text in
 `.assay-tmp/scan.json` and check it:
 
 - Not in `rules[]` at all → it reads as prose, not a rule. Its file marked

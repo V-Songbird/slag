@@ -95,3 +95,13 @@ maps 1:1 to an existing tool.
 The script found no verb it recognizes. Score how binding the rule reads:
 1.0 unconditional (must/never) · 0.85 plain imperative · 0.7 advisory
 (should) or statement-of-convention · 0.5 preference · 0.2 hedged wish.
+
+## What the payload tells you about a rule's origin
+
+Each `judge` entry carries `file` and `scope`. An entry with `autoMemory: true`
+is a note the host wrote ABOUT this project, not an instruction to follow —
+score it like every other entry, since the report will not compose without an F3
+and F8 pair, but do not read its F3 as a standing duty, and let the verification
+pass reject it. A `scope` of `user` or `ancestor` is a rule from outside
+this repository: score it normally, but do not read a missing project path in it
+as a defect.

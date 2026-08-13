@@ -19,7 +19,7 @@ plan stale and the journal blind.
     "id": "rewrite-prettier",
     "kind": "rule-rewrite",
     "rationale": "The rule names no firing moment, so the duty gets skipped.",
-    "addresses": "<the rule's `key` from the scan, if you have it>",
+    "addresses": "<the rule's `key` from the scan>",
     "patches": [{
       "path": "CLAUDE.md",
       "old": "- Run prettier before committing.",
@@ -36,6 +36,10 @@ plan stale and the journal blind.
   what every later command names.
 - `kind` — `rule-rewrite`, `stale-reference-repair`, `placement-promotion`, or
   `park`.
+- `addresses` — the rule's `key` from the scan. Always set it on any change
+  aimed at a specific rule: it is what lets `validate` find the rewritten rule
+  and report where it landed and what it now carries. Without it, validation
+  records only the corpus state.
 - `patches[].old` — the **exact** current text, with enough surrounding context
   to appear exactly once. Match by text, never by line number. `"old": null`
   creates a file, and `plan` refuses if that file already exists.
@@ -142,7 +146,7 @@ plan stale and the journal blind.
    naming both fingerprints and writes nothing; re-plan rather than forcing it. A
    write whose result does not parse is restored and exits 1.
 4. `validate --change <id>` per applied change. It re-parses what was written,
-   re-runs the static analysis and records the delta, and for a promotion checks
+   re-runs the static analysis and records the corpus state that results, and for a promotion checks
    that the host actually discovers the new mechanism. It reports `configured`
    and nothing above: a file on disk is not evidence that anything ran. assay
    never runs the repository's own tests, lint, or a fresh session — those are

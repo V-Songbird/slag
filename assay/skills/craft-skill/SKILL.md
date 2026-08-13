@@ -79,9 +79,10 @@ Beyond that, the description is a router and the measured recipe applies: follow
 [references/recipe.md](references/recipe.md) exactly — concrete base sentence,
 "Use when…" trigger clause, "Do NOT use…" exclusion, under the listing cap. Read
 the finished description once against the recipe's refit checklist before putting
-it in the plan. On a refit, edit only the frontmatter description (and
-`when_to_use` if the format still uses it) — never the body's instructions beyond
-what the user asked.
+it in the plan. On a refit, edit only the frontmatter description — never the
+body's instructions beyond what the user asked. If the file still carries a
+separate `when_to_use`, fold it into `description` and delete the field in the
+same patch; the engine flags a model-invocable skill that keeps both.
 
 **On a refit, keep the diagnosis.** The checklist tells you exactly which parts
 were missing — no trigger clause, no exclusion, nothing concrete named, an
@@ -192,7 +193,9 @@ ran.
 Then check the fresh `.assay-tmp/scan.json` yourself:
 
 - the skill is in `skills[]` under the name you gave it;
-- `checks.missing` is empty — that is the trigger recipe's parts;
+- `checks.missing` is empty, and `checks.redundant`, `checks.overCap` and
+  `checks.hasWhenToUse` are all false — the last three ride beside `missing`,
+  not in it, and `overCap` is the 1,536-char description cap;
 - every file the `SKILL.md` body references exists (`Read` or `Glob` each one) —
   a skill pointing at a missing reference is blocked the first time it runs;
 - where a metadata sidecar was written, `metadata` is present on the entry and

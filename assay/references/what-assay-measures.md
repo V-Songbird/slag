@@ -5,23 +5,32 @@ behind a wording verdict, in the same shape each time: what the check looks at,
 a rule that fails it, the same rule passing, and what the check does **not**
 claim.
 
-Two of the checks need a model to run; the other five are a script, and give the
-same answer every time on the same text. The report says which is which, and
-says plainly when a check did not run at all.
+Two of the checks need a model to run; the other five are a script and give the
+same answer every time on the same text — with one exception, below. The report
+says which is which, and says plainly when a check did not run at all. The verb
+check has a third mode:
+when the script can read no verb out of a rule at all, the model scores how
+binding the rule reads rather than the script guessing.
 
 No part of this predicts whether the agent will follow a rule. It measures how the
 rule is written, where it sits, and what it names — the parts you control.
+
+Not every check runs on every host. Where the wording checks have no measured
+evidence for the host you are on, the report withholds them and lists them under
+*Did not check*; the checks under *The checks that need no wording at all* run
+everywhere.
 
 ---
 
 ## No clear action
 
-**Looks at:** whether an instruction verb leads the line. `Always`, `Never`,
-`Run`, `Use`, `Add` — and the hedges that soften them, like `try to` or
-`where possible`.
+**Looks at:** whether the line states an instruction verb at all — `Always`,
+`Never`, `Run`, `Use`, `Add` — and the hedges that soften them, like `try to` or
+`where possible`. A line that opens like a description is read as one even when a
+verb turns up later in it.
 
 > ✗ `CHANGELOG entries are short and user-facing.`
-> ✓ `Keep CHANGELOG entries under three lines, written for the user.`
+> ✓ `Keep each CHANGELOG.md entry under 3 lines, written for the user.`
 
 The first is a description of a state of affairs. The second asks for something.
 
@@ -37,8 +46,8 @@ much less.
 hatch.
 
 > ✗ `Never edit the generated files.`
-> ✓ `Never edit the generated files — change the template in `templates/` and
-> re-run `npm run gen` instead.`
+> ✓ Never edit the generated files — change the template in `templates/` and
+> re-run `npm run gen` instead.
 
 **Why it matters:** a ban with nowhere to go turns a blocked task into a stopped
 one. The agent needed the thing you banned, has no alternative, and stalls.
@@ -55,8 +64,8 @@ This one is judged by a model, not a script, because recognizing a moment is not
 something a pattern can settle.
 
 > ✗ `Keep the changelog in step with the code.`
-> ✓ `Before opening a pull request, add a line to `CHANGELOG.md` for every
-> user-visible change in it.`
+> ✓ Before opening a pull request, add a line to `CHANGELOG.md` for every
+> user-visible change in it.
 
 The first needs the agent to remember, unprompted, at some future point. The
 second names the moment.
@@ -80,7 +89,9 @@ rule about everything in a file scoped to `**/*.py`.
 or not it applies. Scoping it moves the cost to the sessions it is about.
 
 **Does not claim:** that scoping is always better. A rule that genuinely applies
-everywhere belongs in the always-loaded file.
+everywhere belongs in the always-loaded file — and a mismatch on its own does not
+put a rule in the report. It lowers the score and shows in the per-rule table; it
+is named as a problem only when it is among the rule's two weakest checks.
 
 ---
 
@@ -106,10 +117,11 @@ a number with a unit — against the adjectives that leave the standard to the
 reader: `clean`, `proper`, `appropriate`, `reasonable`, `careful`.
 
 > ✗ `Write clean, maintainable code.`
-> ✓ `Keep functions under 40 lines; extract a helper rather than nesting a third
-> `if`.`
+> ✓ Keep functions under 40 lines; extract a helper rather than nesting a third
+> `if`.
 
-When the report says a rule is too vague, it quotes the words that made it so.
+When the abstract words are what made a rule vague, the report quotes them — up
+to two. A rule that simply names nothing concrete gets the plain verdict instead.
 
 **Does not claim:** that every rule needs a path. Some need a threshold, some a
 worked example, and a few genuinely need judgment — those are the ones the next
@@ -136,11 +148,11 @@ directions.
 
 ## The checks that need no wording at all
 
-These run on every rule, in every language, and none of them is a judgment about
-how the rule reads:
+These run on every rule, in every language — bar the one exception flagged below
+— and none of them is a judgment about how the rule reads:
 
 - **It points at a file that is not there.** Read out of the working tree. When
-  the file merely moved, the report says where it went.
+  the file merely moved, `--verbose` says where it went.
 - **Two rules disagree.** One bans exactly what another commands, on the same
   subject. assay names both and picks no winner — which policy is right is your
   decision, not a wording question.
@@ -149,7 +161,8 @@ how the rule reads:
 - **The host never loads it.** A file scoped to a pattern that matches nothing, a
   file another one shadows, a rule past a documented read limit.
 - **A hook already covers it.** Read out of the settings files — configured, not
-  watched running.
+  watched running. Matching one to a rule reads the rule's own wording, so this
+  is the one check here that needs English.
 
 ---
 

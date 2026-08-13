@@ -17,8 +17,8 @@ description: >-
 
 The engine ships with this skill: from the directory holding this SKILL.md, it
 is `../../scripts/assay.js`. Resolve that to an absolute path once and use it
-in every command below. If `node` is not on PATH, activate it the way the
-project's own setup notes say to, then rerun.
+in every command below. assay needs Node 18 or newer. If `node` is not on PATH,
+activate it the way the project's own setup notes say to, then rerun.
 
 Every engine call that reads or writes the project's instruction files carries
 `--host codex` only where it runs discovery — `scan`, `remeasure`, `ci` and
@@ -30,12 +30,15 @@ else. `rollback` and `clean` work off the journal and take no host.
 Flags the user's request may carry: `--startup <path>` (audit a session that
 begins in a subdirectory — the chain runs from the project root down to where
 the session starts; pass it to `scan`, which fixes it in the saved context
-every later command reads),
+`report` reads. The commands that re-scan inherit nothing from that context:
+`remeasure` and `validate` need `--host codex` and the same `--startup` passed
+again),
 `--fix` (apply repairs without the menu), `--verbose` (the full report),
-`--json` (the machine-readable record), `--no-verify` (skip the second pass in
-step 2), `--deterministic` (skip every model step), `--semantic` (also propose
-duplicates and conflicts the script cannot see), `--project-only` (skip the
-user's own instruction files).
+`--json` (the machine-readable record), `--top <n>` (show more than the default
+8 rows in the fix table), `--no-verify` (skip the second pass in step 2),
+`--deterministic` (skip every model step), `--semantic` (also propose duplicates
+and conflicts the script cannot see), `--project-only` (skip the user's own
+instruction files).
 
 **What this profile does not do.** There is no letter grade and no wording
 score here: those weights carry no evidence for this host. Skills are checked
@@ -55,14 +58,16 @@ node <engine> scan --host codex
 The output JSON has a `judge` list — every rule needing your judgment — and
 writes full data to `.assay-tmp/scan.json`.
 
-If `ruleCount` and `skillCount` are both 0, tell the user nothing was found and
-stop. If only `ruleCount` is 0, write `{}` to `.assay-tmp/judgments.json`, skip
-step 2, and continue.
+If `ruleCount` and `skillCount` are both 0, tell the user nothing was found, run
+step 6's clean-up, and stop — the scan wrote `.assay-tmp/`, and leaving it behind
+is litter in someone's repository. If only `ruleCount` is 0, write `{}` to
+`.assay-tmp/judgments.json`, skip step 2, and continue.
 
 Under `--deterministic`, go straight to step 3 and write no judgments file at
 all. The engine has no such flag and never needs one — the absence of
-`.assay-tmp/judgments.json` *is* the mode, and the report lands complete,
-labelled `deterministic only`, with the model-judged checks named as not run.
+`.assay-tmp/judgments.json` *is* the mode, and the report lands complete, with
+the model-judged checks named as not run in its provenance line; `--verbose`
+also stamps `deterministic only` on the banner.
 
 Read `.assay-tmp/scan.json` before you say anything about this host. It is the
 only place you learn host facts: `sources[]` says which files are selected and
@@ -147,8 +152,9 @@ node <engine> report
 
 Bare, this prints the short report: what was looked at, **Fix these first**,
 **Could be automatic instead**, **Also worth a look**, and one closing line. It
-names each rule **once**, under its worst problem. `--json` prints the record
-instead; **`--verbose`** prints the full report — the resolved instruction
+names each rule **once**, under its worst problem. `--top <n>` widens the fix
+table past its default 8 rows without going to `--verbose`. `--json` prints the
+record instead; **`--verbose`** prints the full report — the resolved instruction
 chain with its byte totals, coverage, every finding with its evidence tag, the
 enforcement ladder, and everything the verify pass suppressed.
 
@@ -182,14 +188,17 @@ evidence, and let them pick any combination:
 - **Repair N dead references** — repoint each rule that cites a path no longer
   in the repository; they approve each patch and every write is reversible.
 - **Fix N skill metadata problems** — add the fields this host documents as
-  required, or shorten a description past the listing budget.
-- **Promote N candidates now** — preview each mechanism built from the live
+  required, or shorten names and descriptions when the skills together overrun
+  the shared listing budget.
+- **Build the mechanism now (N)** — preview each mechanism built from the live
   official docs, and install the ones they approve; the rules stay active.
-- **Park N placement candidates** — record a deferred plan for each; nothing
+- **Just write down the plan (N)** — record a deferred plan for each; nothing
   is written to the rules.
 
-If both promote and park are chosen, promotion wins and parking covers the
-remainder. Everything chosen goes into ONE draft plan.
+The last two cover **the same N items** — say so when you offer them, because
+the two counts being equal looks like a mistake otherwise. If both are chosen,
+building wins and the plan is written for whatever is left. Everything chosen
+goes into ONE draft plan.
 
 ## 5. Plan, preview, apply, validate
 
@@ -222,6 +231,10 @@ file this flow is going to write.
   what every later command names.
 - `kind` — `rule-rewrite`, `stale-reference-repair`, `placement-promotion`, or
   `park`.
+- `addresses` — the rule's `key` from the scan. Always set it on any change
+  aimed at a specific rule: it is what lets `validate` find the rewritten rule
+  and report where it landed and what it now carries. Without it, validation
+  records only the corpus state.
 - `patches[].old` — the **exact** current text, with enough surrounding context
   to appear exactly once. Match by text, never by line number. `"old": null`
   creates a file, and `plan` refuses if that file already exists.
@@ -258,9 +271,9 @@ file this flow is going to write.
   park by design and `clean` never deletes a plan artifact: the plan file
   **is** the park record.
 
-**Then run the transaction.** Only `validate` re-scans, so it is the only step
-here that takes `--host codex`; the rest read the host off the plan and the
-journal.
+**Then run the transaction.** Of these five steps only `validate` re-scans, so
+it is the only one that takes `--host codex`; the rest read the host off the
+plan and the journal.
 
 1. `plan --from .assay-tmp/draft-plan.json`. Exit 1 means the
    draft was rejected — an anchor that is not in the file, an anchor that
@@ -270,16 +283,34 @@ journal.
    the `planFile` path `plan` printed — `.assay/plan-<planId>.json`, named
    for the plan and not for a change id — and show the user each change id, the target path,
    why that mechanism fits, and the exact `old` → `new` text.
-3. **Collect approval per change**, then `apply --change <id>`
-   with exactly the ids approved — or `apply --batch fix-batch`
-   under `--fix`. There is no apply-everything default. A stale file exits 1
+
+   **Flag anything the new text introduces.** If `new` names a path, an
+   identifier, a flag or a number that is not in `old`, say so in one line under
+   that preview — "this adds `scripts/check.js`, which the old wording did not
+   name". A reader who did not write the rule cannot see that from a diff, and
+   it is the one way a rewrite changes what the rule MEANS rather than how it
+   reads.
+3. **Collect approval per change, in a surface that has one.** Print a numbered
+   list of the change ids with a one-line summary each, then an explicit
+   instruction — "reply with the numbers you want applied, or `all`" — and wait
+   for the answer. Never treat silence, "looks good" on the preview, or an
+   earlier yes to the menu as approval for a specific patch.
+
+   Then `apply --change <id>` with exactly the ids approved — or
+   `apply --batch fix-batch` under `--fix`, where the batch is the boundary
+   instead. There is no apply-everything default, and a change the user did not
+   name is not applied even though the plan carries it. A stale file exits 1
    naming both fingerprints and writes nothing; re-plan rather than forcing
    it. A write whose result does not parse is restored and exits 1.
-4. `validate --change <id> --host codex` per applied change. It re-parses what
-   was written, re-runs the static analysis under this profile, and for a
-   promotion checks that the profile actually discovers the mechanism. It
+4. `validate --change <id> --host codex --startup <the same directory passed to
+   scan, when one was passed>` per applied change. It re-scans, so it needs both
+   flags again — nothing is inherited from the saved scan. It re-parses what was written,
+   re-runs the static analysis under this profile, and for a promotion checks
+   that the profile actually discovers the mechanism. It
    reports `configured` and nothing above: a file on disk is not evidence that
-   anything ran.
+   anything ran. assay never runs the project's own tests, lint, or a fresh
+   session — those are external evidence, recorded with
+   `--external "repo tests: pass"` when the user reports one.
 5. **Say what is now true**, and that `git diff` shows every change. Rollback
    stays available for as long as the journal exists:
    `rollback --change <id>`. Offer it whenever a validation fails or the user
@@ -291,13 +322,36 @@ journal.
 node <engine> clean
 ```
 
-Always run this last, whether or not fixes were applied. It removes
-`.assay-tmp/`, and the change journal too once every applied change has been
-validated or rolled back. It exits 1 and keeps the journal when one is still
+Run this after step 7's remeasure, when there was one — remeasure reads
+`.assay-tmp/`, and this deletes it. Run it whether or not fixes were applied. It
+removes `.assay-tmp/`, and the change journal too once every applied change has
+been validated or rolled back.
+
+**Say what it destroys before running it.** Removing the journal removes the
+undo — after this, `git diff` is the only way back. While the user is still
+deciding whether to keep a change, offer to leave it and clean up later.
+
+It exits 1 and keeps the journal when one is still
 open — a journal holds the only copy of a pre-image, so it is never deleted
 while a write is unresolved. That exit is a prompt, not a failure: name the
 open changes it listed, and offer to validate or roll each one back. Parked
-plans survive either way.
+plans survive either way, and `clean` prints their paths — name them in the
+final message so the user can find them.
 
-Then close with whatever step 3 did not already show, your two sentences, and
-what step 5 changed.
+## 7. Say what the fixes did
+
+Only when something was applied, and before step 6, because it reads the journal
+and the judgment cache:
+
+```
+node <engine> remeasure --host codex --startup <the same directory passed to scan, when one was passed>
+```
+
+It re-scans — which is why both flags come back — reuses every cached judgment
+whose rule is unchanged, and prints the before and after. A reworded rule comes
+back as a `judge` worklist instead of a report — judge only those, **merge** them
+into `.assay-tmp/judgments.json` without disturbing the rest, and run it once
+more. At most twice.
+
+Then close with whatever step 3 did not already show, your two sentences, what
+step 5 changed, and the before/after this step measured.
