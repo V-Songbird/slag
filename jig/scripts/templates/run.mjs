@@ -47,9 +47,13 @@ const MAX_FILES = 20000;
 // ---------------------------------------------------------------------------
 
 // Enough glob for the catalogue's own path patterns: `**` crosses directory
-// separators, `*` does not, `?` is one character. Anything else is a literal.
+// separators, `*` does not, `?` is one character, `{a,b}` is an alternation.
+// Anything else is a literal. Without the alternation a path set like
+// `**/*.{ts,tsx}` matches nothing at all, which is a silent zero-coverage
+// failure rather than a loud one.
 function globToRegExp(glob) {
   let out = "";
+  let depth = 0;
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i];
     if (c === "*") {
@@ -61,11 +65,19 @@ function globToRegExp(glob) {
       }
     } else if (c === "?") {
       out += "[^/]";
+    } else if (c === "{") {
+      depth++;
+      out += "(?:";
+    } else if (c === "}" && depth) {
+      depth--;
+      out += ")";
+    } else if (c === "," && depth) {
+      out += "|";
     } else {
       out += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
     }
   }
-  return new RegExp("^" + out + "$", "i");
+  return new RegExp("^" + out + ")".repeat(depth) + "$", "i");
 }
 
 function matchesAny(rel, globs) {
@@ -81,12 +93,22 @@ function matchesAny(rel, globs) {
 // single place false positives are most likely to live, which is why the
 // catalogue's near-miss fixtures aim straight at it.
 
-const HASH_COMMENT_EXT = new Set([".sh", ".bash", ".zsh", ".yml", ".yaml", ".toml"]);
+// Comment syntax is language data, so the edition that knows the language
+// declares it per extension and hands the map down as `opts.commentSyntax`.
+// This table is only the floor for a file no edition claimed — without it a
+// `.py` or `.ps1` file would be read with JavaScript comment rules and every
+// commented-out line would come back as live code.
+const DEFAULT_COMMENT_SYNTAX = {
+  ".py": "hash", ".pyi": "hash", ".rb": "hash", ".ps1": "hash", ".psm1": "hash",
+  ".pl": "hash", ".pm": "hash", ".r": "hash", ".sh": "hash", ".bash": "hash",
+  ".zsh": "hash", ".yml": "hash", ".yaml": "hash", ".toml": "hash",
+};
 
-function commentStyle(rel) {
-  const base = path.basename(rel);
-  if (base === "Dockerfile" || base.startsWith("Dockerfile.")) return "hash";
-  return HASH_COMMENT_EXT.has(path.extname(rel).toLowerCase()) ? "hash" : "slash";
+function commentStyle(rel, syntax) {
+  const ext = path.extname(rel).toLowerCase();
+  if (syntax && typeof syntax[ext] === "string") return syntax[ext];
+  if (/^(?:Dockerfile|Makefile|makefile|GNUmakefile)(?:\.|$)/.test(path.basename(rel))) return "hash";
+  return DEFAULT_COMMENT_SYNTAX[ext] || "slash";
 }
 
 // A `/` opens a regular expression only where a value may start. After a name,
@@ -97,9 +119,20 @@ function regexCanStart(prev) {
   return prev === "" || !/[)\]}\w$]/.test(prev);
 }
 
+// Both `stripComments` and `stripStrings` default to true: blanking more is the
+// fewer-false-positives direction, so an edition that says nothing gets the
+// safe reading. `strings` is the driver's older spelling of `stripStrings`.
+//
+// Comments and string literals are RECOGNISED unconditionally and only ERASED
+// when asked. That separation is the whole fix for the third fault: with string
+// bodies left visible, a scanner that stopped tracking them read the `//` in a
+// URL as a comment and blanked the rest of the line, and the `/*` in a glob as
+// a block comment and blanked the rest of the file.
 function blankRegions(text, rel, opts) {
-  const style = commentStyle(rel);
-  const strings = opts && opts.strings;
+  const o = opts || {};
+  const style = commentStyle(rel, o.commentSyntax);
+  const stripComments = o.stripComments !== false;
+  const stripStrings = o.stripStrings !== undefined ? o.stripStrings !== false : o.strings !== false;
   const out = text.split("");
   const erase = (from, to) => {
     for (let k = from; k < to && k < out.length; k++) if (out[k] !== "\n") out[k] = " ";
@@ -110,27 +143,78 @@ function blankRegions(text, rel, opts) {
     return j;
   };
 
+  // A literal that never closes is not a literal: reading it as one is how a
+  // lone apostrophe used to blank everything after it.
+  const closedAt = (i, q, oneLine) => {
+    let j = i + 1;
+    while (j < text.length) {
+      const d = text[j];
+      if (d === "\\") { j += 2; continue; }
+      if (d === q) return { body: i + 1, bodyEnd: j, end: j + 1 };
+      if (d === "\n" && oneLine) return null;
+      j++;
+    }
+    return null;
+  };
+  // Rust raw strings: `r"…"`, `r#"…"#`, `br##"…"##`. No escapes inside, and the
+  // hash count picks the terminator, so a `"` in the body cannot end it early.
+  const RAW = /(?:br|r)(#*)"/y;
+  const literalAt = (i) => {
+    const q = text[i];
+    if (style === "hash") {
+      if (q !== '"' && q !== "'") return null;
+      // Python triple quotes span lines; consuming one whole is what keeps the
+      // scanner in step with the rest of the file.
+      if (text[i + 1] === q && text[i + 2] === q) {
+        const close = text.indexOf(q + q + q, i + 3);
+        return close === -1 ? null : { body: i + 3, bodyEnd: close, end: close + 3 };
+      }
+      return closedAt(i, q, true);
+    }
+    if (q === "r" || q === "b") {
+      if (/[\w$]/.test(text[i - 1] || "")) return null;
+      RAW.lastIndex = i;
+      const m = RAW.exec(text);
+      if (!m || m.index !== i) return null;
+      const term = '"' + m[1];
+      const body = i + m[0].length;
+      const close = text.indexOf(term, body);
+      return close === -1 ? null : { body, bodyEnd: close, end: close + term.length };
+    }
+    if (q === '"' || q === "'") return closedAt(i, q, true);
+    // Template literals and Go raw strings both span lines.
+    if (q === "`") return closedAt(i, q, false);
+    return null;
+  };
+
   let prev = "";
   let i = 0;
   while (i < text.length) {
     const c = text[i];
     if (style === "hash" && c === "#") {
       const end = toLineEnd(i);
-      erase(i, end);
+      if (stripComments) erase(i, end);
       i = end;
       continue;
     }
     if (style === "slash" && c === "/" && text[i + 1] === "/") {
       const end = toLineEnd(i);
-      erase(i, end);
+      if (stripComments) erase(i, end);
       i = end;
       continue;
     }
     if (style === "slash" && c === "/" && text[i + 1] === "*") {
       const close = text.indexOf("*/", i + 2);
       const end = close === -1 ? text.length : close + 2;
-      erase(i, end);
+      if (stripComments) erase(i, end);
       i = end;
+      continue;
+    }
+    const lit = literalAt(i);
+    if (lit) {
+      if (stripStrings) erase(lit.body, lit.bodyEnd);
+      prev = text[lit.end - 1];
+      i = lit.end;
       continue;
     }
     if (style === "slash" && c === "/" && regexCanStart(prev)) {
@@ -147,23 +231,6 @@ function blankRegions(text, rel, opts) {
       }
       erase(i + 1, Math.max(i + 1, j - 1));
       prev = "/";
-      i = j;
-      continue;
-    }
-    if (strings && (c === '"' || c === "'" || c === "`")) {
-      let j = i + 1;
-      while (j < text.length) {
-        const d = text[j];
-        if (d === "\\") { j += 2; continue; }
-        if (d === c) { j++; break; }
-        // A single- or double-quoted literal cannot span a line in valid
-        // source; treating a stray newline as the end keeps one unbalanced
-        // quote from blanking the rest of the file.
-        if (d === "\n" && c !== "`") break;
-        j++;
-      }
-      erase(i + 1, Math.max(i + 1, j - 1));
-      prev = c;
       i = j;
       continue;
     }
@@ -293,14 +360,37 @@ async function loadChecks() {
   for (const name of names) {
     try {
       const mod = await import(pathToFileURL(path.join(HERE, name)).href);
-      if (typeof mod.check === "function" && typeof mod.id === "string") checks.push(mod);
+      if (typeof mod.id === "string" && Array.isArray(mod.detectors)) checks.push(mod);
     } catch (err) {
       // A check that will not load is reported and skipped. One broken module
-      // must not take the other three down with it.
+      // must not take the others down with it.
       checks.push({ id: name, broken: err.message });
     }
   }
   return checks;
+}
+
+// A check module declares detectors, not a function. Only the ones this driver
+// runs are its own — a detector belonging to a session guard or to CI names a
+// different runner and is skipped here rather than run in the wrong place.
+function driverDetectors(mod) {
+  return mod.detectors.filter((det) => det && det.runner === "checks" &&
+    det.params && Array.isArray(det.params.patterns) && det.params.patterns.length);
+}
+
+function scanWith(ctx, mod, det) {
+  const p = det.params;
+  return ctx.scan(mod.id, p.paths || [], p.patterns, p);
+}
+
+// The fixture pair is stored inline, so the driver has to invent the filename it
+// would have lived under. It takes the extension from the detector's own first
+// path glob, which is the same derivation admission used when it admitted the
+// check — a different one here would prove a different thing.
+function fixtureName(det) {
+  const glob = (det.params.paths || [])[0] || "fixture.txt";
+  const ext = (glob.match(/\.[A-Za-z0-9]+$/) || [".txt"])[0];
+  return "fixture" + ext;
 }
 
 // ---------------------------------------------------------------------------
@@ -314,12 +404,13 @@ async function runChecks(root, only) {
   const broken = [];
   for (const mod of await loadChecks()) {
     if (mod.broken) { broken.push({ id: mod.id, why: mod.broken }); continue; }
+    const mine = driverDetectors(mod);
+    if (!mine.length) {
+      skipped.push({ id: mod.id, why: "no detector this driver runs — it is watched elsewhere", command: null });
+      continue;
+    }
     try {
-      const result = (await mod.check(ctx)) || [];
-      for (const f of result) {
-        if (f && f.skipped) skipped.push({ id: mod.id, why: f.skipped, command: f.command || null });
-        else findings.push(f);
-      }
+      for (const det of mine) findings.push(...scanWith(ctx, mod, det));
     } catch (err) {
       broken.push({ id: mod.id, why: err.message });
     }
@@ -328,35 +419,45 @@ async function runChecks(root, only) {
   return { findings, skipped, broken };
 }
 
-// The witnessed catch, without jig. Each check names a violating sample and
-// where to put it; the driver seeds it in a throwaway directory, runs that one
-// check against it, and reports whether the check saw its own violation. A
-// check that cannot seed itself says so instead of quietly passing.
+// The witnessed catch, without jig. Every check carries the pair that admitted
+// it, so the driver can re-run that same admission here, in a throwaway
+// directory, with nothing installed. Both halves count: a check that misses its
+// own violation is broken, and one that fires on its own near miss is a check
+// that will cry wolf on somebody's real code.
 async function runSelftest() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jig-selftest-"));
   const results = [];
   try {
     for (const mod of await loadChecks()) {
       if (mod.broken) { results.push({ id: mod.id, caught: false, why: mod.broken }); continue; }
-      const seed = mod.selftest;
-      if (!seed || !seed.path) {
-        results.push({ id: mod.id, caught: null, why: seed && seed.why ? seed.why : "cannot seed itself", command: (seed && seed.command) || null });
+      const mine = driverDetectors(mod);
+      const pair = mod.fixtures;
+      if (!mine.length || !pair || typeof pair.violation !== "string" || typeof pair.nearMiss !== "string") {
+        results.push({ id: mod.id, caught: null, why: "carries no fixture pair this driver can run", command: null });
         continue;
       }
-      const full = path.join(dir, seed.path);
-      fs.mkdirSync(path.dirname(full), { recursive: true });
-      fs.writeFileSync(full, seed.sample);
-      let hits = [];
-      try {
-        hits = (await mod.check(makeContext(dir, null))) || [];
-      } catch (err) {
-        results.push({ id: mod.id, caught: false, why: err.message });
-        fs.rmSync(full, { force: true });
-        continue;
+      let hits = 0;
+      let nearMissHits = 0;
+      let failed = null;
+      for (const det of mine) {
+        const name = fixtureName(det);
+        const full = path.join(dir, name);
+        try {
+          fs.writeFileSync(full, pair.violation);
+          hits += scanWith(makeContext(dir, [name]), mod, det).length;
+          fs.writeFileSync(full, pair.nearMiss);
+          nearMissHits += scanWith(makeContext(dir, [name]), mod, det).length;
+        } catch (err) {
+          failed = err.message;
+        } finally {
+          fs.rmSync(full, { force: true });
+        }
+        if (failed) break;
       }
-      const real = hits.filter((h) => h && !h.skipped);
-      results.push({ id: mod.id, caught: real.length > 0, seeded: seed.path, hits: real.length });
-      fs.rmSync(full, { force: true });
+      if (failed) { results.push({ id: mod.id, caught: false, why: failed }); continue; }
+      const why = hits === 0 ? "the seeded violation did not fire the check"
+        : nearMissHits > 0 ? "the check also fired on its own near miss" : null;
+      results.push({ id: mod.id, caught: hits > 0 && nearMissHits === 0, hits, nearMissHits, why });
     }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

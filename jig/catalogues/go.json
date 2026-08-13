@@ -1,0 +1,1363 @@
+{
+  "schemaVersion": 3,
+  "edition": "go",
+  "displayName": "Go (go modules, go toolchain)",
+  "researchedOn": "2026-08-13",
+  "detect": {
+    "files": [
+      "go.mod",
+      "go.sum",
+      "go.work"
+    ],
+    "extensions": [
+      ".go",
+      ".mod",
+      ".sum",
+      ".work"
+    ],
+    "packageManagers": [
+      "go"
+    ],
+    "commentSyntax": {
+      ".go": "slash",
+      ".mod": "slash",
+      ".sum": "none",
+      ".work": "slash"
+    }
+  },
+  "toolchain": [
+    {
+      "id": "golangci-lint",
+      "role": "linter",
+      "why": "Runs the whole third-party analyzer set (errcheck, staticcheck, gosec, revive, testifylint, forbidigo...) in one pass over the type-checked package graph, which is the only place rule ids like SA1019 or G402 are reachable from a single command.",
+      "install": {
+        "go": "go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2"
+      },
+      "installKind": "package",
+      "uninstall": {
+        "go": "rm -f \"$(go env GOPATH)/bin/golangci-lint$(go env GOEXE)\""
+      },
+      "configPath": ".golangci.yml",
+      "configSample": "version: \"2\"\nrun:\n  timeout: 5m\n  tests: true\nlinters:\n  default: none\n  enable:\n    - bodyclose\n    - contextcheck\n    - depguard\n    - errcheck\n    - errorlint\n    - forbidigo\n    - gochecknoglobals\n    - gocritic\n    - gosec\n    - govet\n    - ineffassign\n    - nilerr\n    - noctx\n    - nolintlint\n    - revive\n    - staticcheck\n    - testifylint\n    - thelper\n    - unparam\n    - unused\n    - usetesting\n  settings:\n    errcheck:\n      check-type-assertions: true\n      check-blank: true\n    forbidigo:\n      analyze-types: true\n      forbid:\n        - p: ^fmt\\.Print.*$\n          msg: debug print left in committed code\n        - p: ^testing\\.T\\.Skip.*$\n          msg: a skipped test is an unrun test\n        - p: ^os\\.Exit$\n          msg: return an error instead of exiting\n        - p: ^log\\.Fatal.*$\n          msg: return an error instead of exiting\n    govet:\n      enable:\n        - appends\n        - assign\n        - atomic\n        - bools\n        - buildtag\n        - copylocks\n        - defers\n        - directive\n        - errorsas\n        - httpresponse\n        - ifaceassert\n        - loopclosure\n        - lostcancel\n        - nilfunc\n        - printf\n        - shift\n        - stdmethods\n        - stringintconv\n        - structtag\n        - tests\n        - unmarshal\n        - unreachable\n        - unusedresult\n        - waitgroup\n    nolintlint:\n      require-explanation: true\n      require-specific: true\n      allow-unused: false\n    revive:\n      rules:\n        - name: unhandled-error\n        - name: empty-block\n        - name: deep-exit\n        - name: bare-return\n        - name: context-as-argument\n    testifylint:\n      enable:\n        - bool-compare\n        - compares\n        - empty\n        - error-is-as\n        - error-nil\n        - expected-actual\n        - float-compare\n        - go-require\n        - len\n        - nil-compare\n        - require-error\n        - suite-dont-use-pkg\n        - useless-assert\n    depguard:\n      rules:\n        main:\n          list-mode: lax\n          deny:\n            - pkg: math/rand$\n              desc: use math/rand/v2 or crypto/rand\nformatters:\n  enable:\n    - gofumpt\n  settings:\n    gofumpt:\n      extra-rules: true\n",
+      "wiring": "Makefile target: lint: ; golangci-lint run ./...",
+      "ciStep": "golangci-lint run ./...",
+      "verify": {
+        "argv": [
+          "golangci-lint",
+          "run",
+          "./..."
+        ],
+        "expected": "exit code 1 and a line of the form path/to/file.go:12:2: Error return value of `f.Close` is not checked (errcheck)",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "internal/jigseed/golangcilint/seed.go",
+        "sample": "package golangcilint\n\nimport \"os\"\n\n// Seed exists so errcheck has an unchecked error return to find.\nfunc Seed(path string) error {\n\tf, err := os.Create(path)\n\tif err != nil {\n\t\treturn err\n\t}\n\tf.Close()\n\treturn nil\n}\n"
+      }
+    },
+    {
+      "id": "gofumpt",
+      "role": "formatter",
+      "why": "A stricter superset of gofmt; it is the only step that normalises the diff shape, so a session cannot smuggle a reformat-the-world change past review as part of a one-line fix.",
+      "install": {
+        "go": "go install mvdan.cc/gofumpt@latest"
+      },
+      "installKind": "package",
+      "uninstall": {
+        "go": "rm -f \"$(go env GOPATH)/bin/gofumpt$(go env GOEXE)\""
+      },
+      "configPath": "go.mod",
+      "configSample": "module example.com/project\n\ngo 1.25.0\n",
+      "wiring": "Makefile target: fmt-check: ; test -z \"$(gofumpt -l .)\"",
+      "ciStep": "test -z \"$(gofumpt -l .)\" || { gofumpt -d .; exit 1; }",
+      "verify": {
+        "argv": [
+          "gofumpt",
+          "-l",
+          "."
+        ],
+        "expected": "prints the path of every unformatted file; empty output means clean",
+        "expectedExit": 0
+      },
+      "seed": {
+        "path": "internal/jigseed/gofumptseed/seed.go",
+        "sample": "package gofumptseed\n\nfunc Padded() int {\n\n\treturn 42\n}\n"
+      }
+    },
+    {
+      "id": "go-vet",
+      "role": "type-checker",
+      "why": "Go has no separate type checker - vet runs go/types over every package and then the standard analyzer set (printf, tests, copylocks, lostcancel, httpresponse, loopclosure), catching type-level and semantic mistakes the compiler accepts.",
+      "install": {
+        "go": "go version"
+      },
+      "installKind": "builtin",
+      "configPath": "go.mod",
+      "configSample": "module example.com/project\n\ngo 1.25.0\n\nrequire (\n\tgithub.com/google/go-cmp v0.7.0\n)\n",
+      "wiring": "Makefile target: vet: ; go vet ./...",
+      "ciStep": "go vet ./...",
+      "verify": {
+        "argv": [
+          "go",
+          "vet",
+          "./..."
+        ],
+        "expected": "exit code 1 and a line of the form ./x_test.go:9:6: TestFoo has malformed name: first letter after 'Test' must not be lowercase",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "internal/jigseed/govetseed/seed.go",
+        "sample": "package govetseed\n\nimport \"fmt\"\n\nfunc VetSeed() {\n\tfmt.Printf(\"%d\\n\", \"not a number\")\n}\n"
+      }
+    },
+    {
+      "id": "go-test",
+      "role": "test-runner",
+      "why": "The only step that proves behaviour; -race, -count=1 and -shuffle=on together defeat the three ways a green run can lie (data races, cached results, order dependence).",
+      "install": {
+        "go": "go version"
+      },
+      "installKind": "builtin",
+      "configPath": "go.mod",
+      "configSample": "module example.com/project\n\ngo 1.25.0\n\nrequire (\n\tgithub.com/stretchr/testify v1.11.1\n)\n",
+      "wiring": "Makefile target: test: ; go test -race -shuffle=on -count=1 ./...",
+      "ciStep": "go test -race -shuffle=on -count=1 -coverprofile=coverage.out ./...",
+      "verify": {
+        "argv": [
+          "go",
+          "test",
+          "-race",
+          "-shuffle=on",
+          "-count=1",
+          "./..."
+        ],
+        "expected": "exit code 1 with FAIL lines; a seeded skip shows as --- SKIP with ok ... [no tests to run] rather than a pass",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "internal/jigseed/gotestseed/seed_test.go",
+        "sample": "package gotestseed\n\nimport \"testing\"\n\nfunc TestJigSeedFails(t *testing.T) {\n\tif got, want := 1+1, 3; got != want {\n\t\tt.Fatalf(\"1+1 = %d, want %d\", got, want)\n\t}\n}\n"
+      }
+    },
+    {
+      "id": "go-build",
+      "role": "build",
+      "why": "Compiles every package including ones no test imports, so an invented identifier, a wrong signature or an import path that does not resolve fails here even when the test binary never touches it.",
+      "install": {
+        "go": "go version"
+      },
+      "installKind": "builtin",
+      "configPath": "go.mod",
+      "configSample": "module example.com/project\n\ngo 1.25.0\n\ntoolchain go1.25.0\n",
+      "wiring": "Makefile target: build: ; go build ./... && go mod tidy -diff",
+      "ciStep": "go build ./... && go mod tidy -diff",
+      "verify": {
+        "argv": [
+          "go",
+          "build",
+          "./..."
+        ],
+        "expected": "exit code 1 and a line of the form ./svc.go:14:9: undefined: client.FetchAllPages, or no required module provides package example.com/nope",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "internal/jigseed/gobuildseed/seed.go",
+        "sample": "package gobuildseed\n\nfunc BuildSeed() int {\n\treturn missingHelper()\n}\n"
+      }
+    },
+    {
+      "id": "govulncheck",
+      "role": "security-scanner",
+      "why": "Cross-references the module graph against the Go vulnerability database and reports only the advisories whose vulnerable symbols are actually reachable from this code - dependency risk that no lint rule sees.",
+      "install": {
+        "go": "go install golang.org/x/vuln/cmd/govulncheck@latest"
+      },
+      "installKind": "package",
+      "uninstall": {
+        "go": "rm -f \"$(go env GOPATH)/bin/govulncheck$(go env GOEXE)\""
+      },
+      "configPath": "go.mod",
+      "configSample": "module example.com/project\n\ngo 1.25.0\n\nrequire golang.org/x/text v0.30.0\n",
+      "wiring": "Makefile target: vuln: ; govulncheck ./...",
+      "ciStep": "govulncheck ./...",
+      "verify": {
+        "argv": [
+          "govulncheck",
+          "./..."
+        ],
+        "expected": "non-zero exit and 'Your code is affected by N vulnerabilities' with a GO-YYYY-NNNN id and a call stack; 'No vulnerabilities found.' when clean",
+        "expectedExit": 3
+      },
+      "seed": {
+        "path": "internal/jigseed/govulnseed/seed.go",
+        "sample": "package govulnseed\n\nimport (\n\t\"fmt\"\n\n\t\"golang.org/x/text/language\"\n)\n\n// VulnSeed calls the symbol named by GO-2021-0113 (language.Parse out-of-bounds\n// read). It reports only when go.mod resolves golang.org/x/text below v0.3.7.\nfunc VulnSeed(tag string) {\n\tt, err := language.Parse(tag)\n\tif err != nil {\n\t\treturn\n\t}\n\tfmt.Println(t.String())\n}\n"
+      }
+    }
+  ],
+  "classes": [
+    {
+      "id": "skipped-test",
+      "title": "Test skipped instead of fixed",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "adds t.Skip with a 'flaky, revisit' message when it cannot make the assertion pass",
+        "skips the one failing case in a table so the package reports ok",
+        "converts a red test to a skip and reports the suite as green"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bt\\.Skip(Now|f)?\\s*\\("
+            ],
+            "paths": [
+              "**/*_test.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "forbidigo",
+            "options": {
+              "analyze-types": true,
+              "forbid": [
+                {
+                  "p": "^testing\\.T\\.Skip.*$",
+                  "msg": "a skipped test is an unrun test"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package payments\n\nimport \"testing\"\n\nfunc TestChargeRetriesOnTimeout(t *testing.T) {\n\tt.Skip(\"flaky against the sandbox gateway, revisit\")\n\n\tgw := newFakeGateway(gatewayTimeout)\n\tgot, err := Charge(gw, 1500)\n\tif err != nil {\n\t\tt.Fatalf(\"Charge returned %v\", err)\n\t}\n\tif got.Attempts != 3 {\n\t\tt.Fatalf(\"Attempts = %d, want 3\", got.Attempts)\n\t}\n}\n",
+        "nearMiss": "package payments\n\nimport \"testing\"\n\nfunc TestChargeRecordsOutcome(t *testing.T) {\n\tt.Cleanup(func() {\n\t\tif t.Skipped() {\n\t\t\treturn\n\t\t}\n\t\tresetLedger()\n\t})\n\n\tgw := newFakeGateway(gatewayOK)\n\tgot, err := Charge(gw, 1500)\n\tif err != nil {\n\t\tt.Fatalf(\"Charge returned %v\", err)\n\t}\n\tif got.Attempts != 1 {\n\t\tt.Fatalf(\"Attempts = %d, want 1\", got.Attempts)\n\t}\n}\n"
+      },
+      "gapNotes": "Cannot tell a legitimate environment guard (if testing.Short() { t.Skip() } or a skip behind a build-gated integration flag) from an abandoned test - both trip. It also misses the opposite move: deleting the test function outright, which leaves no token to match.",
+      "evidence": {
+        "tier": "documented",
+        "source": "testing.T.Skip / Skipped in the Go testing package docs; forbidigo pattern syntax and analyze-types from its README, which documents <package>.<type>.<method> matching, wired through golangci-lint linters.settings.forbidigo"
+      }
+    },
+    {
+      "id": "emptied-test-body",
+      "title": "Test body removed but the function kept",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "empties a failing test's body so the name still appears in the run and the package passes",
+        "replaces the assertions with an early return after failing to diagnose the fault",
+        "keeps the function as a placeholder it intends to refill and never does"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "func\\s+Test\\w*\\s*\\(\\s*\\w+\\s+\\*testing\\.[TB]\\s*\\)\\s*\\{\\s*(return\\s*)?\\}"
+            ],
+            "paths": [
+              "**/*_test.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package invoice\n\nimport \"testing\"\n\nfunc TestTotalIncludesTax(t *testing.T) {}\n\nfunc TestTotalRejectsNegativeQuantity(t *testing.T) {\n\treturn\n}\n",
+        "nearMiss": "package invoice\n\nimport \"testing\"\n\n// testFixtureNoop satisfies the reporter interface and deliberately does nothing.\nfunc testFixtureNoop(t *testing.T) {}\n\nfunc TestTotalIncludesTax(t *testing.T) {\n\tinv := Invoice{Lines: []Line{{Cents: 1000, Qty: 2}}, TaxRate: 0.2}\n\ttestFixtureNoop(t)\n\tif got := inv.Total(); got != 2400 {\n\t\tt.Fatalf(\"Total() = %d, want 2400\", got)\n\t}\n}\n"
+      },
+      "gapNotes": "Only the fully empty and bare-return shapes match. A body reduced to `_ = subject` or a single `t.Log` still looks populated, and a test deleted from the file leaves nothing to match at all - that needs a diff against the previous commit or a coverage floor.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "Go test function signature convention from the testing package docs; no linter in the golangci-lint set reports an empty test body, so this is regex-only by design"
+      }
+    },
+    {
+      "id": "softened-assertion",
+      "title": "Failing assertion softened into a log line",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "swaps t.Fatalf for t.Logf so a mismatch is recorded but the test still passes",
+        "keeps the comparison and drops the failure call after it cannot reproduce the expected value",
+        "reports the suite as green because every case now only logs"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "if\\s+[\\w.]+\\s*(!=|==)\\s*(nil|want|expected|tt\\.want|tc\\.want)\\s*\\{\\s*t\\.Logf?\\s*\\("
+            ],
+            "paths": [
+              "**/*_test.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "testifylint",
+            "options": {
+              "enable": [
+                "require-error",
+                "useless-assert"
+              ]
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package shipping\n\nimport \"testing\"\n\nfunc TestQuoteUsesCarrierRate(t *testing.T) {\n\tgot, err := Quote(carrierFixture, 4200)\n\tif err != nil {\n\t\tt.Logf(\"Quote returned an error: %v\", err)\n\t}\n\twant := 1899\n\tif got != want {\n\t\tt.Logf(\"Quote() = %d, want %d\", got, want)\n\t}\n}\n",
+        "nearMiss": "package shipping\n\nimport \"testing\"\n\nfunc TestQuoteUsesCarrierRate(t *testing.T) {\n\tgot, err := Quote(carrierFixture, 4200)\n\tif err != nil {\n\t\tt.Fatalf(\"Quote returned an error: %v\", err)\n\t}\n\tt.Logf(\"carrier fixture resolved to %d\", got)\n\twant := 1899\n\tif got != want {\n\t\tt.Fatalf(\"Quote() = %d, want %d\", got, want)\n\t}\n}\n"
+      },
+      "gapNotes": "Heuristic: it only recognises the guard-then-log shape with a handful of conventional variable names. The commoner softening - widening the expected value, asserting on len() instead of contents, or replacing require.Equal with assert.NotNil - changes no token this pattern watches. testifylint's require-error only applies to projects that use testify.",
+      "evidence": {
+        "tier": "documented",
+        "source": "testifylint checker ids require-error and useless-assert are both enabled-by-default checkers in its README table; the regex shape is reasoned from Go's standard table-test idiom"
+      }
+    },
+    {
+      "id": "swallowed-exception",
+      "title": "Error discarded into the blank identifier",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "writes _ = f.Close() to make errcheck or the compiler stop complaining",
+        "silences an error it could not diagnose rather than wrapping and returning it",
+        "uses _, _ = w.Write(b) to get past an unused-variable error"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\b_\\s*(,\\s*_)?\\s*:?=\\s*[\\w.]+\\("
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "errcheck",
+            "options": {
+              "check-blank": true
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package storage\n\nimport \"os\"\n\nfunc Rotate(path string) error {\n\tf, err := os.Create(path + \".new\")\n\tif err != nil {\n\t\treturn err\n\t}\n\t_ = f.Close()\n\t_, _ = os.Stat(path)\n\t_ = os.Remove(path)\n\treturn os.Rename(path+\".new\", path)\n}\n",
+        "nearMiss": "package storage\n\nimport (\n\t\"io\"\n\t\"os\"\n)\n\ntype Rotator interface {\n\tCopy(dst io.Writer, src io.Reader) error\n}\n\nvar _ Rotator = (*fileRotator)(nil)\n\ntype fileRotator struct{ dir string }\n\nfunc (r *fileRotator) Copy(dst io.Writer, src io.Reader) error {\n\tn, err := io.Copy(dst, src)\n\tif err != nil {\n\t\treturn err\n\t}\n\tif n == 0 {\n\t\treturn io.ErrUnexpectedEOF\n\t}\n\t_ = r.dir\n\treturn nil\n}\n\nfunc (r *fileRotator) Path() string { return os.TempDir() }\n"
+      },
+      "gapNotes": "Downgraded to heuristic on 2026-08-13: the regex matches any blank assignment from any call and has no idea whether the discarded value is an error at all, so `_ = buf.Len()` and `_, _ = fmt.Fprintln(w, s)` read exactly like a swallowed Close error. Only errcheck, which is type-aware, knows the difference. It also cannot see the more common shape - calling an error-returning function and assigning nothing at all - because the regex has no way to know the callee's arity.",
+      "evidence": {
+        "tier": "documented",
+        "source": "errcheck's check-blank option is documented in golangci-lint's linters settings page: 'Report about assignment of errors to blank identifier'"
+      }
+    },
+    {
+      "id": "unchecked-error-return",
+      "title": "Error-returning call left unchecked",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "calls an error-returning function as a statement because the happy path is all it modelled",
+        "drops the error branch when rewriting a function to fit a new signature",
+        "leaves defer f.Close() with no error handling in a write path, losing data on a full disk"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "errcheck",
+            "options": {
+              "check-type-assertions": true,
+              "check-blank": true
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "revive",
+            "options": {
+              "rules": [
+                {
+                  "name": "unhandled-error"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package mailer\n\nimport (\n\t\"encoding/json\"\n\t\"net/http\"\n\t\"os\"\n)\n\nfunc Persist(path string, m Message) {\n\tf, _ := os.Create(path)\n\tdefer f.Close()\n\tjson.NewEncoder(f).Encode(m)\n}\n\nfunc Notify(w http.ResponseWriter, m Message) {\n\tw.Write([]byte(m.Subject))\n}\n",
+        "nearMiss": "package mailer\n\nimport (\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"net/http\"\n\t\"os\"\n)\n\nfunc Persist(path string, m Message) (err error) {\n\tf, err := os.Create(path)\n\tif err != nil {\n\t\treturn fmt.Errorf(\"create %s: %w\", path, err)\n\t}\n\tdefer func() {\n\t\tif cerr := f.Close(); cerr != nil && err == nil {\n\t\t\terr = cerr\n\t\t}\n\t}()\n\treturn json.NewEncoder(f).Encode(m)\n}\n\nfunc Notify(w http.ResponseWriter, m Message) {\n\tif _, err := w.Write([]byte(m.Subject)); err != nil {\n\t\thttp.Error(w, \"write failed\", http.StatusInternalServerError)\n\t}\n}\n"
+      },
+      "gapNotes": "Tool-rule only on purpose: whether a bare call statement discards an error depends on the callee's signature, which regex cannot resolve. errcheck also ships default exclusions (fmt.Print family, bytes.Buffer writes), so a genuinely dropped error inside an excluded function stays invisible unless disable-default-exclusions is set.",
+      "evidence": {
+        "tier": "documented",
+        "source": "errcheck and revive are both in the golangci-lint linter list; revive's rule id unhandled-error appears verbatim in revive's RULES_DESCRIPTIONS.md"
+      }
+    },
+    {
+      "id": "bare-recover-swallows-panic",
+      "title": "Panic swallowed by a bare recover",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "wraps a crashing handler in defer func(){ recover() }() to make the test stop panicking",
+        "adds a recover it never inspects after failing to find the nil dereference",
+        "keeps the process alive by discarding the panic value, so the fault never reaches a log"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "defer\\s+func\\s*\\(\\s*\\)\\s*\\{\\s*(_\\s*=\\s*)?recover\\s*\\(\\s*\\)"
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package worker\n\nimport \"log/slog\"\n\nfunc (w *Worker) RunJob(j Job) {\n\tdefer func() {\n\t\trecover()\n\t}()\n\n\tslog.Info(\"starting job\", \"id\", j.ID)\n\tw.handlers[j.Kind](j)\n}\n",
+        "nearMiss": "package worker\n\nimport (\n\t\"fmt\"\n\t\"log/slog\"\n)\n\nfunc (w *Worker) RunJob(j Job) (err error) {\n\tdefer func() {\n\t\tif r := recover(); r != nil {\n\t\t\terr = fmt.Errorf(\"handler for %q panicked: %v\", j.Kind, r)\n\t\t\tslog.Error(\"job panicked\", \"id\", j.ID, \"kind\", j.Kind)\n\t\t}\n\t}()\n\n\th, ok := w.handlers[j.Kind]\n\tif !ok {\n\t\treturn fmt.Errorf(\"no handler for kind %q\", j.Kind)\n\t}\n\treturn h(j)\n}\n"
+      },
+      "gapNotes": "Matches only the immediate defer-closure form. A recover captured into a variable that is then ignored (r := recover(); _ = r), or a recover hidden in a named helper called from defer, both pass. No linter in the golangci-lint set has a confirmed rule for a discarded recover value, so there is no tool-rule backstop here.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "recover semantics from the Go language spec; no rule id claimed because none was confirmed in the golangci-lint linter list"
+      }
+    },
+    {
+      "id": "nil-returned-after-error-check",
+      "title": "Nil returned from the error branch",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "returns nil inside if err != nil to satisfy a single-value signature it did not want to change",
+        "keeps the check for appearances while dropping the failure, so callers see a zero value as success",
+        "narrows a two-value return to one value and loses the error on the way"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "if\\s+err\\s*!=\\s*nil\\s*\\{\\s*return\\s+nil\\s*\\}"
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "nilerr",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package config\n\nimport (\n\t\"encoding/json\"\n\t\"os\"\n)\n\nfunc Load(path string) *Config {\n\tb, err := os.ReadFile(path)\n\tif err != nil {\n\t\treturn nil\n\t}\n\tvar c Config\n\tif err := json.Unmarshal(b, &c); err != nil {\n\t\treturn nil\n\t}\n\treturn &c\n}\n",
+        "nearMiss": "package config\n\nimport (\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc Load(path string) (*Config, error) {\n\tb, err := os.ReadFile(path)\n\tif err != nil {\n\t\treturn nil, fmt.Errorf(\"read %s: %w\", path, err)\n\t}\n\tvar c Config\n\tif err := json.Unmarshal(b, &c); err != nil {\n\t\treturn nil, fmt.Errorf(\"parse %s: %w\", path, err)\n\t}\n\tif err := c.Validate(); err != nil {\n\t\treturn nil, err\n\t}\n\treturn &c, nil\n}\n"
+      },
+      "gapNotes": "Only the single-value `return nil` shape matches. The multi-value equivalent (return result, nil after a failed step) and returning a zero struct instead of nil both slip past the regex; nilerr covers the multi-value case but only when the error variable is in scope and unmistakably non-nil.",
+      "evidence": {
+        "tier": "documented",
+        "source": "nilerr is listed in the golangci-lint linter list (finds code returning nil even though it checks that the error is not nil)"
+      }
+    },
+    {
+      "id": "process-exit-in-library",
+      "title": "Library code kills the process",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "reaches for log.Fatalf inside a package because it is the shortest way to stop on an error",
+        "adds os.Exit to a helper so a failing path stops without touching the signature",
+        "turns a recoverable error into a panic to make the caller compile"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\b(os\\.Exit|log\\.(Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln))\\s*\\("
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "revive",
+            "options": {
+              "rules": [
+                {
+                  "name": "deep-exit"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "forbidigo",
+            "options": {
+              "forbid": [
+                {
+                  "p": "^os\\.Exit$"
+                },
+                {
+                  "p": "^log\\.Fatal.*$"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package tokenstore\n\nimport (\n\t\"log\"\n\t\"os\"\n)\n\nfunc MustLoad(path string) *Store {\n\ts, err := Open(path)\n\tif err != nil {\n\t\tlog.Fatalf(\"tokenstore: cannot open %s: %v\", path, err)\n\t}\n\tif s.Version != currentVersion {\n\t\tos.Exit(3)\n\t}\n\treturn s\n}\n",
+        "nearMiss": "package tokenstore\n\nimport (\n\t\"fmt\"\n\t\"log/slog\"\n)\n\nfunc Load(path string) (*Store, error) {\n\ts, err := Open(path)\n\tif err != nil {\n\t\tslog.Error(\"cannot open token store\", \"path\", path, \"err\", err)\n\t\treturn nil, fmt.Errorf(\"open %s: %w\", path, err)\n\t}\n\tif s.Version != currentVersion {\n\t\treturn nil, fmt.Errorf(\"token store %s is version %d, want %d\", path, s.Version, currentVersion)\n\t}\n\treturn s, nil\n}\n"
+      },
+      "gapNotes": "Heuristic because package main is where os.Exit belongs: the pattern has no path exclusion for main.go or cmd/, so every CLI entry point trips it and has to be waved off once. It also does not catch bare panic() - too many legitimate uses in Go to flag flatly - nor a logger value whose Fatal method is called through a variable (logger.Fatal), which the package-qualified pattern cannot see.",
+      "evidence": {
+        "tier": "documented",
+        "source": "revive rule id deep-exit appears in RULES_DESCRIPTIONS.md; forbidigo's simple-regex pattern form (^fmt\\.Print.*$) is the documented syntax in golangci-lint's linters settings page"
+      }
+    },
+    {
+      "id": "type-assertion-without-comma-ok",
+      "title": "Type assertion taken without the ok result",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "asserts any to a concrete type in one value because the two-value form did not fit the expression it was writing",
+        "converts a type switch into a direct assertion while simplifying a function",
+        "asserts an interface it inferred rather than read, turning a wrong guess into a runtime panic"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "^\\s*\\w+\\s*:?=\\s*[\\w.]+\\.\\(\\*?[\\w./\\[\\]]+\\)"
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": true
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "errcheck",
+            "options": {
+              "check-type-assertions": true
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package eventbus\n\nfunc (b *Bus) dispatch(e any) {\n\tmsg := e.(*OrderPlaced)\n\tb.orders <- msg\n\n\tmeta := e.(Metadata)\n\tb.audit(meta.TraceID)\n}\n",
+        "nearMiss": "package eventbus\n\nimport \"fmt\"\n\nfunc (b *Bus) dispatch(e any) error {\n\tswitch msg := e.(type) {\n\tcase *OrderPlaced:\n\t\tb.orders <- msg\n\tcase Metadata:\n\t\tb.audit(msg.TraceID)\n\tdefault:\n\t\treturn fmt.Errorf(\"unhandled event %T\", e)\n\t}\n\n\tmeta, ok := e.(Metadata)\n\tif !ok {\n\t\treturn nil\n\t}\n\tb.audit(meta.TraceID)\n\treturn nil\n}\n"
+      },
+      "gapNotes": "Only the assign-to-one-name shape is matched; an assertion used inline as an argument (handle(e.(*OrderPlaced))) or in a return statement is not on a line the pattern recognises. errcheck with check-type-assertions covers those, but only when the linter can type-check the package.",
+      "evidence": {
+        "tier": "documented",
+        "source": "errcheck's check-type-assertions option in golangci-lint's linters settings page: 'Report about not checking of errors in type assertions: a := b.(MyStruct)'"
+      }
+    },
+    {
+      "id": "type-widened-to-any",
+      "title": "Type widened to any to silence the compiler",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "changes a parameter or field to any after the compiler rejects the value it wanted to pass",
+        "returns map[string]any instead of modelling the struct it could not find",
+        "replaces a named type with interface{} rather than fix the mismatch the error pointed at"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "func\\s+(\\([^)]*\\)\\s*)?\\w+\\s*\\([^)]*\\b(any|interface\\{\\})",
+              "\\bmap\\[string\\](any|interface\\{\\})"
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package ingest\n\nfunc Transform(rec map[string]any, opts any) (map[string]any, error) {\n\tout := make(map[string]any, len(rec))\n\tfor k, v := range rec {\n\t\tout[k] = v\n\t}\n\treturn out, nil\n}\n",
+        "nearMiss": "package ingest\n\n// Map applies fn to every element, preserving order.\nfunc Map[T any, U any](in []T, fn func(T) U) []U {\n\tout := make([]U, 0, len(in))\n\tfor _, v := range in {\n\t\tout = append(out, fn(v))\n\t}\n\treturn out\n}\n\nfunc Transform(rec map[string]string, opts Options) (map[string]string, error) {\n\tout := make(map[string]string, len(rec))\n\tfor k, v := range rec {\n\t\tout[k] = opts.Rename(k) + v\n\t}\n\treturn out, nil\n}\n"
+      },
+      "gapNotes": "Heuristic and blunt: `any` is legitimate in decoders, log attribute lists and anything mirroring encoding/json, and every one of those trips. The near-miss shows the trap it does avoid - `any` as a generic type constraint in [T any] is not a widened parameter. Nothing here sees the widening that matters most, an exported field changed from a concrete type to any between commits; that needs a diff, not a snapshot. No golangci-lint rule was found that distinguishes justified from lazy `any`, so there is no tool-rule.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "Go 1.18 type-parameter and `any` alias syntax from the language spec; no rule id claimed because none was confirmed"
+      }
+    },
+    {
+      "id": "blanket-lint-suppression",
+      "title": "Blanket nolint directive with no linter and no reason",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "adds //nolint above the line the linter flagged instead of fixing what it flagged",
+        "writes //nolint:all to clear a whole file of findings at once",
+        "suppresses a gosec or errcheck report it did not understand and moves on"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "nolintlint",
+            "options": {
+              "require-explanation": true,
+              "require-specific": true,
+              "allow-unused": false
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package auth\n\nimport \"crypto/md5\" //nolint\n\nfunc Fingerprint(b []byte) string {\n\t//nolint:all\n\tsum := md5.Sum(b)\n\treturn string(sum[:])\n}\n",
+        "nearMiss": "package auth\n\nimport (\n\t\"crypto/sha256\"\n\t\"encoding/hex\"\n)\n\n//nolint:gosec // the digest is a cache key, never a credential check\nfunc Fingerprint(b []byte) string {\n\tsum := sha256.Sum256(b)\n\treturn hex.EncodeToString(sum[:])\n}\n\n//lint:ignore SA1019 the replacement API lands in v2, tracked in #412\nvar _ = legacyHash\n"
+      },
+      "gapNotes": "ENFORCEMENT GAP: no host-neutral detector. The check-driver detector that matched //nolint was deleted on 2026-08-13 because the driver blanks every comment before any pattern runs and has no switch to keep them, so a directive that lives in a comment is unreachable from the driver by construction - nolintlint in CI is the only catcher, and a project without golangci-lint has none. A specific directive with a fake reason (//nolint:errcheck // safe) satisfies nolintlint, which judges the form of the explanation and never whether it is true. Suppression moved into .golangci.yml as a linters.exclusions rule is invisible to this class entirely.",
+      "evidence": {
+        "tier": "documented",
+        "source": "nolintlint is in the golangci-lint linter list ('reports ill-formed or insufficient nolint directives') with settings require-explanation, require-specific and allow-unused"
+      }
+    },
+    {
+      "id": "debug-artifact-left-behind",
+      "title": "Debug print left in committed code",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "instruments a function with fmt.Println while chasing a bug and never removes the calls",
+        "prints intermediate state instead of adding an assertion or a structured log line",
+        "leaves prints in a hot path where they become an unformatted, unlevelled log"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bfmt\\.Print(ln|f)?\\s*\\(|\\bprintln\\s*\\("
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "forbidigo",
+            "options": {
+              "forbid": [
+                {
+                  "p": "^fmt\\.Print.*$",
+                  "msg": "debug print left in committed code"
+                },
+                {
+                  "p": "^print(ln)?$"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package pricing\n\nimport \"fmt\"\n\nfunc (e *Engine) Apply(o Order) (Order, error) {\n\tfmt.Println(\"apply called with\", o.ID)\n\trate, err := e.rates.Lookup(o.Region)\n\tif err != nil {\n\t\treturn o, err\n\t}\n\tfmt.Printf(\"rate=%v\\n\", rate)\n\to.Total = rate.Apply(o.Subtotal)\n\treturn o, nil\n}\n",
+        "nearMiss": "package pricing\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"os\"\n)\n\nfunc (e *Engine) Report(w io.Writer, o Order) error {\n\tline := fmt.Sprintf(\"order %s total %d\\n\", o.ID, o.Total)\n\tif _, err := fmt.Fprint(w, line); err != nil {\n\t\treturn fmt.Errorf(\"report %s: %w\", o.ID, err)\n\t}\n\t_, err := fmt.Fprintln(os.Stderr, \"reported\", o.ID)\n\treturn err\n}\n"
+      },
+      "gapNotes": "A CLI whose actual output is fmt.Println will trip on every legitimate line, so this class needs a path exclusion for cmd/ that the pattern list does not express. It also misses prints routed through a named writer (fmt.Fprintln(os.Stdout, ...)), which is the same mistake wearing a different call.",
+      "evidence": {
+        "tier": "documented",
+        "source": "forbidigo's documented example patterns ^fmt\\.Print.*$ and ^print(ln)?$ appear verbatim in golangci-lint's linters settings page"
+      }
+    },
+    {
+      "id": "hardcoded-secret",
+      "title": "Credential hardcoded in source",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "inlines a key or password it saw in a log, a fixture or the conversation to make a call succeed",
+        "invents a plausible-looking token so the code compiles and the test reaches the network stub",
+        "replaces a failing os.Getenv lookup with the literal value rather than wire up the variable"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\b(?:[Aa][Pp][Ii]_?[Kk][Ee][Yy]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Aa][Cc][Cc][Ee][Ss][Ss]_?[Kk][Ee][Yy]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee]_?[Kk][Ee][Yy])\\w*\\s*(:=|=|:)\\s*\"(?![A-Z0-9_]+\")(?=[^\"]*[0-9])[^\"]{8,}\""
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": true
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "heuristic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "gosec",
+            "options": {
+              "includes": [
+                "G101"
+              ]
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package client\n\nconst (\n\tapiKey    = \"sk-live-9f2b7c11aa4d\"\n\tauthToken = \"ghp-8f30c1aa77bd41\"\n)\n\ntype Config struct {\n\tEndpoint string\n\tPassword string\n}\n\nfunc Default() Config {\n\treturn Config{\n\t\tEndpoint: \"https://api.example.com\",\n\t\tPassword: \"hunter2-prod-8811\",\n\t}\n}\n",
+        "nearMiss": "package client\n\nimport \"os\"\n\nconst (\n\tapiKeyEnv   = \"SERVICE_API_KEY\"\n\ttokenHeader = \"Authorization\"\n)\n\ntype Config struct {\n\tEndpoint string `json:\"endpoint\"`\n\tAPIKey   string `json:\"api_key\"`\n}\n\nfunc Default() Config {\n\treturn Config{\n\t\tEndpoint: os.Getenv(\"SERVICE_ENDPOINT\"),\n\t\tAPIKey:   os.Getenv(apiKeyEnv),\n\t}\n}\n"
+      },
+      "gapNotes": "The pattern requires the value to contain a digit and to not look like an ALL_CAPS env-var name, which is what keeps the near-miss clean - but it also means a lowercase alphabetic secret ('correcthorsebattery') is missed, and a credential stored in a variable whose name avoids the listed words is missed entirely. gosec G101 is entropy- and name-based and carries its own false-positive rate, hence heuristic on both detectors. Neither sees a secret committed to a .env, a testdata fixture or a YAML manifest, since paths here are Go source only. One driver-level miss: this detector keeps string literals so it can read the value, and the driver still blanks comments in the same pass - a secret containing // or wrapped in / characters (base64 with slashes, a URL-shaped token) is partly blanked before the pattern runs and is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "gosec rule G101 'Look for hardcoded credentials' from gosec's RULES.md; runnable through golangci-lint's gosec linter"
+      }
+    },
+    {
+      "id": "tls-verification-disabled",
+      "title": "TLS certificate verification turned off",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "sets InsecureSkipVerify: true to get past an x509 error it could not diagnose",
+        "copies a snippet that disables verification to make a local call to a self-signed endpoint work",
+        "leaves the flag on after the debugging session that motivated it"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "InsecureSkipVerify\\s*:\\s*true"
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "gosec",
+            "options": {
+              "includes": [
+                "G402"
+              ]
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package transport\n\nimport (\n\t\"crypto/tls\"\n\t\"net/http\"\n)\n\nfunc Client() *http.Client {\n\treturn &http.Client{\n\t\tTransport: &http.Transport{\n\t\t\tTLSClientConfig: &tls.Config{\n\t\t\t\tInsecureSkipVerify: true,\n\t\t\t},\n\t\t},\n\t}\n}\n",
+        "nearMiss": "package transport\n\nimport (\n\t\"crypto/tls\"\n\t\"crypto/x509\"\n\t\"errors\"\n\t\"net/http\"\n)\n\n// InsecureSkipVerify is never set here; the pool below pins the internal CA.\nfunc Client(caPEM []byte) (*http.Client, error) {\n\tpool := x509.NewCertPool()\n\tif !pool.AppendCertsFromPEM(caPEM) {\n\t\treturn nil, errors.New(\"transport: no certificate found in CA bundle\")\n\t}\n\treturn &http.Client{\n\t\tTransport: &http.Transport{\n\t\t\tTLSClientConfig: &tls.Config{\n\t\t\t\tRootCAs:    pool,\n\t\t\t\tMinVersion: tls.VersionTLS13,\n\t\t\t},\n\t\t},\n\t}, nil\n}\n"
+      },
+      "gapNotes": "Only the literal true is matched: InsecureSkipVerify: cfg.AllowInsecure passes the regex, and gosec's G402 also reasons about literals, so a config-driven bypass that defaults to true in production is caught by neither. Verification disabled by supplying a permissive VerifyPeerCertificate or a custom RootCAs pool containing an attacker CA is out of reach of both.",
+      "evidence": {
+        "tier": "documented",
+        "source": "gosec rule G402 'Look for bad TLS connection settings' from gosec's RULES.md; crypto/tls field name from the standard library"
+      }
+    },
+    {
+      "id": "weak-crypto-or-random",
+      "title": "Broken hash or non-cryptographic randomness in a security path",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "reaches for md5 or sha1 because they are the examples it has seen most",
+        "uses math/rand to generate a token or nonce, which is deterministic given the seed",
+        "keeps a weak primitive after being told the output only needs to look unique"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\b(md5|sha1)\\.(New|Sum\\d*)\\s*\\(|\\brand\\.(Intn|Int31|Int63|Float64|Perm|Shuffle)\\s*\\("
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "gosec",
+            "options": {
+              "includes": [
+                "G401",
+                "G404",
+                "G501"
+              ]
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package session\n\nimport (\n\t\"crypto/md5\"\n\t\"encoding/hex\"\n\t\"fmt\"\n\t\"math/rand\"\n)\n\nfunc NewID(user string) string {\n\tsum := md5.Sum([]byte(user))\n\treturn fmt.Sprintf(\"%s-%d\", hex.EncodeToString(sum[:]), rand.Intn(1<<31))\n}\n",
+        "nearMiss": "package session\n\nimport (\n\t\"crypto/rand\"\n\t\"crypto/sha256\"\n\t\"encoding/hex\"\n\t\"fmt\"\n)\n\nfunc NewID(user string) (string, error) {\n\tsum := sha256.Sum256([]byte(user))\n\tnonce := make([]byte, 16)\n\tif _, err := rand.Read(nonce); err != nil {\n\t\treturn \"\", fmt.Errorf(\"read entropy: %w\", err)\n\t}\n\treturn fmt.Sprintf(\"%s-%s\", hex.EncodeToString(sum[:]), hex.EncodeToString(nonce)), nil\n}\n"
+      },
+      "gapNotes": "Heuristic because md5 over a cache key and math/rand for jitter or test data are both legitimate, and the regex cannot see the use site's intent. It also cannot tell math/rand's rand.Intn from math/rand/v2's, and it misses a weak primitive reached through an interface or a hash.Hash variable. gosec G401/G404 have the same blind spot but add the import-blocklist angle via G501.",
+      "evidence": {
+        "tier": "documented",
+        "source": "gosec RULES.md: G401 'Detect the usage of MD5 or SHA1', G404 'Insecure random number source (rand)', G501 'Import blocklist: crypto/md5'"
+      }
+    },
+    {
+      "id": "sql-string-concatenation",
+      "title": "SQL assembled with Sprintf or concatenation",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "builds the query with fmt.Sprintf because the placeholder dialect it guessed was rejected",
+        "concatenates a filter clause from a request field to make a dynamic search work",
+        "switches from parameters to interpolation when the driver returned a bind error it could not read"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\.(QueryRow|Query|Exec)(Context)?\\s*\\(\\s*(ctx\\s*,\\s*)?(fmt\\.Sprintf\\s*\\(|\"[^\"]*\"\\s*\\+)"
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "gosec",
+            "options": {
+              "includes": [
+                "G201",
+                "G202"
+              ]
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package users\n\nimport (\n\t\"database/sql\"\n\t\"fmt\"\n)\n\nfunc Find(db *sql.DB, id string) (*User, error) {\n\trow := db.QueryRow(fmt.Sprintf(\"SELECT id, email FROM users WHERE id = %s\", id))\n\tvar u User\n\tif err := row.Scan(&u.ID, &u.Email); err != nil {\n\t\treturn nil, fmt.Errorf(\"scan user %s: %w\", id, err)\n\t}\n\treturn &u, nil\n}\n",
+        "nearMiss": "package users\n\nimport (\n\t\"context\"\n\t\"database/sql\"\n\t\"fmt\"\n\t\"strings\"\n)\n\nconst findUser = \"SELECT id, email FROM users WHERE id = $1\"\n\nfunc Find(ctx context.Context, db *sql.DB, id string) (*User, error) {\n\trow := db.QueryRowContext(ctx, findUser, id)\n\tvar u User\n\tif err := row.Scan(&u.ID, &u.Email); err != nil {\n\t\treturn nil, fmt.Errorf(\"scan user %s: %w\", id, err)\n\t}\n\treturn &u, nil\n}\n\nfunc placeholders(n int) string {\n\treturn strings.TrimSuffix(strings.Repeat(\"?, \", n), \", \")\n}\n"
+      },
+      "gapNotes": "Only catches interpolation written at the call site. A query built into a variable on an earlier line and then passed by name (q := \"...\" + filter; db.Query(q)) defeats the regex completely - that is exactly what gosec G201/G202 are there for, and they too need the taint to stay inside one function. Same driver-level miss as hardcoded-secret: string literals are kept so the concatenated fragment is visible, but comment blanking still runs over them, so a query literal containing // (a URL, a MySQL /*+ hint */) is truncated before matching.",
+      "evidence": {
+        "tier": "documented",
+        "source": "gosec RULES.md: G201 'SQL query construction using format string', G202 'SQL query construction using string concatenation'; database/sql method names from the standard library"
+      }
+    },
+    {
+      "id": "unclosed-resource",
+      "title": "HTTP response body left unclosed",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "writes http.Get and decodes the body without a defer, leaking a connection per call",
+        "drops the defer when refactoring a request helper into a shorter form",
+        "uses the context-free convenience functions so a cancelled request keeps running"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "bodyclose",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "go-vet",
+            "rule": "httpresponse",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package fetch\n\nimport (\n\t\"encoding/json\"\n\t\"net/http\"\n)\n\nfunc Latest(url string) (*Release, error) {\n\tresp, err := http.Get(url)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tvar r Release\n\tif err := json.NewDecoder(resp.Body).Decode(&r); err != nil {\n\t\treturn nil, err\n\t}\n\treturn &r, nil\n}\n",
+        "nearMiss": "package fetch\n\nimport (\n\t\"context\"\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n)\n\nfunc Latest(ctx context.Context, c *http.Client, url string) (*Release, error) {\n\treq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)\n\tif err != nil {\n\t\treturn nil, fmt.Errorf(\"build request: %w\", err)\n\t}\n\tresp, err := c.Do(req)\n\tif err != nil {\n\t\treturn nil, fmt.Errorf(\"get %s: %w\", url, err)\n\t}\n\tdefer func() {\n\t\t_, _ = io.Copy(io.Discard, resp.Body)\n\t\t_ = resp.Body.Close()\n\t}()\n\tif resp.StatusCode != http.StatusOK {\n\t\treturn nil, fmt.Errorf(\"get %s: status %s\", url, resp.Status)\n\t}\n\tvar r Release\n\tif err := json.NewDecoder(resp.Body).Decode(&r); err != nil {\n\t\treturn nil, fmt.Errorf(\"decode release: %w\", err)\n\t}\n\treturn &r, nil\n}\n"
+      },
+      "gapNotes": "Tool-rule only: closing is proved by the absence of a defer, and no regex can assert an absence across a function body without producing noise on every correct call site. bodyclose works on the SSA of one function, so a response returned to a caller that closes it is reported as a leak, and a body closed inside a helper is missed. The noctx detector was deleted on 2026-08-13: noctx 'finds function calls without context.Context' and never looks at whether a body is closed, so listing it here claimed coverage it does not provide - the missing-context half of the third agent mode above is now uncovered. go vet's httpresponse only catches the defer-before-error-check ordering mistake, not an absent close.",
+      "evidence": {
+        "tier": "documented",
+        "source": "bodyclose is in the golangci-lint linter list; httpresponse is in the default go vet analyzer set listed under cmd/vet ('check for mistakes using HTTP responses')"
+      }
+    },
+    {
+      "id": "context-todo-placeholder",
+      "title": "context.TODO left where a real context belongs",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "passes context.TODO() rather than thread a ctx parameter through the call chain it would have to change",
+        "keeps the placeholder from a scaffold it generated and never revisits it",
+        "breaks cancellation and deadline propagation without any compile-time signal"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bcontext\\.TODO\\s*\\(\\s*\\)"
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "heuristic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "contextcheck",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package orders\n\nimport \"context\"\n\nfunc (s *Service) Reprice(id string) error {\n\to, err := s.repo.Get(context.TODO(), id)\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn s.repo.Save(context.TODO(), o.WithRepricedTotal())\n}\n",
+        "nearMiss": "package orders\n\nimport (\n\t\"context\"\n\t\"time\"\n)\n\nfunc (s *Service) Reprice(ctx context.Context, id string) error {\n\tctx, cancel := context.WithTimeout(ctx, 5*time.Second)\n\tdefer cancel()\n\n\to, err := s.repo.Get(ctx, id)\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn s.repo.Save(ctx, o.WithRepricedTotal())\n}\n"
+      },
+      "gapNotes": "Deliberately does not flag context.Background(), because that is correct in main, in package-level initialisation and in tests - which means the commonest form of the same mistake, calling context.Background() inside a function that already has a ctx parameter, is left to contextcheck. contextcheck is heuristic and does not run reliably across package boundaries.",
+      "evidence": {
+        "tier": "documented",
+        "source": "contextcheck is in the golangci-lint linter list ('check whether the function uses a non-inherited context'); context.TODO semantics from the standard library docs"
+      }
+    },
+    {
+      "id": "test-mutates-process-global-state",
+      "title": "Test mutates process globals instead of using the testing helpers",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "calls os.Setenv in a test with no cleanup, so the next test in the binary sees the leaked variable",
+        "creates a temp dir with os.MkdirTemp and never removes it",
+        "chdirs the process to fix a relative path, which breaks every test scheduled after it under -shuffle=on"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bos\\.(Setenv|Unsetenv|Chdir|MkdirTemp)\\s*\\("
+            ],
+            "paths": [
+              "**/*_test.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "usetesting",
+            "options": {
+              "os-setenv": true,
+              "os-mkdir-temp": true,
+              "os-chdir": true,
+              "os-temp-dir": true
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package server_test\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestServeUsesConfiguredRoot(t *testing.T) {\n\tos.Setenv(\"SERVE_ROOT\", \"/var/www\")\n\tdir, err := os.MkdirTemp(\"\", \"serve\")\n\tif err != nil {\n\t\tt.Fatalf(\"MkdirTemp: %v\", err)\n\t}\n\tif err := os.Chdir(dir); err != nil {\n\t\tt.Fatalf(\"Chdir: %v\", err)\n\t}\n\tif got := Root(); got != \"/var/www\" {\n\t\tt.Fatalf(\"Root() = %q, want /var/www\", got)\n\t}\n}\n",
+        "nearMiss": "package server_test\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestServeUsesConfiguredRoot(t *testing.T) {\n\tt.Setenv(\"SERVE_ROOT\", \"/var/www\")\n\tdir := t.TempDir()\n\tt.Chdir(dir)\n\tif os.Getenv(\"SERVE_ROOT\") == \"\" {\n\t\tt.Fatal(\"SERVE_ROOT not visible to the process\")\n\t}\n\tif got := Root(); got != \"/var/www\" {\n\t\tt.Fatalf(\"Root() = %q, want /var/www\", got)\n\t}\n}\n"
+      },
+      "gapNotes": "Only the four os calls listed are seen. A test that mutates a package-level variable, registers a global http.DefaultServeMux handler, or writes into a shared testdata directory leaks exactly as badly and matches nothing. t.Setenv is itself incompatible with t.Parallel, which neither detector checks. os.MkdirTemp is in the pattern for consistency with usetesting's os-mkdir-temp, but it mutates nothing global - it leaks an uncleaned directory - so that alternative reports a different defect than the class title names.",
+      "evidence": {
+        "tier": "documented",
+        "source": "usetesting is in the golangci-lint linter list; its os-setenv, os-mkdir-temp, os-chdir and os-temp-dir options are documented in its readme, with os-chdir requiring Go >= 1.24 for t.Chdir"
+      }
+    },
+    {
+      "id": "toothless-test-command",
+      "title": "Test command narrowed or its failure suppressed",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "appends || true to the test step so a red suite still reports a green job",
+        "narrows the run to -run TestSmoke and calls the suite passing",
+        "drops -race or adds -short so the case that was failing no longer executes"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "go\\s+test\\b[^\\n]*(\\|\\|\\s*true|-run[= ][\\w^$/.]+|-short\\b|-count=0|2>\\s*/dev/null)"
+            ],
+            "paths": [
+              "**/*.yml",
+              "**/*.yaml",
+              "Makefile",
+              "**/Makefile",
+              "**/*.sh"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": true
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "name: ci\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v5\n      - uses: actions/setup-go@v6\n        with:\n          go-version: '1.25'\n      - name: unit tests\n        run: go test -short -run TestSmoke ./... || true\n",
+        "nearMiss": "name: ci\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v5\n      - uses: actions/setup-go@v6\n        with:\n          go-version: '1.25'\n      - name: unit tests\n        run: go test -race -shuffle=on -count=1 -coverprofile=coverage.out ./...\n      - name: vet\n        run: go vet ./...\n"
+      },
+      "gapNotes": "Sees only what is committed. A session that runs a narrowed command in its own shell and then claims the suite passed leaves no trace in any file, and a package silently dropped from the ./... expansion by an unsatisfiable build tag is invisible here too. Nothing checks that -race is present - only that the listed weakenings are absent. Comment blanking is extension-driven: a Makefile has no extension, so the driver treats it as a slash-comment file and a `# go test ... || true` line commented out in a Makefile still fires, while the same line in a .sh or .yml file is blanked.",
+      "evidence": {
+        "tier": "documented",
+        "source": "go test flag semantics from cmd/go: -count=1 is 'the idiomatic way to disable test caching', -shuffle=on seeds order from the system clock (Go 1.17+), -race enables the data race detector"
+      }
+    },
+    {
+      "id": "local-replace-directive-left-in-gomod",
+      "title": "Filesystem replace directive left in go.mod",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "adds replace => ../lib to make a local edit visible and never removes it, so the build works only on that machine",
+        "points a module at a scratch checkout to get past a version it could not resolve",
+        "leaves the directive in the commit, breaking every clone and every CI runner"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "^replace\\s+[^\\n]*=>\\s*\\.{0,2}/"
+            ],
+            "paths": [
+              "**/go.mod"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": true
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "module example.com/service\n\ngo 1.25.0\n\nrequire (\n\texample.com/lib v1.4.0\n\tgithub.com/google/go-cmp v0.7.0\n)\n\nreplace example.com/lib => ../lib\n",
+        "nearMiss": "module example.com/service\n\ngo 1.25.0\n\nrequire (\n\texample.com/lib v1.4.0\n\tgithub.com/google/go-cmp v0.7.0\n)\n\n// replace example.com/lib => ../lib // local debugging only, never commit uncommented\nreplace example.com/lib => example.com/lib v1.4.1-rc.2\n"
+      },
+      "gapNotes": "Only the block-free single-line form anchored at column zero is matched; a replace inside a parenthesised replace ( ... ) block is indented and slips through. It also says nothing about the neighbouring abuses - a downgraded `go` directive, an exclude, or a go.work file that redirects modules outside the repository.",
+      "evidence": {
+        "tier": "documented",
+        "source": "go.mod replace directive syntax from the Go modules reference (cmd/go); a replacement path beginning with ./ or ../ is a filesystem path by definition"
+      }
+    },
+    {
+      "id": "invented-import-or-api",
+      "title": "Import path that the module does not declare or that does not exist",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "imports a package it inferred from the API it wished existed, with a plausible module path and version suffix",
+        "adds a third-party dependency for something the standard library already covers",
+        "leaves go.mod out of sync with the imports it wrote, so the build works only where the module cache is warm"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "depguard",
+            "options": {
+              "rules": {
+                "main": {
+                  "list-mode": "strict",
+                  "allow": [
+                    "$gostd",
+                    "example.com/service"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package report\n\nimport (\n\t\"fmt\"\n\n\t\"github.com/acme/pdfkit/v3/render\"\n)\n\nfunc Render(r Report) ([]byte, error) {\n\tdoc := render.NewDocument(render.A4)\n\tif err := doc.AddTable(r.Rows); err != nil {\n\t\treturn nil, fmt.Errorf(\"add table: %w\", err)\n\t}\n\treturn doc.Bytes()\n}\n",
+        "nearMiss": "package report\n\nimport (\n\t\"bytes\"\n\t\"fmt\"\n\t\"text/tabwriter\"\n)\n\nfunc Render(r Report) ([]byte, error) {\n\tvar buf bytes.Buffer\n\tw := tabwriter.NewWriter(&buf, 0, 8, 2, ' ', 0)\n\tfor _, row := range r.Rows {\n\t\tif _, err := fmt.Fprintf(w, \"%s\\t%d\\n\", row.Label, row.Cents); err != nil {\n\t\t\treturn nil, fmt.Errorf(\"write row: %w\", err)\n\t\t}\n\t}\n\tif err := w.Flush(); err != nil {\n\t\treturn nil, fmt.Errorf(\"flush: %w\", err)\n\t}\n\treturn buf.Bytes(), nil\n}\n"
+      },
+      "gapNotes": "Tool-rule only: no regex can tell an invented module path from a real one, and depguard in strict mode only proves the import is outside the declared allowlist - a typo inside an allowed prefix, or an invented function on a package that does exist, still needs `go build ./...` and `go mod tidy -diff`, which are wired as toolchain steps rather than detectors because neither has rule ids. The allowlist in the options is per-project and must be filled with the real module path and dependencies.",
+      "evidence": {
+        "tier": "documented",
+        "source": "depguard is in the golangci-lint linter list; its rules/list-mode/allow/deny keys with the $gostd shorthand appear verbatim in golangci-lint's linters settings page"
+      }
+    },
+    {
+      "id": "deprecated-api-used",
+      "title": "Deprecated standard library or dependency API used",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "writes ioutil.ReadFile and other pre-1.16 forms because they dominate its training material",
+        "reaches for a deprecated option struct field the docs marked years ago",
+        "reintroduces a deprecated call while rewriting a function that had already been migrated"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "golangci-lint",
+            "rule": "staticcheck",
+            "options": {
+              "checks": [
+                "SA1019"
+              ]
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package fixtures\n\nimport (\n\t\"io/ioutil\"\n\t\"strings\"\n)\n\nfunc Load(path string) (string, error) {\n\tb, err := ioutil.ReadFile(path)\n\tif err != nil {\n\t\treturn \"\", err\n\t}\n\treturn strings.TrimSpace(string(b)), nil\n}\n",
+        "nearMiss": "package fixtures\n\nimport (\n\t\"os\"\n\t\"strings\"\n)\n\nfunc Load(path string) (string, error) {\n\tb, err := os.ReadFile(path)\n\tif err != nil {\n\t\treturn \"\", err\n\t}\n\treturn strings.TrimSpace(string(b)), nil\n}\n"
+      },
+      "gapNotes": "Tool-rule only: deprecation lives in a // Deprecated: doc comment on the declaration, which only a type-aware analyzer can follow to the call site - a name list in a regex would rot immediately. SA1019 sees nothing when the dependency marks a symbol deprecated in prose without the conventional comment prefix.",
+      "evidence": {
+        "tier": "documented",
+        "source": "staticcheck check SA1019 'Using a deprecated function, variable, constant or field' from staticcheck.dev/docs/checks; io/ioutil deprecation from the Go 1.16 release notes"
+      }
+    }
+  ]
+}

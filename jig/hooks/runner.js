@@ -20,9 +20,10 @@ function main(argv) {
   if (lib.isOff(root) || !lib.isConfigured(root)) return;
 
   const out = lib.runEvent(root, event, lib.readInput(), (line) => process.stderr.write(line + "\n"));
-  // Only jig-namespaced keys are ever emitted. The host reads its control
-  // fields off the top level, so there is no shape this can take that denies a
-  // tool call — the v1 clamp is structural, not a policy the code remembers.
+  // The host reads its control fields off the top level, and runEvent puts one
+  // there only for a guard that armed: its own row asked to, and the proof it
+  // recorded still matches the check on disk. Everything else an observing
+  // guard has to say stays under the `jig` key, where nothing acts on it.
   process.stdout.write(JSON.stringify(out) + "\n");
 }
 

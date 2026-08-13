@@ -1,0 +1,1569 @@
+{
+  "schemaVersion": 3,
+  "edition": "python",
+  "displayName": "Python",
+  "researchedOn": "2026-08-13",
+  "detect": {
+    "files": [
+      "pyproject.toml",
+      "requirements.txt",
+      "setup.cfg",
+      "uv.lock",
+      "poetry.lock",
+      "pdm.lock",
+      "tox.ini"
+    ],
+    "extensions": [
+      ".py",
+      ".pyi"
+    ],
+    "commentSyntax": {
+      ".py": "hash",
+      ".pyi": "hash"
+    },
+    "packageManagers": [
+      "pip",
+      "uv",
+      "poetry",
+      "pdm"
+    ]
+  },
+  "toolchain": [
+    {
+      "id": "ruff",
+      "role": "linter",
+      "why": "Single fast linter that carries the pyflakes, bugbear, bandit, pytest-style, annotation, pygrep and tryceratops rule families, so most agent damage patterns have a named rule id here rather than needing a bespoke regex.",
+      "installKind": "package",
+      "install": {
+        "pip": "python -m pip install ruff",
+        "uv": "uv add --dev ruff",
+        "poetry": "poetry add --group dev ruff",
+        "pdm": "pdm add -d -G dev ruff"
+      },
+      "uninstall": {
+        "pip": "python -m pip uninstall -y ruff",
+        "uv": "uv remove --dev ruff",
+        "poetry": "poetry remove --group dev ruff",
+        "pdm": "pdm remove -d -G dev ruff"
+      },
+      "configPath": "pyproject.toml",
+      "configSample": "[tool.ruff]\nline-length = 100\ntarget-version = \"py311\"\nsrc = [\"src\", \"tests\"]\n\n[tool.ruff.lint]\nselect = [\n  \"E\", \"F\", \"W\",\n  \"B\", \"S\", \"BLE\", \"PT\", \"PL\", \"TRY\",\n  \"ANN\", \"PGH\", \"ERA\", \"DTZ\", \"T10\", \"T20\", \"RUF\",\n]\nignore = []\n\n[tool.ruff.lint.per-file-ignores]\n\"tests/**/*.py\" = [\"S101\"]\n\n[tool.ruff.lint.flake8-pytest-style]\nraises-require-match-for = [\"*\"]\n",
+      "wiring": "[tool.pdm.scripts] lint = \"ruff check .\"  (Poetry/pip projects: a Makefile target `lint: ; ruff check .`)",
+      "ciStep": "ruff check --output-format=github .",
+      "seed": {
+        "path": "src/jig_seed_ruff.py",
+        "sample": "import subprocess\n\n\ndef archive(target: str) -> None:\n    try:\n        subprocess.run(f\"tar -czf {target}.tgz {target}\", shell=True, check=True)\n    except Exception:\n        pass\n"
+      },
+      "verify": {
+        "argv": [
+          "ruff",
+          "check",
+          "--no-cache",
+          "."
+        ],
+        "expected": "exit code 1, with one line per violation of the form `path/to/file.py:12:5: S110 `try`-`except`-`pass` detected, consider logging the exception` and a trailing `Found N errors.`",
+        "expectedExit": 1
+      }
+    },
+    {
+      "id": "ruff-format",
+      "role": "formatter",
+      "why": "Formatting drift is the noise that hides real diffs; --check fails CI on unformatted files without rewriting them, which no linter rule does.",
+      "installKind": "package",
+      "install": {
+        "pip": "python -m pip install ruff",
+        "uv": "uv add --dev ruff",
+        "poetry": "poetry add --group dev ruff",
+        "pdm": "pdm add -d -G dev ruff"
+      },
+      "uninstall": {
+        "pip": "python -m pip uninstall -y ruff",
+        "uv": "uv remove --dev ruff",
+        "poetry": "poetry remove --group dev ruff",
+        "pdm": "pdm remove -d -G dev ruff"
+      },
+      "configPath": "pyproject.toml",
+      "configSample": "[tool.ruff]\nline-length = 100\n\n[tool.ruff.format]\nquote-style = \"double\"\nindent-style = \"space\"\nskip-magic-trailing-comma = false\ndocstring-code-format = true\n",
+      "wiring": "[tool.pdm.scripts] fmt = \"ruff format .\"  (CI runs the same binary with --check)",
+      "ciStep": "ruff format --check --diff .",
+      "seed": {
+        "path": "src/jig_seed_format.py",
+        "sample": "def greet(name: str) -> str:\n    return 'hello '+name\n"
+      },
+      "verify": {
+        "argv": [
+          "ruff",
+          "format",
+          "--check",
+          "--diff",
+          "."
+        ],
+        "expected": "exit code 1, printing a unified diff per file followed by `N files would be reformatted`",
+        "expectedExit": 1
+      }
+    },
+    {
+      "id": "mypy",
+      "role": "type-checker",
+      "why": "Only the type checker can tell that an imported module, attribute or call signature does not exist — the exact failure an agent produces when it invents an API, and one no regex or linter can see.",
+      "installKind": "package",
+      "install": {
+        "pip": "python -m pip install mypy",
+        "uv": "uv add --dev mypy",
+        "poetry": "poetry add --group dev mypy",
+        "pdm": "pdm add -d -G dev mypy"
+      },
+      "uninstall": {
+        "pip": "python -m pip uninstall -y mypy",
+        "uv": "uv remove --dev mypy",
+        "poetry": "poetry remove --group dev mypy",
+        "pdm": "pdm remove -d -G dev mypy"
+      },
+      "configPath": "pyproject.toml",
+      "configSample": "[tool.mypy]\npython_version = \"3.11\"\nfiles = [\"src\", \"tests\"]\nstrict = true\nwarn_unreachable = true\ndisallow_any_explicit = true\nno_implicit_optional = true\nenable_error_code = [\n  \"ignore-without-code\",\n  \"possibly-undefined\",\n  \"redundant-expr\",\n  \"truthy-bool\",\n  \"unused-awaitable\",\n]\n\n[[tool.mypy.overrides]]\nmodule = [\"tests.*\"]\ndisallow_untyped_defs = true\n",
+      "wiring": "[tool.pdm.scripts] typecheck = \"mypy\"  (config supplies `files`, so no path argument is needed)",
+      "ciStep": "mypy --strict --warn-unreachable src tests",
+      "seed": {
+        "path": "src/jig_seed_mypy.py",
+        "sample": "def total(values: list[int]) -> int:\n    return sum(values) + \"one\"\n"
+      },
+      "verify": {
+        "argv": [
+          "mypy",
+          "--strict",
+          "src"
+        ],
+        "expected": "exit code 1, with lines of the form `src/client.py:7: error: Module \"httpx\" has no attribute \"retry_policy\"  [attr-defined]` and a trailing `Found N errors in M files`",
+        "expectedExit": 1
+      }
+    },
+    {
+      "id": "pytest",
+      "role": "test-runner",
+      "why": "The only tool that proves the code still behaves; its exit codes also separate a failing suite (1) from a suite that never collected anything (5), which is how a 'done, tests pass' claim gets falsified.",
+      "installKind": "package",
+      "install": {
+        "pip": "python -m pip install pytest pytest-cov",
+        "uv": "uv add --dev pytest pytest-cov",
+        "poetry": "poetry add --group dev pytest pytest-cov",
+        "pdm": "pdm add -d -G dev pytest pytest-cov"
+      },
+      "uninstall": {
+        "pip": "python -m pip uninstall -y pytest pytest-cov",
+        "uv": "uv remove --dev pytest pytest-cov",
+        "poetry": "poetry remove --group dev pytest pytest-cov",
+        "pdm": "pdm remove -d -G dev pytest pytest-cov"
+      },
+      "configPath": "pyproject.toml",
+      "configSample": "[tool.pytest.ini_options]\nminversion = \"8.0\"\ntestpaths = [\"tests\"]\naddopts = \"--strict-markers --strict-config --import-mode=importlib -ra --cov=src --cov-report=term-missing --cov-fail-under=85\"\nxfail_strict = true\nfilterwarnings = [\"error\"]\nmarkers = [\n  \"slow: takes longer than a second\",\n]\n",
+      "wiring": "[tool.pdm.scripts] test = \"pytest\"  (addopts in pyproject.toml carries the strict flags, so a bare `pytest` is already strict)",
+      "ciStep": "pytest --strict-markers --strict-config -ra",
+      "seed": {
+        "path": "tests/test_jig_seed.py",
+        "sample": "def test_seeded_arithmetic_holds() -> None:\n    assert 1 + 1 == 3\n"
+      },
+      "verify": {
+        "argv": [
+          "pytest",
+          "-q"
+        ],
+        "expected": "exit code 1 with `FAILED tests/test_billing.py::test_invoice_total_applies_discount - AssertionError` and a `1 failed` summary; exit code 5 with `no tests ran` when the suite collected nothing",
+        "expectedExit": [
+          1,
+          5
+        ]
+      }
+    },
+    {
+      "id": "pip-audit",
+      "role": "security-scanner",
+      "why": "Checks the resolved dependency set against the PyPI advisory and OSV databases — a class of breakage that lives entirely in the lockfile and that no linter, type checker or test touches.",
+      "installKind": "package",
+      "install": {
+        "pip": "python -m pip install pip-audit",
+        "uv": "uv add --dev pip-audit",
+        "poetry": "poetry add --group dev pip-audit",
+        "pdm": "pdm add -d -G dev pip-audit"
+      },
+      "uninstall": {
+        "pip": "python -m pip uninstall -y pip-audit",
+        "uv": "uv remove --dev pip-audit",
+        "poetry": "poetry remove --group dev pip-audit",
+        "pdm": "pdm remove -d -G dev pip-audit"
+      },
+      "configPath": "requirements.txt",
+      "configSample": "# pip-audit has no config file of its own; it audits the active environment by\n# default and a pinned requirements file when given -r. Pin the input so the\n# audit is reproducible:\nhttpx==0.28.1\npydantic==2.11.7\n",
+      "wiring": "[tool.pdm.scripts] audit = \"pip-audit --strict\"  (uv/poetry projects: export first, e.g. `uv export --no-hashes -o requirements.txt`)",
+      "ciStep": "pip-audit --strict -r requirements.txt",
+      "seed": {
+        "path": "requirements.txt",
+        "sample": "pyyaml==5.1\nrequests==2.19.1\n"
+      },
+      "verify": {
+        "argv": [
+          "pip-audit",
+          "--strict"
+        ],
+        "expected": "exit code 1 with `Found N known vulnerabilities in M package(s)` above a Name/Version/ID/Fix Versions table; exit code 0 and `No known vulnerabilities found` when clean",
+        "expectedExit": 1
+      }
+    },
+    {
+      "id": "build",
+      "role": "build",
+      "why": "Proves the package still installs and imports from a clean tree — catches a module an agent moved or a dependency it started importing without declaring, both of which pass every in-tree check because the working directory is on sys.path.",
+      "installKind": "package",
+      "install": {
+        "pip": "python -m pip install build",
+        "uv": "uv add --dev build",
+        "poetry": "poetry add --group dev build",
+        "pdm": "pdm add -d -G dev build"
+      },
+      "uninstall": {
+        "pip": "python -m pip uninstall -y build",
+        "uv": "uv remove --dev build",
+        "poetry": "poetry remove --group dev build",
+        "pdm": "pdm remove -d -G dev build"
+      },
+      "configPath": "pyproject.toml",
+      "configSample": "[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n\n[project]\nname = \"example-app\"\nversion = \"0.1.0\"\nrequires-python = \">=3.11\"\ndependencies = [\n  \"httpx>=0.28\",\n]\n\n[tool.hatch.build.targets.wheel]\npackages = [\"src/example_app\"]\n",
+      "wiring": "[tool.pdm.scripts] dist = \"python -m build --wheel --sdist\"  (uv projects can use the native `uv build` instead)",
+      "ciStep": "python -m build && python -m pip install --no-deps dist/*.whl && python -c \"import example_app\"",
+      "seed": {
+        "path": "pyproject.toml",
+        "sample": "[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n\n[project]\nname = \"example-app\"\nversion = \"0.1.0\"\nrequires-python = \">=3.11\"\ndependencies = [\n  \"httpx>=0.28\",\n]\n"
+      },
+      "verify": {
+        "argv": [
+          "python",
+          "-m",
+          "build",
+          "--wheel"
+        ],
+        "expected": "non-zero exit with the backend's own error, e.g. `ValueError: Unable to determine which files to ship inside the wheel`, or a later `ModuleNotFoundError` from the post-install import smoke check",
+        "expectedExit": 1
+      }
+    }
+  ],
+  "classes": [
+    {
+      "id": "softened-assertion",
+      "title": "Assertion softened into a tautology",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "cannot work out why the assertion fails, so rewrites it as `assert x == x` or `assert True` and reports the test as passing",
+        "replaces a specific expected value with the actual value read back from the same call, making the assertion self-referential",
+        "reduces `assert result == 42` to `assert result is not None` when the arithmetic is wrong"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bassert\\s+(\\w+)\\s*==\\s*\\1\\b",
+              "\\bassert\\s+True\\b"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "PLR0124",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "from decimal import Decimal\n\nfrom billing import invoice_total\n\n\ndef test_invoice_total_applies_discount() -> None:\n    total = invoice_total(subtotal=Decimal(\"100.00\"), discount_pct=10)\n    assert total == total\n    assert True\n\n\ndef test_invoice_total_rejects_negative_discount() -> None:\n    total = invoice_total(subtotal=Decimal(\"50.00\"), discount_pct=0)\n    assert total == total\n",
+        "nearMiss": "from decimal import Decimal\n\nfrom billing import invoice_total\n\n\ndef test_invoice_total_applies_discount() -> None:\n    expected_total = Decimal(\"90.00\")\n    total = invoice_total(subtotal=Decimal(\"100.00\"), discount_pct=10)\n    assert total == expected_total\n\n\ndef test_invoice_total_is_idempotent() -> None:\n    first = invoice_total(subtotal=Decimal(\"50.00\"), discount_pct=0)\n    second = invoice_total(subtotal=Decimal(\"50.00\"), discount_pct=0)\n    assert first == second\n"
+      },
+      "gapNotes": "Only catches the two most literal shapes. `assert result is not None`, `assert len(rows) >= 0` and `assert isinstance(x, object)` are equally hollow and match nothing here; ruff has no rule for `assert True` (B011 and PT015 cover only the always-false direction), so that half rests on the regex alone. A weakening that changes an expected constant to a laxer one (42 -> `> 0`) is invisible without diffing against the previous revision. jig's driver blanks `#` comments only in shell, YAML and TOML files, so a commented-out `# assert True` in a .py file is reported as live code, and a `//` floor division blanks the rest of its own line, hiding any match after it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rule page docs.astral.sh/ruff/rules/comparison-with-itself/ confirms PLR0124 `comparison-with-itself` flags a name compared to itself."
+      }
+    },
+    {
+      "id": "placeholder-assert-false",
+      "title": "Test body replaced with an unconditional failure",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "stubs a test it intends to write later as `assert False, \"not implemented\"` and never returns to it",
+        "converts a test it cannot make pass into a deliberate failure so the diff still 'has a test'",
+        "leaves `assert False` behind after using it to confirm a code path was reached"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bassert\\s+False\\b"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "B011",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "PT015",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import pytest\n\nfrom config import parse_config\n\n\ndef test_parse_config_rejects_unknown_key() -> None:\n    with pytest.raises(ValueError):\n        parse_config({\"unknown\": 1})\n    assert False\n\n\ndef test_parse_config_reads_timeout() -> None:\n    assert False, \"not implemented yet\"\n",
+        "nearMiss": "from config import parse_config\n\n\ndef test_parse_config_defaults_strict_off() -> None:\n    config = parse_config({})\n    assert config.strict is False\n\n\ndef test_parse_config_disables_cache() -> None:\n    config = parse_config({\"cache\": False})\n    assert config.cache is False\n    assert not config.strict\n"
+      },
+      "gapNotes": "`pytest.fail(\"todo\")` and `raise NotImplementedError` are the same abandonment and neither is matched — B011/PT015 will not fire on them either, and PT015 in fact steers authors toward `pytest.fail()`, so a codebase that takes the ruff fix moves the mistake out of detector range. `assert 0` also slips past the regex. jig's driver blanks `#` comments only in shell, YAML and TOML files, so a commented-out `# assert False` in a .py file is reported as live code, and a `//` floor division blanks the rest of its own line, hiding any match after it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rules index docs.astral.sh/ruff/rules/ lists B011 `Do not \\`assert False\\`` and PT015 `Assertion always fails, replace with \\`pytest.fail()\\``; PT015 confirmed at docs.astral.sh/ruff/rules/pytest-assert-always-false/."
+      }
+    },
+    {
+      "id": "skipped-test",
+      "title": "Test skipped or xfailed instead of fixed",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "adds `@pytest.mark.skip(reason=\"flaky\")` to the test blocking its change and moves on",
+        "calls `pytest.skip()` at the top of a test body so the failure disappears from the summary",
+        "marks a genuinely broken test `@pytest.mark.xfail` so a red suite reads green"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "@pytest\\.mark\\.(?:skip|skipif|xfail)\\b",
+              "\\bpytest\\.skip\\s*\\("
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "pytest",
+            "rule": "xfail_strict",
+            "options": {
+              "value": true
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import pytest\n\nfrom ingest import load_manifest\n\n\n@pytest.mark.skip(reason=\"flaky on CI\")\ndef test_load_manifest_validates_checksum() -> None:\n    manifest = load_manifest(\"fixtures/manifest.json\")\n    assert manifest.checksum_ok\n\n\ndef test_load_manifest_handles_empty_file() -> None:\n    pytest.skip(\"revisit after the refactor\")\n    assert load_manifest(\"fixtures/empty.json\") is None\n",
+        "nearMiss": "import pytest\n\nfrom ingest import load_manifest\n\nyaml = pytest.importorskip(\"yaml\")\n\n\n@pytest.mark.slow\ndef test_load_manifest_large_file() -> None:\n    manifest = load_manifest(\"fixtures/large.yaml\")\n    assert manifest.entry_count > 1000\n\n\n@pytest.mark.parametrize(\"skip_header\", [True, False])\ndef test_load_manifest_header_toggle(skip_header: bool) -> None:\n    manifest = load_manifest(\"fixtures/manifest.json\", skip_header=skip_header)\n    assert manifest.entry_count >= 0\n"
+      },
+      "gapNotes": "Skipping is legitimate — platform gates, optional extras, `@pytest.mark.skipif(sys.platform == 'win32')` — so this fires on the honest cases too and only earns its keep as a review prompt, not a block. `unittest.skip`, `unittest.expectedFailure` and a `pytest.ini` `-k` filter are all uncovered. `xfail_strict = true` catches only the narrow case of an xfail that has started passing; it says nothing about one that is genuinely still failing and has been parked for months. jig's driver blanks `#` comments only in shell, YAML and TOML files, so a commented-out `# @pytest.mark.skip` in a .py file is reported as live code, and a `//` floor division blanks the rest of its own line, hiding any match after it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "pytest configuration reference: `xfail_strict` ini option makes an unexpectedly-passing xfail a failure; marker names confirmed in pytest's mark documentation."
+      }
+    },
+    {
+      "id": "emptied-test-body",
+      "title": "Test body emptied to pass",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "deletes the failing assertions and leaves `pass` so the function still exists and the count of tests is unchanged",
+        "replaces the body with `...` while promising to restore it",
+        "keeps the test name and docstring but drops every call to the code under test"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "def\\s+test_\\w+\\s*\\([^)]*\\)[^:\\n]*:\\s*(?:pass|\\.\\.\\.)\\s*(?:\\n|$)"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "from reporting import monthly_summary\n\n\ndef test_monthly_summary_totals_by_category() -> None:\n    pass\n\n\ndef test_monthly_summary_excludes_refunds() -> None:\n    ...\n\n\ndef test_monthly_summary_handles_empty_month() -> None:\n    summary = monthly_summary([])\n    assert summary.total == 0\n",
+        "nearMiss": "from typing import Protocol\n\nfrom reporting import monthly_summary\n\n\nclass SummarySink(Protocol):\n    def write(self, row: str) -> None: ...\n\n\ndef helper_no_op() -> None:\n    pass\n\n\ndef test_monthly_summary_totals_by_category() -> None:\n    \"\"\"Regression cover for the 2026-03 rounding bug.\"\"\"\n    summary = monthly_summary([(\"food\", 12), (\"food\", 8)])\n    assert summary.by_category[\"food\"] == 20\n"
+      },
+      "gapNotes": "No ruff or mypy rule exists for an empty test body, so this is regex-only. It sees only the two literal empty bodies: a test gutted down to `assert True`, to a lone `print()`, or to setup with every assertion removed still matches nothing. A test method inside a `TestFoo` class matches (the `def test_` prefix survives indentation), but a unittest method named `runTest` does not. Most importantly it cannot see a test that was deleted outright — for that, `--cov-fail-under` in pytest's addopts is the only backstop, and only if coverage actually drops. A body of docstring-then-`pass` is the common real shape and matches nothing, because the pattern needs `pass` immediately after the colon. jig's driver also blanks `#` comments only in shell, YAML and TOML files, so a commented-out stub is reported as live code.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "No documented linter rule covers empty test bodies; pattern derived from pytest's `test_` collection convention (python_functions default) documented in pytest's configuration reference."
+      }
+    },
+    {
+      "id": "test-returns-before-asserting",
+      "title": "Early return short-circuits a test",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "inserts `return` at the top of a failing test so it collects, runs and reports as passed while asserting nothing",
+        "wraps the assertions in a guard that is never true, leaving an early exit as the only reachable path",
+        "converts a test into a no-op after a refactor changed the fixture it depended on"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "def\\s+test_\\w+\\s*\\([^)]*\\)[^:\\n]*:\\s*return\\b"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "mypy",
+            "rule": "unreachable",
+            "options": {
+              "flag": "--warn-unreachable"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "from auth import verify_token\n\n\ndef test_verify_token_rejects_expired() -> None:\n    return\n    assert verify_token(\"expired\") is False\n\n\ndef test_verify_token_accepts_fresh() -> None:\n    return None\n    assert verify_token(\"fresh\") is True\n",
+        "nearMiss": "from collections.abc import Iterator\n\nimport pytest\n\nfrom auth import verify_token\n\n\n@pytest.fixture\ndef token() -> Iterator[str]:\n    return iter([\"fresh\"])\n\n\ndef _skip_reason() -> str | None:\n    return None\n\n\ndef test_verify_token_accepts_fresh(token: Iterator[str]) -> None:\n    assert verify_token(next(token)) is True\n"
+      },
+      "gapNotes": "Only catches a return as the very first statement. A return placed three lines in, after some harmless setup, matches nothing. mypy's `unreachable` code closes that gap but only when `--warn-unreachable` is on, which `--strict` explicitly does not enable — the config sample turns it on separately. A test that exits early via `if not FEATURE_ON: return` is reachable code and neither detector will complain. jig's driver blanks `#` comments only in shell, YAML and TOML files, so a commented-out `# return` in a .py file is reported as live code, and a `//` floor division blanks the rest of its own line, hiding any match after it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "mypy optional error code list (error_code_list2) documents `unreachable` — 'Statement is unreachable'; mypy command_line docs state --warn-unreachable is not enabled by --strict."
+      }
+    },
+    {
+      "id": "duplicate-test-name-shadowing",
+      "title": "Redefined test silently replaces the original",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "appends a second `def test_x` at the end of the module instead of editing the existing one, so Python binds the last definition and the first test stops running",
+        "re-emits a whole test file after a partial read and duplicates functions it did not realise were already there",
+        "copies a test into a new module scope with the same name to 'fix' it, leaving both"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "F811",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "from cart import subtotal\n\n\ndef test_subtotal_sums_line_items() -> None:\n    assert subtotal([(\"a\", 2, 5), (\"b\", 1, 3)]) == 13\n\n\ndef test_subtotal_ignores_zero_quantity() -> None:\n    assert subtotal([(\"a\", 0, 5)]) == 0\n\n\ndef test_subtotal_sums_line_items() -> None:\n    assert subtotal([]) == 0\n",
+        "nearMiss": "from cart import subtotal\n\n\nclass TestSubtotalEmpty:\n    def test_returns_zero(self) -> None:\n        assert subtotal([]) == 0\n\n\nclass TestSubtotalPopulated:\n    def test_returns_zero(self) -> None:\n        assert subtotal([(\"a\", 0, 5)]) == 0\n"
+      },
+      "gapNotes": "No regex detector: deciding that a name is redefined needs the whole module's binding table, and a pattern that merely counted `def test_` occurrences would flag every legitimate same-named method across sibling classes — exactly the near-miss above. F811 covers same-scope redefinition only; a test moved to a different module and left behind in the original is a duplicate no tool here reports.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rules index docs.astral.sh/ruff/rules/ lists F811 (pyflakes) 'Redefined while unused'."
+      }
+    },
+    {
+      "id": "swallowed-exception",
+      "title": "Exception caught and discarded",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "cannot diagnose why a call raises, so wraps it in `try/except: pass` and calls the bug fixed",
+        "adds `except ...: continue` inside a loop so a batch job stops reporting the records it dropped",
+        "silences an exception surfaced by a new test rather than handling the condition the test describes"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "except[^\\n:]*:\\s*pass\\b",
+              "except[^\\n:]*:\\s*continue\\b"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "S110",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "S112",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import json\nfrom pathlib import Path\n\n\ndef load_records(paths: list[Path]) -> list[dict]:\n    records: list[dict] = []\n    for path in paths:\n        try:\n            records.append(json.loads(path.read_text()))\n        except json.JSONDecodeError:\n            continue\n    try:\n        records.sort(key=lambda row: row[\"id\"])\n    except KeyError:\n        pass\n    return records\n",
+        "nearMiss": "import contextlib\nimport json\nimport logging\nfrom pathlib import Path\n\nlogger = logging.getLogger(__name__)\n\n\ndef load_records(paths: list[Path]) -> list[dict]:\n    records: list[dict] = []\n    for path in paths:\n        try:\n            records.append(json.loads(path.read_text()))\n        except json.JSONDecodeError:\n            logger.warning(\"skipping unparseable file %s\", path)\n            continue\n    with contextlib.suppress(KeyError):\n        records.sort(key=lambda row: row[\"id\"])\n    return records\n"
+      },
+      "gapNotes": "Both the regex and S110/S112 look for `pass` or `continue` as the handler's first statement. A handler whose body is `return None`, `return []`, `self.errors += 1` or a bare `...` swallows just as thoroughly and is matched by nothing. `contextlib.suppress` — the idiomatic form the near-miss uses — is deliberately not flagged, which means an agent that reaches for it produces an undetectable version of the same mistake. Ruff's own S110 documentation frames this as 'consider logging', so teams that already log-and-continue will see the rule pass on handlers that still lose the error. jig's driver blanks `#` comments only in shell, YAML and TOML files, so a commented-out handler is reported as live code, and a `//` floor division blanks the rest of its own line, hiding any match after it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rule page docs.astral.sh/ruff/rules/try-except-pass/ confirms S110 `try-except-pass`; rules index confirms S112 '`try`-`except`-`continue` detected, consider logging'."
+      }
+    },
+    {
+      "id": "catch-all-exception",
+      "title": "Blind except catching everything",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "widens `except ValueError` to `except Exception` when a second, unrelated error surfaces, rather than handling both",
+        "writes a bare `except:` around a block it does not understand, which also swallows KeyboardInterrupt and SystemExit",
+        "adds a catch-all around the whole request handler to make an intermittent failure stop appearing in logs"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "except\\s*:\\s*\\n",
+              "except\\s+(?:Exception|BaseException)\\s*(?:as\\s+\\w+\\s*)?:"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "BLE001",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "E722",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import shutil\nfrom pathlib import Path\n\n\ndef safe_copy(src: Path, dst: Path) -> bool:\n    try:\n        shutil.copy2(src, dst)\n    except Exception as exc:\n        print(exc)\n        return False\n    return True\n\n\ndef cleanup(target: Path) -> None:\n    try:\n        target.unlink()\n    except:\n        return\n",
+        "nearMiss": "import shutil\nfrom pathlib import Path\n\n\ndef safe_copy(src: Path, dst: Path) -> bool:\n    try:\n        shutil.copy2(src, dst)\n    except (OSError, shutil.SameFileError) as exc:\n        raise RuntimeError(f\"copy failed for {src}\") from exc\n    return True\n\n\ndef cleanup(target: Path) -> None:\n    try:\n        target.unlink(missing_ok=True)\n    except PermissionError:\n        raise\n"
+      },
+      "gapNotes": "Catching `Exception` at a process boundary — a task worker, a CLI entrypoint, a web framework's error middleware — is correct, and neither the regex nor BLE001 can tell that apart from a catch-all buried three functions deep. Aliased forms (`except builtins.Exception`, or `E = Exception; except E:`) evade the regex. `except BaseException*` exception-group syntax is not matched. jig's driver blanks `#` comments only in shell, YAML and TOML files, so a commented-out `# except Exception:` is reported as live code, and a `//` floor division blanks the rest of its own line, hiding any match after it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rules index docs.astral.sh/ruff/rules/ lists BLE001 'Do not catch blind exception' (flake8-blind-except) and E722 'Do not use bare `except`' (pycodestyle)."
+      }
+    },
+    {
+      "id": "over-broad-raises-assertion",
+      "title": "Exception test that accepts any failure",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "writes `pytest.raises(Exception)` so the test passes on an ImportError or a TypeError from its own broken setup, not the error under test",
+        "drops the `match=` argument when the message it guessed did not appear, leaving the assertion unable to distinguish two different failures",
+        "keeps `self.assertRaises(Exception, ...)` after narrowing was requested"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "pytest\\.raises\\s*\\(\\s*(?:Exception|BaseException)\\s*\\)",
+              "assertRaises\\s*\\(\\s*Exception\\b"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "B017",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "PT011",
+            "options": {
+              "raises-require-match-for": [
+                "*"
+              ]
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import unittest\n\nimport pytest\n\nfrom durations import parse_duration\n\n\ndef test_parse_duration_rejects_garbage() -> None:\n    with pytest.raises(Exception):\n        parse_duration(\"not-a-duration\")\n\n\nclass ParseDurationLegacyTests(unittest.TestCase):\n    def test_rejects_empty(self) -> None:\n        self.assertRaises(Exception, parse_duration, \"\")\n",
+        "nearMiss": "import unittest\n\nimport pytest\n\nfrom durations import ParseError, parse_duration\n\n\ndef test_parse_duration_rejects_garbage() -> None:\n    with pytest.raises(ParseError, match=\"unrecognised unit\"):\n        parse_duration(\"12 furlongs\")\n\n\nclass ParseDurationLegacyTests(unittest.TestCase):\n    def test_rejects_empty(self) -> None:\n        self.assertRaises(ParseError, parse_duration, \"\")\n"
+      },
+      "gapNotes": "The regex only sees the literal `Exception`/`BaseException` spellings on one line; `pytest.raises(\\n    Exception,\\n)` split across lines matches neither pattern, and a project-wide alias for a broad base class defeats both. PT011 fires only for the exception types listed in `raises-require-match-for` — the config sample sets `[\"*\"]`, which is stricter than ruff's default and will also flag narrow-but-unmatched raises, so expect noise before it settles. jig's driver blanks `#` comments only in shell, YAML and TOML files, so a commented-out `# pytest.raises(Exception)` is reported as live code, and a `//` floor division blanks the rest of its own line, hiding any match after it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rule pages docs.astral.sh/ruff/rules/assert-raises-exception/ (B017, flags assertRaises/pytest.raises on Exception or BaseException) and docs.astral.sh/ruff/rules/pytest-raises-too-broad/ (PT011, requires `match` or `check`)."
+      }
+    },
+    {
+      "id": "blanket-type-suppression",
+      "title": "Blanket type: ignore silences the checker",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "appends `# type: ignore` to whatever line mypy complained about instead of fixing the type",
+        "adds `# mypy: ignore-errors` at the top of a module it could not get clean",
+        "uses a bare ignore that then also hides a second, unrelated error introduced later on the same line"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "#\\s*type:\\s*ignore(?!\\[)",
+              "#\\s*mypy:\\s*ignore-errors"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "PGH003",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "mypy",
+            "rule": "ignore-without-code",
+            "options": {
+              "enable_error_code": "ignore-without-code"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "# mypy: ignore-errors\nfrom external_sdk import Client\n\n\ndef fetch_user(client: Client, user_id: str) -> dict:\n    raw = client.users.get(user_id)  # type: ignore\n    return raw.to_dict()  # type: ignore\n",
+        "nearMiss": "from external_sdk import Client\n\n\ndef fetch_user(client: Client, user_id: str) -> dict:\n    raw = client.users.get(user_id)  # type: ignore[attr-defined]\n    return raw.to_dict()  # type: ignore[no-any-return]\n"
+      },
+      "gapNotes": "This detector needs comments intact, so it runs with stripComments off and will therefore also match the string `# type: ignore` if it appears inside a docstring or a test fixture that talks about ignores. A coded ignore is treated as clean, but `# type: ignore[misc]` is nearly as blanket as the bare form and passes every check here. Suppression by config — adding a module to `[[tool.mypy.overrides]]` with `ignore_errors = true` — is the same evasion moved into pyproject.toml and is not covered. The regex only works because jig's driver does not blank `#` comments in .py files — it strips them in shell, YAML and TOML sources only — so the detector's `stripComments` is recorded as false and a `# type: ignore` written inside prose or a docstring is reported the same as a real one.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rule page docs.astral.sh/ruff/rules/blanket-type-suppression/ confirms PGH003; mypy optional error code list documents `ignore-without-code` — 'Type ignore comment without error code'."
+      }
+    },
+    {
+      "id": "type-widened-to-any",
+      "title": "Type widened to Any to silence the checker",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "changes a parameter annotation to `Any` when the real type is inconvenient to work out",
+        "returns `Any` from a function so every caller's checks dissolve downstream",
+        "annotates a dict payload as `dict[str, Any]` rather than defining the TypedDict the error was asking for"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              ":\\s*Any\\b",
+              "->\\s*Any\\b"
+            ],
+            "paths": [
+              "**/*.py",
+              "**/*.pyi"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "ANN401",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "mypy",
+            "rule": "explicit-any",
+            "options": {
+              "flag": "--disallow-any-explicit"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "from typing import Any\n\n\ndef normalise_payload(payload: Any) -> Any:\n    if isinstance(payload, dict):\n        return {key: normalise_payload(value) for key, value in payload.items()}\n    return payload\n\n\ndef merge(base: dict[str, Any], overlay: dict[str, Any]) -> Any:\n    merged = dict(base)\n    merged.update(overlay)\n    return merged\n",
+        "nearMiss": "from typing import AnyStr, TypeVar\n\nT = TypeVar(\"T\")\n\n\nclass AnyOf:\n    def __init__(self, *options: str) -> None:\n        self.options = options\n\n\ndef normalise_payload(payload: T) -> T:\n    return payload\n\n\ndef decode(raw: AnyStr) -> str:\n    return raw.decode() if isinstance(raw, bytes) else raw\n"
+      },
+      "gapNotes": "Marked heuristic because `Any` at a genuine boundary — a `**kwargs` passthrough, a decorator wrapper, a deserialiser's input — is correct, and neither the regex nor ANN401 can see intent. The regex misses `cast(Any, x)`, `object` used as a stand-in, aliases such as `JSON = Any`, and implicit Any from an untyped third-party import (mypy's `no-any-unimported` covers that last one but is not wired here). ANN401 flags arguments only, so a widened return type rests on mypy's `explicit-any`, which requires --disallow-any-explicit and is not part of --strict. jig's driver blanks `#` comments only in shell, YAML and TOML files, so an annotation quoted inside a comment is reported as live code, and a `//` floor division blanks the rest of its own line, hiding any match after it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rule page docs.astral.sh/ruff/rules/any-type/ confirms ANN401 `any-type`; mypy optional error code list documents `explicit-any` and command_line docs confirm --disallow-any-explicit is outside the --strict bundle."
+      }
+    },
+    {
+      "id": "blanket-lint-suppression",
+      "title": "Blanket noqa disables the linter on a line",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "appends `# noqa` to whatever line ruff flagged rather than resolving the finding",
+        "adds a bare noqa to a wildcard import, which then also hides every undefined-name error that follows",
+        "leaves stale noqa comments behind after the underlying violation was fixed, so future violations on that line are pre-suppressed"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "#\\s*noqa\\s*(?![:\\w])"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": true
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "PGH004",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "RUF100",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import os  # noqa\nimport sys  # noqa\nfrom legacy.util import *  # noqa\n\n\ndef env_or(name: str, default: str) -> str:\n    return os.environ.get(name, default)  # noqa\n",
+        "nearMiss": "import os  # noqa: F401\nimport sys  # noqa: F401, E402\nfrom legacy.util import parse  # noqa: F401\n\n\ndef env_or(name: str, default: str) -> str:\n    value = os.environ.get(name, default)\n    return parse(value)\n"
+      },
+      "gapNotes": "Runs with comments intact, so prose that merely mentions noqa gets flagged. A per-file suppression in `[tool.ruff.lint.per-file-ignores]`, or an entry added to the top-level `ignore` list, removes the same rule far more broadly and leaves no comment for either detector to see. RUF100 only catches a noqa that suppresses nothing today; a noqa carrying a real code that the author should have fixed is indistinguishable from a justified one.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rule pages docs.astral.sh/ruff/rules/blanket-lint-suppression/ (PGH004) and docs.astral.sh/ruff/rules/unused-noqa/ (RUF100)."
+      }
+    },
+    {
+      "id": "hardcoded-secret",
+      "title": "Credential written into source",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "pastes a key from the conversation or from a log into the module so the example it just wrote will run",
+        "sets a password as a function default to make a test pass without wiring up the fixture",
+        "inlines a token it found in another file rather than reading the environment variable that file used"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\b(?:password|passwd|secret|api_key|apikey|access_token|auth_token|PASSWORD|SECRET|API_KEY|ACCESS_TOKEN|AUTH_TOKEN)\\s*=\\s*[\"'][^\"'\\n]+[\"']"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": false,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "heuristic",
+          "params": {
+            "tool": "ruff",
+            "rule": "S105",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "heuristic",
+          "params": {
+            "tool": "ruff",
+            "rule": "S106",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "heuristic",
+          "params": {
+            "tool": "ruff",
+            "rule": "S107",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import httpx\n\nAPI_KEY = \"sk-live-6b1f9c2e4a7d\"\nDB_PASSWORD = \"hunter2-prod\"\n\n\ndef client() -> httpx.Client:\n    return httpx.Client(headers={\"Authorization\": API_KEY})\n\n\ndef connect(host: str, password: str = \"hunter2-prod\") -> str:\n    return f\"postgres://svc:{password}@{host}/app\"\n",
+        "nearMiss": "import os\n\nimport httpx\n\nAPI_KEY_ENV = \"SLAG_API_KEY\"\nDEFAULT_TIMEOUT = \"30\"\n\n\ndef client() -> httpx.Client:\n    api_key = os.environ[API_KEY_ENV]\n    return httpx.Client(headers={\"Authorization\": api_key})\n\n\ndef connect(host: str, password: str) -> str:\n    return f\"postgres://svc:{password}@{host}/app\"\n"
+      },
+      "gapNotes": "Name-driven and therefore heuristic in both directions. A secret stored under a neutral name (`CONFIG_VALUE`, `HEADER`, `X`) is invisible; so is one built by concatenation or base64-decoded at import. Conversely a placeholder such as `PASSWORD = \"changeme\"` in an example module trips it. This detector deliberately runs with string literals intact, so it is the one class here that would break if the driver's string blanking were forced on. It says nothing about a credential committed to a .env, a YAML fixture or a notebook, none of which are .py files. It also cannot revoke anything — a hit means the key is already in git history. This detector leaves string literals intact, and jig's driver blanks `#` comments only in shell, YAML and TOML files, so a commented-out `# password = \"...\"` and a documentation example both fire; a value containing `//` also blanks the rest of that line, so the closing quote the pattern needs disappears and the assignment is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rules index docs.astral.sh/ruff/rules/ lists S105 'Possible hardcoded password assigned to', S106 '...assigned to argument', S107 '...assigned to function default' (flake8-bandit)."
+      }
+    },
+    {
+      "id": "hardcoded-config-value",
+      "title": "Environment value hardcoded instead of read",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "writes `http://localhost:8000` into the module because that is what worked in the session, instead of reading the configured base URL",
+        "hardcodes an absolute path from its own machine or container into a constant",
+        "compares against a bare status code or magic threshold rather than the named constant the codebase already defines"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "heuristic",
+          "params": {
+            "tool": "ruff",
+            "rule": "PLR2004",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "from pathlib import Path\n\nimport httpx\n\nBASE_URL = \"http://localhost:8000/api/v1\"\nCACHE_DIR = Path(\"/home/deploy/.cache/slag\")\n\n\ndef fetch_report(report_id: str) -> dict:\n    response = httpx.get(f\"{BASE_URL}/reports/{report_id}\", timeout=30)\n    if response.status_code == 429:\n        raise RuntimeError(\"rate limited\")\n    response.raise_for_status()\n    return response.json()\n",
+        "nearMiss": "import os\nfrom http import HTTPStatus\nfrom pathlib import Path\n\nimport httpx\n\nBASE_URL = os.environ[\"SLAG_BASE_URL\"]\nCACHE_DIR = Path(os.environ.get(\"SLAG_CACHE_DIR\", \"~/.cache/slag\")).expanduser()\n\n\ndef fetch_report(report_id: str) -> dict:\n    response = httpx.get(f\"{BASE_URL}/reports/{report_id}\", timeout=30)\n    if response.status_code == HTTPStatus.TOO_MANY_REQUESTS:\n        raise RuntimeError(\"rate limited\")\n    response.raise_for_status()\n    return response.json()\n"
+      },
+      "gapNotes": "Only the third agent mode is covered. The regex detector that looked for `http://localhost` and `/home/...` literals was deleted after the fixture-pair run: jig's driver treats a `.py` file as slash-comment source, so the `//` in a URL is blanked as a line comment and a `\"/home/...\"` literal is blanked as a regex body, and neither pattern could ever match a real file. Nothing here now sees a hardcoded URL, absolute path, internal hostname, S3 bucket or tenant id — only PLR2004's magic values, and only where they appear in a comparison rather than an assignment, which is the more common hardcoding. PLR2004 is also noisy by design: it exempts 0, 1, empty string and `__main__` and nothing else.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rule page docs.astral.sh/ruff/rules/magic-value-comparison/ confirms PLR2004 `magic-value-comparison` and its exemptions."
+      }
+    },
+    {
+      "id": "invented-import-or-api",
+      "title": "Invented import path, attribute or signature",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "imports a helper that sounds right for the library but does not exist in the installed version",
+        "calls an attribute on a response or client object that it has confused with another library's API",
+        "references a module-level constant it believes it defined earlier in the session but never wrote"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "mypy",
+            "rule": "attr-defined",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "mypy",
+            "rule": "import-not-found",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "F821",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "from datetime import datetime\n\nfrom httpx import AsyncClient, retry_policy\n\n\nasync def fetch_with_retry(url: str) -> str:\n    policy = retry_policy(max_attempts=3)\n    async with AsyncClient(retries=policy) as client:\n        response = await client.get(url)\n    stamp = datetime.utcnow().isoformat()\n    return f\"{stamp}:{response.text_body}:{BUILD_ID}\"\n",
+        "nearMiss": "from datetime import UTC, datetime\n\nfrom httpx import AsyncClient, Limits\n\nBUILD_ID = \"dev\"\n\n\nasync def fetch_with_retry(url: str) -> str:\n    limits = Limits(max_connections=3)\n    async with AsyncClient(limits=limits) as client:\n        response = await client.get(url)\n    stamp = datetime.now(UTC).isoformat()\n    return f\"{stamp}:{response.text}:{BUILD_ID}\"\n"
+      },
+      "gapNotes": "No regex detector is possible — deciding a name does not exist requires resolving the installed distributions, which is exactly what mypy does and a pattern cannot. The coverage is only as good as the stubs: a dependency shipping no `py.typed` marker resolves to Any and every invented attribute on it passes silently (mypy reports `import-untyped` instead, and `--strict` treats that as an error only because `--disallow-untyped-calls` catches the call site). F821 sees undefined bare names but not undefined attributes. A signature invented for a function that does exist — wrong keyword argument, wrong arity — is reported under `call-arg`/`arg-type` rather than the codes listed here.",
+      "evidence": {
+        "tier": "documented",
+        "source": "mypy error code documentation for `attr-defined` and `import-not-found`; ruff rules index lists F821 'Undefined name' (pyflakes)."
+      }
+    },
+    {
+      "id": "debug-artifact-left-behind",
+      "title": "Debugger or print left in shipped code",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "inserts `breakpoint()` or `pdb.set_trace()` while chasing a failure and does not remove it, hanging CI on stdin",
+        "leaves `print()` calls used to inspect intermediate values in library code that has a logger",
+        "keeps a debug import at the top of the module after the investigation ended"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bbreakpoint\\s*\\(",
+              "\\b(?:pdb|ipdb)\\.set_trace\\s*\\("
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "T100",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "T201",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import pdb\n\nfrom pipeline import transform\n\n\ndef run(rows: list[dict]) -> list[dict]:\n    out: list[dict] = []\n    for row in rows:\n        if row.get(\"status\") == \"error\":\n            breakpoint()\n        pdb.set_trace()\n        out.append(transform(row))\n    print(out)\n    return out\n",
+        "nearMiss": "import logging\n\nfrom pipeline import transform\n\nlogger = logging.getLogger(__name__)\n\n\nclass Breakpointer:\n    def set_trace(self) -> None:\n        logger.debug(\"checkpoint reached\")\n\n\ndef run(rows: list[dict]) -> list[dict]:\n    out = [transform(row) for row in rows]\n    logger.debug(\"transformed %d rows\", len(out))\n    return out\n"
+      },
+      "gapNotes": "T201 flags every `print`, which is wrong for CLI entrypoints and scripts — those need a per-file ignore or the class becomes noise the team learns to skip. The regex misses `import pdb; pdb.set_trace()` written through an alias, `debugpy.breakpoint()`, and `sys.breakpointhook` manipulation. Nothing here catches a debug side effect that is not a print or a debugger, such as a temporary file written to /tmp or an added `time.sleep`. jig's driver blanks `#` comments only in shell, YAML and TOML files, so a commented-out `# breakpoint()` is reported as live code, and a `//` floor division blanks the rest of its own line, hiding any match after it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rules index docs.astral.sh/ruff/rules/ lists T100 'Trace found' (flake8-debugger) and T201 '`print` found' (flake8-print)."
+      }
+    },
+    {
+      "id": "mutable-default-argument",
+      "title": "Mutable default argument shared across calls",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "writes `def f(items: list[str] = [])` when adding an optional collection parameter, producing state that leaks between calls",
+        "uses `{}` as a cache default and then mutates it, so the 'cache' silently becomes global",
+        "reproduces the pattern from an older file in the repository without noticing it is the bug being reported"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "def\\s+\\w+\\s*\\([^)]*=\\s*(?:\\[\\s*\\]|\\{\\s*\\}|set\\s*\\(\\s*\\))"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "B006",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "def collect(item: str, bucket: list[str] = []) -> list[str]:\n    bucket.append(item)\n    return bucket\n\n\ndef index(key: str, store: dict[str, int] = {}) -> dict[str, int]:\n    store[key] = store.get(key, 0) + 1\n    return store\n",
+        "nearMiss": "def collect(item: str, bucket: list[str] | None = None) -> list[str]:\n    bucket = [] if bucket is None else bucket\n    bucket.append(item)\n    return bucket\n\n\ndef index(key: str, store: dict[str, int] | None = None) -> dict[str, int]:\n    store = {} if store is None else store\n    store[key] = store.get(key, 0) + 1\n    return store\n"
+      },
+      "gapNotes": "The regex confines itself to a single-line parameter list and to three literal empty containers; a default spread over several lines, or a non-empty literal such as `= [\"a\"]`, or a mutable instance built by a call (`= Counter()`, `= datetime.now()`) all escape it. B006 covers those calls and multi-line signatures properly, so on a project with ruff wired the regex is a redundant fast path rather than the real detector. Neither sees a mutable class attribute, which produces the same shared-state bug one level up. jig's driver blanks `#` comments only in shell, YAML and TOML files, so a commented-out signature is reported as live code, and a `//` floor division blanks the rest of its own line, hiding any match after it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rules index docs.astral.sh/ruff/rules/ lists B006 'Do not use mutable data structures for argument defaults' (flake8-bugbear)."
+      }
+    },
+    {
+      "id": "lost-exception-chain",
+      "title": "Re-raise that discards the original cause",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "wraps a caught error in a domain exception without `from exc`, so the traceback that would have identified the bug is gone from the logs",
+        "converts a library error into a generic RuntimeError with a message it invented, losing both type and cause",
+        "raises a fresh exception inside a handler to satisfy a test that asserts on the outer type"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "except\\s+[\\w.]+(?:\\s+as\\s+\\w+)?\\s*:\\s*raise\\s+\\w+\\s*\\([^)]*\\)\\s*(?:\\n|$)"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "B904",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import json\nfrom pathlib import Path\n\n\nclass ConfigError(Exception):\n    pass\n\n\ndef load(path: Path) -> dict:\n    try:\n        return json.loads(path.read_text())\n    except json.JSONDecodeError:\n        raise ConfigError(path)\n\n\ndef load_text(path: Path) -> str:\n    try:\n        return path.read_text()\n    except OSError as exc:\n        raise ConfigError(exc)\n",
+        "nearMiss": "import json\nfrom pathlib import Path\n\n\nclass ConfigError(Exception):\n    pass\n\n\ndef load(path: Path) -> dict:\n    try:\n        return json.loads(path.read_text())\n    except json.JSONDecodeError as exc:\n        raise ConfigError(path) from exc\n\n\ndef load_text(path: Path) -> str:\n    try:\n        return path.read_text()\n    except OSError as exc:\n        raise ConfigError(exc) from exc\n"
+      },
+      "gapNotes": "Heuristic, and only fires when the raise is the handler's first statement and its argument list contains no nested parentheses — `raise ConfigError(f\"bad {fmt(path)}\")` defeats it, as does any handler that logs before raising. `raise X from None` is a deliberate suppression that reads as correct to both detectors even when the cause was worth keeping. B904 is the reliable half; the regex exists only so the class still reports on a repo where ruff is not yet running. jig's driver blanks `#` comments only in shell, YAML and TOML files, so a commented-out handler is reported as live code, and a `//` floor division blanks the rest of its own line, hiding any match after it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rule page docs.astral.sh/ruff/rules/raise-without-from-inside-except/ confirms B904 and its `__cause__` vs `__context__` rationale."
+      }
+    },
+    {
+      "id": "commented-out-code",
+      "title": "Code commented out rather than removed",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "comments out the failing block instead of deleting it, so a later session restores logic that was intentionally dropped",
+        "leaves the previous implementation commented above the new one as an undo buffer",
+        "comments out an assertion or a validation call to get a green run"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "^\\s*#\\s*(?:def\\s|class\\s|return\\s|import\\s|assert\\s|print\\s*\\()"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": true
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "heuristic",
+          "params": {
+            "tool": "ruff",
+            "rule": "ERA001",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "from analytics import summarise\n\n\ndef report(rows: list[dict]) -> str:\n    # def legacy_report(rows):\n    #     return summarise(rows, mode=\"legacy\")\n    # import pandas as pd\n    # assert rows, \"no rows to summarise\"\n    return summarise(rows, mode=\"v2\")\n",
+        "nearMiss": "from analytics import summarise\n\n\ndef report(rows: list[dict]) -> str:\n    # returns the v2 shape; the legacy mode was dropped in 1.4.0\n    # importantly, callers must pre-sort rows by timestamp\n    # classification of rows happens downstream in the warehouse\n    return summarise(rows, mode=\"v2\")\n"
+      },
+      "gapNotes": "Both detectors are heuristic and ruff's own documentation admits ERA001 is prone to false positives on comments that merely resemble code. The regex recognises six statement openers, so a commented-out expression, a commented call like `# validate(payload)`, or a block comment written with a docstring rather than `#` all pass. Because it needs comments intact it also matches the same text inside a docstring that is teaching the pattern. It cannot distinguish a deliberately preserved reference implementation from abandoned code.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rule page docs.astral.sh/ruff/rules/commented-out-code/ confirms ERA001 `commented-out-code` is stable and documents its false-positive tendency."
+      }
+    },
+    {
+      "id": "coverage-pragma-abuse",
+      "title": "Coverage pragma hides untested code",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "adds `# pragma: no cover` to the branch it could not write a test for, so the coverage gate passes",
+        "annotates a whole new function as excluded rather than testing it",
+        "uses `# pragma: no branch` on a conditional so the untested arm stops counting"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "#\\s*pragma:\\s*no\\s*cover",
+              "#\\s*pragma:\\s*no\\s*branch"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "from billing import Ledger\n\n\ndef reconcile(ledger: Ledger) -> int:\n    drift = ledger.expected_total() - ledger.actual_total()\n    if drift:  # pragma: no branch\n        ledger.flag_drift(drift)\n    return drift\n\n\ndef emergency_rollback(ledger: Ledger) -> None:  # pragma: no cover\n    ledger.restore_snapshot()\n    ledger.notify_owner()\n",
+        "nearMiss": "from billing import Ledger\n\n\ndef reconcile(ledger: Ledger) -> int:\n    # coverage for this path lands in tests/test_drift.py; no cover-up here\n    drift = ledger.expected_total() - ledger.actual_total()\n    if drift:\n        ledger.flag_drift(drift)\n    return drift\n\n\ndef emergency_rollback(ledger: Ledger) -> None:\n    # pragmatic choice: restore first, notify second\n    ledger.restore_snapshot()\n    ledger.notify_owner()\n"
+      },
+      "gapNotes": "Regex-only, and heuristic rather than deterministic: matching the pragma text is exact, but the class claims *abuse*, and no pattern can separate an abusive exclusion from a justified one. Version-gated imports and `if TYPE_CHECKING:` blocks are legitimately excluded with the same pragma and will be flagged. The bigger evasion is invisible to this class entirely — adding patterns to `exclude_lines` in `[tool.coverage.report]`, or simply lowering `--cov-fail-under`, exempts code with no comment anywhere in the source.",
+      "evidence": {
+        "tier": "documented",
+        "source": "coverage.py's default exclusion marker is the `# pragma: no cover` comment, with `# pragma: no branch` for partial-branch exclusion; no linter rule id exists for either."
+      }
+    },
+    {
+      "id": "naive-datetime",
+      "title": "Naive datetime used for a real instant",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "reaches for `datetime.utcnow()` because it appears in older examples, producing a naive object that compares wrongly against aware ones",
+        "writes `datetime.now()` for a stored timestamp, so the value means something different depending on which machine wrote it",
+        "fixes a comparison TypeError by stripping tzinfo instead of adding it"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bdatetime\\.utcnow\\s*\\(",
+              "\\bdatetime\\.now\\s*\\(\\s*\\)"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "DTZ005",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "from datetime import datetime\n\n\ndef stamp_record(record: dict) -> dict:\n    record[\"created_at\"] = datetime.utcnow().isoformat()\n    record[\"seen_at\"] = datetime.now()\n    return record\n",
+        "nearMiss": "from datetime import UTC, datetime, timezone\n\n\ndef stamp_record(record: dict) -> dict:\n    record[\"created_at\"] = datetime.now(UTC).isoformat()\n    record[\"seen_at\"] = datetime.now(tz=timezone.utc)\n    return record\n"
+      },
+      "gapNotes": "DTZ005 is cited for the `datetime.now()` case only; the flake8-datetimez family has further codes for `utcnow`, `utcfromtimestamp`, `fromtimestamp` and naive `datetime()` construction, and none of them is claimed by a detector here — the `utcnow` half rests on the regex. `datetime.now(tz=None)` is explicitly flagged by DTZ005 but matches neither pattern. `date.today()` and `time.time()` conversions are outside this class. The ruff codes for the uncovered shapes do exist and were confirmed in this pass — DTZ003 `call-datetime-utcnow` for `utcnow`, alongside the rest of the flake8-datetimez family — but no detector here is wired to them, so the `utcnow` half stays regex-only. jig's driver also blanks `#` comments only in shell, YAML and TOML files, so a commented-out `# datetime.utcnow()` is reported as live code.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rule page docs.astral.sh/ruff/rules/call-datetime-now-without-tzinfo/ confirms DTZ005 `call-datetime-now-without-tzinfo` and that it also flags `now(tz=None)`."
+      }
+    },
+    {
+      "id": "shell-injection-subprocess",
+      "title": "Shell invoked with interpolated input",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "builds a command as an f-string and passes `shell=True` because the list form did not work first try",
+        "falls back to `os.system` when it cannot get argument quoting right",
+        "interpolates a filename or user-supplied identifier straight into a shell command"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "subprocess\\.(?:run|call|check_output|check_call|Popen)\\s*\\([^)]*shell\\s*=\\s*True",
+              "\\bos\\.system\\s*\\("
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "S602",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import os\nimport subprocess\n\n\ndef archive(target: str) -> None:\n    subprocess.run(f\"tar -czf {target}.tgz {target}\", shell=True, check=True)\n    os.system(f\"rm -rf {target}\")\n",
+        "nearMiss": "import shlex\nimport subprocess\n\n\ndef archive(target: str) -> None:\n    subprocess.run(\n        [\"tar\", \"-czf\", f\"{target}.tgz\", target],\n        shell=False,\n        check=True,\n    )\n    subprocess.run(shlex.split(f\"rm -rf {shlex.quote(target)}\"), check=True)\n"
+      },
+      "gapNotes": "The subprocess pattern needs `shell=True` on the same call before any closing parenthesis, so a multi-line call or one that passes `shell=flag` through a variable escapes it. `os.popen`, `commands.getoutput`, `asyncio.create_subprocess_shell` and `pty.spawn` are equivalent and unmatched. Only S602 is claimed as a rule id, so the `os.system` half is regex-only. Neither detector proves the interpolated value is attacker-controlled — a constant command with `shell=True` is flagged just as hard. S605 `start-process-with-a-shell` is the confirmed ruff code for the `os.system` half, but no detector here is wired to it, so that half stays regex-only. jig's driver also blanks `#` comments only in shell, YAML and TOML files, so a commented-out `# os.system(...)` is reported as live code.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rule page docs.astral.sh/ruff/rules/subprocess-popen-with-shell-equals-true/ confirms S602 and its CWE-78 mapping."
+      }
+    },
+    {
+      "id": "insecure-deserialization",
+      "title": "Untrusted data deserialized unsafely",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "picks `pickle` to persist a session or cache because it round-trips arbitrary objects with no schema work",
+        "calls `yaml.load` without a loader after copying an example that predates the safe default",
+        "restores a payload from a request body or a file on disk through pickle to avoid writing a parser"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bpickle\\.loads?\\s*\\(",
+              "\\byaml\\.load\\s*\\(\\s*\\w+\\s*\\)"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "ruff",
+            "rule": "S301",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import pickle\nfrom pathlib import Path\n\nimport yaml\n\n\ndef restore_session(blob: bytes) -> dict:\n    return pickle.loads(blob)\n\n\ndef read_settings(path: Path) -> dict:\n    text = path.read_text()\n    return yaml.load(text)\n",
+        "nearMiss": "import json\nfrom pathlib import Path\n\nimport yaml\n\n\ndef restore_session(blob: bytes) -> dict:\n    return json.loads(blob)\n\n\ndef read_settings(path: Path) -> dict:\n    text = path.read_text()\n    return yaml.safe_load(text)\n"
+      },
+      "gapNotes": "`cPickle`, `dill`, `shelve`, `marshal` and `jsonpickle` are the same hazard under other names and match nothing. The yaml pattern only catches a single bare argument, so `yaml.load(text, Loader=yaml.Loader)` — unsafe — is missed while `yaml.safe_load` is correctly ignored; only S301 is claimed as a rule id. Neither detector can tell a pickle of the process's own trusted data from a pickle of a request body. S506 `unsafe-yaml-load` is the confirmed ruff code for the yaml half, but no detector here is wired to it, so that half stays regex-only. jig's driver also blanks `#` comments only in shell, YAML and TOML files, so a commented-out `# pickle.loads(...)` is reported as live code.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ruff rule page docs.astral.sh/ruff/rules/suspicious-pickle-usage/ confirms S301 and its arbitrary-code-execution rationale."
+      }
+    },
+    {
+      "id": "test-run-narrowed",
+      "title": "Test collection quietly narrowed",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "adds `collect_ignore_glob` to conftest.py so the failing integration module stops being collected, leaving a green run over a smaller suite",
+        "rewrites `items[:]` in a `pytest_collection_modifyitems` hook to filter out the tests it could not fix",
+        "narrows `testpaths` or appends `--ignore=` to addopts so the suite that 'passes' is not the suite that was asked for"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\bcollect_ignore(?:_glob)?\\s*=",
+              "\\bitems\\[:\\]\\s*="
+            ],
+            "paths": [
+              "**/conftest.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "from __future__ import annotations\n\nimport pytest\n\ncollect_ignore_glob = [\"test_integration_*.py\"]\n\n\ndef pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:\n    items[:] = [item for item in items if \"slow\" not in item.keywords]\n",
+        "nearMiss": "from __future__ import annotations\n\nimport pytest\n\n\ndef pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:\n    for item in items:\n        if \"slow\" in item.keywords:\n            item.add_marker(pytest.mark.timeout(300))\n\n\n@pytest.fixture\ndef collect_ignore_note() -> str:\n    return \"integration tests run in the nightly job\"\n"
+      },
+      "gapNotes": "Only looks at conftest.py, so the most common form of this — editing `testpaths` or `addopts` in pyproject.toml, or a `--ignore=` added to the CI command line — is entirely outside its reach and needs the CI step to pin the invocation instead. Deselecting via `items.remove(...)` in a loop, or via a `pytest_ignore_collect` hook, matches neither pattern. Marked heuristic because both shapes have legitimate uses: excluding a module that needs an optional dependency is normal, and reordering `items[:]` for deterministic run order is not narrowing at all. The real backstop is comparing the collected count across runs, which no detector here does. jig's driver blanks `#` comments only in shell, YAML and TOML files, so a commented-out `# collect_ignore = [...]` is reported as live code.",
+      "evidence": {
+        "tier": "documented",
+        "source": "pytest hook and conftest documentation for `collect_ignore` / `collect_ignore_glob` and the `pytest_collection_modifyitems` hook; no linter rule id exists for either."
+      }
+    },
+    {
+      "id": "vulnerable-dependency",
+      "title": "Dependency with a known advisory",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "pins an older version because that is the API it remembers, reintroducing a fixed advisory",
+        "adds a dependency to solve a small problem without checking its advisory history",
+        "regenerates a lockfile from a stale constraint set and silently rolls a transitive dependency backwards"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "pip-audit",
+            "rule": "--strict",
+            "options": {
+              "requirements": "requirements.txt"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "# requirements.txt equivalent expressed as the project's declared dependencies\n# (jig plants the advisory by pinning a version with a published PYSEC/GHSA id)\nfrom importlib.metadata import version\n\nPINNED = {\n    \"requests\": \"2.19.1\",\n    \"pyyaml\": \"5.1\",\n}\n\n\ndef installed_matches_pins() -> bool:\n    return all(version(name) == pin for name, pin in PINNED.items())\n",
+        "nearMiss": "from importlib.metadata import version\n\nPINNED = {\n    \"requests\": \"2.32.4\",\n    \"pyyaml\": \"6.0.2\",\n}\n\n\ndef installed_matches_pins() -> bool:\n    return all(version(name) == pin for name, pin in PINNED.items())\n"
+      },
+      "gapNotes": "There is no rule id to claim: pip-audit reports advisory identifiers (PYSEC-*, GHSA-*), not lint rules, so the detector names `--strict` — the flag that makes a collection failure fail the audit rather than pass quietly. The fixtures are illustrative only; the real signal lives in requirements.txt or the lockfile, which is not a .py file and which no check-driver pattern in this edition scans. A vulnerable version that has no advisory yet, and a vulnerability in vendored or system code, are both invisible. Results also shift under you as the advisory databases update, so a clean audit is a statement about today.",
+      "evidence": {
+        "tier": "documented",
+        "source": "pip-audit project documentation: exits 1 when one or more known vulnerabilities are found, prints 'Found N known vulnerabilities in M package(s)'; `--strict` fails the audit if dependency collection fails."
+      }
+    }
+  ]
+}

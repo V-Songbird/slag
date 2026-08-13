@@ -1,0 +1,1469 @@
+{
+  "schemaVersion": 3,
+  "edition": "jvm",
+  "displayName": "Java & Kotlin (Gradle / Maven)",
+  "researchedOn": "2026-08-13",
+  "detect": {
+    "files": [
+      "build.gradle.kts",
+      "build.gradle",
+      "settings.gradle.kts",
+      "settings.gradle",
+      "pom.xml",
+      "gradlew"
+    ],
+    "extensions": [
+      ".java",
+      ".kt",
+      ".kts",
+      ".gradle"
+    ],
+    "commentSyntax": {
+      ".java": "slash",
+      ".kt": "slash",
+      ".kts": "slash",
+      ".gradle": "slash"
+    },
+    "packageManagers": [
+      "gradle",
+      "maven"
+    ]
+  },
+  "toolchain": [
+    {
+      "id": "gradle",
+      "role": "build",
+      "why": "Owns whether the other checks actually ran: it is the only place that can prove `check` depended on `test`, that no one passed `-x test`, and that a source set with tests present did not silently discover zero of them.",
+      "install": {
+        "gradle": "gradle wrapper --gradle-version 9.1.0",
+        "maven": "mvn -N wrapper:wrapper"
+      },
+      "installKind": "scaffold",
+      "configPath": "build.gradle.kts",
+      "configSample": "plugins {\n    java\n    checkstyle\n    pmd\n}\n\nrepositories { mavenCentral() }\n\ndependencies {\n    testImplementation(platform(\"org.junit:junit-bom:5.13.4\"))\n    testImplementation(\"org.junit.jupiter:junit-jupiter\")\n    testRuntimeOnly(\"org.junit.platform:junit-platform-launcher\")\n}\n\ntasks.withType<JavaCompile>().configureEach {\n    options.compilerArgs.addAll(listOf(\"-Xlint:all\", \"-Werror\"))\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform()\n    failOnNoDiscoveredTests = true\n    ignoreFailures = false\n    testLogging { events(\"failed\", \"skipped\") }\n}\n",
+      "wiring": "tasks.named(\"check\") { dependsOn(\"test\", \"checkstyleMain\", \"checkstyleTest\", \"pmdMain\", \"pmdTest\") }",
+      "ciStep": "./gradlew --no-daemon --stacktrace check",
+      "verify": {
+        "argv": [
+          "./gradlew",
+          "--no-daemon",
+          "check"
+        ],
+        "expected": "exit code 1 with `FAILURE: Build failed with an exception.` and `Execution failed for task ':test'` naming the seeded failing test; with `-x test` present the task list printed by `--dry-run` omits `:test`",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "src/test/java/jig/seed/GradleCheckWiringSeedTest.java",
+        "sample": "package jig.seed;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport org.junit.jupiter.api.Test;\n\nclass GradleCheckWiringSeedTest {\n\n    @Test\n    void seededFailureProvesCheckRanTheTests() {\n        assertEquals(2, 1 + 2);\n    }\n}\n"
+      }
+    },
+    {
+      "id": "checkstyle",
+      "role": "linter",
+      "why": "The only tool here that lets a project ban an arbitrary source shape by regex (RegexpSinglelineJava) and police what @SuppressWarnings is allowed to silence, so project-specific bans do not need a bespoke plugin.",
+      "install": {
+        "gradle": "./gradlew checkstyleMain checkstyleTest",
+        "maven": "mvn checkstyle:check"
+      },
+      "installKind": "audit",
+      "configPath": "config/checkstyle/checkstyle.xml",
+      "configSample": "<?xml version=\"1.0\"?>\n<!DOCTYPE module PUBLIC\n    \"-//Checkstyle//DTD Checkstyle Configuration 1.3//EN\"\n    \"https://checkstyle.org/dtds/configuration_1_3.dtd\">\n<module name=\"Checker\">\n  <property name=\"severity\" value=\"error\"/>\n  <module name=\"TreeWalker\">\n    <module name=\"EmptyCatchBlock\"/>\n    <module name=\"IllegalCatch\"/>\n    <module name=\"IllegalThrows\"/>\n    <module name=\"EqualsHashCode\"/>\n    <module name=\"MissingSwitchDefault\"/>\n    <module name=\"UnusedLocalVariable\"/>\n    <module name=\"UnusedImports\"/>\n    <module name=\"AvoidStarImport\"/>\n    <module name=\"MissingOverride\"/>\n    <module name=\"SuppressWarnings\">\n      <property name=\"format\" value=\"^unchecked$|^rawtypes$|^all$\"/>\n    </module>\n    <module name=\"MagicNumber\">\n      <property name=\"ignoreAnnotation\" value=\"true\"/>\n    </module>\n    <module name=\"RegexpSinglelineJava\">\n      <property name=\"format\" value=\"System\\.(out|err)\\.print\"/>\n      <property name=\"message\" value=\"Use a logger, not System.out/System.err.\"/>\n      <property name=\"ignoreComments\" value=\"true\"/>\n    </module>\n    <module name=\"SuppressWarningsHolder\"/>\n  </module>\n  <module name=\"SuppressWarningsFilter\"/>\n</module>\n",
+      "wiring": "plugins { checkstyle }   // build.gradle.kts; Maven: <plugin><artifactId>maven-checkstyle-plugin</artifactId></plugin> bound to the `verify` phase",
+      "ciStep": "./gradlew --no-daemon checkstyleMain checkstyleTest",
+      "verify": {
+        "argv": [
+          "./gradlew",
+          "--no-daemon",
+          "checkstyleMain"
+        ],
+        "expected": "exit code 1 and a line of the form `[ERROR] .../Foo.java:12:5: Empty catch block. [EmptyCatchBlock]`",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "src/main/java/jig/seed/CheckstyleEmptyCatchSeed.java",
+        "sample": "package jig.seed;\n\nimport java.io.IOException;\nimport java.nio.file.Files;\nimport java.nio.file.Path;\n\npublic final class CheckstyleEmptyCatchSeed {\n\n    public String read(Path path) {\n        try {\n            return Files.readString(path);\n        } catch (IOException e) {\n        }\n        return \"\";\n    }\n}\n"
+      }
+    },
+    {
+      "id": "pmd",
+      "role": "linter",
+      "why": "The only tool here with test-shaped rules — it can tell that a @Test method contains no assertion at all, or that a test class has stopped containing tests, which no formatter or compiler plugin models.",
+      "install": {
+        "gradle": "./gradlew pmdMain pmdTest",
+        "maven": "mvn pmd:check"
+      },
+      "installKind": "audit",
+      "configPath": "config/pmd/ruleset.xml",
+      "configSample": "<?xml version=\"1.0\"?>\n<ruleset name=\"jig\"\n    xmlns=\"http://pmd.sourceforge.net/ruleset/2.0.0\"\n    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n    xsi:schemaLocation=\"http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd\">\n  <description>Guardrails jig refuses to trust until seen firing.</description>\n\n  <rule ref=\"category/java/bestpractices.xml/UnitTestShouldIncludeAssert\"/>\n  <rule ref=\"category/java/bestpractices.xml/UnitTestShouldUseTestAnnotation\"/>\n  <rule ref=\"category/java/bestpractices.xml/SystemPrintln\"/>\n  <rule ref=\"category/java/bestpractices.xml/AvoidPrintStackTrace\"/>\n  <rule ref=\"category/java/bestpractices.xml/UnusedAssignment\"/>\n\n  <rule ref=\"category/java/errorprone.xml/EmptyCatchBlock\"/>\n  <rule ref=\"category/java/errorprone.xml/AvoidCatchingThrowable\"/>\n  <rule ref=\"category/java/errorprone.xml/AvoidCatchingNPE\"/>\n  <rule ref=\"category/java/errorprone.xml/TestClassWithoutTestCases\"/>\n  <rule ref=\"category/java/errorprone.xml/DetachedTestCase\"/>\n  <rule ref=\"category/java/errorprone.xml/CloseResource\"/>\n  <rule ref=\"category/java/errorprone.xml/ReturnFromFinallyBlock\"/>\n  <rule ref=\"category/java/errorprone.xml/CompareObjectsWithEquals\"/>\n  <rule ref=\"category/java/errorprone.xml/DoNotTerminateVM\"/>\n  <rule ref=\"category/java/errorprone.xml/AvoidDuplicateLiterals\"/>\n\n  <rule ref=\"category/java/design.xml/AvoidCatchingGenericException\"/>\n  <rule ref=\"category/java/design.xml/AvoidThrowingRawExceptionTypes\"/>\n  <rule ref=\"category/java/design.xml/SignatureDeclareThrowsException\"/>\n  <rule ref=\"category/java/design.xml/ExceptionAsFlowControl\"/>\n</ruleset>\n",
+      "wiring": "plugins { pmd }\npmd { ruleSetFiles = files(\"config/pmd/ruleset.xml\"); ruleSets = emptyList(); isConsoleOutput = true }",
+      "ciStep": "./gradlew --no-daemon pmdMain pmdTest",
+      "verify": {
+        "argv": [
+          "./gradlew",
+          "--no-daemon",
+          "pmdTest"
+        ],
+        "expected": "exit code 1 and `X PMD rule violations were found` plus a line naming the rule, e.g. `UnitTestShouldIncludeAssert:\tThis test method does not contain any assertions`",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "src/test/java/jig/seed/PmdNoAssertSeedTest.java",
+        "sample": "package jig.seed;\n\nimport org.junit.jupiter.api.Test;\n\nclass PmdNoAssertSeedTest {\n\n    @Test\n    void exercisesThePathWithoutAssertingAnything() {\n        String label = String.join(\"-\", \"jig\", \"seed\");\n        label.trim();\n    }\n}\n"
+      }
+    },
+    {
+      "id": "errorprone",
+      "role": "type-checker",
+      "why": "Runs inside javac with the real type model, so it catches things no regex or AST linter can: an assertion whose arguments can never be equal by type, a fail() that a catch block eats, a @Test that will never be run.",
+      "install": {
+        "gradle": "./gradlew compileJava compileTestJava",
+        "maven": "mvn -DskipTests compile"
+      },
+      "installKind": "audit",
+      "configPath": "build.gradle.kts",
+      "configSample": "plugins {\n    java\n    id(\"net.ltgt.errorprone\") version \"4.3.0\"\n}\n\ndependencies {\n    errorprone(\"com.google.errorprone:error_prone_core:2.42.0\")\n}\n\ntasks.withType<JavaCompile>().configureEach {\n    options.compilerArgs.addAll(listOf(\"-Xlint:all\", \"-Werror\"))\n    options.errorprone {\n        allDisabledChecksAsWarnings = false\n        error(\n            \"ReturnValueIgnored\",\n            \"CheckReturnValue\",\n            \"JUnit4TestNotRun\",\n            \"JUnit3TestNotRun\",\n            \"AssertionFailureIgnored\",\n            \"MissingFail\",\n            \"TryFailThrowable\",\n            \"EmptyCatch\",\n            \"UnusedVariable\",\n            \"UnusedMethod\",\n            \"MissingOverride\",\n            \"SelfEquals\",\n            \"AlwaysThrows\",\n            \"DeadException\",\n            \"EqualsIncompatibleType\",\n            \"ModifiedButNotUsed\"\n        )\n    }\n}\n",
+      "wiring": "tasks.withType<JavaCompile>().configureEach { options.errorprone.error(\"EmptyCatch\", \"AssertionFailureIgnored\") }",
+      "ciStep": "./gradlew --no-daemon compileJava compileTestJava",
+      "verify": {
+        "argv": [
+          "./gradlew",
+          "--no-daemon",
+          "compileTestJava"
+        ],
+        "expected": "exit code 1 with `error: [EmptyCatch] Caught exceptions should not be ignored` (or the named check) and `1 error`",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "src/test/java/jig/seed/ErrorProneEmptyCatchSeedTest.java",
+        "sample": "package jig.seed;\n\nimport static org.junit.jupiter.api.Assertions.assertTrue;\n\nimport org.junit.jupiter.api.Test;\n\nclass ErrorProneEmptyCatchSeedTest {\n\n    @Test\n    void swallowsTheFailureItShouldReport() {\n        try {\n            assertTrue(Integer.parseInt(\"12\") > 0);\n        } catch (NumberFormatException e) {\n        }\n    }\n}\n"
+      }
+    },
+    {
+      "id": "detekt",
+      "role": "linter",
+      "why": "The Kotlin half of the catalogue — the only tool here that models `!!`, unsafe casts, swallowed exceptions and TODO()/@Suppress in Kotlin source, which Checkstyle, PMD and Error Prone never parse.",
+      "install": {
+        "gradle": "./gradlew detekt"
+      },
+      "installKind": "audit",
+      "configPath": "config/detekt/detekt.yml",
+      "configSample": "build:\n  maxIssues: 0\n\nconfig:\n  validation: true\n\nempty-blocks:\n  active: true\n  EmptyCatchBlock:\n    active: true\n    allowedExceptionNameRegex: '_|(ignore|expected).*'\n  EmptyFunctionBlock:\n    active: true\n  EmptyTryBlock:\n    active: true\n\nexceptions:\n  active: true\n  SwallowedException:\n    active: true\n  PrintStackTrace:\n    active: true\n  TooGenericExceptionCaught:\n    active: true\n  TooGenericExceptionThrown:\n    active: true\n  NotImplementedDeclaration:\n    active: true\n  ThrowingExceptionsWithoutMessageOrCause:\n    active: true\n\npotential-bugs:\n  active: true\n  UnsafeCallOnNullableType:\n    active: true\n  UnsafeCast:\n    active: true\n  IgnoredReturnValue:\n    active: true\n  ExitOutsideMain:\n    active: true\n  LateinitUsage:\n    active: true\n  MapGetWithNotNullAssertionOperator:\n    active: true\n  HasPlatformType:\n    active: true\n\nstyle:\n  active: true\n  ForbiddenComment:\n    active: true\n    comments:\n      - reason: 'Unfinished work must not reach main.'\n        value: 'TODO:'\n      - reason: 'Unfinished work must not reach main.'\n        value: 'FIXME:'\n  ForbiddenMethodCall:\n    active: true\n    methods:\n      - reason: 'Use a logger.'\n        value: 'kotlin.io.println'\n      - reason: 'Use a logger.'\n        value: 'kotlin.io.print'\n  MagicNumber:\n    active: true\n  WildcardImport:\n    active: true\n  UnusedImport:\n    active: true\n  UnusedPrivateFunction:\n    active: true\n  UnusedPrivateProperty:\n    active: true\n",
+      "wiring": "plugins { id(\"io.gitlab.arturbosch.detekt\") version \"1.23.8\" }\ndetekt { buildUponDefaultConfig = true; config.setFrom(\"config/detekt/detekt.yml\"); ignoreFailures = false }   // Gradle only. detekt ships no Maven plugin: detekt.dev documents Maven use as maven-antrun-plugin invoking the detekt-cli jar, so a Maven project must wire that ant task itself. The previously listed `mvn dependency:get -Dartifact=io.gitlab.arturbosch.detekt:detekt-cli:1.23.8` was deleted — it downloads a jar into the local repository and installs nothing runnable.",
+      "ciStep": "./gradlew --no-daemon detekt",
+      "verify": {
+        "argv": [
+          "./gradlew",
+          "--no-daemon",
+          "detekt"
+        ],
+        "expected": "exit code 1 with `Build failed with 1 weighted issues.` and a finding line of the form `Foo.kt:12:9: The caught exception is swallowed. [SwallowedException]`",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "src/main/kotlin/jig/seed/DetektSwallowedExceptionSeed.kt",
+        "sample": "package jig.seed\n\nclass DetektSwallowedExceptionSeed {\n\n    fun parseOrDefault(raw: String): Int {\n        return try {\n            raw.toInt()\n        } catch (e: NumberFormatException) {\n            -1\n        }\n    }\n}\n"
+      }
+    },
+    {
+      "id": "spotbugs",
+      "role": "security-scanner",
+      "why": "Reads bytecode rather than source, so it sees what survived compilation — an ignored return value or a swallowed exception the author obscured — and with the find-sec-bugs plugin it is the ecosystem's standard hardcoded-credential and injection detector.",
+      "install": {
+        "gradle": "./gradlew spotbugsMain spotbugsTest",
+        "maven": "mvn spotbugs:check"
+      },
+      "installKind": "audit",
+      "configPath": "config/spotbugs/exclude.xml",
+      "configSample": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<FindBugsFilter\n    xmlns=\"https://github.com/spotbugs/filter/3.0.0\"\n    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n    xsi:schemaLocation=\"https://github.com/spotbugs/filter/3.0.0 https://raw.githubusercontent.com/spotbugs/spotbugs/master/spotbugs/etc/findbugsfilter.xsd\">\n  <!-- Generated stubs only; nothing hand-written is excluded. -->\n  <Match>\n    <Source name=\"~.*[\\\\/]generated[\\\\/].*\"/>\n  </Match>\n</FindBugsFilter>\n",
+      "wiring": "plugins { id(\"com.github.spotbugs\") version \"6.4.2\" }\nspotbugs { effort = com.github.spotbugs.snom.Effort.MAX; reportLevel = com.github.spotbugs.snom.Confidence.LOW; excludeFilter = file(\"config/spotbugs/exclude.xml\") }\ndependencies { spotbugsPlugins(\"com.h3xstream.findsecbugs:findsecbugs-plugin:1.14.0\") }",
+      "ciStep": "./gradlew --no-daemon spotbugsMain spotbugsTest",
+      "verify": {
+        "argv": [
+          "./gradlew",
+          "--no-daemon",
+          "spotbugsMain"
+        ],
+        "expected": "exit code 1 with `SpotBugs ended with exit code 1` and a report entry naming the pattern, e.g. `M D DE_MIGHT_IGNORE: ... might ignore java.lang.Exception`",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "src/main/java/jig/seed/SpotBugsDroppedExceptionSeed.java",
+        "sample": "package jig.seed;\n\npublic final class SpotBugsDroppedExceptionSeed {\n\n    public int parseOrZero(String raw) {\n        try {\n            return Integer.parseInt(raw);\n        } catch (NumberFormatException e) {\n        }\n        return 0;\n    }\n}\n"
+      }
+    },
+    {
+      "id": "junit5",
+      "role": "test-runner",
+      "why": "Defines the vocabulary every other check keys on — @Test, @Disabled, Assumptions, @Tag — and is the only thing that can report that a test was skipped rather than passed.",
+      "install": {
+        "gradle": "./gradlew test",
+        "maven": "mvn test"
+      },
+      "installKind": "audit",
+      "configPath": "src/test/resources/junit-platform.properties",
+      "configSample": "junit.jupiter.execution.timeout.testable.method.default = 30 s\njunit.jupiter.testinstance.lifecycle.default = per_method\njunit.platform.output.capture.stdout = true\njunit.platform.output.capture.stderr = true\njunit.jupiter.extensions.autodetection.enabled = true\n",
+      "wiring": "tasks.test { useJUnitPlatform(); failOnNoDiscoveredTests = true }   // Maven: <configuration><failIfNoTests>true</failIfNoTests></configuration> on maven-surefire-plugin",
+      "ciStep": "./gradlew --no-daemon test && ! grep -rn --include='*.xml' 'skipped=\"[1-9]' build/test-results/test",
+      "verify": {
+        "argv": [
+          "./gradlew",
+          "--no-daemon",
+          "test"
+        ],
+        "expected": "exit code 1 and `> There were failing tests.`; when the seeded test is @Disabled instead, exit code 0 but `build/test-results/test/*.xml` carries a `<skipped/>` element and the report shows a non-zero skipped count",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "src/test/java/jig/seed/JUnit5FailingSeedTest.java",
+        "sample": "package jig.seed;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport org.junit.jupiter.api.Test;\n\nclass JUnit5FailingSeedTest {\n\n    @Test\n    void reportsTheFailureRatherThanPassing() {\n        assertEquals(\"expected\", \"actual\");\n    }\n}\n"
+      }
+    }
+  ],
+  "classes": [
+    {
+      "id": "softened-assertion",
+      "title": "Assertion weakened until the test passes",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Rewrites assertEquals(expected, actual) into assertTrue(true) or assertNotNull(actual) after failing to reproduce the expected value",
+        "Replaces a failing expected literal with the actual observed output verbatim, so the test now asserts the bug",
+        "Turns a value assertion into a self-comparison such as assertEquals(actual, actual) so it can never fail"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "assert(?:True|False)\\s*\\(\\s*(?:true|false)\\s*[,)]",
+              "assertEquals\\s*\\(\\s*([A-Za-z_$][\\w$]*)\\s*,\\s*\\1\\s*[,)]"
+            ],
+            "paths": [
+              "**/src/test/**/*.java",
+              "**/src/test/**/*.kt"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "errorprone",
+            "rule": "SelfEquals",
+            "options": {
+              "severity": "ERROR"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.billing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertTrue;\n\nimport org.junit.jupiter.api.Test;\n\nclass InvoiceTotalTest {\n\n    private final InvoiceCalculator calculator = new InvoiceCalculator();\n\n    @Test\n    void appliesVatToNetTotal() {\n        Invoice invoice = Invoice.of(\"ACME\", 100_00L);\n        long total = calculator.grossTotal(invoice);\n        assertTrue(true);\n        assertEquals(total, total);\n    }\n\n    @Test\n    void roundsHalfUp() {\n        Invoice invoice = Invoice.of(\"ACME\", 3_33L);\n        long total = calculator.grossTotal(invoice);\n        assertTrue(total > 0);\n    }\n}\n",
+        "nearMiss": "package com.example.billing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertTrue;\n\nimport org.junit.jupiter.api.Test;\n\nclass InvoiceTotalTest {\n\n    private final InvoiceCalculator calculator = new InvoiceCalculator();\n\n    @Test\n    void appliesVatToNetTotal() {\n        Invoice invoice = Invoice.of(\"ACME\", 100_00L);\n        long expected = 120_00L;\n        long actual = calculator.grossTotal(invoice);\n        assertEquals(expected, actual, \"20% VAT on a 100.00 net line\");\n        assertTrue(actual > invoice.netMinorUnits());\n    }\n\n    @Test\n    void rejectsNegativeLines() {\n        assertTrue(calculator.isRejected(Invoice.of(\"ACME\", -1L)));\n    }\n}\n"
+      },
+      "gapNotes": "Only catches the two loudest shapes. An agent that changes `assertEquals(120_00L, actual)` to `assertEquals(119_99L, actual)` — pasting the observed value in place of the specification — is invisible to every detector here and to every tool in the ecosystem; only a diff review or a mutation-testing gate (PIT) sees it. The assertEquals self-comparison pattern is literal-identifier only: `assertEquals(a.total(), a.total())` does not trip it. Error Prone's SelfEquals covers `a.equals(a)` and not the JUnit assertion form — a claim that this note previously left as the end of the story, wrongly. Error Prone's separate SelfAssertion bug pattern (ERROR by default) does cover `assertEquals(x, x)` and `assertThat(x).isEqualTo(x)`, including the expression forms the regex misses, and a project that wants the self-comparison half of this class enforced by a type-aware tool should enable it. It is not listed as a detector here because it was not exercised against these fixtures in this pass; SelfEquals is.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Error Prone bug pattern list at errorprone.info/bugpatterns confirms SelfEquals at ERROR severity; JUnit 5 Assertions API for assertTrue/assertEquals signatures."
+      }
+    },
+    {
+      "id": "test-without-assertion",
+      "title": "Test method that asserts nothing",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Writes a @Test that only exercises the code path and returns, so the suite goes green without checking any outcome",
+        "Strips the assertion out of a failing test but leaves the arrangement so the diff still looks like a test",
+        "Replaces assertions with logging or print statements while 'debugging' and never puts them back"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "pmd",
+            "rule": "UnitTestShouldIncludeAssert",
+            "options": {
+              "ruleset": "category/java/bestpractices.xml"
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "pmd",
+            "rule": "TestClassWithoutTestCases",
+            "options": {
+              "ruleset": "category/java/errorprone.xml"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.shipping;\n\nimport org.junit.jupiter.api.Test;\n\nclass LabelPrinterTest {\n\n    private final LabelPrinter printer = new LabelPrinter();\n\n    @Test\n    void printsInternationalLabel() {\n        Shipment shipment = new Shipment(\"DE\", 2_400);\n        printer.render(shipment);\n    }\n\n    @Test\n    void printsDomesticLabel() {\n        Shipment shipment = new Shipment(\"GB\", 900);\n        String label = printer.render(shipment);\n        System.out.println(label);\n    }\n}\n",
+        "nearMiss": "package com.example.shipping;\n\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nimport org.junit.jupiter.api.Test;\n\nclass LabelPrinterTest {\n\n    private final LabelPrinter printer = new LabelPrinter();\n\n    @Test\n    void rejectsUnknownDestination() {\n        Shipment shipment = new Shipment(\"ZZ\", 2_400);\n        assertThrows(UnknownDestinationException.class, () -> printer.render(shipment));\n    }\n\n    @Test\n    void renderingIsSideEffectFree() {\n        Shipment shipment = new Shipment(\"GB\", 900);\n        printer.render(shipment);\n        org.junit.jupiter.api.Assertions.assertEquals(900, shipment.weightGrams());\n    }\n}\n"
+      },
+      "gapNotes": "No check-driver detector: judging 'has an assertion' needs the method body scoped to the @Test, and a whole-file regex cannot tell an assertion inside one test method from one inside its neighbour. PMD's rule is configurable via its `extraAssertMethodNames` property, so a project using AssertJ, Truth or a custom assertion helper must list those names or the rule fires on healthy tests; Kotlin tests are outside PMD entirely and detekt ships no equivalent rule, so Kotlin coverage of this class is zero.",
+      "evidence": {
+        "tier": "documented",
+        "source": "docs.pmd-code.org PMD 7.26.0 java bestpractices ruleset (UnitTestShouldIncludeAssert, renamed from JUnitTestsShouldIncludeAssert in PMD 7.7.0) and java errorprone ruleset (TestClassWithoutTestCases)."
+      }
+    },
+    {
+      "id": "skipped-test",
+      "title": "Test disabled or ignored and left that way",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Annotates a failing test with @Disabled to get the suite green and reports the task complete",
+        "Adds JUnit 4's @Ignore when it cannot make a legacy test pass",
+        "Marks the test with a @Tag that the build's excludeTags filter drops, which reads as a categorisation rather than a skip"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "@(?:Disabled|Ignore)(?:OnOs|OnJre|IfSystemProperty|IfEnvironmentVariable|If)?\\s*(?:\\(|\\s*$|\\s*\\n)"
+            ],
+            "paths": [
+              "**/src/test/**/*.java",
+              "**/src/test/**/*.kt"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.pricing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport org.junit.jupiter.api.Disabled;\nimport org.junit.jupiter.api.Test;\n\nclass DiscountLadderTest {\n\n    private final DiscountLadder ladder = new DiscountLadder();\n\n    @Disabled(\"flaky since the rounding change, revisit\")\n    @Test\n    void appliesTierThreeAtTenThousand() {\n        assertEquals(15, ladder.percentFor(10_000L));\n    }\n\n    @Test\n    void appliesNoDiscountBelowThreshold() {\n        assertEquals(0, ladder.percentFor(10L));\n    }\n}\n",
+        "nearMiss": "package com.example.pricing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport org.junit.jupiter.api.Test;\n\nclass DiscountLadderTest {\n\n    private final DiscountLadder ladder = new DiscountLadder();\n\n    /**\n     * Was @Disabled while the rounding change landed; re-enabled 2026-08-01.\n     * Do not annotate this with @Ignore again — see ADR-014.\n     */\n    @Test\n    void appliesTierThreeAtTenThousand() {\n        assertEquals(15, ladder.percentFor(10_000L));\n    }\n\n    @Test\n    void disabledAccountsGetNoDiscount() {\n        Account account = Account.disabled(\"ACME\");\n        assertEquals(0, ladder.percentFor(account));\n    }\n}\n"
+      },
+      "gapNotes": "Regex-only, by choice: no linter in this ecosystem ships a rule that bans @Disabled, because disabling is a legitimate temporary act. That makes the class inherently a policy check, not a defect check — the honest gate is 'a @Disabled must carry an issue link', which this pattern does not enforce. It also misses the @Tag route entirely (a test excluded by `excludeTags(\"slow\")` never runs and carries no annotation this pattern knows), and misses a test silently orphaned by renaming it off the runner's naming convention. The near-miss shows the trap: a class whose Javadoc discusses @Disabled and whose test is named `disabledAccountsGetNoDiscount` must not fire, which is why the pattern requires the annotation to be followed by `(` or end-of-line.",
+      "evidence": {
+        "tier": "documented",
+        "source": "JUnit 5 user guide @Disabled and the conditional-execution annotations (@DisabledOnOs, @DisabledIfSystemProperty, @DisabledIfEnvironmentVariable); JUnit 4 @Ignore."
+      }
+    },
+    {
+      "id": "assumption-used-as-skip",
+      "title": "Assumption used to make a test opt out at runtime",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Adds assumeTrue(false) or an assumption on an environment variable so the test aborts instead of failing",
+        "Wraps the failing part in assumingThat so the assertion body never executes",
+        "Prefers an assumption to @Disabled specifically because a skip-scanning check driver only greps for @Disabled"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "assum(?:e(?:True|False|NotNull)|ingThat)\\s*\\(",
+              "Assumptions\\s*\\.\\s*assum"
+            ],
+            "paths": [
+              "**/src/test/**/*.java",
+              "**/src/test/**/*.kt"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.storage;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assumptions.assumeTrue;\n\nimport org.junit.jupiter.api.Assumptions;\nimport org.junit.jupiter.api.Test;\n\nclass BlobStoreTest {\n\n    private final BlobStore store = new BlobStore();\n\n    @Test\n    void roundTripsLargeBlob() {\n        assumeTrue(System.getenv(\"CI\") == null);\n        Assumptions.assumeTrue(store.isReachable());\n        store.put(\"k\", new byte[1024]);\n        assertEquals(1024, store.get(\"k\").length);\n    }\n}\n",
+        "nearMiss": "package com.example.storage;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertTrue;\n\nimport org.junit.jupiter.api.Test;\n\nclass BlobStoreTest {\n\n    private final BlobStore store = new BlobStore();\n\n    /** We deliberately do not assume the store is reachable — an unreachable store is a failure. */\n    @Test\n    void roundTripsLargeBlob() {\n        assertTrue(store.isReachable(), \"blob store must be reachable in every environment\");\n        store.put(\"k\", new byte[1024]);\n        assertEquals(1024, store.get(\"k\").length);\n    }\n\n    @Test\n    void assumesNothingAboutOrdering() {\n        store.put(\"a\", new byte[1]);\n        store.put(\"b\", new byte[2]);\n        assertEquals(2, store.keys().size());\n    }\n}\n"
+      },
+      "gapNotes": "Marked heuristic because assumptions are legitimate for genuinely environment-bound tests (a Docker-dependent integration test on a machine without Docker). The check driver cannot distinguish that from an agent aborting a test it could not fix; the only honest resolution is the ledger — an assumption added in the same diff that touched production code is suspect, one that has been there for a year is not. No linter in this ecosystem has a rule for this. A near-miss trap the pattern survives: a test method literally named `assumesNothingAboutOrdering`, which a naive `/assume/i` pattern would flag.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "JUnit 5 org.junit.jupiter.api.Assumptions API (assumeTrue, assumeFalse, assumingThat) — the API is documented; the judgement that its use is a skip-in-disguise is jig's, not a tool's."
+      }
+    },
+    {
+      "id": "deleted-test",
+      "title": "Test or test class removed instead of fixed",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Deletes the failing test method and reports the suite green",
+        "Deletes an entire test class whose compilation broke after a refactor rather than updating it",
+        "Empties a test class down to its fields and imports so the file still exists and the diff looks small"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "gradle",
+            "rule": "failOnNoDiscoveredTests",
+            "options": {
+              "value": true,
+              "task": "Test"
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "pmd",
+            "rule": "TestClassWithoutTestCases",
+            "options": {
+              "ruleset": "category/java/errorprone.xml"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.auth;\n\nimport org.junit.jupiter.api.BeforeEach;\n\nimport java.time.Clock;\nimport java.time.Instant;\nimport java.time.ZoneOffset;\n\nclass TokenExpiryTest {\n\n    private Clock clock;\n    private TokenService service;\n\n    @BeforeEach\n    void setUp() {\n        clock = Clock.fixed(Instant.parse(\"2026-01-01T00:00:00Z\"), ZoneOffset.UTC);\n        service = new TokenService(clock);\n    }\n}\n",
+        "nearMiss": "package com.example.auth;\n\nimport static org.junit.jupiter.api.Assertions.assertFalse;\nimport static org.junit.jupiter.api.Assertions.assertTrue;\n\nimport org.junit.jupiter.api.BeforeEach;\nimport org.junit.jupiter.api.Nested;\nimport org.junit.jupiter.api.Test;\n\nimport java.time.Clock;\nimport java.time.Duration;\nimport java.time.Instant;\nimport java.time.ZoneOffset;\n\nclass TokenExpiryTest {\n\n    private Clock clock;\n    private TokenService service;\n\n    @BeforeEach\n    void setUp() {\n        clock = Clock.fixed(Instant.parse(\"2026-01-01T00:00:00Z\"), ZoneOffset.UTC);\n        service = new TokenService(clock);\n    }\n\n    @Nested\n    class WithinLifetime {\n        @Test\n        void tokenIsValid() {\n            Token token = service.issue(Duration.ofMinutes(5));\n            assertTrue(service.isValid(token));\n        }\n    }\n\n    @Nested\n    class PastLifetime {\n        @Test\n        void tokenIsRejected() {\n            Token token = service.issue(Duration.ZERO);\n            assertFalse(service.isValid(token));\n        }\n    }\n}\n"
+      },
+      "gapNotes": "Deletion is invisible to any check that reads only the current tree — the evidence lives in the diff, not the file. `failOnNoDiscoveredTests` (Gradle Test task, default true) only fires when a source set drops to zero discovered tests, so deleting nine tests of ten passes silently; PMD's TestClassWithoutTestCases only fires when a class keeps its Test-shaped name but loses every @Test. The real gate is a git-aware count comparison against the merge base, which no tool in this ecosystem provides and which jig's check driver must supply itself. The near-miss is the genuine trap for the PMD rule: a class whose own body has no @Test method because every test lives in @Nested inner classes.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Gradle DSL reference for org.gradle.api.tasks.testing.Test — `failOnNoDiscoveredTests`, 'Whether the task should fail if test sources are present, but no tests are discovered during test execution. Defaults to true.'; PMD 7 java errorprone TestClassWithoutTestCases."
+      }
+    },
+    {
+      "id": "swallowed-exception",
+      "title": "Exception caught and discarded",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Wraps a call it could not diagnose in try/catch with an empty body so the failure disappears",
+        "Catches and returns a neutral literal — null, false, 0, an empty list — turning a hard failure into a silent wrong answer",
+        "Catches the exception, logs nothing, and moves on because the surrounding test then passes"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "catch\\s*\\([^)]*\\)\\s*\\{\\s*\\}",
+              "catch\\s*\\([^)]*\\)\\s*\\{\\s*return\\s+(?:null|false|true|-?\\d+)\\s*;?\\s*\\}"
+            ],
+            "paths": [
+              "**/*.java",
+              "**/*.kt"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "checkstyle",
+            "rule": "EmptyCatchBlock",
+            "options": {
+              "category": "blocks"
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "detekt",
+            "rule": "SwallowedException",
+            "options": {
+              "ruleset": "exceptions"
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "errorprone",
+            "rule": "EmptyCatch",
+            "options": {
+              "severity": "ERROR"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.config;\n\nimport java.io.IOException;\nimport java.nio.file.Files;\nimport java.nio.file.Path;\nimport java.util.Properties;\n\npublic final class SettingsLoader {\n\n    private final Path path;\n\n    public SettingsLoader(Path path) {\n        this.path = path;\n    }\n\n    public Properties load() {\n        Properties properties = new Properties();\n        try (var reader = Files.newBufferedReader(path)) {\n            properties.load(reader);\n        } catch (IOException e) {\n        }\n        return properties;\n    }\n\n    public boolean isFeatureEnabled(String key) {\n        try {\n            return Boolean.parseBoolean(load().getProperty(key));\n        } catch (RuntimeException e) {\n            return false;\n        }\n    }\n}\n",
+        "nearMiss": "package com.example.config;\n\nimport java.io.IOException;\nimport java.io.UncheckedIOException;\nimport java.nio.file.Files;\nimport java.nio.file.Path;\nimport java.util.Properties;\n\nimport org.slf4j.Logger;\nimport org.slf4j.LoggerFactory;\n\npublic final class SettingsLoader {\n\n    private static final Logger LOG = LoggerFactory.getLogger(SettingsLoader.class);\n\n    private final Path path;\n    private final Properties fallback;\n\n    public SettingsLoader(Path path, Properties fallback) {\n        this.path = path;\n        this.fallback = fallback;\n    }\n\n    public Properties load() {\n        Properties properties = new Properties();\n        try (var reader = Files.newBufferedReader(path)) {\n            properties.load(reader);\n        } catch (IOException e) {\n            throw new UncheckedIOException(\"settings unreadable: \" + path, e);\n        }\n        return properties;\n    }\n\n    public Properties loadOrFallback() {\n        try {\n            return load();\n        } catch (UncheckedIOException e) {\n            LOG.warn(\"falling back to defaults\", e);\n            return fallback;\n        }\n    }\n}\n"
+      },
+      "gapNotes": "Downgraded from deterministic to heuristic in the verification pass. The first pattern only looks deterministic: comments are blanked before matching, so `catch (X e) { /* the caller retries */ }` reaches the regex as `catch (X e) { }` and is reported, which makes the finding a judgement about a comment the driver deliberately threw away. The second pattern is a guess by construction — returning `null`, `false` or `0` from a catch is the correct fallback in plenty of code. Because comments are blanked before matching, a catch block whose only content is `// intentional` collapses to `{ }` and trips — jig treats a comment-only catch as swallowing, which is a judgement call, not a fact. The second pattern only recognises literal returns; `catch (X e) { return fallback; }` and `catch (X e) { return Optional.empty(); }` slip past it. Checkstyle's EmptyCatchBlock and detekt's EmptyCatchBlock both honour an exception-name escape hatch (`expected`, `ignore`, `_`), so an agent that renames the variable to `ignored` defeats the tool detectors while still tripping the regex. Nothing here catches the widest swallow of all: `catch (Exception e) { LOG.debug(...); }` — logged at a level nobody reads.",
+      "evidence": {
+        "tier": "documented",
+        "source": "checkstyle.org blocks category (EmptyCatchBlock); detekt.dev exceptions ruleset (SwallowedException) and empty-blocks ruleset (EmptyCatchBlock); errorprone.info bug patterns (EmptyCatch, WARNING by default, raised to ERROR in the sample config)."
+      }
+    },
+    {
+      "id": "printstacktrace-as-handling",
+      "title": "printStackTrace() standing in for error handling",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Reaches for e.printStackTrace() because it needs no logger dependency and no import decision",
+        "Converts a rethrow into a printStackTrace() so the calling test stops failing",
+        "Leaves printStackTrace() in after using it to inspect a failure it was debugging"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\.printStackTrace\\s*\\("
+            ],
+            "paths": [
+              "**/*.java",
+              "**/*.kt"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "pmd",
+            "rule": "AvoidPrintStackTrace",
+            "options": {
+              "ruleset": "category/java/bestpractices.xml"
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "detekt",
+            "rule": "PrintStackTrace",
+            "options": {
+              "ruleset": "exceptions"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.jobs;\n\nimport java.util.concurrent.ExecutorService;\nimport java.util.concurrent.Executors;\n\npublic final class NightlyReconciler {\n\n    private final ExecutorService pool = Executors.newFixedThreadPool(4);\n\n    public void runAll(Iterable<Ledger> ledgers) {\n        for (Ledger ledger : ledgers) {\n            pool.submit(() -> {\n                try {\n                    ledger.reconcile();\n                } catch (ReconcileException e) {\n                    e.printStackTrace();\n                }\n            });\n        }\n    }\n}\n",
+        "nearMiss": "package com.example.jobs;\n\nimport java.io.PrintWriter;\nimport java.util.concurrent.ExecutorService;\nimport java.util.concurrent.Executors;\n\nimport org.slf4j.Logger;\nimport org.slf4j.LoggerFactory;\n\npublic final class NightlyReconciler {\n\n    private static final Logger LOG = LoggerFactory.getLogger(NightlyReconciler.class);\n\n    private final ExecutorService pool = Executors.newFixedThreadPool(4);\n\n    public void runAll(Iterable<Ledger> ledgers) {\n        for (Ledger ledger : ledgers) {\n            pool.submit(() -> {\n                try {\n                    ledger.reconcile();\n                } catch (ReconcileException e) {\n                    LOG.error(\"reconcile failed for {}\", ledger.id(), e);\n                    throw e;\n                }\n            });\n        }\n    }\n\n    void dumpDiagnostics(ReconcileException e, PrintWriter writer) {\n        this.printStackTraceTo(e, writer);\n    }\n\n    private void printStackTraceTo(ReconcileException e, PrintWriter writer) {\n        writer.println(e.getMessage());\n    }\n}\n"
+      },
+      "gapNotes": "Says nothing about whether the exception was actually handled — replacing printStackTrace() with a LOG.error() and no rethrow satisfies every detector here while losing the failure just as completely. It also cannot see Throwable.printStackTrace(PrintStream) reached through a helper. The near-miss is the real trap: a project-local method named `printStackTraceTo` must not fire, which is why the pattern requires the open paren to follow the name immediately.",
+      "evidence": {
+        "tier": "documented",
+        "source": "docs.pmd-code.org PMD 7 java bestpractices (AvoidPrintStackTrace); detekt.dev exceptions ruleset (PrintStackTrace)."
+      }
+    },
+    {
+      "id": "catch-all-exception",
+      "title": "catch (Exception) or catch (Throwable) around code that throws one thing",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Widens a specific catch to Exception when a refactor makes a new checked exception appear, rather than handling it",
+        "Catches Throwable so that an Error — OutOfMemoryError, StackOverflowError, an assertion failure — is absorbed too",
+        "Wraps a whole method body in catch (Exception e) to make an intermittent failure stop reaching the caller"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "catch\\s*\\(\\s*(?:final\\s+)?(?:(?:java\\.lang\\.)?(?:Exception|Throwable)\\s+\\w+|\\w+\\s*:\\s*(?:Exception|Throwable))\\s*\\)"
+            ],
+            "paths": [
+              "**/*.java",
+              "**/*.kt"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "checkstyle",
+            "rule": "IllegalCatch",
+            "options": {
+              "category": "coding"
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "pmd",
+            "rule": "AvoidCatchingGenericException",
+            "options": {
+              "ruleset": "category/java/design.xml"
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "detekt",
+            "rule": "TooGenericExceptionCaught",
+            "options": {
+              "ruleset": "exceptions"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.gateway;\n\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\nimport java.net.http.HttpResponse;\nimport java.net.URI;\n\npublic final class PaymentGateway {\n\n    private final HttpClient client = HttpClient.newHttpClient();\n\n    public ChargeResult charge(String customerId, long minorUnits) {\n        HttpRequest request = HttpRequest.newBuilder(URI.create(\"https://api.example.com/charges\"))\n            .POST(HttpRequest.BodyPublishers.ofString(customerId + \":\" + minorUnits))\n            .build();\n        try {\n            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());\n            return ChargeResult.parse(response.body());\n        } catch (Exception e) {\n            return ChargeResult.declined(\"gateway error\");\n        }\n    }\n}\n",
+        "nearMiss": "package com.example.gateway;\n\nimport java.io.IOException;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\nimport java.net.http.HttpResponse;\nimport java.net.URI;\nimport java.util.concurrent.ExecutionException;\n\npublic final class PaymentGateway {\n\n    private final HttpClient client = HttpClient.newHttpClient();\n\n    public ChargeResult charge(String customerId, long minorUnits) throws GatewayUnavailableException {\n        HttpRequest request = HttpRequest.newBuilder(URI.create(\"https://api.example.com/charges\"))\n            .POST(HttpRequest.BodyPublishers.ofString(customerId + \":\" + minorUnits))\n            .build();\n        try {\n            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());\n            return ChargeResult.parse(response.body());\n        } catch (IOException | InterruptedException e) {\n            Thread.currentThread().interrupt();\n            throw new GatewayUnavailableException(\"charge transport failed\", e);\n        } catch (ExecutionException e) {\n            throw new GatewayUnavailableException(\"charge task failed\", e.getCause());\n        }\n    }\n}\n"
+      },
+      "gapNotes": "Bans two type names and nothing else. `catch (RuntimeException e)` is nearly as wide and is not matched, deliberately, because it is the correct catch in several legitimate places. A multi-catch that happens to include Exception — `catch (Exception | Error e)` — is not matched by this pattern because the type is not immediately followed by an identifier. Kotlin's form is covered by the second alternation, but Kotlin has no checked exceptions, so detekt's TooGenericExceptionCaught fires far more often there and needs a project-level exclusion list before it can be armed. The near-miss is the trap for a naive `/Exception/` pattern: `ExecutionException`, `GatewayUnavailableException` and `IOException | InterruptedException` must all pass.",
+      "evidence": {
+        "tier": "documented",
+        "source": "checkstyle.org coding category (IllegalCatch, default illegalClassNames include Exception and Throwable); docs.pmd-code.org PMD 7 java design (AvoidCatchingGenericException) and java errorprone (AvoidCatchingThrowable); detekt.dev exceptions ruleset (TooGenericExceptionCaught)."
+      }
+    },
+    {
+      "id": "blanket-lint-suppression",
+      "title": "Broad @SuppressWarnings or @Suppress added to silence a checker",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Adds @SuppressWarnings(\"unchecked\") rather than fixing the generic signature that produced the warning",
+        "Adds @SuppressWarnings(\"all\") to a class after a build fails under -Werror",
+        "Adds Kotlin's @Suppress(\"UNCHECKED_CAST\") over a cast it could not prove safe"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "@Suppress(?:Warnings)?\\s*\\(\\s*(?:value\\s*=\\s*)?(?:\\{\\s*|\\[\\s*)?\"(?:all|unchecked|rawtypes|deprecation|ALL|UNCHECKED_CAST|UNUSED_PARAMETER|UNUSED_VARIABLE)\""
+            ],
+            "paths": [
+              "**/*.java",
+              "**/*.kt"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "checkstyle",
+            "rule": "SuppressWarnings",
+            "options": {
+              "category": "annotation",
+              "format": "^unchecked$|^rawtypes$|^all$"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.registry;\n\nimport java.util.HashMap;\nimport java.util.Map;\n\npublic final class TypedRegistry {\n\n    private final Map<Class<?>, Object> instances = new HashMap<>();\n\n    public <T> void register(Class<T> type, T instance) {\n        instances.put(type, instance);\n    }\n\n    @SuppressWarnings(\"unchecked\")\n    public <T> T lookup(Class<T> type) {\n        return (T) instances.get(type);\n    }\n\n    @SuppressWarnings({\"rawtypes\", \"unchecked\"})\n    public Map asRawMap() {\n        return instances;\n    }\n}\n",
+        "nearMiss": "package com.example.registry;\n\nimport java.io.Serial;\nimport java.io.Serializable;\nimport java.util.HashMap;\nimport java.util.Map;\n\npublic final class TypedRegistry implements Serializable {\n\n    @Serial\n    private static final long serialVersionUID = 1L;\n\n    private final Map<Class<?>, Object> instances = new HashMap<>();\n\n    public <T> void register(Class<T> type, T instance) {\n        instances.put(type, type.cast(instance));\n    }\n\n    @SuppressWarnings(\"this-escape\")\n    public TypedRegistry() {\n        register(Map.class, instances);\n    }\n\n    public <T> T lookup(Class<T> type) {\n        return type.cast(instances.get(type));\n    }\n}\n"
+      },
+      "gapNotes": "Deliberately runs with stripStrings disabled, because the suppression key IS the string literal — a driver that blanks strings cannot tell @SuppressWarnings(\"serial\") from @SuppressWarnings(\"all\"). That means this one detector sees string content everywhere in the file and is the only class in this edition with that exposure. It cannot see suppression moved out of source entirely: a Checkstyle `<suppressions>` file, a SpotBugs exclude filter entry, a detekt baseline.xml, or `//noinspection` comments (blanked as comments) all silence a checker with no annotation at all, and jig must gate those files by path instead. Error Prone's own `@SuppressWarnings(\"CheckName\")` form is not listed because the set of check names is open-ended.",
+      "evidence": {
+        "tier": "documented",
+        "source": "checkstyle.org annotation category — SuppressWarnings check, 'Allows to specify what warnings that @SuppressWarnings is not allowed to suppress'; Kotlin @Suppress with the compiler's own diagnostic names (UNCHECKED_CAST)."
+      }
+    },
+    {
+      "id": "type-widened-to-any",
+      "title": "Type widened to Object or a raw type to make the compiler stop complaining",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Casts to Object, or declares a raw List/Map, when it cannot work out the correct generic parameter",
+        "Changes a method return type to Object so an incompatible-types error goes away",
+        "Drops the diamond and the type argument together — `new ArrayList()` — after a generics error it could not resolve"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\(\\s*Object\\s*\\)\\s*[A-Za-z_$(]",
+              "\\b(?:List|Map|Set|Collection|Iterator|Optional|Comparable|Class)\\s+\\w+\\s*=\\s*new\\s+(?:ArrayList|HashMap|LinkedHashMap|HashSet|LinkedList|TreeMap)\\s*\\(\\s*\\)"
+            ],
+            "paths": [
+              "**/*.java"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "detekt",
+            "rule": "UnsafeCast",
+            "options": {
+              "ruleset": "potential-bugs"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.events;\n\nimport java.util.ArrayList;\nimport java.util.HashMap;\nimport java.util.List;\nimport java.util.Map;\n\npublic final class EventBuffer {\n\n    private final List pending = new ArrayList();\n    private final Map index = new HashMap();\n\n    public void add(DomainEvent event) {\n        pending.add(event);\n        index.put(event.id(), (Object) event.payload());\n    }\n\n    public Object drainFirst() {\n        return pending.isEmpty() ? null : pending.remove(0);\n    }\n}\n",
+        "nearMiss": "package com.example.events;\n\nimport java.util.ArrayList;\nimport java.util.HashMap;\nimport java.util.List;\nimport java.util.Map;\nimport java.util.Objects;\nimport java.util.Optional;\n\npublic final class EventBuffer {\n\n    private final List<DomainEvent> pending = new ArrayList<>();\n    private final Map<String, Payload> index = new HashMap<>();\n    private final ObjectMapper mapper = new ObjectMapper();\n\n    public void add(DomainEvent event) {\n        Objects.requireNonNull(event, \"event\");\n        pending.add(event);\n        index.put(event.id(), (Payload) event.payload());\n    }\n\n    public Optional<DomainEvent> drainFirst() {\n        return pending.isEmpty() ? Optional.empty() : Optional.of(pending.remove(0));\n    }\n}\n"
+      },
+      "gapNotes": "Heuristic: a cast to Object is occasionally correct (varargs disambiguation, `Objects.equals` bridging), and this pattern cannot tell those apart from a give-up cast. The raw-type pattern only recognises the declaration-plus-construction form on one statement; a raw type in a field declaration split across lines, a raw parameter, or a raw return type all pass. Widening a return type from `Invoice` to `Object` — the mode named in the brief — has no regex signature at all and is caught only by review or by `-Xlint:rawtypes`/`-Xlint:unchecked` with `-Werror`, which are javac lint categories rather than Error Prone bug patterns and so cover raw and unchecked usage only, not honest-but-vacuous Object typing. detekt's UnsafeCast covers the Kotlin `as` form; there is no Kotlin equivalent of the raw-type pattern because Kotlin has no raw types, hence the Java-only paths. A tool-rule claiming `-Xlint:rawtypes` as an Error Prone rule id was deleted in the verification pass: `-Xlint:rawtypes` is a javac lint category and does not appear in the Error Prone bug-pattern list at errorprone.info/bugpatterns, so it cannot be configured as an Error Prone check. Nothing replaces it — the javac flag is reached through the toolchain's `-Xlint:all -Werror` compiler args, not through a rule id — and that leaves this class with exactly one tool detector, covering Kotlin only.",
+      "evidence": {
+        "tier": "documented",
+        "source": "javac `-Xlint` categories `rawtypes` and `unchecked` with `-Werror` (JDK javac tool documentation); detekt.dev potential-bugs ruleset (UnsafeCast). No Checkstyle or PMD rule id is claimed here because none was confirmed for this shape."
+      }
+    },
+    {
+      "id": "non-null-assertion",
+      "title": "Kotlin !! used to get past the null checker",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Appends !! to a nullable expression the moment the Kotlin compiler refuses it, instead of handling the null branch",
+        "Uses map[key]!! rather than getValue or an explicit missing-key error",
+        "Adds lateinit or a !! chain to satisfy a platform type coming back from Java interop"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "[\\w)\\]]!!"
+            ],
+            "paths": [
+              "**/*.kt",
+              "**/*.kts"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "detekt",
+            "rule": "UnsafeCallOnNullableType",
+            "options": {
+              "ruleset": "potential-bugs"
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "detekt",
+            "rule": "MapGetWithNotNullAssertionOperator",
+            "options": {
+              "ruleset": "potential-bugs"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.profile\n\nclass ProfileAssembler(private val repo: ProfileRepository) {\n\n    private val cache = mutableMapOf<String, Profile>()\n\n    fun displayName(userId: String): String {\n        val profile = repo.findById(userId)\n        return profile!!.displayName\n    }\n\n    fun cached(userId: String): Profile = cache[userId]!!\n\n    fun avatarUrl(userId: String): String {\n        val profile = cache[userId]\n        return profile!!.avatar!!.url\n    }\n}\n",
+        "nearMiss": "package com.example.profile\n\nclass ProfileAssembler(private val repo: ProfileRepository) {\n\n    private val cache = mutableMapOf<String, Profile>()\n\n    fun displayName(userId: String): String {\n        val profile = repo.findById(userId) ?: error(\"no profile for $userId\")\n        return profile.displayName\n    }\n\n    fun cached(userId: String): Profile = cache.getValue(userId)\n\n    fun isMissing(userId: String): Boolean {\n        val known = cache.containsKey(userId)\n        return !!known == known && repo.findById(userId) != null\n    }\n\n    fun avatarUrl(userId: String): String? = cache[userId]?.avatar?.url\n}\n"
+      },
+      "gapNotes": "Only the operator, not the intent. `?: error(...)`, `?: throw`, `checkNotNull(...)` and `requireNotNull(...)` all crash on null exactly as `!!` does but are idiomatic and are not flagged; conversely a `!!` guarded three lines earlier by an explicit null check is flagged even though it is provably safe. The pattern cannot see nullability laundered through a Java platform type — `val name: String = javaApi.getName()` with no `!!` anywhere — which detekt's HasPlatformType covers only when type resolution is enabled (detekt needs the `detektMain` type-resolution task, not the plain `detekt` task, for UnsafeCallOnNullableType to work at all). The near-miss is the trap for a bare `/!!/` pattern: `!!known` is double boolean negation and `a != null` contains no `!!`.",
+      "evidence": {
+        "tier": "documented",
+        "source": "detekt.dev potential-bugs ruleset — UnsafeCallOnNullableType, MapGetWithNotNullAssertionOperator, HasPlatformType; Kotlin language reference for the not-null assertion operator."
+      }
+    },
+    {
+      "id": "unimplemented-stub-shipped",
+      "title": "Stub left throwing or returning nothing while the task is reported done",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Leaves TODO() in a Kotlin function body after writing the signature and the call sites",
+        "Throws UnsupportedOperationException(\"not implemented\") from a method the change was supposed to implement",
+        "Returns null or an empty collection from a method it did not write, so callers compile and the suite passes vacuously"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\bTODO\\s*\\(|throw\\s+new\\s+UnsupportedOperationException\\s*\\(|\\bNotImplementedError\\s*\\("
+            ],
+            "paths": [
+              "**/*.java",
+              "**/*.kt"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "detekt",
+            "rule": "NotImplementedDeclaration",
+            "options": {
+              "ruleset": "exceptions"
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "detekt",
+            "rule": "ForbiddenComment",
+            "options": {
+              "ruleset": "style",
+              "comments": [
+                "TODO:",
+                "FIXME:"
+              ]
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.reporting;\n\nimport java.time.LocalDate;\nimport java.util.List;\n\npublic final class QuarterlyReport {\n\n    private final LedgerRepository repository;\n\n    public QuarterlyReport(LedgerRepository repository) {\n        this.repository = repository;\n    }\n\n    public List<LineItem> lineItems(LocalDate quarterStart) {\n        return repository.between(quarterStart, quarterStart.plusMonths(3));\n    }\n\n    public Money runningBalance(LocalDate quarterStart) {\n        throw new UnsupportedOperationException(\"not implemented\");\n    }\n}\n",
+        "nearMiss": "package com.example.reporting;\n\nimport java.time.LocalDate;\nimport java.util.Collections;\nimport java.util.List;\n\npublic final class QuarterlyReport {\n\n    private static final int TODO_REVIEW_LIMIT = 25;\n\n    private final LedgerRepository repository;\n\n    public QuarterlyReport(LedgerRepository repository) {\n        this.repository = repository;\n    }\n\n    public List<LineItem> todoItems() {\n        return Collections.unmodifiableList(repository.flagged(TODO_REVIEW_LIMIT));\n    }\n\n    public Money runningBalance(LocalDate quarterStart) {\n        Money balance = Money.zero();\n        for (LineItem item : lineItems(quarterStart)) {\n            balance = balance.plus(item.amount());\n        }\n        return balance;\n    }\n\n    public List<LineItem> lineItems(LocalDate quarterStart) {\n        return repository.between(quarterStart, quarterStart.plusMonths(3));\n    }\n}\n"
+      },
+      "gapNotes": "Downgraded from deterministic to heuristic in the verification pass: the three tokens are matched exactly, but every one of them is also the correct implementation somewhere, so what the detector reports is a guess about intent rather than a fact about the source. Throwing UnsupportedOperationException is a legitimate contract in immutable-collection and sealed-adapter code, so on some projects this class must be scoped to changed files only or it will fire on healthy source. The quietest form of the mistake — a method body that returns `null`, `Collections.emptyList()` or `Money.zero()` because the agent did not know what to compute — has no textual signature and is not detected at all; only a test that asserts the real value catches it. `// TODO` comments are blanked before matching, so detekt's ForbiddenComment (which reads real comments) is the only detector here that sees them, and it covers Kotlin only. The near-miss is the trap: `TODO_REVIEW_LIMIT` and `todoItems()` must not fire, which the word boundary and case sensitivity handle.",
+      "evidence": {
+        "tier": "documented",
+        "source": "detekt.dev exceptions ruleset (NotImplementedDeclaration, which reports TODO() and NotImplementedError) and style ruleset (ForbiddenComment); Kotlin stdlib TODO()."
+      }
+    },
+    {
+      "id": "debug-artifact-left-behind",
+      "title": "System.out.println / println left in shipped code",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Inserts prints to trace a failure it is debugging and never removes them",
+        "Uses a print instead of the project's logger because it did not check which logging facade the project uses",
+        "Prints a value in a test in place of asserting it"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "System\\s*\\.\\s*(?:out|err)\\s*\\.\\s*print(?:ln|f)?\\s*\\(|(?<![.\\w$])println\\s*\\("
+            ],
+            "paths": [
+              "**/src/main/**/*.java",
+              "**/src/main/**/*.kt"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "pmd",
+            "rule": "SystemPrintln",
+            "options": {
+              "ruleset": "category/java/bestpractices.xml"
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "checkstyle",
+            "rule": "RegexpSinglelineJava",
+            "options": {
+              "category": "regexp",
+              "format": "System\\.(out|err)\\.print",
+              "ignoreComments": true
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "detekt",
+            "rule": "ForbiddenMethodCall",
+            "options": {
+              "ruleset": "style",
+              "methods": [
+                "kotlin.io.println",
+                "kotlin.io.print"
+              ]
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.importer;\n\nimport java.nio.file.Path;\nimport java.util.List;\n\npublic final class CsvImporter {\n\n    public ImportResult importAll(Path source, List<String> rows) {\n        System.out.println(\"importing \" + rows.size() + \" rows from \" + source);\n        int accepted = 0;\n        for (String row : rows) {\n            if (row.isBlank()) {\n                System.err.printf(\"skipping blank row in %s%n\", source);\n                continue;\n            }\n            accepted++;\n        }\n        return new ImportResult(accepted, rows.size() - accepted);\n    }\n}\n",
+        "nearMiss": "package com.example.importer;\n\nimport java.io.PrintWriter;\nimport java.nio.file.Path;\nimport java.util.List;\n\nimport org.slf4j.Logger;\nimport org.slf4j.LoggerFactory;\n\npublic final class CsvImporter {\n\n    private static final Logger LOG = LoggerFactory.getLogger(CsvImporter.class);\n\n    private final PrintWriter rejects;\n\n    public CsvImporter(PrintWriter rejects) {\n        this.rejects = rejects;\n    }\n\n    public ImportResult importAll(Path source, List<String> rows) {\n        LOG.info(\"importing {} rows from {}\", rows.size(), source);\n        int accepted = 0;\n        for (String row : rows) {\n            if (row.isBlank()) {\n                rejects.println(row);\n                continue;\n            }\n            accepted++;\n        }\n        return new ImportResult(accepted, rows.size() - accepted);\n    }\n\n    public void dumpTo(PrintWriter writer) {\n        writer.print(System.lineSeparator());\n    }\n}\n"
+      },
+      "gapNotes": "Scoped to src/main deliberately — a print in a test fixture or a sample is normal, so this class will not see a debugging print left inside a test, which is where agents leave most of them. It also cannot distinguish a CLI tool whose entire job is writing to stdout; such a project must exempt its main class by path or the class is unusable. The near-miss carries both traps: `rejects.println(row)` on a caller-supplied PrintWriter is legitimate output and the lookbehind must let it through, and `writer.print(System.lineSeparator())` mentions System without being a console print.",
+      "evidence": {
+        "tier": "documented",
+        "source": "docs.pmd-code.org PMD 7 java bestpractices (SystemPrintln); checkstyle.org regexp category (RegexpSinglelineJava, 'Checks that a specified pattern matches a single-line in Java files'); detekt.dev style ruleset (ForbiddenMethodCall)."
+      }
+    },
+    {
+      "id": "hardcoded-secret",
+      "title": "Credential written into source instead of read from the environment",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Inlines a password or API key it found in a log, a fixture or the conversation so the code runs immediately",
+        "Replaces a failing System.getenv lookup with the literal value it was given while debugging",
+        "Writes a plausible placeholder key that is nonetheless a real, committed constant"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "(?:PASSWORD|Password|password|passwd|SECRET|Secret|secret|API_KEY|apiKey|ApiKey|ACCESS_KEY|accessKey|TOKEN|Token|token|PRIVATE_KEY|privateKey|CREDENTIALS|credentials)\\s*(?::\\s*String\\s*)?=\\s*\"[^\"]"
+            ],
+            "paths": [
+              "**/*.java",
+              "**/*.kt",
+              "**/*.kts"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "heuristic",
+          "params": {
+            "tool": "spotbugs",
+            "rule": "HARD_CODE_PASSWORD",
+            "options": {
+              "plugin": "com.h3xstream.findsecbugs:findsecbugs-plugin"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.integration;\n\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\nimport java.net.URI;\n\npublic final class WarehouseClient {\n\n    private static final String PASSWORD = \"Sup3rS3cret!\";\n    private final String apiKey = \"ak_live_9f2c1b7e4d\";\n\n    private final HttpClient client = HttpClient.newHttpClient();\n\n    public HttpRequest authorized(URI target) {\n        return HttpRequest.newBuilder(target)\n            .header(\"X-Api-Key\", apiKey)\n            .header(\"X-Api-Secret\", PASSWORD)\n            .build();\n    }\n}\n",
+        "nearMiss": "package com.example.integration;\n\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\nimport java.net.URI;\nimport java.util.Objects;\n\npublic final class WarehouseClient {\n\n    private static final String PASSWORD_ENV = \"WAREHOUSE_PASSWORD\";\n    private static final String API_KEY_ENV = \"WAREHOUSE_API_KEY\";\n\n    private final String password = requiredEnv(PASSWORD_ENV);\n    private final String apiKey = requiredEnv(API_KEY_ENV);\n\n    private final HttpClient client = HttpClient.newHttpClient();\n\n    private static String requiredEnv(String name) {\n        return Objects.requireNonNull(System.getenv(name), name + \" is not set\");\n    }\n\n    public HttpRequest authorized(URI target) {\n        return HttpRequest.newBuilder(target)\n            .header(\"X-Api-Key\", apiKey)\n            .header(\"X-Api-Secret\", password)\n            .build();\n    }\n}\n"
+      },
+      "gapNotes": "Name-driven and therefore heuristic in both directions: a constant called `DEFAULT_SALT` or `bearer` is missed, and a legitimate constant called `PASSWORD_PROMPT = \"Enter password: \"` fires. Runs with stripStrings disabled because the literal itself is the evidence. It cannot see a secret assigned indirectly (`var k = keys.get(0)` where the list is a literal), a secret in `src/test/resources/application.properties`, or one committed to `gradle.properties` — none of which are Java or Kotlin source. find-sec-bugs' HARD_CODE_PASSWORD is bytecode-level and misses a key passed straight through to a builder without ever being stored, which is why it is marked heuristic here too. This class does not attempt to detect that a secret was previously committed; that is a git-history question. A second find-sec-bugs tool-rule, PREDICTABLE_RANDOM, was deleted in the verification pass: the pattern id is real, but it reports `java.util.Random` used where `SecureRandom` is required, which is a weak-randomness defect and not a hardcoded secret — it cannot fire on either fixture here. That leaves one tool detector, bytecode-level, for this class.",
+      "evidence": {
+        "tier": "documented",
+        "source": "OWASP find-sec-bugs bug-pattern catalogue at find-sec-bugs.github.io/bugs.htm — HARD_CODE_PASSWORD; SpotBugs Gradle docs for the `spotbugsPlugins 'com.h3xstream.findsecbugs:findsecbugs-plugin:1.14.0'` coordinate."
+      }
+    },
+    {
+      "id": "hardcoded-config-value",
+      "title": "Environment-specific URL, host or filesystem path baked into code",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Inlines the URL or path from an example rather than threading it through configuration it cannot see",
+        "Hardcodes an absolute path taken from a stack trace or a local run so the code works on one machine",
+        "Substitutes a literal for a value it was supposed to read, because the config plumbing would have been a larger change"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\"https?:"
+            ],
+            "paths": [
+              "**/src/main/**/*.java",
+              "**/src/main/**/*.kt"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "checkstyle",
+            "rule": "MagicNumber",
+            "options": {
+              "category": "coding",
+              "ignoreAnnotation": true
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "detekt",
+            "rule": "MagicNumber",
+            "options": {
+              "ruleset": "style"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.sync;\n\nimport java.net.URI;\nimport java.nio.file.Path;\n\npublic final class CatalogueSync {\n\n    private static final URI BASE = URI.create(\"https://catalogue.internal.acme.com/v3\");\n    private static final Path KEYSTORE = Path.of(\"/etc/acme/keystore.p12\");\n\n    public URI feedFor(String tenant) {\n        return BASE.resolve(\"/tenants/\" + tenant + \"/feed\");\n    }\n\n    public Path keystore() {\n        return KEYSTORE;\n    }\n}\n",
+        "nearMiss": "package com.example.sync;\n\nimport java.net.URI;\nimport java.nio.file.Path;\nimport java.util.Objects;\n\n/**\n * Endpoints are configured, never inlined. See https://docs.acme.com/adr/0014 for why.\n */\npublic final class CatalogueSync {\n\n    private static final String SCHEME = \"https\";\n\n    private final URI base;\n    private final Path keystore;\n\n    public CatalogueSync(SyncSettings settings) {\n        this.base = URI.create(Objects.requireNonNull(settings.baseUrl(), \"baseUrl\"));\n        this.keystore = Path.of(\"config\", \"keystore.p12\").toAbsolutePath();\n        if (!SCHEME.equals(base.getScheme())) {\n            throw new IllegalArgumentException(\"baseUrl must be https\");\n        }\n    }\n\n    public URI feedFor(String tenant) {\n        return base.resolve(\"/tenants/\" + tenant + \"/feed\");\n    }\n\n    public Path keystore() {\n        return keystore;\n    }\n}\n"
+      },
+      "gapNotes": "Heuristic and noisy on purpose. Legitimate constants — a well-known schema URL, an XML namespace, a public API's documented base — trip the first pattern and must be allowlisted before this class can be armed. The URL pattern deliberately stops at `\"https?:` and does not include the `//`, because this detector leaves string literals intact while blanking comments: a driver that blanks comments without first tokenising strings will eat `//host/path` out of a URL literal as if it were a line comment, and a pattern that depended on those two slashes would then silently never fire. It also means the URL must begin the literal — a scheme embedded mid-string is missed. Relative-but-still-wrong paths (`\"build/reports\"`) and hostnames without a scheme (`\"db-prod-01\"`) are not matched at all. The MagicNumber rules cover the numeric half of this mistake (a port, a timeout, a retry count) but Checkstyle's default ignores -1, 0, 1 and 2, and both MagicNumber rules are famously loud on legitimate code. Runs with stripStrings disabled, so the driver reads string content in every main-source file. The near-miss shows all three traps: a documentation URL inside a Javadoc comment (blanked), a bare `\"https\"` scheme constant with no `://`, and a genuinely relative `Path.of(\"config\", ...)`. THE BIGGEST GAP, found by running this class against its own fixtures: absolute filesystem paths are no longer detected at all. A second pattern `\"(?:/etc/|/var/|/home/|/Users/|/opt/|/srv/|[A-Za-z]:\\\\)` was deleted because it cannot fire under jig's driver. The driver treats an unescaped `/` as opening a regex literal wherever a value may start, and the character before `/etc/` is the opening `\"` of the string — which is a value-start position — so `Path.of(\"/etc/acme/keystore.p12\")` is blanked to `Path.of(\"/   /acme/keystore.p12\")` before any pattern runs. That is the same blanking hazard the URL note describes, one step further along, and it is not repairable from the pattern side: any pattern loose enough to survive the blanking also matches the legitimate relative `base.resolve(\"/tenants/\" + tenant + \"/feed\")` that both fixtures carry. Detecting an absolute path in this edition needs either a driver that tokenises strings before comments or a path-scoped check outside the source scanner; until one exists, a hardcoded `/etc/...` or `C:\\...` in Java or Kotlin source is invisible to jig. Only URLs beginning a string literal are covered.",
+      "evidence": {
+        "tier": "documented",
+        "source": "checkstyle.org coding category (MagicNumber); detekt.dev style ruleset (MagicNumber). PMD's AvoidLiteralsInIfCondition was deleted from this class in the verification pass: the rule id is real but it reports literals used inside `if` conditions, which is a different defect and cannot fire on a hardcoded endpoint constant."
+      }
+    },
+    {
+      "id": "build-check-disabled",
+      "title": "Build script edited so a verification task can no longer fail",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Sets ignoreFailures = true on the failing quality task instead of fixing what it reported",
+        "Turns failOnNoDiscoveredTests off after deleting the last test in a source set",
+        "Removes a check task from the `check` lifecycle, or excludes the offending source set, so CI stops seeing it"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "ignoreFailures\\s*=\\s*true",
+              "failOnNoDiscoveredTests\\s*=\\s*false"
+            ],
+            "paths": [
+              "**/build.gradle.kts",
+              "**/build.gradle",
+              "**/*.gradle.kts"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "gradle",
+            "rule": "failOnNoDiscoveredTests",
+            "options": {
+              "value": true,
+              "task": "Test"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "plugins {\n    java\n    checkstyle\n    pmd\n}\n\nrepositories { mavenCentral() }\n\ndependencies {\n    testImplementation(platform(\"org.junit:junit-bom:5.13.4\"))\n    testImplementation(\"org.junit.jupiter:junit-jupiter\")\n    testRuntimeOnly(\"org.junit.platform:junit-platform-launcher\")\n}\n\ncheckstyle {\n    ignoreFailures = true\n}\n\npmd {\n    isIgnoreFailures = true\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform()\n    failOnNoDiscoveredTests = false\n}\n",
+        "nearMiss": "plugins {\n    java\n    checkstyle\n    pmd\n}\n\nrepositories { mavenCentral() }\n\ndependencies {\n    testImplementation(platform(\"org.junit:junit-bom:5.13.4\"))\n    testImplementation(\"org.junit.jupiter:junit-jupiter\")\n    testRuntimeOnly(\"org.junit.platform:junit-platform-launcher\")\n}\n\nval ignoreFailuresInDocsTask = true\n\ncheckstyle {\n    ignoreFailures = false\n    maxWarnings = 0\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform()\n    failOnNoDiscoveredTests = true\n    ignoreFailures = false\n}\n\ntasks.named(\"check\") {\n    dependsOn(\"test\", \"checkstyleMain\", \"checkstyleTest\", \"pmdMain\", \"pmdTest\")\n}\n"
+      },
+      "gapNotes": "Two literal shapes in Gradle Kotlin/Groovy DSL only. Maven's equivalents live in pom.xml — `<testFailureIgnore>`, `<failOnViolation>false</failOnViolation>`, `<skip>true</skip>` — and are not covered here because a pom is not Java or Kotlin source and would break the compilable-fixture rule; a Maven project needs a separate XML-scoped driver. The subtler moves are invisible to both: deleting a `dependsOn` edge, narrowing `include`/`exclude` patterns, adding entries to a detekt `baseline.xml` or a SpotBugs exclude filter, or lowering `reportLevel`. The near-miss carries the trap for a substring pattern: `val ignoreFailuresInDocsTask = true` must not fire.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Gradle DSL reference for org.gradle.api.tasks.testing.Test (`failOnNoDiscoveredTests`, `ignoreFailures`) and the Checkstyle/PMD plugin quality extensions (`ignoreFailures`, `maxWarnings`)."
+      }
+    },
+    {
+      "id": "zero-tests-treated-as-pass",
+      "title": "Done reported while the suite never actually ran",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Runs `./gradlew build -x test` or `mvn -DskipTests package`, sees success, and reports the tests pass",
+        "Runs a single test class it just wrote and generalises the green to the whole suite",
+        "Runs `compileJava` only and treats compilation as verification",
+        "Summarises a test run it did not perform, quoting a plausible pass count"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "gradle",
+            "rule": "failOnNoDiscoveredTests",
+            "options": {
+              "value": true,
+              "task": "Test",
+              "note": "CI must invoke `check`, never `build -x test`"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.ordering;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport org.junit.jupiter.api.Tag;\nimport org.junit.jupiter.api.Test;\n\n@Tag(\"slow\")\nclass OrderPipelineTest {\n\n    private final OrderPipeline pipeline = new OrderPipeline();\n\n    @Test\n    void splitsMultiWarehouseOrder() {\n        Order order = Order.of(\"ACME\", 3);\n        assertEquals(2, pipeline.split(order).size());\n    }\n\n    @Test\n    void keepsSingleWarehouseOrderIntact() {\n        Order order = Order.of(\"ACME\", 1);\n        assertEquals(1, pipeline.split(order).size());\n    }\n}\n",
+        "nearMiss": "package com.example.ordering;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport org.junit.jupiter.api.Test;\n\nclass OrderPipelineTest {\n\n    private final OrderPipeline pipeline = new OrderPipeline();\n\n    @Test\n    void splitsMultiWarehouseOrder() {\n        Order order = Order.of(\"ACME\", 3);\n        assertEquals(2, pipeline.split(order).size());\n    }\n\n    @Test\n    void keepsSingleWarehouseOrderIntact() {\n        Order order = Order.of(\"ACME\", 1);\n        assertEquals(1, pipeline.split(order).size());\n    }\n}\n"
+      },
+      "gapNotes": "No check-driver detector exists and none honestly can: the mistake is in the command that was issued and the claim that followed it, neither of which appears in any file. The two fixtures differ only by a @Tag that a build's `excludeTags` filter can drop — the violation is a well-formed test class that a real invocation may never execute, which is exactly why no regex over source can decide it. `failOnNoDiscoveredTests` and Surefire's `failIfNoTests` only fire on the total-zero case. The workable gate is outside the toolchain entirely: jig must read `build/test-results/test/*.xml` (or `target/surefire-reports/*.xml`), compare its timestamp against the working tree's newest source mtime, and compare its test count against the merge base — and must refuse a session's done claim when those artefacts are stale, absent, or carry a non-zero skipped count. A second tool-rule claiming `failIfNoTests` under `tool: junit5` was deleted in the verification pass: `failIfNoTests` is a maven-surefire-plugin configuration parameter, not any JUnit 5 setting, and JUnit 5 itself has no such option — so on a Gradle project this class now has exactly one tool detector, and on a Maven project it has none until a Surefire-scoped detector is researched and added. A sibling class, `wildcard-import-hiding-invented-api`, was deleted from this edition in the same pass and its gap belongs here: it claimed to catch an invented API but by its own admission only banned star imports, and an invented import is a hard compile error in javac and kotlinc, so the class carried no cost beyond import style. Banning star imports is still available as a project preference through Checkstyle AvoidStarImport and detekt WildcardImport — both remain in the toolchain config samples — but jig no longer models it as a defect class.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Gradle Test task `failOnNoDiscoveredTests` (default true) and maven-surefire-plugin's `failIfNoTests` parameter; JUnit Platform XML report format for the skipped/tests counts."
+      }
+    },
+    {
+      "id": "ignored-return-value",
+      "title": "Return value of a pure call thrown away",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Calls a String or stream method as if it mutated the receiver — `name.trim();` — after mixing up an immutable API with a mutable one",
+        "Drops the result of a builder or validation call it did not realise returned a new object",
+        "Calls a method for a side effect the method does not have, so the change silently does nothing"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "^\\s*[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*\\.(?:trim|strip|toUpperCase|toLowerCase|replace|replaceAll|replaceFirst|substring|concat|intern|repeat|formatted)\\s*\\([^;]*\\)\\s*;\\s*$"
+            ],
+            "paths": [
+              "**/*.java"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": true
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "errorprone",
+            "rule": "ReturnValueIgnored",
+            "options": {
+              "severity": "ERROR"
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "errorprone",
+            "rule": "CheckReturnValue",
+            "options": {
+              "severity": "ERROR"
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "spotbugs",
+            "rule": "RV_RETURN_VALUE_IGNORED",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "detekt",
+            "rule": "IgnoredReturnValue",
+            "options": {
+              "ruleset": "potential-bugs"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.normalise;\n\nimport java.util.List;\n\npublic final class TenantNormaliser {\n\n    public List<String> normalise(List<String> rawNames) {\n        for (String name : rawNames) {\n            name.trim();\n            name.toLowerCase();\n            name.replace(\" \", \"-\");\n        }\n        return rawNames;\n    }\n}\n",
+        "nearMiss": "package com.example.normalise;\n\nimport java.util.ArrayList;\nimport java.util.List;\n\npublic final class TenantNormaliser {\n\n    public List<String> normalise(List<String> rawNames) {\n        List<String> normalised = new ArrayList<>(rawNames.size());\n        StringBuilder audit = new StringBuilder();\n        for (String name : rawNames) {\n            String slug = name.trim().toLowerCase().replace(\" \", \"-\");\n            audit.append(slug).append('\\n');\n            normalised.add(slug);\n        }\n        log(audit.toString());\n        return List.copyOf(normalised);\n    }\n\n    private void log(String text) {\n        // intentionally left to the caller's logger\n    }\n}\n"
+      },
+      "gapNotes": "The regex knows a fixed list of java.lang.String methods and nothing else — an ignored `Stream.map`, an ignored `Optional.filter`, an ignored `Instant.plus`, or any project method annotated `@CheckReturnValue` is out of its reach and depends entirely on Error Prone or SpotBugs. Error Prone's ReturnValueIgnored covers a curated set of known-pure JDK and Guava methods, not arbitrary user code, so a project wanting full coverage must annotate its own APIs with `@CheckReturnValue`. Java-only paths: detekt's IgnoredReturnValue requires type resolution to be useful on Kotlin. The near-miss is the trap for a line-anchored pattern: `String slug = name.trim().toLowerCase()...` starts with a type and an assignment, and `audit.append(slug)` is a genuinely mutating builder call.",
+      "evidence": {
+        "tier": "documented",
+        "source": "errorprone.info bug patterns — ReturnValueIgnored (ERROR), CheckReturnValue (ERROR); spotbugs.readthedocs.io bug descriptions — RV_RETURN_VALUE_IGNORED, 'Method ignores return value'; detekt.dev potential-bugs (IgnoredReturnValue)."
+      }
+    },
+    {
+      "id": "unclosed-resource",
+      "title": "Closeable opened outside try-with-resources",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Opens a stream, reader or socket in a plain assignment because try-with-resources would have restructured the method it was editing",
+        "Moves a resource out of its try-with-resources header while extracting a variable, and does not add a close",
+        "Adds a second resource to an existing method by copying the assignment form rather than the try header"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "^\\s*(?:final\\s+)?(?:var|[\\w.]+(?:<[^>]*>)?)\\s+\\w+\\s*=\\s*new\\s+(?:FileInputStream|FileOutputStream|FileReader|FileWriter|RandomAccessFile|Scanner|Socket|ServerSocket|ZipFile)\\s*\\("
+            ],
+            "paths": [
+              "**/*.java"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": true
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "pmd",
+            "rule": "CloseResource",
+            "options": {
+              "ruleset": "category/java/errorprone.xml"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.archive;\n\nimport java.io.FileInputStream;\nimport java.io.IOException;\nimport java.nio.file.Path;\nimport java.util.zip.ZipFile;\n\npublic final class ArchiveReader {\n\n    public byte[] header(Path archive) throws IOException {\n        FileInputStream stream = new FileInputStream(archive.toFile());\n        byte[] header = stream.readNBytes(16);\n        return header;\n    }\n\n    public int entryCount(Path archive) throws IOException {\n        ZipFile zip = new ZipFile(archive.toFile());\n        return zip.size();\n    }\n}\n",
+        "nearMiss": "package com.example.archive;\n\nimport java.io.FileInputStream;\nimport java.io.IOException;\nimport java.nio.file.Path;\nimport java.util.zip.ZipFile;\n\npublic final class ArchiveReader {\n\n    public byte[] header(Path archive) throws IOException {\n        try (FileInputStream stream = new FileInputStream(archive.toFile())) {\n            return stream.readNBytes(16);\n        }\n    }\n\n    public int entryCount(Path archive) throws IOException {\n        try (var zip = new ZipFile(archive.toFile())) {\n            return zip.size();\n        }\n    }\n\n    public ArchiveSummary summarise(Path archive) throws IOException {\n        var summary = new ArchiveSummary(archive);\n        summary.load();\n        return summary;\n    }\n}\n"
+      },
+      "gapNotes": "Heuristic on two counts. It recognises a closed list of JDK constructors, so a project-specific Closeable, a factory method (`Files.newInputStream`, `HttpClient.newHttpClient`), or a resource obtained from a builder is missed entirely — PMD's CloseResource is the only detector that generalises, and it needs its `types`/`closeTargets` properties extended to know about project types. It leans on line-anchoring to distinguish an assignment from a try-with-resources header, which fails the moment the header wraps across lines. It also cannot see a resource correctly closed in a `finally` block and will flag it. Kotlin's `use { }` idiom is not modelled at all; detekt's MissingUseCall exists but is not claimed here because it was not confirmed against a specific Kotlin fixture shape in this research pass.",
+      "evidence": {
+        "tier": "documented",
+        "source": "docs.pmd-code.org PMD 7 java errorprone (CloseResource); Java language specification try-with-resources."
+      }
+    },
+    {
+      "id": "sleep-based-test-synchronisation",
+      "title": "Thread.sleep standing in for a real wait condition in a test",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Adds Thread.sleep to make an intermittently failing async test pass on the machine it is running on",
+        "Increases an existing sleep when the test fails again, rather than waiting on the condition",
+        "Uses a sleep because it does not know which awaiting primitive the project already has"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "Thread\\s*\\.\\s*sleep\\s*\\(|TimeUnit\\s*\\.\\s*[A-Z_]+\\s*\\.\\s*sleep\\s*\\("
+            ],
+            "paths": [
+              "**/src/test/**/*.java",
+              "**/src/test/**/*.kt"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.queue;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport java.util.concurrent.TimeUnit;\n\nimport org.junit.jupiter.api.Test;\n\nclass DispatchQueueTest {\n\n    private final DispatchQueue queue = new DispatchQueue();\n\n    @Test\n    void drainsAsynchronously() throws InterruptedException {\n        queue.submit(new Job(\"a\"));\n        queue.submit(new Job(\"b\"));\n        Thread.sleep(500);\n        TimeUnit.MILLISECONDS.sleep(250);\n        assertEquals(0, queue.pendingCount());\n    }\n}\n",
+        "nearMiss": "package com.example.queue;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertTrue;\n\nimport java.util.concurrent.CountDownLatch;\nimport java.util.concurrent.TimeUnit;\n\nimport org.junit.jupiter.api.Test;\nimport org.junit.jupiter.api.Timeout;\n\nclass DispatchQueueTest {\n\n    private final DispatchQueue queue = new DispatchQueue();\n\n    @Test\n    @Timeout(value = 5, unit = TimeUnit.SECONDS)\n    void drainsAsynchronously() throws InterruptedException {\n        CountDownLatch drained = new CountDownLatch(2);\n        queue.onComplete(job -> drained.countDown());\n        queue.submit(new Job(\"a\"));\n        queue.submit(new Job(\"b\"));\n        assertTrue(drained.await(5, TimeUnit.SECONDS), \"queue did not drain within 5s\");\n        assertEquals(0, queue.pendingCount());\n    }\n\n    @Test\n    void reportsSleepBudget() {\n        assertEquals(0L, queue.sleepBudgetMillis());\n    }\n}\n"
+      },
+      "gapNotes": "Downgraded from deterministic to heuristic in the verification pass, on the strength of this note's own next sentence: the call site is matched exactly, but whether that call is a defect is not decidable from the text. Regex-only: no linter in this ecosystem ships a rule banning Thread.sleep in tests, and no honest one could — a sleep is correct when the test is deliberately exercising timing. That makes this a project-policy class whose value comes from the ledger, not the match. It does not see the same mistake expressed through Awaitility with a fixed `pollDelay`, a busy-wait loop, or a Kotlin `runBlocking { delay(500) }` — `delay(` was deliberately left out of the pattern because it collides with too many legitimate project method names. The near-miss carries the two traps: `drained.await(5, TimeUnit.SECONDS)` is a real condition wait using the same TimeUnit import, and a method named `reportsSleepBudget` mentions sleep without calling it.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "java.lang.Thread.sleep and java.util.concurrent.TimeUnit.sleep are JDK APIs; the judgement that their use in a test is a synchronisation smell is jig's policy, backed by no tool rule id — hence the missing tool-rule detector."
+      }
+    },
+    {
+      "id": "equals-without-hashcode",
+      "title": "equals overridden without hashCode (or the reverse)",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Writes equals to make a test comparison pass and stops there, silently breaking every HashMap and HashSet holding the type",
+        "Regenerates equals after adding a field but leaves hashCode covering the old field set",
+        "Adds equals to a class it converted from a record, losing the record's generated hashCode"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "checkstyle",
+            "rule": "EqualsHashCode",
+            "options": {
+              "category": "coding"
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "pmd",
+            "rule": "OverrideBothEqualsAndHashcode",
+            "options": {
+              "ruleset": "category/java/errorprone.xml"
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "detekt",
+            "rule": "EqualsWithHashCodeExist",
+            "options": {
+              "ruleset": "potential-bugs"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.catalogue;\n\nimport java.util.Objects;\n\npublic final class Sku {\n\n    private final String code;\n    private final String variant;\n\n    public Sku(String code, String variant) {\n        this.code = Objects.requireNonNull(code);\n        this.variant = Objects.requireNonNull(variant);\n    }\n\n    @Override\n    public boolean equals(Object other) {\n        if (this == other) {\n            return true;\n        }\n        if (!(other instanceof Sku sku)) {\n            return false;\n        }\n        return code.equals(sku.code) && variant.equals(sku.variant);\n    }\n\n    @Override\n    public String toString() {\n        return code + \"/\" + variant;\n    }\n}\n",
+        "nearMiss": "package com.example.catalogue;\n\nimport java.util.Comparator;\nimport java.util.Objects;\n\npublic final class Sku implements Comparable<Sku> {\n\n    private static final Comparator<Sku> ORDER =\n        Comparator.comparing(Sku::code).thenComparing(Sku::variant);\n\n    private final String code;\n    private final String variant;\n\n    public Sku(String code, String variant) {\n        this.code = Objects.requireNonNull(code);\n        this.variant = Objects.requireNonNull(variant);\n    }\n\n    public String code() {\n        return code;\n    }\n\n    public String variant() {\n        return variant;\n    }\n\n    @Override\n    public boolean equals(Object other) {\n        return other instanceof Sku sku && code.equals(sku.code) && variant.equals(sku.variant);\n    }\n\n    @Override\n    public int hashCode() {\n        return Objects.hash(code, variant);\n    }\n\n    @Override\n    public int compareTo(Sku other) {\n        return ORDER.compare(this, other);\n    }\n}\n"
+      },
+      "gapNotes": "Tool-rule only, because the mistake is the absence of a method: a regex can see `equals` present but cannot prove `hashCode` missing from the same class without parsing class bodies, and a file with two classes defeats any whole-file proximity heuristic. None of these rules catches the worse variant that IS present in both methods — a hashCode that covers fewer fields than equals, which satisfies every rule here and still breaks hash lookups. Nor do they catch equals overloaded on the concrete type (`boolean equals(Sku other)`) instead of overridden on Object; Error Prone has bug patterns in that area but none was confirmed by name in this research pass, so none is claimed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "checkstyle.org coding category (EqualsHashCode); docs.pmd-code.org PMD 7 java errorprone (OverrideBothEqualsAndHashcode); detekt.dev potential-bugs ruleset (EqualsWithHashCodeExist)."
+      }
+    }
+  ]
+}

@@ -32,13 +32,20 @@ function seedFixture(root, fixture, rel) {
   return bytes;
 }
 
+// The approval token is now `--change <id>` and `--path <rel>` together, so the
+// helper remembers what each drafted id writes rather than making every caller
+// repeat the path it already wrote two lines above.
+const plannedPaths = new Map();
+
 function draft(root, changes) {
   fs.writeFileSync(path.join(root, "draft.json"), JSON.stringify({ changes }));
-  return engine.cmdPlan(root, { _: [], change: [], from: "draft.json" });
+  const plan = engine.cmdPlan(root, { _: [], change: [], from: "draft.json" });
+  for (const c of plan.changes || []) plannedPaths.set(root + "|" + c.id, c.path);
+  return plan;
 }
 
 function apply(root, ids) {
-  return engine.cmdApply(root, { _: [], change: ids });
+  return engine.cmdApply(root, { _: [], change: ids, path: ids.map((id) => plannedPaths.get(root + "|" + id)) });
 }
 
 // ---------------------------------------------------------------------------
@@ -67,13 +74,19 @@ test("a target that escapes the project root is refused before any write", () =>
   assert.notEqual(engine.resolveWritePath(root, ".jig/checks/run.mjs"), null);
 });
 
+// The widened boundary (SCOPE, "What this reverses"): the two kinds that carry a
+// linter config or a package install may land anywhere the owner approved by
+// name; the kinds whose target IS the point of the kind keep their narrow list.
 test("the per-kind allowlist decides where a kind may land inside the root", () => {
   const root = tmpProject({});
   assert.equal(engine.targetProblem(root, "write-side-file", ".jig/checks/run.mjs"), null);
   assert.equal(engine.targetProblem(root, "write-side-file", ".github/workflows/jig.yml"), null);
-  assert.match(String(engine.targetProblem(root, "write-side-file", "src/index.js")), /outside what write-side-file may write/);
+  assert.equal(engine.targetProblem(root, "write-side-file", "eslint.config.js"), null);
+  assert.equal(engine.targetProblem(root, "run-install", "package.json"), null);
   assert.equal(engine.targetProblem(root, "write-config", ".jig/config.json"), null);
   assert.match(String(engine.targetProblem(root, "write-config", ".jig/other.json")), /outside what write-config may write/);
+  assert.match(String(engine.targetProblem(root, "write-settings", "src/index.js")), /outside what write-settings may write/);
+  assert.match(String(engine.targetProblem(root, "write-side-file", ".git/hooks/pre-commit")), /inside \.git\//);
 });
 
 test("no change may write the transaction record itself", () => {

@@ -1,0 +1,1496 @@
+{
+  "schemaVersion": 3,
+  "edition": "rust",
+  "displayName": "Rust (cargo / Cargo.toml / workspaces)",
+  "researchedOn": "2026-08-13",
+  "detect": {
+    "files": [
+      "Cargo.toml",
+      "Cargo.lock",
+      "rust-toolchain.toml"
+    ],
+    "extensions": [
+      ".rs",
+      ".toml"
+    ],
+    "packageManagers": [
+      "cargo",
+      "rustup"
+    ],
+    "commentSyntax": {
+      ".rs": "slash",
+      ".toml": "hash"
+    }
+  },
+  "toolchain": [
+    {
+      "id": "clippy",
+      "role": "linter",
+      "why": "Catches the panic-shaped and intent-shaped mistakes rustc happily compiles - unwrap on a Result, dbg! left in, an assertion softened to a constant, a blanket #[allow] - none of which are type errors.",
+      "install": {
+        "rustup": "rustup component add clippy"
+      },
+      "installKind": "package",
+      "uninstall": {
+        "rustup": "rustup component remove clippy"
+      },
+      "configPath": "clippy.toml",
+      "configSample": "avoid-breaking-exported-api = true\nallow-unwrap-in-tests = true\nallow-expect-in-tests = true\nallow-panic-in-tests = true\nallow-print-in-tests = true\ntoo-many-arguments-threshold = 7\n\ndisallowed-macros = [\n    { path = \"std::dbg\", reason = \"debug output must not be committed\" },\n]\n\ndisallowed-methods = [\n    { path = \"std::env::set_var\", reason = \"process-global mutation is not thread-safe\" },\n]\n",
+      "wiring": "Cargo.toml gains `[lints.clippy]` with `all = { level = \"deny\", priority = -1 }` plus per-lint entries such as `unwrap_used = \"deny\"`; workspace members inherit it with `[lints] workspace = true`.",
+      "ciStep": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+      "verify": {
+        "argv": [
+          "cargo",
+          "clippy",
+          "--all-targets",
+          "--",
+          "-D",
+          "clippy::unwrap_used"
+        ],
+        "expected": "prints `error: used `unwrap()` on a `Result` value` with the seeded file:line and a `-D clippy::unwrap-used` note, and exits 101",
+        "expectedExit": 101
+      },
+      "seed": {
+        "path": "src/bin/jig_seed_clippy.rs",
+        "sample": "fn parse_retries(raw: &str) -> u32 {\n    raw.parse::<u32>().unwrap()\n}\n\nfn main() {\n    let retries = parse_retries(\"3\");\n    assert!(retries > 0);\n}\n"
+      }
+    },
+    {
+      "id": "rustfmt",
+      "role": "formatter",
+      "why": "The only check that makes a diff reviewable - it normalises whitespace and import order so a real logic change cannot hide inside a reformat.",
+      "install": {
+        "rustup": "rustup component add rustfmt"
+      },
+      "installKind": "package",
+      "uninstall": {
+        "rustup": "rustup component remove rustfmt"
+      },
+      "configPath": "rustfmt.toml",
+      "configSample": "edition = \"2021\"\nmax_width = 100\nhard_tabs = false\ntab_spaces = 4\nnewline_style = \"Unix\"\nuse_small_heuristics = \"Default\"\nuse_field_init_shorthand = true\nuse_try_shorthand = true\nreorder_imports = true\nreorder_modules = true\nmerge_derives = true\nforce_explicit_abi = true\n",
+      "wiring": "rustfmt.toml at the workspace root is picked up automatically by `cargo fmt`; the gate is `cargo fmt --all --check` run before every other step.",
+      "ciStep": "cargo fmt --all --check",
+      "verify": {
+        "argv": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--check"
+        ],
+        "expected": "prints a unified diff (`Diff in /path/to/src/lib.rs at line N:`) for each misformatted file and exits 1",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "src/bin/jig_seed_rustfmt.rs",
+        "sample": "use std::collections::HashMap;\nuse std::cmp::Ordering;\nfn main( ) {\n\tlet mut counts   = HashMap::new( ) ;\n\tcounts.insert( \"a\" , 1 ) ;\n\tlet ordering = counts.len( ).cmp( &1 ) ;\n\tif ordering == Ordering::Less { println!( \"{:?}\" , counts ) ; }\n}\n"
+      }
+    },
+    {
+      "id": "cargo-check",
+      "role": "type-checker",
+      "why": "The only step that resolves paths and types - it is what turns an invented import, a hallucinated method or a widened signature into a hard error (E0432, E0433, E0308) rather than a runtime surprise.",
+      "install": {
+        "rustup": "rustup toolchain install stable --profile default"
+      },
+      "installKind": "builtin",
+      "configPath": "Cargo.toml",
+      "configSample": "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\nrust-version = \"1.85\"\n\n[lints.rust]\nunsafe_code = \"forbid\"\nunused_must_use = \"deny\"\nunused_results = \"warn\"\nlet_underscore_drop = \"deny\"\nmissing_docs = \"warn\"\n\n[lints.clippy]\nall = { level = \"deny\", priority = -1 }\nunwrap_used = \"deny\"\nexpect_used = \"deny\"\npanic = \"deny\"\ntodo = \"deny\"\nunimplemented = \"deny\"\ndbg_macro = \"deny\"\nprint_stdout = \"deny\"\n",
+      "wiring": "The `[lints.rust]` and `[lints.clippy]` tables above live in Cargo.toml (or `[workspace.lints]` plus `[lints] workspace = true` in each member) so every `cargo check` and `cargo clippy` invocation carries the same levels.",
+      "ciStep": "cargo check --workspace --all-targets --all-features --locked",
+      "verify": {
+        "argv": [
+          "cargo",
+          "check",
+          "--workspace",
+          "--all-targets",
+          "--locked"
+        ],
+        "expected": "prints `error[E0432]: unresolved import `tokio::runtime::AsyncPool`` (or `error[E0433]: failed to resolve`) and exits 101",
+        "expectedExit": 101
+      },
+      "seed": {
+        "path": "src/bin/jig_seed_check.rs",
+        "sample": "use std::collections::HashDeque;\n\nfn main() {\n    let queue: HashDeque<u8> = HashDeque::new();\n    println!(\"{}\", queue.len());\n}\n"
+      }
+    },
+    {
+      "id": "cargo-nextest",
+      "role": "test-runner",
+      "why": "Runs each test in its own process and, unlike `cargo test`, fails the run when nothing matched (`--no-tests fail`) and surfaces SKIPPED counts - this is the step that catches a suite that never actually ran.",
+      "install": {
+        "cargo": "cargo install cargo-nextest --locked"
+      },
+      "installKind": "package",
+      "uninstall": {
+        "cargo": "cargo uninstall cargo-nextest"
+      },
+      "configPath": ".config/nextest.toml",
+      "configSample": "[profile.default]\nretries = 0\nfail-fast = true\nstatus-level = \"fail\"\nfinal-status-level = \"slow\"\nslow-timeout = \"30s\"\n\n[profile.ci]\nretries = 0\nfail-fast = false\nstatus-level = \"skip\"\nfinal-status-level = \"slow\"\nfailure-output = \"immediate-final\"\nslow-timeout = \"60s\"\n",
+      "wiring": ".config/nextest.toml at the workspace root defines the `ci` profile; the project runs it with `cargo nextest run --profile ci`. Doc-tests are not run by nextest, so `cargo test --doc` stays alongside it.",
+      "ciStep": "cargo nextest run --workspace --all-features --profile ci --no-tests fail && cargo test --workspace --doc",
+      "verify": {
+        "argv": [
+          "cargo",
+          "nextest",
+          "run",
+          "--workspace",
+          "--no-tests",
+          "fail"
+        ],
+        "expected": "a seeded failing test prints a `FAIL [ 0.0xxs] crate test_name` line plus the captured panic and exits 100; an empty suite prints `error: no tests to run` and exits 4",
+        "expectedExit": 100
+      },
+      "seed": {
+        "path": "tests/jig_seed_nextest.rs",
+        "sample": "#[test]\nfn jig_seed_failing_test() {\n    assert_eq!(2 + 2, 5, \"seeded failure: the runner must report this test as FAIL\");\n}\n"
+      }
+    },
+    {
+      "id": "cargo-deny",
+      "role": "security-scanner",
+      "why": "The only check that reads the resolved dependency graph - RUSTSEC advisories, yanked crates, wildcard version requirements, unknown registries and license drift are invisible to clippy and rustc.",
+      "install": {
+        "cargo": "cargo install --locked cargo-deny"
+      },
+      "installKind": "package",
+      "uninstall": {
+        "cargo": "cargo uninstall cargo-deny"
+      },
+      "configPath": "deny.toml",
+      "configSample": "[advisories]\nyanked = \"deny\"\nignore = []\n\n[licenses]\nallow = [\"MIT\", \"Apache-2.0\", \"BSD-2-Clause\", \"BSD-3-Clause\", \"ISC\", \"Unicode-3.0\"]\nconfidence-threshold = 0.93\n\n[bans]\nmultiple-versions = \"warn\"\nwildcards = \"deny\"\n\n[sources]\nunknown-registry = \"deny\"\nunknown-git = \"deny\"\n",
+      "wiring": "deny.toml at the workspace root (scaffolded by `cargo deny init`) is read automatically by `cargo deny check`; no manifest entry is needed.",
+      "ciStep": "cargo deny check advisories bans licenses sources",
+      "verify": {
+        "argv": [
+          "cargo",
+          "deny",
+          "check",
+          "advisories"
+        ],
+        "expected": "prints `error[vulnerability]:` naming the RUSTSEC-YYYY-NNNN id and the affected crate version, and exits 1",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "Cargo.toml",
+        "sample": "[package]\nname = \"jig-seed-deny\"\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n[dependencies]\ntime = \"=0.1.45\"\n"
+      }
+    },
+    {
+      "id": "cargo",
+      "role": "build",
+      "why": "Proves Cargo.lock still matches the manifest and that every target actually links - it is what catches a dependency an agent wrote into Cargo.toml but never resolved, or a feature combination that only compiles on the machine it was written on.",
+      "install": {
+        "rustup": "rustup toolchain install stable --profile minimal"
+      },
+      "installKind": "builtin",
+      "configPath": "Cargo.toml",
+      "configSample": "[workspace]\nmembers = [\"crates/*\"]\nresolver = \"2\"\n\n[workspace.package]\nedition = \"2021\"\nrust-version = \"1.85\"\n\n[workspace.lints.rust]\nunsafe_code = \"forbid\"\nunused_must_use = \"deny\"\n\n[workspace.lints.clippy]\nall = { level = \"deny\", priority = -1 }\n\n[profile.release]\noverflow-checks = true\ndebug = 1\n",
+      "wiring": "Cargo.lock is committed and every CI invocation passes --locked, so a manifest edit without a matching lockfile update fails the build instead of silently re-resolving.",
+      "ciStep": "cargo build --workspace --all-targets --locked",
+      "verify": {
+        "argv": [
+          "cargo",
+          "build",
+          "--workspace",
+          "--locked"
+        ],
+        "expected": "prints `error: the lock file /path/Cargo.lock needs to be updated but --locked was passed to prevent this` and exits 101",
+        "expectedExit": 101
+      },
+      "seed": {
+        "path": "Cargo.toml",
+        "sample": "[package]\nname = \"jig-seed-lockfile\"\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n[dependencies]\nlibc = \"=0.2.155\"\n"
+      }
+    }
+  ],
+  "classes": [
+    {
+      "id": "unwrap-on-fallible",
+      "title": "unwrap/expect on a fallible value in shipping code",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "reaches for .unwrap() to get past a Result the session did not want to thread through the signature",
+        "converts a ? into .expect(\"...\") when the enclosing fn does not return Result, rather than changing the return type",
+        "leaves .unwrap() in the happy path after a refactor because the test suite only exercises the happy path"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\.unwrap\\(\\)",
+              "\\.expect\\("
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "unwrap_used",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "expect_used",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "use std::fs;\nuse std::path::Path;\n\npub struct Config {\n    pub retries: u32,\n}\n\npub fn load(path: &Path) -> Config {\n    let raw = fs::read_to_string(path).unwrap();\n    let retries = raw\n        .lines()\n        .find(|l| l.starts_with(\"retries=\"))\n        .expect(\"retries key missing\")\n        .trim_start_matches(\"retries=\")\n        .parse::<u32>()\n        .unwrap();\n    Config { retries }\n}\n",
+        "nearMiss": "use std::fs;\nuse std::io;\nuse std::path::Path;\n\nfn default_retries() -> u32 {\n    3\n}\n\npub struct Config {\n    pub retries: u32,\n}\n\npub fn load(path: &Path) -> io::Result<Config> {\n    let raw = fs::read_to_string(path)?;\n    let retries = raw\n        .lines()\n        .find_map(|l| l.strip_prefix(\"retries=\"))\n        .and_then(|v| v.trim().parse::<u32>().ok())\n        .unwrap_or_else(default_retries);\n    Ok(Config { retries })\n}\n"
+      },
+      "gapNotes": "The regex cannot tell test code from shipping code, so it fires inside #[cfg(test)] modules where unwrap is idiomatic; clippy.toml allow-unwrap-in-tests/allow-expect-in-tests fixes that for the tool-rule detector only. It also misses the equivalents .unwrap_unchecked(), Option::unwrap_or_else(|| panic!(..)), and slice indexing. Blind spot shared by every string-blanked detector here: the driver treats `'` as an opening quote, so on a line carrying an unpaired lifetime tick (`&'static`, `impl<'a>`) everything after the tick is blanked and a violation on that line is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::unwrap_used and clippy::expect_used are listed in the Clippy lint index (rust-lang.github.io/rust-clippy, restriction group); allow-unwrap-in-tests / allow-expect-in-tests are documented clippy.toml keys in doc.rust-lang.org/clippy/lint_configuration.html."
+      }
+    },
+    {
+      "id": "panic-macro-in-library",
+      "title": "panic!/todo!/unimplemented! left in a library path",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "stubs a match arm or trait method with todo!() to make the crate compile, then reports the feature as done",
+        "writes panic!(\"unreachable\") instead of returning an error variant it would have had to add to the enum",
+        "fills an unimplemented branch with unimplemented!() while claiming the module is complete"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bpanic!\\s*[\\(\\[\\{]",
+              "\\btodo!\\s*[\\(\\[\\{]",
+              "\\bunimplemented!\\s*[\\(\\[\\{]"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "panic",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "todo",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "unimplemented",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "#[derive(Debug)]\npub enum Shape {\n    Circle(f64),\n    Square(f64),\n    Triangle(f64, f64),\n}\n\npub fn area(shape: &Shape) -> f64 {\n    match shape {\n        Shape::Circle(r) => std::f64::consts::PI * r * r,\n        Shape::Square(s) => s * s,\n        Shape::Triangle(_, _) => todo!(\"triangle area\"),\n    }\n}\n\npub fn scale(_shape: &Shape, factor: f64) -> Shape {\n    if factor <= 0.0 {\n        panic!(\"factor must be positive\");\n    }\n    unimplemented!(\"scaling is not wired up yet\")\n}\n",
+        "nearMiss": "use std::fmt;\n\n#[derive(Debug)]\npub enum AreaError {\n    Negative,\n}\n\nimpl fmt::Display for AreaError {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        f.write_str(\"negative dimension\")\n    }\n}\n\nimpl std::error::Error for AreaError {}\n\npub fn area(width: f64, height: f64) -> Result<f64, AreaError> {\n    if width < 0.0 || height < 0.0 {\n        return Err(AreaError::Negative);\n    }\n    Ok(width * height)\n}\n\npub fn area_or_zero(width: f64, height: f64) -> f64 {\n    std::panic::catch_unwind(|| area(width, height).unwrap_or(0.0)).unwrap_or(0.0)\n}\n"
+      },
+      "gapNotes": "Misses the panics that arrive through other doors: assert!/assert_eq! in shipping code, Option::expect, integer overflow in debug, and slice indexing. clippy::panic also fires on #[should_panic] test helpers unless allow-panic-in-tests is set. Blind spot shared by every string-blanked detector here: the driver treats `'` as an opening quote, so on a line carrying an unpaired lifetime tick (`&'static`, `impl<'a>`) everything after the tick is blanked and a violation on that line is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::panic, clippy::todo and clippy::unimplemented are restriction-group lints in the Clippy lint index (rust-lang.github.io/rust-clippy)."
+      }
+    },
+    {
+      "id": "swallowed-exception",
+      "title": "Result discarded with let _ = or an empty Err arm",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "writes let _ = fallible(); to clear an unused_must_use warning it could not diagnose",
+        "adds Err(_) => {} to a match so the code compiles without deciding what the failure means",
+        "calls .ok() on a Result purely to drop it, turning a hard failure into a silent no-op"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "let\\s+_\\s*=\\s*",
+              "Err\\s*\\(\\s*_\\s*\\)\\s*=>\\s*\\{\\s*\\}"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "let_underscore_must_use",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "unused_result_ok",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "cargo-check",
+            "rule": "unused_must_use",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "use std::fs::File;\nuse std::io::Write;\n\npub fn persist(path: &str, body: &str) {\n    let _ = std::fs::create_dir_all(\"out\");\n    match File::create(path).and_then(|mut f| f.write_all(body.as_bytes())) {\n        Ok(()) => {}\n        Err(_) => {}\n    }\n}\n",
+        "nearMiss": "use std::fs::File;\nuse std::io::{self, Write};\n\npub fn persist(path: &str, body: &str) -> io::Result<()> {\n    let _created = std::fs::create_dir_all(\"out\")?;\n    let mut file = File::create(path)?;\n    match file.write_all(body.as_bytes()) {\n        Ok(()) => Ok(()),\n        Err(err) if err.kind() == io::ErrorKind::Interrupted => file.write_all(body.as_bytes()),\n        Err(err) => Err(err),\n    }\n}\n"
+      },
+      "gapNotes": "let _ = is genuinely correct for suppressing a lock-guard drop order or an intentionally ignored send on a closed channel, so the driver detector is heuristic and needs a per-repo allowlist. It does not catch .ok(); on its own line, .unwrap_or_default() used to erase an error, or an Err arm that logs and then continues. Blind spot shared by every string-blanked detector here: the driver treats `'` as an opening quote, so on a line carrying an unpaired lifetime tick (`&'static`, `impl<'a>`) everything after the tick is blanked and a violation on that line is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::let_underscore_must_use and clippy::unused_result_ok appear in the Clippy lint index; unused_must_use is a warn-by-default rustc lint listed in doc.rust-lang.org/rustc/lints."
+      }
+    },
+    {
+      "id": "softened-assertion",
+      "title": "assertion weakened to make a failing test pass",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "replaces assert_eq!(got, expected) with assert!(got.is_ok()) when the expected value stops matching",
+        "drops in assert!(true) so the test body is non-empty after deleting the real check",
+        "changes an exact comparison to a range or a truthiness check rather than fixing the code under test"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "assert!\\s*\\(\\s*(?:true|1\\s*==\\s*1)\\s*[,)]",
+              "assert!\\s*\\(\\s*[A-Za-z_][A-Za-z_0-9]*\\.is_ok\\(\\)\\s*[,)]"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "assertions_on_constants",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "assertions_on_result_states",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "pub fn parse_port(raw: &str) -> Result<u16, std::num::ParseIntError> {\n    raw.trim().parse::<u16>()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn parses_a_port() {\n        let parsed = parse_port(\"8080\");\n        assert!(parsed.is_ok());\n    }\n\n    #[test]\n    fn rejects_garbage() {\n        assert!(true);\n    }\n}\n",
+        "nearMiss": "pub fn parse_port(raw: &str) -> Result<u16, std::num::ParseIntError> {\n    raw.trim().parse::<u16>()\n}\n\nfn is_okay_range(port: u16) -> bool {\n    (1024..=65535).contains(&port)\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn parses_a_port() {\n        let parsed = parse_port(\"8080\").expect(\"8080 must parse\");\n        assert_eq!(parsed, 8080);\n        assert!(is_okay_range(parsed), \"port {parsed} outside the allowed range\");\n    }\n\n    #[test]\n    fn rejects_garbage() {\n        assert!(parse_port(\"not-a-port\").is_err());\n    }\n}\n"
+      },
+      "gapNotes": "Only catches the two loudest shapes. A softening that changes assert_eq!(got, 42) to assert!(got > 0), widens a float tolerance, or swaps a specific expected error for a catch-all is invisible to both the regex and clippy - only a diff review against the previous assertion catches those. Blind spot shared by every string-blanked detector here: the driver treats `'` as an opening quote, so on a line carrying an unpaired lifetime tick (`&'static`, `impl<'a>`) everything after the tick is blanked and a violation on that line is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::assertions_on_constants and clippy::assertions_on_result_states are in the Clippy lint index (rust-lang.github.io/rust-clippy)."
+      }
+    },
+    {
+      "id": "skipped-test",
+      "title": "#[ignore] left on a test instead of fixing it",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "adds #[ignore] to a test it cannot make pass, then reports the suite green",
+        "marks a test #[ignore = \"flaky\"] after one non-deterministic failure rather than finding the race",
+        "keeps a scaffolding #[ignore] from a debugging loop in the final diff"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "#\\s*\\[\\s*ignore\\s*[\\]=]"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "pub fn checksum(bytes: &[u8]) -> u32 {\n    bytes.iter().fold(0u32, |acc, b| acc.rotate_left(3) ^ u32::from(*b))\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    #[ignore]\n    fn matches_reference_vector() {\n        assert_eq!(checksum(b\"abc\"), 263_046);\n    }\n\n    #[test]\n    #[ignore = \"flaky on CI\"]\n    fn stable_across_runs() {\n        assert_eq!(checksum(b\"abc\"), checksum(b\"abc\"));\n    }\n}\n",
+        "nearMiss": "pub struct Matcher {\n    pub ignore_case: bool,\n}\n\nimpl Matcher {\n    pub fn matches(&self, haystack: &str, needle: &str) -> bool {\n        if self.ignore_case {\n            haystack.to_lowercase().contains(&needle.to_lowercase())\n        } else {\n            haystack.contains(needle)\n        }\n    }\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    #[cfg_attr(miri, ignore)]\n    fn honours_case_flag() {\n        let m = Matcher { ignore_case: true };\n        assert!(m.matches(\"Hello\", \"hello\"));\n    }\n}\n"
+      },
+      "gapNotes": "No lint exists for this - neither clippy nor rustc flags #[ignore], and cargo test / cargo nextest both exit 0 with the test merely counted as ignored, so the check-driver regex is the only gate. The regex deliberately does not fire on #[cfg_attr(miri, ignore)], which means a session can hide a permanent skip behind any cfg_attr predicate.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "The #[ignore] test attribute is documented in the Rust book test chapter; the absence of a clippy lint id for it was confirmed against the full Clippy lint index, so no tool-rule detector is claimed."
+      }
+    },
+    {
+      "id": "emptied-test-body",
+      "title": "test kept as a name with an empty or trivially-passing body",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "deletes the failing assertions but keeps the #[test] fn so the test count does not drop",
+        "replaces a test body with a TODO comment, which leaves an empty block after the comment is stripped",
+        "reduces a Result-returning test to a bare Ok(()) so it passes without exercising anything"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "#\\s*\\[\\s*test\\s*\\]\\s*(?:async\\s+)?fn\\s+[A-Za-z_][A-Za-z_0-9]*\\s*\\(\\s*\\)\\s*\\{\\s*\\}",
+              "#\\s*\\[\\s*test\\s*\\]\\s*(?:async\\s+)?fn\\s+[A-Za-z_][A-Za-z_0-9]*\\s*\\(\\s*\\)\\s*->\\s*[A-Za-z_0-9:<>,() ]+\\{\\s*Ok\\(\\(\\)\\)\\s*\\}"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "pub fn normalize(input: &str) -> String {\n    input.trim().to_lowercase()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn trims_and_lowers() {}\n\n    #[test]\n    fn round_trips() -> Result<(), std::fmt::Error> {\n        Ok(())\n    }\n}\n",
+        "nearMiss": "pub fn normalize(input: &str) -> String {\n    input.trim().to_lowercase()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    fn fixture() {}\n\n    #[test]\n    fn trims_and_lowers() {\n        fixture();\n        assert_eq!(normalize(\"  MiXeD  \"), \"mixed\");\n    }\n\n    #[test]\n    fn round_trips() -> Result<(), std::num::ParseIntError> {\n        let n: i32 = normalize(\" 42 \").parse()?;\n        assert_eq!(n, 42);\n        Ok(())\n    }\n}\n"
+      },
+      "gapNotes": "Only the two degenerate shapes are matched. A test whose body still calls the function but asserts nothing, or one reduced to a single println!, still looks alive to this detector. #[tokio::test] and other custom test attributes are not covered because the attribute path varies per crate; extend the pattern per repo.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "Derived from the #[test] attribute form documented in the Rust book; no clippy or rustc lint inspects test-body emptiness, so no tool-rule id is claimed."
+      }
+    },
+    {
+      "id": "bare-should-panic",
+      "title": "#[should_panic] without an expected message",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "wraps a test in #[should_panic] so any panic - including an unrelated unwrap in the setup - counts as a pass",
+        "strips the expected = \"...\" argument when the message drifts, instead of updating it"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "#\\s*\\[\\s*should_panic\\s*\\]"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "should_panic_without_expect",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "pub fn divide(numerator: i64, denominator: i64) -> i64 {\n    numerator / denominator\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    #[should_panic]\n    fn rejects_zero_denominator() {\n        divide(10, 0);\n    }\n}\n",
+        "nearMiss": "pub fn divide(numerator: i64, denominator: i64) -> i64 {\n    if denominator == 0 {\n        panic!(\"denominator must be non-zero\");\n    }\n    numerator / denominator\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    #[should_panic(expected = \"denominator must be non-zero\")]\n    fn rejects_zero_denominator() {\n        divide(10, 0);\n    }\n}\n"
+      },
+      "gapNotes": "An expected = \"...\" substring that is too short or too generic (\"error\", \"failed\") passes both the regex and the lint while still accepting the wrong panic. Neither detector checks that the panic came from the line under test rather than from setup code.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::should_panic_without_expect is listed in the Clippy lint index (pedantic group)."
+      }
+    },
+    {
+      "id": "blanket-lint-suppression",
+      "title": "blanket #[allow] used to silence a diagnostic",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "adds #![allow(dead_code)] at the crate root rather than deleting or wiring up the unused item",
+        "annotates a function with #[allow(clippy::unwrap_used)] instead of handling the Result",
+        "reaches for #[allow(warnings)] when a refactor produces warnings it does not want to triage"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "#!?\\s*\\[\\s*allow\\s*\\(\\s*(?:dead_code|unused|unused_variables|unused_imports|unused_mut|warnings)\\s*\\)\\s*\\]",
+              "#!?\\s*\\[\\s*allow\\s*\\(\\s*clippy::[a-z_]+\\s*\\)\\s*\\]"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "allow_attributes_without_reason",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "allow_attributes",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "#![allow(dead_code)]\n\nuse std::collections::HashMap;\n\n#[allow(clippy::unwrap_used)]\npub fn index_of(map: &HashMap<String, usize>, key: &str) -> usize {\n    *map.get(key).unwrap()\n}\n\nstruct Unused {\n    field: u8,\n}\n",
+        "nearMiss": "use std::collections::HashMap;\n\n#[expect(dead_code, reason = \"only constructed on windows\")]\nstruct WindowsOnly {\n    handle: usize,\n}\n\n#[cfg_attr(test, allow(dead_code))]\npub fn index_of(map: &HashMap<String, usize>, key: &str) -> Option<usize> {\n    map.get(key).copied()\n}\n\n#[allow(clippy::needless_return, reason = \"keeps the early exit obvious\")]\npub fn first_word(text: &str) -> &str {\n    return text.split_whitespace().next().unwrap_or(\"\");\n}\n"
+      },
+      "gapNotes": "The regex only knows the enumerated rustc lint names plus any single clippy:: lint without a reason; #[allow(some_other_lint)] and multi-lint allow lists such as #[allow(dead_code, unused)] slip past it. clippy::allow_attributes_without_reason is a restriction lint and must be enabled explicitly; it accepts any reason string, however hollow.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::allow_attributes and clippy::allow_attributes_without_reason are in the Clippy lint index; the #[expect(..., reason = ...)] form is the stable rustc alternative documented in the rustc lint-levels reference."
+      }
+    },
+    {
+      "id": "undocumented-unsafe",
+      "title": "unsafe used without a safety argument",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "adds unsafe impl Send/Sync for a type holding a raw pointer to get past a \"cannot be sent between threads\" error",
+        "wraps a borrow-checker conflict in an unsafe block with no SAFETY comment explaining the invariant"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "unsafe\\s+impl\\s+(?:Send|Sync)\\s+for\\s"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "undocumented_unsafe_blocks",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "not_unsafe_ptr_arg_deref",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "cargo-check",
+            "rule": "unsafe_code",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "use std::os::raw::c_void;\n\npub struct RawHandle {\n    ptr: *mut c_void,\n}\n\nunsafe impl Send for RawHandle {}\nunsafe impl Sync for RawHandle {}\n\nimpl RawHandle {\n    pub fn as_ptr(&self) -> *mut c_void {\n        self.ptr\n    }\n}\n",
+        "nearMiss": "use std::marker::PhantomData;\n\npub unsafe trait Sealed {}\n\npub struct Token<T> {\n    value: usize,\n    _marker: PhantomData<T>,\n}\n\nunsafe impl<T> Sealed for Token<T> {}\n\npub struct Sendable {\n    inner: Vec<u8>,\n}\n\nimpl Sendable {\n    pub fn len(&self) -> usize {\n        self.inner.len()\n    }\n\n    pub fn is_empty(&self) -> bool {\n        self.inner.is_empty()\n    }\n}\n"
+      },
+      "gapNotes": "The check driver blanks comments before matching, so it structurally cannot tell a documented unsafe block from an undocumented one - only clippy::undocumented_unsafe_blocks can, and only when it is enabled from the restriction group. The regex therefore covers just the auto-trait impls, and misses unsafe fn, unsafe blocks, and generic unsafe impl<T> Send forms. Blind spot shared by every string-blanked detector here: the driver treats `'` as an opening quote, so on a line carrying an unpaired lifetime tick (`&'static`, `impl<'a>`) everything after the tick is blanked and a violation on that line is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::undocumented_unsafe_blocks and clippy::not_unsafe_ptr_arg_deref are in the Clippy lint index; unsafe_code is an allow-by-default rustc lint in doc.rust-lang.org/rustc/lints/listing/allowed-by-default.html and is settable to \"forbid\" from Cargo.toml [lints.rust]."
+      }
+    },
+    {
+      "id": "numeric-cast-to-silence-checker",
+      "title": "`as` cast used to make the types line up",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "appends `as usize` or `as u32` to a mismatched-type error instead of using TryFrom and handling the failure",
+        "casts an i64 to f64 to reuse a float helper, silently losing precision on large inputs",
+        "widens a signed value with `as u64` to satisfy an API, turning a negative into a huge positive"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\bas\\s+(?:u8|u16|u32|u64|u128|usize|i8|i16|i32|i64|i128|isize)\\b",
+              "\\bas\\s+(?:f32|f64)\\b"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "cast_possible_truncation",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "cast_sign_loss",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "as_conversions",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "pub fn resample(samples: &[i64], gain: i64) -> Vec<u8> {\n    let mut out = Vec::with_capacity(samples.len());\n    for s in samples {\n        let scaled = s * gain;\n        let ratio = scaled as f64 / i64::MAX as f64;\n        out.push((ratio * 255.0) as u8);\n    }\n    out\n}\n",
+        "nearMiss": "pub fn resample(samples: &[i64], gain: i64) -> Result<Vec<u8>, std::num::TryFromIntError> {\n    let mut out = Vec::with_capacity(samples.len());\n    for s in samples {\n        let scaled = s.saturating_mul(gain);\n        let clamped = scaled.clamp(0, 255);\n        out.push(u8::try_from(clamped)?);\n    }\n    Ok(out)\n}\n\npub fn label(bytes: impl AsRef<[u8]>) -> String {\n    String::from_utf8_lossy(bytes.as_ref()).into_owned()\n}\n"
+      },
+      "gapNotes": "Plenty of `as` casts are correct and unavoidable (usize <-> u64 on a known-small value, pointer casts, enum-to-integer), so on most codebases this class must run as a review signal rather than a hard gate. The regex does not see casts written as `as _` with inference, and clippy::cast_possible_truncation is pedantic-group so it is off unless enabled. Blind spot shared by every string-blanked detector here: the driver treats `'` as an opening quote, so on a line carrying an unpaired lifetime tick (`&'static`, `impl<'a>`) everything after the tick is blanked and a violation on that line is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::cast_possible_truncation, clippy::cast_sign_loss and clippy::as_conversions are all present in the Clippy lint index (pedantic and restriction groups)."
+      }
+    },
+    {
+      "id": "invented-import-or-api",
+      "title": "import or API path that does not exist",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "writes `use tokio::runtime::AsyncPool;` for a type that was never in the crate, recalled from a plausible-sounding API surface",
+        "calls a helper on the wrong crate version - the name existed two majors ago, or exists on a different type",
+        "imports from a crate that is not in Cargo.toml at all and never runs cargo check to find out"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "cargo-check",
+            "rule": "E0432",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "cargo-check",
+            "rule": "E0433",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "use serde_json::from_str_lossy;\nuse tokio::runtime::AsyncPool;\n\npub async fn load_records(raw: &str) -> Vec<String> {\n    let pool = AsyncPool::with_threads(4);\n    let parsed: Vec<String> = from_str_lossy(raw);\n    pool.spawn_blocking(move || parsed).await\n}\n",
+        "nearMiss": "use std::collections::HashMap;\nuse std::sync::Arc;\n\npub struct Registry {\n    entries: Arc<HashMap<String, String>>,\n}\n\nimpl Registry {\n    pub fn new(entries: HashMap<String, String>) -> Self {\n        Self { entries: Arc::new(entries) }\n    }\n\n    pub fn get(&self, key: &str) -> Option<&String> {\n        self.entries.get(key)\n    }\n}\n"
+      },
+      "gapNotes": "Tool-rule only on purpose: no regex over source text can know which paths resolve, because that depends on the resolved dependency graph and the enabled feature set. cargo check must run with --all-targets --all-features or an invented path behind a disabled feature stays hidden, and a crate missing from Cargo.toml fails earlier during resolution with a different diagnostic than E0432.",
+      "evidence": {
+        "tier": "documented",
+        "source": "E0432 (\"An import was unresolved\") and E0433 (\"An undeclared crate, module, or type was used\") confirmed verbatim from `rustc --explain` on rustc 1.94.1."
+      }
+    },
+    {
+      "id": "hardcoded-config-value",
+      "title": "endpoint, host or port hardcoded instead of read from config",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "pins http://localhost:8080 in the client because that is what the session saw working locally",
+        "inlines a bind address rather than threading a config struct through the constructor",
+        "hardcodes a value it was asked to make configurable, because the config plumbing was the harder half"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\"(?:0\\.0\\.0\\.0|127\\.0\\.0\\.1):\\d+\""
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": false,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "use std::time::Duration;\n\npub struct Client {\n    base_url: String,\n    timeout: Duration,\n}\n\nimpl Client {\n    pub fn new() -> Self {\n        Self {\n            base_url: \"http://localhost:8080/api/v1\".to_string(),\n            timeout: Duration::from_secs(30),\n        }\n    }\n}\n\nimpl Default for Client {\n    fn default() -> Self {\n        Self::new()\n    }\n}\n\npub fn bind_address() -> &'static str {\n    \"0.0.0.0:9000\"\n}\n",
+        "nearMiss": "use std::env;\nuse std::time::Duration;\n\nconst DEFAULT_TIMEOUT_SECS: u64 = 30;\n\npub struct Client {\n    base_url: String,\n    timeout: Duration,\n}\n\nimpl Client {\n    pub fn from_env() -> Result<Self, env::VarError> {\n        let base_url = env::var(\"SERVICE_BASE_URL\")?;\n        let timeout = env::var(\"SERVICE_TIMEOUT_SECS\")\n            .ok()\n            .and_then(|v| v.parse().ok())\n            .map(Duration::from_secs)\n            .unwrap_or_else(|| Duration::from_secs(DEFAULT_TIMEOUT_SECS));\n        Ok(Self { base_url, timeout })\n    }\n}\n\npub fn bind_address() -> String {\n    env::var(\"SERVICE_BIND\").unwrap_or_else(|_| String::from(\"[::1]:0\"))\n}\n"
+      },
+      "gapNotes": "The check driver blanks comments unconditionally and exposes no switch to stop it, so this class's original URL pattern (\"https?://...\") could never fire: the `//` inside the literal is read as a line comment and blanks the rest of the line before matching. That pattern was removed rather than softened, which means a hardcoded http://localhost:8080 URL is now missed entirely and only a bare host:port literal is caught. A production hostname, an S3 bucket name and a magic timeout integer were never covered. It runs with stripStrings off because the evidence lives inside the literal, so a bind address in a test fixture or a doc example fires too - scope the paths to src/ and exclude tests/ per repo.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "No clippy or rustc lint covers hardcoded endpoints; the full Clippy lint index was searched and none matched, so this class is check-driver only."
+      }
+    },
+    {
+      "id": "hardcoded-secret",
+      "title": "credential embedded in source",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "pastes a working key into a const so the example it just wrote actually runs",
+        "moves a secret out of an env var and into the source when the env lookup returned None during a test run"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "(?:[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Tt][Oo][Kk][Ee][Nn])[A-Za-z_0-9]*\\s*(?::\\s*&'?[a-z_]*\\s*str)?\\s*=\\s*\"[^\"]{8,}\"",
+              "\"[A-Za-z0-9+/]{32,}={0,2}\""
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": false,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "pub struct Credentials {\n    pub user: String,\n    pub password: String,\n}\n\npub const API_KEY: &str = \"sk_live_9f2c4b8a17de40e6\";\nconst SIGNING_SECRET: &str = \"aGVsbG93b3JsZHNlY3JldGtleXZhbHVlMTIzNDU2Nzg5MA==\";\n\npub fn service_account() -> Credentials {\n    let password = \"correct-horse-battery\";\n    Credentials {\n        user: String::from(\"deploy-bot\"),\n        password: password.to_string(),\n    }\n}\n\npub fn signing_secret() -> &'static str {\n    SIGNING_SECRET\n}\n",
+        "nearMiss": "use std::env;\n\npub const AUTH_HEADER: &str = \"authorization\";\npub const TOKEN_PREFIX: &str = \"Bearer \";\n\npub struct Credentials {\n    pub user: String,\n    pub password: String,\n}\n\npub fn from_environment() -> Result<Credentials, env::VarError> {\n    Ok(Credentials {\n        user: env::var(\"SERVICE_USER\")?,\n        password: env::var(\"SERVICE_PASSWORD\")?,\n    })\n}\n\npub fn header_value(token: &str) -> String {\n    format!(\"{TOKEN_PREFIX}{token}\")\n}\n"
+      },
+      "gapNotes": "Name-driven and therefore heuristic: a credential stored in a const called BOOTSTRAP or CFG_BLOB is invisible, and a long non-secret literal named SECRET_HEADER_NAME is a false positive. It runs with stripStrings off because the evidence is the literal itself, but comments cannot be left in - the driver always blanks them - so a base64 blob that happens to contain `//` is truncated there and the second pattern, which needs the closing quote, misses it; a commented-out key is correspondingly never seen. It reads only .rs files, so a key committed to a .env, a fixture JSON or a CI workflow is out of scope - pair this with a dedicated secret scanner in CI.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "No clippy lint detects embedded credentials (the full Clippy lint index was searched); cargo-deny covers dependency supply chain, not source secrets, so no tool-rule id is claimed here."
+      }
+    },
+    {
+      "id": "wildcard-dependency",
+      "title": "dependency pinned to \"*\" in Cargo.toml",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "writes version = \"*\" because it does not know which version has the API it just called",
+        "loosens a pin to \"*\" to make cargo resolve after adding a crate mid-session"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "^[ \\t]*[A-Za-z0-9_-]+[ \\t]*=[ \\t]*\"\\*\"[ \\t]*$",
+              "version[ \\t]*=[ \\t]*\"\\*\""
+            ],
+            "paths": [
+              "**/Cargo.toml"
+            ],
+            "stripComments": false,
+            "stripStrings": false,
+            "perLine": true
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "wildcard_dependencies",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "[package]\nname = \"ingest\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nrand = \"*\"\nserde = { version = \"*\", features = [\"derive\"] }\n",
+        "nearMiss": "[package]\nname = \"ingest\"\nversion = \"0.1.0\"\nedition = \"2021\"\ninclude = [\"src/**/*.rs\", \"Cargo.toml\"]\n\n[dependencies]\nrand = \"0.8.5\"\nwildcard = \"0.3\"\nserde = { version = \"1\", features = [\"derive\"] }\n\n[dev-dependencies]\nproptest = \"1\"\n"
+      },
+      "gapNotes": "Fixtures for this class are TOML, not Rust, because the mistake lives in the manifest. The driver blanks `#` comments in .toml, so a commented-out `# rand = \"*\"` is correctly ignored - but by the same token a wildcard reintroduced by uncommenting is only caught on the next run. It does not catch the softer versions of the same drift - a `>=1.0` range, a git dependency without a rev, a path dependency pointing outside the workspace, or a wildcard inherited through [workspace.dependencies] in another file. clippy::wildcard_dependencies only fires when the cargo group is enabled (`cargo clippy -- -W clippy::cargo`).",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::wildcard_dependencies is listed in the Clippy lint index under the cargo group; the manifest dependency syntax is from doc.rust-lang.org/cargo/reference/manifest.html."
+      }
+    },
+    {
+      "id": "debug-artifact-left-behind",
+      "title": "dbg!/println!/eprintln! left in a library path",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "instruments a function with dbg!() while chasing a bug and never removes it",
+        "uses println! for progress reporting in a library where the project uses tracing"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bdbg!\\s*\\(",
+              "\\bprintln!\\s*\\(",
+              "\\beprintln!\\s*\\("
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "dbg_macro",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "print_stdout",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "print_stderr",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "use std::collections::BTreeMap;\n\npub fn summarize(counts: &BTreeMap<String, u64>) -> u64 {\n    let total: u64 = counts.values().sum();\n    println!(\"total = {total}\");\n    dbg!(counts.len());\n    if total == 0 {\n        eprintln!(\"no counts recorded\");\n    }\n    total\n}\n",
+        "nearMiss": "use std::collections::BTreeMap;\nuse std::fmt::{self, Write as _};\n\npub struct Summary {\n    pub total: u64,\n}\n\nimpl fmt::Display for Summary {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        write!(f, \"total = {}\", self.total)\n    }\n}\n\npub fn summarize(counts: &BTreeMap<String, u64>) -> Result<String, fmt::Error> {\n    let total: u64 = counts.values().sum();\n    let mut out = String::new();\n    writeln!(out, \"entries = {}\", counts.len())?;\n    write!(out, \"{}\", Summary { total })?;\n    Ok(out)\n}\n"
+      },
+      "gapNotes": "A binary crate legitimately prints, so scope the paths to library modules or set allow-print-in-tests plus a src/bin exclusion. The regex does not catch print!/eprint! without the newline suffix, std::io::stdout().write_all, or a logging macro configured to write to stdout. Blind spot shared by every string-blanked detector here: the driver treats `'` as an opening quote, so on a line carrying an unpaired lifetime tick (`&'static`, `impl<'a>`) everything after the tick is blanked and a violation on that line is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::dbg_macro, clippy::print_stdout and clippy::print_stderr are restriction-group lints in the Clippy lint index; allow-print-in-tests is a documented clippy.toml key."
+      }
+    },
+    {
+      "id": "process-exit-in-library",
+      "title": "process::exit or abort called outside main",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "calls process::exit(1) on a validation failure instead of returning an error to the caller",
+        "aborts on an inconsistent state to avoid designing an error path, which kills the caller and skips destructors"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\b(?:std::)?process::(?:exit|abort)\\s*\\("
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "exit",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "use std::process;\n\npub fn ensure_config_present(path: &str) {\n    if !std::path::Path::new(path).exists() {\n        eprintln!(\"missing config: {path}\");\n        process::exit(2);\n    }\n}\n\npub fn on_corrupt_state() -> ! {\n    std::process::abort()\n}\n",
+        "nearMiss": "use std::process::{Command, ExitCode};\n\npub fn git_revision() -> Option<String> {\n    let out = Command::new(\"git\").args([\"rev-parse\", \"HEAD\"]).output().ok()?;\n    String::from_utf8(out.stdout).ok().map(|s| s.trim().to_string())\n}\n\npub fn run() -> ExitCode {\n    match git_revision() {\n        Some(_) => ExitCode::SUCCESS,\n        None => ExitCode::FAILURE,\n    }\n}\n"
+      },
+      "gapNotes": "Exiting from main is correct, and this detector cannot tell main from a library module - scope the paths or accept a wave-off on src/main.rs. clippy::exit covers process::exit only; std::process::abort and libc::_exit are matched by the regex but by no lint. Blind spot shared by every string-blanked detector here: the driver treats `'` as an opening quote, so on a line carrying an unpaired lifetime tick (`&'static`, `impl<'a>`) everything after the tick is blanked and a violation on that line is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::exit is a restriction-group lint in the Clippy lint index; no clippy lint for std::process::abort was found in that index, which is why the regex carries that half."
+      }
+    },
+    {
+      "id": "float-equality-assert",
+      "title": "floating-point compared with ==",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "writes assert_eq!(mean(..), 0.3) and then softens or deletes the test when it fails by one ULP",
+        "compares an accumulated f64 to a literal in business logic rather than against a tolerance"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "assert_eq!\\s*\\([^;]*?[0-9]+\\.[0-9]+",
+              "[A-Za-z_0-9)]\\s*==\\s*[0-9]+\\.[0-9]+"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "float_cmp",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "pub fn mean(values: &[f64]) -> f64 {\n    values.iter().sum::<f64>() / values.len() as f64\n}\n\npub fn is_unit(total: f64) -> bool {\n    total == 1.0\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn averages() {\n        assert_eq!(mean(&[0.1, 0.2, 0.6]), 0.3);\n    }\n}\n",
+        "nearMiss": "pub fn mean(values: &[f64]) -> f64 {\n    values.iter().sum::<f64>() / values.len() as f64\n}\n\npub fn is_unit(total: f64) -> bool {\n    (total - 1.0).abs() < f64::EPSILON\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    fn values_len() -> usize {\n        3\n    }\n\n    #[test]\n    fn averages() {\n        let got = mean(&[0.1, 0.2, 0.6]);\n        assert!((got - 0.3).abs() < 1e-9, \"mean drifted: {got}\");\n        assert_eq!(values_len(), 3);\n    }\n}\n"
+      },
+      "gapNotes": "Only literal-shaped comparisons are seen. `a == b` between two f64 variables, `assert_eq!(x, y)` on two computed floats, and comparisons via PartialEq on a struct with float fields all pass the regex - clippy::float_cmp is the detector that actually covers those, and it is a pedantic-group lint that must be enabled. Exponent literals such as 1e-9 are deliberately not matched. Blind spot shared by every string-blanked detector here: the driver treats `'` as an opening quote, so on a line carrying an unpaired lifetime tick (`&'static`, `impl<'a>`) everything after the tick is blanked and a violation on that line is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::float_cmp is listed in the Clippy lint index (pedantic group)."
+      }
+    },
+    {
+      "id": "unchecked-index-access",
+      "title": "slice indexed without a bounds check",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "writes parts.get(0).unwrap() after a split, assuming the input always has the shape the sample had",
+        "indexes buf[offset + n] from a parsed length field without validating it against the buffer"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\.get\\(\\s*[0-9]+\\s*\\)\\s*\\.unwrap\\(\\)",
+              "\\[\\s*[a-z_][A-Za-z_0-9]*\\s*\\+\\s*[0-9]+\\s*\\]"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "indexing_slicing",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "string_slice",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "pub fn parse_frame(buf: &[u8]) -> (u8, u16) {\n    let offset = 2usize;\n    let kind = buf[offset + 1];\n    let parts: Vec<&[u8]> = buf.split(|b| *b == b',').collect();\n    let first = parts.get(0).unwrap();\n    (kind, first.len() as u16)\n}\n",
+        "nearMiss": "pub fn parse_frame(buf: &[u8]) -> Option<(u8, u16)> {\n    let offset = 2usize;\n    let kind = buf.get(offset + 1).copied()?;\n    let parts: Vec<&[u8]> = buf.split(|b| *b == b',').collect();\n    let first = parts.first()?;\n    let len = u16::try_from(first.len()).ok()?;\n    Some((kind, len))\n}\n"
+      },
+      "gapNotes": "Catches only two of many shapes: plain v[i], v[i..j] range slicing, HashMap index syntax and s[..n] on a String are all unmatched by the regex. clippy::indexing_slicing covers those but is restriction-group and is noisy on code with genuinely known-good indices, so most repos need it scoped rather than global. Blind spot shared by every string-blanked detector here: the driver treats `'` as an opening quote, so on a line carrying an unpaired lifetime tick (`&'static`, `impl<'a>`) everything after the tick is blanked and a violation on that line is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::indexing_slicing and clippy::string_slice are restriction-group lints in the Clippy lint index."
+      }
+    },
+    {
+      "id": "unchecked-arithmetic",
+      "title": "arithmetic that can overflow, wrap or divide by zero",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "writes total / count for an average without proving count is non-zero",
+        "indexes with items.len() - 1 on a slice that can be empty, which underflows a usize into a huge index"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\.len\\(\\)\\s*-\\s*[0-9]+",
+              "[a-z_][A-Za-z_0-9]*\\s*/\\s*[a-z_][A-Za-z_0-9]*\\s*[;\\),]"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "arithmetic_side_effects",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "integer_division",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "pub fn stats(samples: &[u32]) -> (u32, u32) {\n    let count = samples.len() as u32;\n    let total: u32 = samples.iter().sum();\n    let mean = total / count;\n    let last = samples[samples.len() - 1];\n    (mean, last)\n}\n",
+        "nearMiss": "pub fn stats(samples: &[u32]) -> Option<(u32, u32)> {\n    let count = u32::try_from(samples.len()).ok()?;\n    let total: u32 = samples.iter().copied().try_fold(0u32, u32::checked_add)?;\n    let mean = total.checked_div(count)?;\n    let last = samples.last().copied()?;\n    let gaps = u32::try_from(samples.len().saturating_sub(1)).ok()?;\n    Some((mean.wrapping_add(gaps), last))\n}\n"
+      },
+      "gapNotes": "The division half is heuristic - it fires on float division and on integer division that is provably safe, so it is a review signal, not a gate. Addition and multiplication overflow are not matched at all by the regex; that is entirely on clippy::arithmetic_side_effects, which is restriction-group, extremely noisy on arithmetic-heavy crates, and blind to overflow in release builds where the wrap is silent. Blind spot shared by every string-blanked detector here: the driver treats `'` as an opening quote, so on a line carrying an unpaired lifetime tick (`&'static`, `impl<'a>`) everything after the tick is blanked and a violation on that line is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::arithmetic_side_effects and clippy::integer_division are restriction-group lints confirmed present in the Clippy lint index."
+      }
+    },
+    {
+      "id": "blocking-call-in-async",
+      "title": "blocking call inside an async fn",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "uses std::thread::sleep inside an async fn because it is the sleep the session remembered",
+        "takes a std::sync::Mutex guard with .lock().unwrap() and holds it across an .await, which can deadlock the executor"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "async\\s+fn\\s+[A-Za-z_][A-Za-z_0-9]*[\\s\\S]{0,400}?(?:std::)?thread::sleep\\s*\\(",
+              "async\\s+fn\\s+[A-Za-z_][A-Za-z_0-9]*[\\s\\S]{0,400}?\\.lock\\(\\)\\s*\\.unwrap\\(\\)"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "await_holding_lock",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "unused_async",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "use std::sync::{Arc, Mutex};\nuse std::thread;\nuse std::time::Duration;\n\n#[derive(Default)]\npub struct Counter {\n    hits: u64,\n}\n\npub async fn record(state: Arc<Mutex<Counter>>, delay_ms: u64) -> u64 {\n    thread::sleep(Duration::from_millis(delay_ms));\n    let mut guard = state.lock().unwrap();\n    guard.hits += 1;\n    guard.hits\n}\n",
+        "nearMiss": "use std::sync::Arc;\nuse std::time::Duration;\nuse tokio::sync::Mutex;\n\n#[derive(Default)]\npub struct Counter {\n    hits: u64,\n}\n\npub fn blocking_record(state: &std::sync::Mutex<Counter>) -> u64 {\n    let mut guard = state.lock().unwrap();\n    guard.hits += 1;\n    guard.hits\n}\n\npub async fn record(state: Arc<Mutex<Counter>>, delay_ms: u64) -> u64 {\n    tokio::time::sleep(Duration::from_millis(delay_ms)).await;\n    let mut guard = state.lock().await;\n    guard.hits += 1;\n    guard.hits\n}\n"
+      },
+      "gapNotes": "The regex bridges forward at most 400 characters from the `async fn` header, so it is positional, not scoped: a blocking call declared before the async fn is missed (as in the near-miss), one further than 400 characters into a long body is missed, and a blocking call in a plain fn that happens to follow an async fn is a false positive. Real scoping is clippy::await_holding_lock, which understands the guard lifetime but only covers lock guards, not blocking I/O or sleeps. The near-miss needs tokio in the manifest to compile. Blind spot shared by every string-blanked detector here: the driver treats `'` as an opening quote, so on a line carrying an unpaired lifetime tick (`&'static`, `impl<'a>`) everything after the tick is blanked and a violation on that line is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::await_holding_lock (suspicious group) and clippy::unused_async are both present in the Clippy lint index."
+      }
+    },
+    {
+      "id": "redundant-clone-to-appease-borrowck",
+      "title": "clone() sprayed to get past the borrow checker",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "adds .clone() at each borrow error until the code compiles, without changing the ownership design",
+        "passes &value.clone() where &value would do, allocating for nothing on every call"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\.clone\\(\\)\\s*\\.clone\\(\\)",
+              "&\\s*[a-z_][A-Za-z_0-9]*\\.clone\\(\\)"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "redundant_clone",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "clone_on_copy",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "use std::collections::HashMap;\n\n#[derive(Clone, Debug)]\npub struct Settings {\n    pub name: String,\n}\n\nfn audit(_cfg: &Settings) {}\n\npub fn register(store: &mut HashMap<String, Settings>, cfg: &Settings) {\n    let key = cfg.name.clone().clone();\n    audit(&cfg.clone());\n    store.insert(key, cfg.clone());\n}\n",
+        "nearMiss": "use std::collections::HashMap;\n\n#[derive(Clone, Debug)]\npub struct Settings {\n    pub name: String,\n}\n\nfn audit(_cfg: &Settings) {}\n\npub fn register(store: &mut HashMap<String, Settings>, cfg: &Settings) {\n    let key = cfg.name.clone();\n    audit(cfg);\n    store.entry(key.clone()).or_insert_with(|| cfg.clone());\n    store.insert(key, cfg.clone());\n}\n"
+      },
+      "gapNotes": "Only the two most obviously wasteful shapes are matched; the common case - one .clone() per borrow error, each individually defensible - is exactly what the regex cannot judge, which is why the detector is a signal and not a gate. clippy::redundant_clone lives in the nursery group, so it is off by default and known to have false positives; enable it with `-W clippy::nursery` and expect to wave some off. Blind spot shared by every string-blanked detector here: the driver treats `'` as an opening quote, so on a line carrying an unpaired lifetime tick (`&'static`, `impl<'a>`) everything after the tick is blanked and a violation on that line is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::redundant_clone (nursery group) and clippy::clone_on_copy are both listed in the Clippy lint index; the nursery group is documented as experimental in doc.rust-lang.org/clippy/lints.html."
+      }
+    },
+    {
+      "id": "deliberate-leak",
+      "title": "mem::forget or Box::leak used to dodge a lifetime",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "reaches for Box::leak to manufacture a &'static reference the signature demanded",
+        "calls mem::forget on a value whose Drop impl was causing a double-free or a borrow conflict, leaking the resource instead"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bmem::forget\\s*\\(",
+              "\\bBox::leak\\s*\\("
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "clippy",
+            "rule": "mem_forget",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "use std::mem;\n\npub struct Session {\n    id: u64,\n    buffer: Vec<u8>,\n}\n\npub fn detach(session: Session) -> &'static [u8] {\n    let boxed = session.buffer.into_boxed_slice();\n    let leaked: &'static [u8] = Box::leak(boxed);\n    let stale = Session { id: session.id, buffer: Vec::new() };\n    mem::forget(stale);\n    leaked\n}\n",
+        "nearMiss": "use std::mem::{self, ManuallyDrop};\n\npub struct Session {\n    id: u64,\n    buffer: Vec<u8>,\n}\n\npub fn take_buffer(session: &mut Session) -> Vec<u8> {\n    mem::take(&mut session.buffer)\n}\n\npub fn swap_buffer(session: &mut Session, mut next: Vec<u8>) -> Vec<u8> {\n    mem::replace(&mut session.buffer, mem::take(&mut next))\n}\n\npub fn park(session: Session) -> ManuallyDrop<Session> {\n    let held = ManuallyDrop::new(session);\n    drop(Box::new(held.id));\n    held\n}\n"
+      },
+      "gapNotes": "Runs with stripStrings off by necessity: the driver treats a `'` as an opening string quote, so with string blanking on the `&'static` lifetime on the same line blanked `Box::leak(` out of the violation fixture and the pattern silently missed it. The cost of leaving strings in is that the text `mem::forget(` or `Box::leak(` inside a string literal or a macro argument now counts as a hit. Box::leak is also legitimate for once-per-process configuration, so this class needs a per-repo allowlist rather than a hard block. The regex misses std::mem::forget written with the full path split across lines, ManuallyDrop used to skip a Drop impl, and Vec::leak / String::leak. clippy::mem_forget is restriction-group and covers mem::forget only.",
+      "evidence": {
+        "tier": "documented",
+        "source": "clippy::mem_forget is a restriction-group lint in the Clippy lint index; no lint for Box::leak was found there, so the regex carries that half."
+      }
+    },
+    {
+      "id": "type-widened-to-any",
+      "title": "type erased to dyn Any to silence a type error",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "replaces a typed enum with Box<dyn Any> when two branches would not unify, then downcasts at every read site",
+        "widens a struct field to dyn Any rather than adding the variant the design actually needed"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "Box\\s*<\\s*dyn\\s+(?:std::any::)?Any\\b",
+              "\\.downcast(?:_ref|_mut)?\\s*::\\s*<"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "use std::any::Any;\nuse std::collections::HashMap;\n\npub struct Bag {\n    slots: HashMap<String, Box<dyn Any + Send>>,\n}\n\nimpl Bag {\n    pub fn put(&mut self, key: &str, value: Box<dyn Any + Send>) {\n        self.slots.insert(key.to_string(), value);\n    }\n\n    pub fn get_u32(&self, key: &str) -> Option<u32> {\n        self.slots.get(key)?.downcast_ref::<u32>().copied()\n    }\n}\n",
+        "nearMiss": "use std::collections::HashMap;\nuse std::error::Error;\n\n#[derive(Debug, Clone, PartialEq)]\npub enum Slot {\n    Count(u32),\n    Label(String),\n}\n\npub struct Bag {\n    slots: HashMap<String, Slot>,\n}\n\nimpl Bag {\n    pub fn put(&mut self, key: &str, value: Slot) {\n        self.slots.insert(key.to_string(), value);\n    }\n\n    pub fn get_u32(&self, key: &str) -> Option<u32> {\n        match self.slots.get(key) {\n            Some(Slot::Count(n)) => Some(*n),\n            _ => None,\n        }\n    }\n\n    pub fn describe(&self) -> Result<String, Box<dyn Error + Send + Sync>> {\n        Ok(format!(\"{} slots\", self.slots.len()))\n    }\n}\n"
+      },
+      "gapNotes": "No clippy or rustc lint covers this - dyn Any is a legitimate tool for plugin registries and panic payload inspection, and the compiler has no opinion about it - so the check driver is the only detector and it must be waved off wherever erasure is the design. It also does not catch the other widening moves: swapping a typed struct for serde_json::Value, a String, or a HashMap<String, String>. Blind spot shared by every string-blanked detector here: the driver treats `'` as an opening quote, so on a line carrying an unpaired lifetime tick (`&'static`, `impl<'a>`) everything after the tick is blanked and a violation on that line is missed.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "The full Clippy lint index was searched for a dyn Any / downcast lint and none exists; std::any::Any and downcast_ref are documented in the std library reference."
+      }
+    }
+  ]
+}

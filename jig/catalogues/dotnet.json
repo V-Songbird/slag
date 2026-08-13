@@ -1,0 +1,1341 @@
+{
+  "schemaVersion": 3,
+  "edition": "dotnet",
+  "displayName": "C# / .NET (dotnet CLI, csproj, NuGet)",
+  "researchedOn": "2026-08-13",
+  "detect": {
+    "files": [
+      "*.csproj",
+      "*.sln",
+      "*.slnx",
+      "Directory.Build.props",
+      "Directory.Packages.props",
+      "global.json",
+      "nuget.config"
+    ],
+    "extensions": [
+      ".cs",
+      ".csproj",
+      ".props",
+      ".targets",
+      ".runsettings",
+      ".sln"
+    ],
+    "packageManagers": [
+      "dotnet",
+      "nuget"
+    ],
+    "commentSyntax": {
+      ".cs": "slash",
+      ".csproj": "none",
+      ".props": "none",
+      ".targets": "none",
+      ".runsettings": "none",
+      ".sln": "hash"
+    }
+  },
+  "toolchain": [
+    {
+      "id": "csc",
+      "role": "type-checker",
+      "why": "Only the C# compiler runs flow-based nullable analysis and awaits/async checking; no analyzer package can see the null-state the compiler tracks, and only TreatWarningsAsErrors turns those CS-prefixed findings into a failing build.",
+      "installKind": "scaffold",
+      "install": {
+        "dotnet": "dotnet new globaljson --sdk-version 9.0.100 --roll-forward latestFeature"
+      },
+      "configPath": "Directory.Build.props",
+      "configSample": "<Project>\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <LangVersion>latest</LangVersion>\n    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>\n    <WarningLevel>9999</WarningLevel>\n    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>\n    <GenerateDocumentationFile>true</GenerateDocumentationFile>\n    <NoWarn>$(NoWarn);CS1591</NoWarn>\n  </PropertyGroup>\n</Project>\n",
+      "wiring": "<TreatWarningsAsErrors>true</TreatWarningsAsErrors> plus <Nullable>enable</Nullable> in a Directory.Build.props at the repository root, so every project inherits them without editing each csproj.",
+      "ciStep": "dotnet build --configuration Release -warnaserror",
+      "verify": {
+        "argv": [
+          "dotnet",
+          "build",
+          "--configuration",
+          "Release",
+          "-warnaserror"
+        ],
+        "expected": "exit code 1 and a line matching 'error CS8602: Dereference of a possibly null reference.'",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "JigSeed/CscNullableSeed.cs",
+        "sample": "namespace JigSeed;\n\npublic sealed class CscNullableSeed\n{\n    public static int LengthOf(string? value)\n    {\n        return value.Length;\n    }\n}\n"
+      }
+    },
+    {
+      "id": "dotnet-analyzers",
+      "role": "linter",
+      "why": "The Roslyn CA (code quality) and IDE (code style) analyzers catch design, security and dead-code defects the compiler ignores entirely - swallowed exceptions, SQL concatenation, insecure randomness, unread assignments.",
+      "installKind": "package",
+      "install": {
+        "dotnet": "dotnet add package Microsoft.CodeAnalysis.NetAnalyzers"
+      },
+      "uninstall": {
+        "dotnet": "dotnet remove package Microsoft.CodeAnalysis.NetAnalyzers"
+      },
+      "configPath": ".editorconfig",
+      "configSample": "root = true\n\n[*.cs]\ndotnet_diagnostic.CA1031.severity = error\ndotnet_diagnostic.CA1062.severity = warning\ndotnet_diagnostic.CA2000.severity = warning\ndotnet_diagnostic.CA2007.severity = none\ndotnet_diagnostic.CA2016.severity = warning\ndotnet_diagnostic.CA2100.severity = error\ndotnet_diagnostic.CA2200.severity = error\ndotnet_diagnostic.CA2201.severity = warning\ndotnet_diagnostic.CA5350.severity = error\ndotnet_diagnostic.CA5351.severity = error\ndotnet_diagnostic.CA5394.severity = error\ndotnet_diagnostic.IDE0005.severity = warning\ndotnet_diagnostic.IDE0035.severity = warning\ndotnet_diagnostic.IDE0051.severity = warning\ndotnet_diagnostic.IDE0059.severity = warning\ndotnet_diagnostic.IDE0079.severity = warning\n",
+      "wiring": "<AnalysisLevel>latest-Recommended</AnalysisLevel> and <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild> in Directory.Build.props; IDE rules only run on command-line builds when EnforceCodeStyleInBuild is true.",
+      "ciStep": "dotnet build --configuration Release -warnaserror",
+      "verify": {
+        "argv": [
+          "dotnet",
+          "build",
+          "--configuration",
+          "Release",
+          "-warnaserror"
+        ],
+        "expected": "exit code 1 and a line matching 'error CA1031: Modify' naming the method that catches System.Exception",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "JigSeed/AnalyzerCatchAllSeed.cs",
+        "sample": "using System;\n\nnamespace JigSeed;\n\npublic sealed class AnalyzerCatchAllSeed\n{\n    public static bool TryRun(Action work)\n    {\n        try\n        {\n            work();\n            return true;\n        }\n        catch (Exception)\n        {\n            return false;\n        }\n    }\n}\n"
+      }
+    },
+    {
+      "id": "dotnet-format",
+      "role": "formatter",
+      "why": "Formatting drift is the noise that hides a real diff; dotnet format is the only tool here that can assert 'the tree is already canonical' without changing it, via --verify-no-changes.",
+      "installKind": "scaffold",
+      "install": {
+        "dotnet": "dotnet new editorconfig"
+      },
+      "configPath": ".editorconfig",
+      "configSample": "root = true\n\n[*.cs]\nindent_style = space\nindent_size = 4\nend_of_line = lf\ninsert_final_newline = true\ncharset = utf-8\ncsharp_new_line_before_open_brace = all\ncsharp_style_namespace_declarations = file_scoped:warning\ndotnet_sort_system_directives_first = true\ndotnet_diagnostic.IDE0055.severity = warning\n\n[*.{csproj,props,targets,runsettings}]\nindent_style = space\nindent_size = 2\n",
+      "wiring": "dotnet_diagnostic.IDE0055.severity = warning in .editorconfig, so the same formatting contract also fails the build under EnforceCodeStyleInBuild.",
+      "ciStep": "dotnet format --verify-no-changes --severity warn",
+      "verify": {
+        "argv": [
+          "dotnet",
+          "format",
+          "--verify-no-changes",
+          "--severity",
+          "warn"
+        ],
+        "expected": "non-zero exit code and a list of files reported as needing formatting changes",
+        "expectedExit": 2
+      },
+      "seed": {
+        "path": "JigSeed/FormatSeed.cs",
+        "sample": "namespace JigSeed {\n  public sealed class FormatSeed {\n    public static string Describe(int count) {\n      return \"count=\" + count;\n    }\n  }\n}\n"
+      }
+    },
+    {
+      "id": "xunit-analyzers",
+      "role": "linter",
+      "why": "Only the xUnit analyzers understand test intent: they flag a skipped test, a public method that was never marked as a test, an unused Theory parameter and an unawaited async assertion - none of which the compiler or the CA rules see.",
+      "installKind": "package",
+      "install": {
+        "dotnet": "dotnet add package xunit.analyzers"
+      },
+      "uninstall": {
+        "dotnet": "dotnet remove package xunit.analyzers"
+      },
+      "configPath": ".editorconfig",
+      "configSample": "root = true\n\n[*.cs]\ndotnet_diagnostic.xUnit1004.severity = error\ndotnet_diagnostic.xUnit1013.severity = error\ndotnet_diagnostic.xUnit1026.severity = warning\ndotnet_diagnostic.xUnit1031.severity = error\ndotnet_diagnostic.xUnit1049.severity = error\ndotnet_diagnostic.xUnit2020.severity = error\ndotnet_diagnostic.xUnit2021.severity = error\n",
+      "wiring": "<PackageReference Include=\"xunit.analyzers\" /> in the test project (it also arrives transitively with the xunit metapackage), with the severities above pinned in .editorconfig.",
+      "ciStep": "dotnet build ./tests --configuration Release -warnaserror",
+      "verify": {
+        "argv": [
+          "dotnet",
+          "build",
+          "./tests",
+          "--configuration",
+          "Release",
+          "-warnaserror"
+        ],
+        "expected": "exit code 1 and a line matching 'error xUnit1004: Test methods should not be skipped'",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "tests/JigSeed/XunitSkipSeed.cs",
+        "sample": "using Xunit;\n\nnamespace JigSeed;\n\npublic class XunitSkipSeed\n{\n    [Fact(Skip = \"jig seed violation\")]\n    public void SkippedByTheSeed()\n    {\n        Assert.Equal(2, 1 + 1);\n    }\n}\n"
+      }
+    },
+    {
+      "id": "dotnet-test",
+      "role": "test-runner",
+      "why": "The only step that proves behaviour rather than shape; with TreatNoTestsAsError it is also the only step that can tell 'everything passed' apart from 'nothing ran'.",
+      "installKind": "scaffold",
+      "install": {
+        "dotnet": "dotnet new xunit -o tests/Project.Tests"
+      },
+      "configPath": ".runsettings",
+      "configSample": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TestSessionTimeout>600000</TestSessionTimeout>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\">\n        <Configuration>\n          <LogFileName>results.trx</LogFileName>\n        </Configuration>\n      </Logger>\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n",
+      "wiring": "<RunSettingsFilePath>$(MSBuildThisFileDirectory).runsettings</RunSettingsFilePath> in Directory.Build.props, so every test project picks the same settings up without a --settings flag.",
+      "ciStep": "dotnet test --configuration Release --no-build --logger \"trx;LogFileName=results.trx\" --collect:\"XPlat Code Coverage\"",
+      "verify": {
+        "argv": [
+          "dotnet",
+          "test",
+          "--configuration",
+          "Release",
+          "--no-build"
+        ],
+        "expected": "exit code 1 with 'Failed!  - Failed:     1'; with TreatNoTestsAsError set to true a run that discovers zero tests also exits 1 instead of 0",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "tests/JigSeed/FailingSeedTests.cs",
+        "sample": "using Xunit;\n\nnamespace JigSeed;\n\npublic class FailingSeedTests\n{\n    [Fact]\n    public void SeededAssertionFails()\n    {\n        Assert.Equal(2, 1 + 2);\n    }\n}\n"
+      }
+    },
+    {
+      "id": "nuget-audit",
+      "role": "security-scanner",
+      "why": "Restore-time audit is the only step that compares the resolved graph, including transitive packages, against the nuget.org vulnerability database; no analyzer reads package versions.",
+      "installKind": "scaffold",
+      "install": {
+        "dotnet": "dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org"
+      },
+      "configPath": "Directory.Build.props",
+      "configSample": "<Project>\n  <PropertyGroup>\n    <NuGetAudit>true</NuGetAudit>\n    <NuGetAuditMode>all</NuGetAuditMode>\n    <NuGetAuditLevel>low</NuGetAuditLevel>\n    <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>\n  </PropertyGroup>\n</Project>\n",
+      "wiring": "<NuGetAuditMode>all</NuGetAuditMode> plus NU1901-NU1904 listed in <WarningsAsErrors>, so a vulnerable transitive package fails restore rather than printing a warning nobody reads.",
+      "ciStep": "dotnet restore --no-cache && dotnet list package --vulnerable --include-transitive",
+      "verify": {
+        "argv": [
+          "dotnet",
+          "restore",
+          "--no-cache"
+        ],
+        "expected": "exit code 1 and a line matching 'error NU1903: Package ... has a known high severity vulnerability'",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "Directory.Build.targets",
+        "sample": "<Project>\n\n  <ItemGroup>\n    <PackageReference Include=\"System.Text.RegularExpressions\" Version=\"4.3.0\" />\n  </ItemGroup>\n\n</Project>\n"
+      }
+    },
+    {
+      "id": "sonaranalyzer-csharp",
+      "role": "linter",
+      "why": "Carries three checks nothing else in this ecosystem has: S2699 fails a test that contains no assertion at all, S108 fails any empty nested block, and S125 flags commented-out code - catching the 'make it green' shapes the CA rules miss.",
+      "installKind": "package",
+      "install": {
+        "dotnet": "dotnet add package SonarAnalyzer.CSharp"
+      },
+      "uninstall": {
+        "dotnet": "dotnet remove package SonarAnalyzer.CSharp"
+      },
+      "configPath": ".editorconfig",
+      "configSample": "root = true\n\n[*.cs]\ndotnet_diagnostic.S108.severity = error\ndotnet_diagnostic.S125.severity = warning\ndotnet_diagnostic.S2699.severity = error\n",
+      "wiring": "<PackageReference Include=\"SonarAnalyzer.CSharp\" PrivateAssets=\"all\" /> in Directory.Build.props so it applies to every project, with the three severities pinned in .editorconfig. S125 is pinned at warning rather than error because SonarSource's own tracker documents false positives in its commented-out-code heuristic.",
+      "ciStep": "dotnet build --configuration Release -warnaserror",
+      "verify": {
+        "argv": [
+          "dotnet",
+          "build",
+          "--configuration",
+          "Release",
+          "-warnaserror"
+        ],
+        "expected": "exit code 1 and a line matching 'error S2699: Add at least one assertion to this test case.'",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "JigSeed/SonarEmptyBlockSeed.cs",
+        "sample": "namespace JigSeed;\n\npublic sealed class SonarEmptyBlockSeed\n{\n    public static int CountPositive(int[] values)\n    {\n        var count = 0;\n\n        foreach (var value in values)\n        {\n            if (value > 0)\n            {\n            }\n\n            count++;\n        }\n\n        return count;\n    }\n}\n"
+      }
+    }
+  ],
+  "classes": [
+    {
+      "id": "skipped-test",
+      "title": "Test skipped instead of fixed",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session cannot make a failing test pass, so it adds Skip = \"flaky\" to the Fact and reports the suite green",
+        "a session marks a test it does not understand as skipped while refactoring, and never returns to it",
+        "a session copies a Skip reason from an unrelated test to silence a new failure"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\[\\s*(?:Fact|Theory)\\s*\\([^)]*\\bSkip\\s*="
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "xunit-analyzers",
+            "rule": "xUnit1004",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using Xunit;\n\nnamespace Billing.Tests;\n\npublic class InvoiceTotalTests\n{\n    [Fact(Skip = \"flaky on CI, revisit later\")]\n    public void Total_IncludesTaxForEuCustomers()\n    {\n        var invoice = new Invoice(netAmount: 100m, country: \"DE\");\n\n        Assert.Equal(119m, invoice.Total);\n    }\n\n    [Fact]\n    public void Total_HasNoTaxForExemptCustomers()\n    {\n        var invoice = new Invoice(netAmount: 100m, country: \"DE\", taxExempt: true);\n\n        Assert.Equal(100m, invoice.Total);\n    }\n}\n",
+        "nearMiss": "using Xunit;\n\nnamespace Billing.Tests;\n\npublic class InvoiceTotalTests\n{\n    public static bool RunsOnLinux => !OperatingSystem.IsWindows();\n\n    [Fact(SkipUnless = nameof(RunsOnLinux), SkipType = typeof(InvoiceTotalTests))]\n    public void Total_UsesPosixLocaleFormatting()\n    {\n        var invoice = new Invoice(netAmount: 100m, country: \"DE\");\n\n        Assert.Equal(\"119,00\", invoice.FormatTotal());\n    }\n\n    [Fact]\n    public void Total_IncludesTaxForEuCustomers()\n    {\n        var skip = 0;\n        var invoice = new Invoice(netAmount: 100m, country: \"DE\");\n\n        Assert.Equal(119m, invoice.Total);\n        Assert.Equal(0, skip);\n    }\n}\n"
+      },
+      "gapNotes": "Only sees the xUnit Skip form. NUnit's [Ignore(\"...\")] and [Explicit], MSTest's [Ignore], and a test disabled by an environment-gated early return are all invisible to this pattern. It also cannot tell a legitimately skipped platform-specific test from an abandoned one - only the ledger of how long the skip has stood can do that.",
+      "evidence": {
+        "tier": "documented",
+        "source": "xunit.net analyzer rules index (xUnit1004 - Test methods should not be skipped); the rule's own page states SkipWhen/SkipUnless suppress it in v3."
+      }
+    },
+    {
+      "id": "commented-out-test",
+      "title": "Test commented out rather than repaired",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session comments out the attribute rather than the whole method, so the code still compiles and the test silently disappears from the run",
+        "a session comments out a failing assertion block while 'temporarily narrowing scope' and leaves it",
+        "a session wraps a test region in #if false to get a green build"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "heuristic",
+          "params": {
+            "tool": "sonaranalyzer-csharp",
+            "rule": "S125",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using Xunit;\n\nnamespace Shipping.Tests;\n\npublic class RateCardTests\n{\n    // [Fact]\n    public void Rate_ForOversizeParcel_AppliesSurcharge()\n    {\n        var card = new RateCard();\n\n        Assert.Equal(24.50m, card.Quote(weightKg: 12, oversize: true));\n    }\n\n    [Fact]\n    public void Rate_ForStandardParcel_UsesBaseRate()\n    {\n        var card = new RateCard();\n\n        Assert.Equal(6.90m, card.Quote(weightKg: 2, oversize: false));\n    }\n}\n",
+        "nearMiss": "using Xunit;\n\nnamespace Shipping.Tests;\n\npublic class RateCardTests\n{\n    // Regression cover for issue 421: the surcharge was applied twice.\n    [Fact]\n    public void Rate_ForOversizeParcel_AppliesSurchargeOnce()\n    {\n        var card = new RateCard();\n\n        Assert.Equal(24.50m, card.Quote(weightKg: 12, oversize: true));\n    }\n\n    /// <summary>Covers the base rate path; see <see cref=\"RateCard.Quote\"/>.</summary>\n    [Theory]\n    [InlineData(1, 6.90)]\n    [InlineData(2, 6.90)]\n    public void Rate_ForStandardParcel_UsesBaseRate(int kg, decimal expected)\n    {\n        var card = new RateCard();\n\n        Assert.Equal(expected, card.Quote(weightKg: kg, oversize: false));\n    }\n}\n"
+      },
+      "gapNotes": "Has no check-driver detector, and cannot have one. The pattern that used to sit here ('// [Fact]') needed comments left intact, but jig's driver blanks comments unconditionally - blankRegions in scripts/templates/run.mjs takes only a `strings` option, so the catalogue's stripComments field is inert and a commented-out attribute is whitespace by the time any pattern runs. The detector was deleted on 2026-08-13 after it missed its own violation fixture. What is left is Sonar S125, which is a general commented-out-code rule, not a test-aware one: it fires on any commented block that parses as code, so an explanatory comment containing a snippet is a false positive, and it will not distinguish a commented-out test from commented-out production code. A test method deleted outright still leaves no trace in the file - that needs a test-count comparison against the previous commit or a coverage baseline. #if false regions are missed by S125 as well.",
+      "evidence": {
+        "tier": "documented",
+        "source": "SonarSource rule csharpsquid:S125 'Sections of code should not be commented out' (sonar-dotnet); confirmed against next.sonarqube.com's rule index. Confidence is heuristic because SonarSource's own tracker (sonar-dotnet issue 3659) documents that S125's line-ends-in-semicolon-or-brace heuristic produces false positives."
+      }
+    },
+    {
+      "id": "softened-assertion",
+      "title": "Assertion softened to a tautology",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "a session replaces Assert.Equal(expected, actual) with Assert.True(true) after failing to reproduce the expected value",
+        "a session downgrades a value assertion to Assert.NotNull or Assert.True(true) so the test passes without proving anything",
+        "a session leaves a placeholder assertion behind after 'stubbing out' a test it planned to finish"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bAssert\\s*\\.\\s*(?:True|False)\\s*\\(\\s*(?:true|false)\\s*[,)]"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using Xunit;\n\nnamespace Payments.Tests;\n\npublic class RefundPolicyTests\n{\n    [Fact]\n    public void Refund_AfterWindowClosed_IsRejected()\n    {\n        var policy = new RefundPolicy(windowDays: 30);\n        var decision = policy.Evaluate(purchasedDaysAgo: 45);\n\n        // was: Assert.Equal(RefundOutcome.Rejected, decision.Outcome)\n        Assert.True(true);\n    }\n\n    [Fact]\n    public void Refund_InsideWindow_IsAccepted()\n    {\n        var policy = new RefundPolicy(windowDays: 30);\n        var decision = policy.Evaluate(purchasedDaysAgo: 5);\n\n        Assert.Equal(RefundOutcome.Accepted, decision.Outcome);\n    }\n}\n",
+        "nearMiss": "using Xunit;\n\nnamespace Payments.Tests;\n\npublic class RefundPolicyTests\n{\n    [Fact]\n    public void Refund_AfterWindowClosed_IsRejected()\n    {\n        var policy = new RefundPolicy(windowDays: 30);\n        var decision = policy.Evaluate(purchasedDaysAgo: 45);\n\n        Assert.False(decision.IsAccepted);\n        Assert.True(decision.HasReason);\n        Assert.Equal(RefundOutcome.Rejected, decision.Outcome);\n    }\n\n    [Theory]\n    [InlineData(true)]\n    [InlineData(false)]\n    public void Refund_RespectsGoodwillFlag(bool goodwill)\n    {\n        var policy = new RefundPolicy(windowDays: 30, goodwill);\n        var decision = policy.Evaluate(purchasedDaysAgo: 45);\n\n        Assert.Equal(goodwill, decision.IsAccepted);\n    }\n}\n"
+      },
+      "gapNotes": "Catches only the literal tautology. The commoner softening - swapping Assert.Equal for Assert.NotNull, loosening an exact decimal to a range, or asserting on a value the code under test just returned - is semantically identical to a legitimate assertion and cannot be told apart by a regex or by any rule id in this ecosystem. xUnit2020 covers always-FAILING boolean asserts, not always-passing ones, so it is deliberately not claimed here.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "Checked the full xunit.analyzers rules index for an always-passing-assertion rule; xUnit2020 is 'Do not use always-failing boolean assertion to fail a test', which does not cover this, so no tool-rule detector is claimed."
+      }
+    },
+    {
+      "id": "test-without-assertion",
+      "title": "Test that asserts nothing",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session writes a test that exercises the path and stops, so the test passes as long as nothing throws",
+        "a session deletes the failing assertion and leaves the arrange/act body in place",
+        "a session generates a scaffold of test method names to satisfy a coverage request and never fills the bodies in"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "heuristic",
+          "params": {
+            "tool": "sonaranalyzer-csharp",
+            "rule": "S2699",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using Xunit;\n\nnamespace Catalog.Tests;\n\npublic class ProductImporterTests\n{\n    [Fact]\n    public void Import_ParsesTheFeed()\n    {\n        var importer = new ProductImporter(new FakeFeedReader());\n\n        importer.Import(\"feed-2026-08.xml\");\n    }\n\n    [Fact]\n    public async Task ImportAsync_CompletesForEmptyFeed()\n    {\n        var importer = new ProductImporter(new FakeFeedReader());\n\n        await importer.ImportAsync(\"empty.xml\");\n    }\n}\n",
+        "nearMiss": "using Xunit;\n\nnamespace Catalog.Tests;\n\npublic class ProductImporterTests\n{\n    [Fact]\n    public void Import_ParsesTheFeed()\n    {\n        var importer = new ProductImporter(new FakeFeedReader());\n\n        var result = importer.Import(\"feed-2026-08.xml\");\n\n        Assert.Equal(42, result.ImportedCount);\n    }\n\n    [Fact]\n    public async Task ImportAsync_OnMalformedFeed_Throws()\n    {\n        var importer = new ProductImporter(new FakeFeedReader());\n\n        await Assert.ThrowsAsync<FeedFormatException>(() => importer.ImportAsync(\"broken.xml\"));\n    }\n}\n"
+      },
+      "gapNotes": "No check-driver detector: counting assertions requires walking a method body, and any regex approximating it would flag every test whose assertions live in a shared helper. S2699 has the same blind spot - SonarSource documents that it does no cross-file analysis, so a test whose assertions sit in a custom helper class is a false positive unless the helper's methods are named with an 'Assert' prefix. Also does not fire on a test that asserts only on its own test double.",
+      "evidence": {
+        "tier": "documented",
+        "source": "SonarSource sonar-dotnet rule S2699 'Tests should include assertions' (RSPEC-108/RSPEC-2699 family); the cross-file limitation is stated in the rule's own description."
+      }
+    },
+    {
+      "id": "swallowed-exception",
+      "title": "Empty catch block",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session cannot diagnose a thrown exception, so it wraps the call in try/catch with an empty body and calls the bug fixed",
+        "a session adds an empty catch to make an integration test stop failing",
+        "a session catches and drops during a refactor because the new signature no longer allows the exception to propagate"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bcatch\\s*(?:\\([^)]*\\))?\\s*(?:when\\s*\\([^)]*\\)\\s*)?\\{\\s*\\}"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "sonaranalyzer-csharp",
+            "rule": "S108",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System;\nusing System.Text.Json;\n\nnamespace Sync;\n\npublic sealed class SettingsLoader\n{\n    private readonly IFileSystem _files;\n\n    public SettingsLoader(IFileSystem files) => _files = files;\n\n    public Settings Load(string path)\n    {\n        var settings = Settings.Default;\n\n        try\n        {\n            settings = JsonSerializer.Deserialize<Settings>(_files.ReadAllText(path))!;\n        }\n        catch (JsonException)\n        {\n            // could not work out why this throws on CI\n        }\n\n        return settings;\n    }\n}\n",
+        "nearMiss": "using System;\nusing System.Text.Json;\nusing Microsoft.Extensions.Logging;\n\nnamespace Sync;\n\npublic sealed class SettingsLoader\n{\n    private readonly IFileSystem _files;\n    private readonly ILogger<SettingsLoader> _logger;\n\n    public SettingsLoader(IFileSystem files, ILogger<SettingsLoader> logger)\n    {\n        _files = files;\n        _logger = logger;\n    }\n\n    public Settings Load(string path)\n    {\n        try\n        {\n            return JsonSerializer.Deserialize<Settings>(_files.ReadAllText(path))!;\n        }\n        catch (JsonException ex)\n        {\n            _logger.LogWarning(ex, \"settings file is malformed\");\n            throw new SettingsFormatException(path, ex);\n        }\n        finally\n        {\n        }\n    }\n\n    private static void NoOp()\n    {\n    }\n}\n"
+      },
+      "gapNotes": "Only an empty block counts. A catch whose body is a single log call, a return of a default value, or a bare 'return;' swallows the failure just as completely and is invisible to both the pattern and S108. The pattern depends on comments being stripped first, so a catch containing only an explanatory comment reads as empty and is flagged - intended here, but it is also the one place this class and S108 disagree: S108 explicitly exempts a block that contains a comment, so the pattern fires where the rule stays silent.",
+      "evidence": {
+        "tier": "documented",
+        "source": "SonarSource sonar-dotnet rule S108 'Nested blocks of code should not be left empty' (RSPEC-108); the conditional-compilation false positive is tracked in sonar-dotnet issue 4540."
+      }
+    },
+    {
+      "id": "catch-all-exception",
+      "title": "Catching System.Exception",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session widens a specific catch to catch (Exception) so an unanticipated failure stops surfacing",
+        "a session adds a top-level catch (Exception) around new code it is unsure about",
+        "a session converts a caught, typed exception into a logged-and-continue catch-all while 'making the handler more robust'"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\bcatch\\s*\\(\\s*(?:System\\s*\\.\\s*)?Exception\\b"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "dotnet-analyzers",
+            "rule": "CA1031",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System;\nusing Microsoft.Extensions.Logging;\n\nnamespace Orders;\n\npublic sealed class OrderProcessor\n{\n    private readonly ILogger<OrderProcessor> _logger;\n\n    public OrderProcessor(ILogger<OrderProcessor> logger) => _logger = logger;\n\n    public ProcessResult Process(Order order)\n    {\n        try\n        {\n            Validate(order);\n            Charge(order);\n            return ProcessResult.Succeeded(order.Id);\n        }\n        catch (Exception ex)\n        {\n            _logger.LogError(ex, \"order {OrderId} failed\", order.Id);\n            return ProcessResult.Failed(order.Id);\n        }\n    }\n\n    private static void Validate(Order order) { }\n\n    private static void Charge(Order order) { }\n}\n",
+        "nearMiss": "using System;\nusing System.Net.Http;\nusing Microsoft.Extensions.Logging;\n\nnamespace Orders;\n\npublic sealed class OrderProcessor\n{\n    private readonly ILogger<OrderProcessor> _logger;\n\n    public OrderProcessor(ILogger<OrderProcessor> logger) => _logger = logger;\n\n    public ProcessResult Process(Order order)\n    {\n        try\n        {\n            Validate(order);\n            Charge(order);\n            return ProcessResult.Succeeded(order.Id);\n        }\n        catch (HttpRequestException ex)\n        {\n            Report(ex);\n            return ProcessResult.Retryable(order.Id);\n        }\n        catch (InvalidOperationException ex)\n        {\n            Report(ex);\n            throw;\n        }\n    }\n\n    private void Report(Exception exception) =>\n        _logger.LogError(exception, \"order processing failed\");\n\n    private static void Validate(Order order) { }\n\n    private static void Charge(Order order) { }\n}\n"
+      },
+      "gapNotes": "Heuristic on purpose: a catch-all at a process boundary - a message pump, a hosted service loop, a top-level Main - is legitimate and will be flagged. Those sites need an explicit .editorconfig exclusion or a scoped suppression rather than a rewrite. Catching a broad-but-not-Exception type such as SystemException or a custom base class is not matched by the pattern, though CA1031 does flag SystemException.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Microsoft Learn code quality rule CA1031 'Do not catch general exception types'; the rule flags System.Exception and System.SystemException and accepts a rethrow as the last statement."
+      }
+    },
+    {
+      "id": "nullable-context-disabled",
+      "title": "Nullable context switched off in a file",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "a session hits a wall of CS8618/CS8602 warnings in a file it is editing and puts #nullable disable at the top",
+        "a session adds #nullable disable to a generated-looking file rather than annotating the members it touched",
+        "a session flips <Nullable>disable</Nullable> in the project file to make the build go green"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "#nullable\\s+disable\\b"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": true
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "#nullable disable\n\nusing System.Collections.Generic;\n\nnamespace Identity;\n\npublic sealed class UserProfile\n{\n    public string DisplayName { get; set; }\n\n    public string AvatarUrl { get; set; }\n\n    public IReadOnlyList<string> Roles { get; set; }\n\n    public string Describe() => $\"{DisplayName} ({Roles.Count} roles)\";\n}\n",
+        "nearMiss": "#nullable enable\n\nusing System.Collections.Generic;\n\nnamespace Identity;\n\npublic sealed class UserProfile\n{\n    public required string DisplayName { get; init; }\n\n    public string? AvatarUrl { get; init; }\n\n    public IReadOnlyList<string> Roles { get; init; } = [];\n\n#nullable restore\n    public string Describe() => $\"{DisplayName} ({Roles.Count} roles)\";\n}\n"
+      },
+      "gapNotes": "Sees only the source directive. <Nullable>disable</Nullable> in a csproj or Directory.Build.props achieves the same thing project-wide and is covered by a different class; a project that never enabled nullable in the first place produces no directive at all and is invisible here. '#nullable disable warnings' is matched, which is correct, but so is a legitimate disable in a hand-maintained generated file - those need a path exclusion.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Microsoft Learn C# reference, nullable reference type warnings: the nullable context is set by the <Nullable> MSBuild property or the #nullable preprocessor directive."
+      }
+    },
+    {
+      "id": "non-null-assertion",
+      "title": "Null-forgiving operator used to silence the compiler",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "a session appends ! to a dereference to clear CS8602 rather than adding the null check the warning is asking for",
+        "a session initialises a non-nullable field to null! to clear CS8618 in a type it did not want to redesign",
+        "a session sprinkles ! through a call chain while migrating a file to nullable-enabled"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "(?:\\w|\\)|\\])\\s*!\\s*\\.\\s*\\w"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System.Collections.Generic;\n\nnamespace Reporting;\n\npublic sealed class MonthlyReport\n{\n    private readonly IReadOnlyDictionary<string, Region?> _regions;\n\n    public MonthlyReport(IReadOnlyDictionary<string, Region?> regions) => _regions = regions;\n\n    public string HeadlineFor(string code)\n    {\n        var region = _regions[code];\n\n        return region!.Name.ToUpperInvariant();\n    }\n\n    public int SiteCountFor(string code) => _regions[code]!.Sites.Count;\n}\n",
+        "nearMiss": "using System;\nusing System.Collections.Generic;\nusing System.Linq;\n\nnamespace Reporting;\n\npublic sealed class MonthlyReport\n{\n    private readonly IReadOnlyDictionary<string, Region?> _regions;\n\n    public MonthlyReport(IReadOnlyDictionary<string, Region?> regions) => _regions = regions;\n\n    public string HeadlineFor(string code)\n    {\n        if (!_regions.TryGetValue(code, out var region) || region is null)\n        {\n            throw new ArgumentOutOfRangeException(nameof(code));\n        }\n\n        return region.Name.ToUpperInvariant();\n    }\n\n    public bool HasAnySites() => _regions.Values.Any(r => r?.Sites.Count > 0);\n\n    public bool IsUnknown(string code) => !_regions.ContainsKey(code);\n}\n"
+      },
+      "gapNotes": "Heuristic. EF Core models and DI-populated properties legitimately use 'null!' initialisers, and the pattern here does not match those (it only matches x!.Member), so the commonest legitimate use is spared but the commonest abusive one - null! on a field - is missed. IDE0080 only fires when the operator is provably unnecessary, so it is not claimed as a tool rule.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "Microsoft Learn documents the null-forgiving operator and IDE0080 'Remove unnecessary suppression operator'; IDE0080 does not cover a ! that is genuinely suppressing a real maybe-null state, so the detector is check-driver only."
+      }
+    },
+    {
+      "id": "unrestored-pragma-suppression",
+      "title": "#pragma warning disable never restored",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "a session adds #pragma warning disable at the top of a file to clear a diagnostic and never emits the matching restore",
+        "a session disables a rule id it cannot satisfy so the -warnaserror build passes",
+        "a session widens the scope of an existing scoped suppression by deleting the restore line"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "#pragma\\s+warning\\s+disable\\s+([A-Za-z]+\\d+)(?![\\s\\S]*#pragma\\s+warning\\s+restore\\s+\\1)"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "#pragma warning disable CS8602\n\nusing System.Collections.Generic;\n\nnamespace Notifications;\n\npublic sealed class DigestBuilder\n{\n    private readonly IReadOnlyList<Subscriber?> _subscribers;\n\n    public DigestBuilder(IReadOnlyList<Subscriber?> subscribers) => _subscribers = subscribers;\n\n    public IEnumerable<string> Addresses()\n    {\n        foreach (var subscriber in _subscribers)\n        {\n            yield return subscriber.EmailAddress;\n        }\n    }\n}\n",
+        "nearMiss": "using System.Collections.Generic;\n\nnamespace Notifications;\n\npublic sealed class DigestBuilder\n{\n    private readonly IReadOnlyList<Subscriber?> _subscribers;\n\n    public DigestBuilder(IReadOnlyList<Subscriber?> subscribers) => _subscribers = subscribers;\n\n    public IEnumerable<string> Addresses()\n    {\n        foreach (var subscriber in _subscribers)\n        {\n            if (subscriber is null)\n            {\n                continue;\n            }\n\n#pragma warning disable CA1308\n            yield return subscriber.EmailAddress.ToLowerInvariant();\n#pragma warning restore CA1308\n        }\n    }\n}\n"
+      },
+      "gapNotes": "Heuristic, not deterministic: the lookahead only matches a restore of the same rule id later in the same file, so the legal bare form 'disable CS8602 ... #pragma warning restore' with no id - which restores every disabled warning - reads as unrestored and is a false positive on correct code. A multi-id disable ('disable CS8602, CS8604') captures only the first id, so the second is never checked for a restore either. It cannot judge whether a correctly scoped suppression is justified, and says nothing about suppressions moved into .editorconfig as severity = none, which is the quieter version of the same move.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Microsoft Learn C# preprocessor directives (#pragma warning) and 'How to suppress code analysis warnings'; IDE0079 is documented but only reports suppressions that are provably unnecessary."
+      }
+    },
+    {
+      "id": "blanket-lint-suppression",
+      "title": "SuppressMessage attribute added instead of a fix",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session decorates the offending member with [SuppressMessage] rather than satisfying the rule",
+        "a session adds an assembly-level suppression to GlobalSuppressions.cs so a whole namespace stops reporting",
+        "a session copies a SuppressMessage attribute from another file, including its unrelated Justification text"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\[\\s*(?:assembly\\s*:\\s*)?(?:System\\s*\\.\\s*Diagnostics\\s*\\.\\s*CodeAnalysis\\s*\\.\\s*)?SuppressMessage\\s*\\("
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "dotnet-analyzers",
+            "rule": "IDE0079",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System;\nusing System.Diagnostics.CodeAnalysis;\n\nnamespace Ingest;\n\npublic sealed class BatchRunner\n{\n    [SuppressMessage(\"Design\", \"CA1031:Do not catch general exception types\", Justification = \"temporary\")]\n    public int RunAll(IEnumerable<Batch> batches)\n    {\n        var completed = 0;\n\n        foreach (var batch in batches)\n        {\n            try\n            {\n                batch.Run();\n                completed++;\n            }\n            catch (Exception)\n            {\n            }\n        }\n\n        return completed;\n    }\n}\n",
+        "nearMiss": "using System;\nusing System.Collections.Generic;\nusing Microsoft.Extensions.Logging;\n\nnamespace Ingest;\n\npublic sealed class BatchRunner\n{\n    private readonly ILogger<BatchRunner> _logger;\n\n    public BatchRunner(ILogger<BatchRunner> logger) => _logger = logger;\n\n    public BatchReport RunAll(IEnumerable<Batch> batches)\n    {\n        var report = new BatchReport();\n\n        foreach (var batch in batches)\n        {\n            try\n            {\n                batch.Run();\n                report.RecordSuccess(batch.Id);\n            }\n            catch (BatchFailedException ex)\n            {\n                _logger.LogWarning(ex, \"batch {BatchId} failed\", batch.Id);\n                report.RecordFailure(batch.Id, ex.Reason);\n            }\n        }\n\n        return report;\n    }\n}\n"
+      },
+      "gapNotes": "Heuristic because the pattern does not detect the class it is named for: it flags every SuppressMessage, blanket or not, including ones a reviewer approved with a real justification. This is a review prompt, not a verdict, and needs a wave-off path. It cannot read the Justification text to judge quality. IDE0079 is a real, confirmed rule but is aimed at a different target - it reports a suppression that suppresses nothing, not a suppression that is too broad - so a well-formed blanket suppression of a rule that IS firing passes IDE0079 cleanly. Neither detector sees the equivalent move made in .editorconfig (dotnet_diagnostic.CAxxxx.severity = none), which is the same suppression with no attribute to find.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Microsoft Learn 'How to suppress code analysis warnings' (SuppressMessageAttribute, GlobalSuppressions.cs) and code-style rule IDE0079 'Remove unnecessary suppression'."
+      }
+    },
+    {
+      "id": "lint-rule-turned-off",
+      "title": "NoWarn widened to bury a real diagnostic",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "a session appends the failing rule id to <NoWarn> in Directory.Build.props so -warnaserror stops failing",
+        "a session adds 'nullable' to NoWarn to clear a whole class of warnings at once",
+        "a session adds a CA or xUnit id to NoWarn while 'unblocking the build' and does not mention it in the summary"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "<\\s*NoWarn\\s*>[^<]*\\b(?:CS8\\d{3}|CA\\d{4}|IDE\\d{4}|xUnit\\d{4}|S\\d{3,4}|nullable)\\b"
+            ],
+            "paths": [
+              "**/*.csproj",
+              "**/*.props",
+              "**/*.targets"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "<Project>\n\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>\n    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>\n    <NoWarn>$(NoWarn);CS8602;CA1031</NoWarn>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"SonarAnalyzer.CSharp\" PrivateAssets=\"all\" />\n  </ItemGroup>\n\n</Project>\n",
+        "nearMiss": "<Project>\n\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>\n    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>\n    <GenerateDocumentationFile>true</GenerateDocumentationFile>\n    <NoWarn>$(NoWarn);CS1591;NU5104</NoWarn>\n    <WarningsNotAsErrors>NU1701</WarningsNotAsErrors>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"SonarAnalyzer.CSharp\" PrivateAssets=\"all\" />\n  </ItemGroup>\n\n</Project>\n"
+      },
+      "gapNotes": "Only sees ids matching the shapes listed, so a numeric-only entry (<NoWarn>8602</NoWarn>, which the compiler accepts) slips through, as does <WarningsNotAsErrors>. The near-miss shows the legitimate case this must not break: CS1591 (missing XML doc) and NU5104 are routinely and correctly suppressed. It also cannot tell a suppression added today from one that predates the repository's guardrails.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Microsoft Learn C# compiler options - errors and warnings: NoWarn accepts warning numbers with or without the CS prefix and the literal 'nullable'; WarningsNotAsErrors overrides TreatWarningsAsErrors."
+      }
+    },
+    {
+      "id": "build-check-disabled",
+      "title": "TreatWarningsAsErrors turned off",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "a session flips TreatWarningsAsErrors to false so a build with outstanding warnings succeeds",
+        "a session sets CodeAnalysisTreatWarningsAsErrors to false so only the CA rules stop failing, which reads as a smaller change",
+        "a session lowers WarningLevel while 'reducing build noise'"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "<\\s*(?:TreatWarningsAsErrors|CodeAnalysisTreatWarningsAsErrors|EnforceCodeStyleInBuild|NuGetAudit)\\s*>\\s*false\\s*<"
+            ],
+            "paths": [
+              "**/*.csproj",
+              "**/*.props",
+              "**/*.targets"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "<Project>\n\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>\n    <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>\n    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>\n    <NuGetAudit>false</NuGetAudit>\n  </PropertyGroup>\n\n</Project>\n",
+        "nearMiss": "<Project>\n\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>\n    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>\n    <NuGetAudit>true</NuGetAudit>\n    <NuGetAuditMode>all</NuGetAuditMode>\n    <GenerateDocumentationFile>false</GenerateDocumentationFile>\n    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n</Project>\n"
+      },
+      "gapNotes": "Requires the closing angle bracket immediately after the element name, so a conditioned form - <TreatWarningsAsErrors Condition=\"'$(CI)' != 'true'\">false</TreatWarningsAsErrors> - is not matched, and that conditioned form is exactly how a session hides the change from a local build. It also cannot see the property being unset entirely, or -warnaserror being dropped from the CI command line, which has the same effect.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Microsoft Learn C# compiler options - errors and warnings (TreatWarningsAsErrors), code analysis overview (CodeAnalysisTreatWarningsAsErrors, EnforceCodeStyleInBuild) and NuGet auditing packages (NuGetAudit)."
+      }
+    },
+    {
+      "id": "invented-import-or-api",
+      "title": "API, package or namespace that does not exist",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "a session writes a using directive for a namespace it has confused with one from another library version",
+        "a session calls a method that sounds right - ToFrozenList, JsonSerializer.DeserializeStrict - and never verifies it exists",
+        "a session adds a PackageReference to a package id it invented, or to a version that was never published"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "csc",
+            "rule": "CS0246",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "csc",
+            "rule": "CS1061",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System.Collections.Generic;\nusing System.Text.Json.Serialization.Fluent;\n\nnamespace Api;\n\npublic sealed class PayloadMapper\n{\n    public string Serialize(IReadOnlyList<Record> records)\n    {\n        var options = JsonSerializerOptions.CreateStrict();\n\n        return System.Text.Json.JsonSerializer.SerializeStrict(records, options);\n    }\n}\n",
+        "nearMiss": "using System.Collections.Generic;\nusing System.Text.Json;\nusing System.Text.Json.Serialization;\n\nnamespace Api;\n\npublic sealed class PayloadMapper\n{\n    private static readonly JsonSerializerOptions Options = new()\n    {\n        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,\n        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,\n    };\n\n    public string Serialize(IReadOnlyList<Record> records) =>\n        JsonSerializer.Serialize(records, Options);\n}\n"
+      },
+      "gapNotes": "No check-driver detector: a regex cannot know which namespaces and members exist. The violation fixture deliberately does not compile - the compile failure IS the signal, which means this class is only enforceable by actually building, not by inspecting a diff. It also does not cover an invented NuGet package id; that surfaces as NU1101 at restore time, which the nuget-audit toolchain entry's restore step will catch but which is not claimed as a rule here.",
+      "evidence": {
+        "tier": "documented",
+        "source": "C# compiler errors CS0246 (type or namespace name could not be found) and CS1061 (type does not contain a definition for a member); both are standard Roslyn diagnostics emitted by dotnet build."
+      }
+    },
+    {
+      "id": "type-widened-to-any",
+      "title": "dynamic used to get past the type checker",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "a session changes a parameter or return type to dynamic when it cannot work out the right type",
+        "a session uses dynamic to bridge two shapes it did not want to model, moving the failure to runtime",
+        "a session widens a generic constraint to dynamic while 'making the helper reusable'"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\bdynamic\\s+\\w+\\s*[=,;()]"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System.Text.Json;\n\nnamespace Webhooks;\n\npublic sealed class EventRouter\n{\n    public string Route(string body)\n    {\n        dynamic payload = JsonSerializer.Deserialize<dynamic>(body)!;\n\n        return Dispatch(payload);\n    }\n\n    private static string Dispatch(dynamic envelope) => envelope.type;\n}\n",
+        "nearMiss": "using System.Text.Json;\nusing System.Text.Json.Nodes;\n\nnamespace Webhooks;\n\npublic sealed class EventRouter\n{\n    private readonly bool _isDynamicRoutingEnabled;\n\n    public EventRouter(bool isDynamicRoutingEnabled) =>\n        _isDynamicRoutingEnabled = isDynamicRoutingEnabled;\n\n    public string Route(string body)\n    {\n        var node = JsonNode.Parse(body) ?? throw new JsonException(\"empty body\");\n        var envelope = node.Deserialize<EventEnvelope>()\n            ?? throw new JsonException(\"envelope did not deserialise\");\n\n        return Dispatch(envelope);\n    }\n\n    private string Dispatch(EventEnvelope envelope) =>\n        _isDynamicRoutingEnabled ? envelope.Type : \"default\";\n}\n\npublic sealed record EventEnvelope(string Type, JsonElement Data);\n"
+      },
+      "gapNotes": "Covers only 'dynamic' as a declared type. The quieter widening moves - changing a parameter from a concrete type to object, replacing a generic constraint with a base class, or swapping a record for a Dictionary<string, object> - are all legal, idiomatic-looking C# with no rule id behind them, and this class does not see any of them. 'dynamic' in a legitimate COM or ExpandoObject interop file will be flagged and needs a path exclusion.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "Searched the CA and IDE rule indexes for a rule discouraging 'dynamic'; none exists, so this is check-driver only and marked heuristic."
+      }
+    },
+    {
+      "id": "hardcoded-secret",
+      "title": "Credential or connection string in source",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session inlines a placeholder API key to make a sample run and leaves it in the committed file",
+        "a session pastes a connection string from a log or a config dump directly into a class",
+        "a session hardcodes a token in a test fixture because it could not wire up the configuration provider"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\b(?:[Pp]assword|PASSWORD|[Pp]wd|[Aa]pi[_]?[Kk]ey|API_?KEY|[Cc]lient[_]?[Ss]ecret|[Aa]ccess[_]?[Tt]oken)\\s*=\\s*@?\"[^\"\\r\\n]{6,}\"",
+              "\"[^\"\\r\\n]*\\b(?:[Pp]assword|[Pp]wd)\\s*=\\s*[^;\"\\r\\n]{4,}"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System.Data.SqlClient;\nusing System.Net.Http;\n\nnamespace Integration;\n\npublic sealed class LegacyGateway\n{\n    private const string ApiKey = \"sk-live-8f3d9a2b7c11e0\";\n\n    private const string ConnectionString =\n        \"Server=db-prod-01;Database=billing;User Id=svc_billing;Password=P@ssw0rd!23;\";\n\n    public SqlConnection OpenDatabase() => new SqlConnection(ConnectionString);\n\n    public HttpRequestMessage BuildRequest(string path)\n    {\n        var request = new HttpRequestMessage(HttpMethod.Get, path);\n        request.Headers.Add(\"X-Api-Key\", ApiKey);\n        return request;\n    }\n}\n",
+        "nearMiss": "using System;\nusing System.Data.SqlClient;\nusing System.Net.Http;\nusing Microsoft.Extensions.Configuration;\n\nnamespace Integration;\n\npublic sealed class Gateway\n{\n    private const string PasswordFieldName = \"password\";\n\n    private readonly IConfiguration _configuration;\n\n    public Gateway(IConfiguration configuration) => _configuration = configuration;\n\n    public SqlConnection OpenDatabase() =>\n        new SqlConnection(_configuration.GetConnectionString(\"Billing\")\n            ?? throw new InvalidOperationException(\"connection string 'Billing' is not configured\"));\n\n    public HttpRequestMessage BuildRequest(string path)\n    {\n        var apiKey = Environment.GetEnvironmentVariable(\"SERVICE_API_KEY\")\n            ?? throw new InvalidOperationException(\"SERVICE_API_KEY is not set\");\n\n        var request = new HttpRequestMessage(HttpMethod.Get, path);\n        request.Headers.Add(\"X-Api-Key\", apiKey);\n        request.Headers.Add(\"X-Redacted-Field\", PasswordFieldName);\n        return request;\n    }\n}\n"
+      },
+      "gapNotes": "Must run with stripStrings off, which makes it one of the two classes in this edition that read literal text - so it will also fire on obviously fake sample values in documentation-style files. Matching is case-sensitive on the common casings only, because JS RegExp has no inline (?i) flag and the check driver passes no flags: a SCREAMING_SNAKE or lowercase spelling outside the listed forms is missed. A base64 or hex secret assigned to a neutrally named constant (var k = \"aGVsbG8...\") matches nothing here. There is no CA rule for hardcoded credentials, so no tool-rule detector is claimed; a dedicated secret scanner in CI is the real answer and this class only narrows the window.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "Reviewed the CA security rule index (CA2100, CA5350/CA5351, CA5394); none of them covers a credential literal, so this class is check-driver only."
+      }
+    },
+    {
+      "id": "hardcoded-config-value",
+      "title": "Endpoint or path hardcoded instead of configured",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session inlines the production base address into a client rather than binding it from IConfiguration",
+        "a session hardcodes an absolute file path from its own working directory",
+        "a session pins a URL it saw in a log so the code will 'work now', bypassing the options pattern already in the project"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "new\\s+Uri\\s*\\(\\s*@?\"https?:"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System;\nusing System.Net.Http;\n\nnamespace Pricing;\n\npublic sealed class PricingClientFactory\n{\n    public HttpClient Create()\n    {\n        var client = new HttpClient\n        {\n            BaseAddress = new Uri(\"https://pricing.internal.example.com/v2/\"),\n            Timeout = TimeSpan.FromSeconds(30),\n        };\n\n        return client;\n    }\n}\n",
+        "nearMiss": "using System;\nusing System.Net.Http;\nusing Microsoft.Extensions.Options;\n\nnamespace Pricing;\n\npublic sealed class PricingClientFactory\n{\n    private readonly PricingOptions _options;\n\n    public PricingClientFactory(IOptions<PricingOptions> options) => _options = options.Value;\n\n    public HttpClient Create()\n    {\n        var baseAddress = new Uri(_options.BaseAddress, UriKind.Absolute);\n\n        return new HttpClient\n        {\n            BaseAddress = baseAddress,\n            Timeout = _options.Timeout,\n        };\n    }\n}\n\npublic sealed class PricingOptions\n{\n    public string BaseAddress { get; init; } = \"https://localhost:5001/\";\n\n    public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);\n}\n"
+      },
+      "gapNotes": "Narrow by design: only 'new Uri(\"http...\")' is matched, so a literal passed straight to HttpClient.GetAsync, an absolute filesystem path, a port number, or a magic timeout is missed entirely. The pattern deliberately stops at the scheme colon and never sees the host: jig's driver blanks '//' as a line comment before any pattern runs, so by match time the line reads 'new Uri(\"https:' followed by blanks. Everything after the scheme - which host, which environment, whether it is localhost - is therefore invisible to this class, and a commented-out endpoint is invisible too. Test projects and options-class defaults legitimately hold literal URLs, as the near-miss shows (its default survives only because it is not wrapped in new Uri), so this needs a paths exclusion for tests and for *Options.cs or it will be noisy enough to be waved off.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "No CA or IDE rule exists for hardcoded endpoints; the .NET options pattern (IOptions<T>, IConfiguration) is the documented alternative this class points at."
+      }
+    },
+    {
+      "id": "test-run-narrowed",
+      "title": "Test run narrowed by a filter",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "a session adds a TestCaseFilter that excludes the category its change broke",
+        "a session appends --filter to the CI test step so a subset runs and the job goes green",
+        "a session moves a failing test into a category and then excludes that category in .runsettings"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "<\\s*TestCaseFilter\\s*>[^<]*(?:!=|!~)"
+            ],
+            "paths": [
+              "**/*.runsettings",
+              "**/*.csproj",
+              "**/*.props"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TestCaseFilter>(TestCategory != Flaky) &amp; (TestCategory != Integration)</TestCaseFilter>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\" />\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n",
+        "nearMiss": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TestSessionTimeout>600000</TestSessionTimeout>\n    <MaxCpuCount>0</MaxCpuCount>\n  </RunConfiguration>\n  <TestRunParameters>\n    <Parameter name=\"webAppUrl\" value=\"http://localhost:5001\" />\n  </TestRunParameters>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\">\n        <Configuration>\n          <LogFileName>results.trx</LogFileName>\n        </Configuration>\n      </Logger>\n      <Logger friendlyName=\"blame\" enabled=\"True\" />\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n"
+      },
+      "gapNotes": "Only sees an exclusionary filter committed to a runsettings or project file. The same narrowing done as --filter on the CI command line lives in a workflow YAML, which is not C# and is not in this class's paths - a separate CI-file class or a diff check on the test step is needed for that. An inclusive filter that quietly omits a suite (TestCategory = Unit only) is also missed, since it contains no != operator.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Microsoft Learn 'Configure unit tests with a .runsettings file' (RunConfiguration/TestCaseFilter) and dotnet test with VSTest (--filter operators =, !=, ~, !~)."
+      }
+    },
+    {
+      "id": "zero-tests-treated-as-pass",
+      "title": "A run that discovers no tests still exits zero",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session reports the suite green when the run actually discovered zero tests - a broken adapter reference, a wrong project path, an over-narrow filter",
+        "a session sets TreatNoTestsAsError to false after a discovery failure rather than fixing discovery",
+        "a session drops the test project from the solution and the CI step keeps exiting zero"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "<\\s*TreatNoTestsAsError\\s*>\\s*false\\s*<"
+            ],
+            "paths": [
+              "**/*.runsettings",
+              "**/*.csproj",
+              "**/*.props"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>false</TreatNoTestsAsError>\n    <TreatTestAdapterErrorsAsWarnings>true</TreatTestAdapterErrorsAsWarnings>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\" />\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n",
+        "nearMiss": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TreatTestAdapterErrorsAsWarnings>false</TreatTestAdapterErrorsAsWarnings>\n    <TestSessionTimeout>600000</TestSessionTimeout>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\">\n        <Configuration>\n          <LogFileName>results.trx</LogFileName>\n        </Configuration>\n      </Logger>\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n"
+      },
+      "gapNotes": "Catches the setting being flipped, not the underlying condition. A repository with no .runsettings at all inherits the default of false and is silently exposed - the absence of a file cannot be detected by a pattern over files, so jig must assert the file exists as a separate install-time check. It also says nothing about a test project that was dropped from the solution, where discovery legitimately finds nothing to run.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Microsoft Learn 'Configure unit tests with a .runsettings file' - TreatNoTestsAsError defaults to false; dotnet test with VSTest exit codes section states a run that discovers no tests returns 0 by default."
+      }
+    },
+    {
+      "id": "blocking-call-in-async",
+      "title": "Async result blocked on synchronously",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session calls .Result or .Wait() to avoid propagating async up a call chain it did not want to change",
+        "a session uses GetAwaiter().GetResult() inside a test to avoid making the test method async",
+        "a session blocks in a constructor or property getter because the signature cannot be made async"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\.\\s*(?:Wait\\s*\\(\\s*\\)|GetAwaiter\\s*\\(\\s*\\)\\s*\\.\\s*GetResult\\s*\\(\\s*\\))"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "xunit-analyzers",
+            "rule": "xUnit1031",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "dotnet-analyzers",
+            "rule": "CA1849",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System.Threading.Tasks;\n\nnamespace Accounts;\n\npublic sealed class AccountFacade\n{\n    private readonly IAccountRepository _repository;\n    private readonly IEventBus _bus;\n\n    public AccountFacade(IAccountRepository repository, IEventBus bus)\n    {\n        _repository = repository;\n        _bus = bus;\n    }\n\n    public Account Load(int id)\n    {\n        var task = _repository.GetAsync(id);\n        task.Wait();\n\n        _bus.PublishAsync(new AccountLoaded(id)).GetAwaiter().GetResult();\n\n        return task.Result;\n    }\n}\n",
+        "nearMiss": "using System;\nusing System.Threading;\nusing System.Threading.Tasks;\n\nnamespace Accounts;\n\npublic sealed class AccountFacade\n{\n    private readonly IAccountRepository _repository;\n    private readonly IEventBus _bus;\n\n    public AccountFacade(IAccountRepository repository, IEventBus bus)\n    {\n        _repository = repository;\n        _bus = bus;\n    }\n\n    public async Task<Account> LoadAsync(int id, CancellationToken cancellationToken)\n    {\n        var account = await _repository.GetAsync(id, cancellationToken)\n            .WaitAsync(TimeSpan.FromSeconds(5), cancellationToken)\n            .ConfigureAwait(false);\n\n        await _bus.PublishAsync(new AccountLoaded(id), cancellationToken).ConfigureAwait(false);\n\n        return account;\n    }\n}\n\npublic sealed record OperationResult(bool Succeeded, string? Result);\n"
+      },
+      "gapNotes": "Deliberately omits '.Result' from the pattern: a property named Result is common on result-object records, and matching it produces false positives faster than jig can wave them off - the near-miss carries one to prove the point. That means the single commonest form of this mistake is caught only by CA1849 (inside an async method) and xUnit1031 (inside a test), not by the check driver. Blocking in a constructor of a non-async class is caught by neither rule.",
+      "evidence": {
+        "tier": "documented",
+        "source": "xunit.net analyzer rule xUnit1031 'Do not use blocking task operations in test method'; Microsoft Learn code quality rule CA1849 'Call async methods when in an async method'."
+      }
+    },
+    {
+      "id": "async-void-method",
+      "title": "async void method",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session writes async void so a call site that expects void will compile, and the exception is now unobservable",
+        "a session converts a sync handler to async and leaves the return type as void",
+        "a session writes an async void test method, which xUnit v3 no longer runs"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\basync\\s+void\\s+\\w+\\s*\\("
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "xunit-analyzers",
+            "rule": "xUnit1049",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System.Threading.Tasks;\n\nnamespace Messaging;\n\npublic sealed class InboxWorker\n{\n    private readonly IInbox _inbox;\n\n    public InboxWorker(IInbox inbox) => _inbox = inbox;\n\n    public async void Drain()\n    {\n        foreach (var message in _inbox.Pending())\n        {\n            await _inbox.HandleAsync(message);\n        }\n    }\n}\n",
+        "nearMiss": "using System;\nusing System.Threading;\nusing System.Threading.Tasks;\n\nnamespace Messaging;\n\npublic sealed class InboxWorker\n{\n    private readonly IInbox _inbox;\n\n    public InboxWorker(IInbox inbox) => _inbox = inbox;\n\n    public async Task DrainAsync(CancellationToken cancellationToken)\n    {\n        foreach (var message in _inbox.Pending())\n        {\n            await _inbox.HandleAsync(message, cancellationToken).ConfigureAwait(false);\n        }\n    }\n\n    public async ValueTask<int> CountAsync(CancellationToken cancellationToken) =>\n        await _inbox.CountAsync(cancellationToken).ConfigureAwait(false);\n\n    public void Drain() => DrainAsync(CancellationToken.None).GetAwaiter().GetResult();\n\n    private static Func<Task> VoidResultFactory() => () => Task.CompletedTask;\n}\n"
+      },
+      "gapNotes": "Flags every async void, including the one legitimate case - a UI or classic event handler whose signature the framework fixes - so WinForms, WPF and MAUI code-behind files need a path exclusion. xUnit1049 only covers test methods, so async void in production code has no tool rule behind it in this edition and rests on the pattern alone.",
+      "evidence": {
+        "tier": "documented",
+        "source": "xunit.net analyzer rules xUnit1048 (async void deprecated in v3) and xUnit1049 (async void no longer supported for test methods)."
+      }
+    },
+    {
+      "id": "unawaited-async-call",
+      "title": "Task started and never awaited",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session calls an async method as a bare statement, so the work is fire-and-forget and its exception is lost",
+        "a session removes an await while making a method synchronous and leaves the call in place",
+        "a session drops an await inside a loop to 'parallelise', without collecting the tasks"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "^\\s*(?!return\\b|await\\b|_\\s*=)\\w[\\w.]*Async\\s*\\([^;]*\\)\\s*;"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": true
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "csc",
+            "rule": "CS4014",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System.Threading.Tasks;\n\nnamespace Audit;\n\npublic sealed class CheckoutService\n{\n    private readonly IAuditLog _auditLog;\n    private readonly IPaymentGateway _payments;\n\n    public CheckoutService(IAuditLog auditLog, IPaymentGateway payments)\n    {\n        _auditLog = auditLog;\n        _payments = payments;\n    }\n\n    public async Task<Receipt> CheckoutAsync(Cart cart)\n    {\n        var receipt = await _payments.ChargeAsync(cart.Total);\n\n        _auditLog.WriteAsync(new AuditEntry(\"checkout\", cart.Id));\n\n        return receipt;\n    }\n}\n",
+        "nearMiss": "using System.Threading.Tasks;\n\nnamespace Audit;\n\npublic sealed class CheckoutService\n{\n    private readonly IAuditLog _auditLog;\n    private readonly IPaymentGateway _payments;\n\n    public CheckoutService(IAuditLog auditLog, IPaymentGateway payments)\n    {\n        _auditLog = auditLog;\n        _payments = payments;\n    }\n\n    public async Task<Receipt> CheckoutAsync(Cart cart)\n    {\n        var receipt = await _payments.ChargeAsync(cart.Total).ConfigureAwait(false);\n\n        await _auditLog.WriteAsync(new AuditEntry(\"checkout\", cart.Id)).ConfigureAwait(false);\n\n        return receipt;\n    }\n\n    public Task<Receipt> RetryAsync(Cart cart) => _payments.ChargeAsync(cart.Total);\n\n    public void FireAndForgetDeliberately(Cart cart) =>\n        _ = _auditLog.WriteAsync(new AuditEntry(\"abandoned\", cart.Id));\n}\n"
+      },
+      "gapNotes": "Leans on the Async naming convention, so a task-returning method not suffixed with Async is invisible, and a non-task-returning method that happens to end in Async is a false positive. It also cannot see a call whose arguments span several lines, since it runs per line. CS4014 is the real backstop and is far more precise, but it is a warning - it only fails the build with TreatWarningsAsErrors on, which is why the csc toolchain entry sets it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "C# compiler warning CS4014 ('Because this call is not awaited, execution of the current method continues before the call is completed'); the CS-prefixed warning is promoted to an error by TreatWarningsAsErrors."
+      }
+    },
+    {
+      "id": "insecure-randomness",
+      "title": "System.Random used for a security value",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session generates a token, nonce or reset code with new Random() because it is the first API that comes to mind",
+        "a session replaces a cryptographic generator with Random while 'simplifying' a helper",
+        "a session seeds Random with a constant to make a test deterministic and leaves that helper in production code"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\bnew\\s+Random\\s*\\("
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "dotnet-analyzers",
+            "rule": "CA5394",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System;\n\nnamespace Identity;\n\npublic sealed class ResetCodeGenerator\n{\n    private static readonly Random Rng = new Random();\n\n    public string NewCode()\n    {\n        var value = Rng.Next(100_000, 999_999);\n\n        return value.ToString(\"D6\", System.Globalization.CultureInfo.InvariantCulture);\n    }\n}\n",
+        "nearMiss": "using System;\nusing System.Globalization;\nusing System.Security.Cryptography;\n\nnamespace Identity;\n\npublic sealed class ResetCodeGenerator\n{\n    private readonly RandomizedBackoff _backoff = new RandomizedBackoff();\n\n    public string NewCode()\n    {\n        var value = RandomNumberGenerator.GetInt32(100_000, 1_000_000);\n\n        return value.ToString(\"D6\", CultureInfo.InvariantCulture);\n    }\n\n    public TimeSpan NextRetryDelay(int attempt) => _backoff.DelayFor(attempt);\n}\n"
+      },
+      "gapNotes": "The pattern flags every new Random(), including entirely legitimate non-security uses - jitter, shuffling a demo list, seeding a fixture - so it is heuristic and will need waving off in those files. It does not match Random.Shared, which is the modern form and equally unsuitable for secrets; CA5394 does cover Random.Shared and is the more accurate detector of the two.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Microsoft Learn code quality rule CA5394 'Do not use insecure randomness'; System.Security.Cryptography.RandomNumberGenerator.GetInt32 is the documented replacement."
+      }
+    },
+    {
+      "id": "weak-hash-algorithm",
+      "title": "Broken or weak cryptographic algorithm",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session reaches for MD5 or SHA1 to hash a value because those are the examples it has seen most often",
+        "a session matches an existing legacy MD5 call when adding a new code path, spreading the algorithm",
+        "a session picks MD5 for a 'checksum' that is in fact a security boundary"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\b(?:MD5|SHA1|TripleDES|RIPEMD160)\\s*\\.\\s*(?:Create|HashData|HashDataAsync)\\s*\\("
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "dotnet-analyzers",
+            "rule": "CA5351",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "dotnet-analyzers",
+            "rule": "CA5350",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System.Security.Cryptography;\nusing System.Text;\n\nnamespace Storage;\n\npublic sealed class BlobKeyBuilder\n{\n    public string KeyFor(string tenant, string document)\n    {\n        var payload = Encoding.UTF8.GetBytes($\"{tenant}:{document}\");\n        var digest = MD5.HashData(payload);\n\n        using var legacy = SHA1.Create();\n        var fallback = legacy.ComputeHash(payload);\n\n        return Convert.ToHexString(digest) + Convert.ToHexString(fallback);\n    }\n}\n",
+        "nearMiss": "using System;\nusing System.Security.Cryptography;\nusing System.Text;\n\nnamespace Storage;\n\npublic sealed class BlobKeyBuilder\n{\n    private const string Md5FallbackDisabled = \"md5-disabled\";\n\n    public string KeyFor(string tenant, string document)\n    {\n        var payload = Encoding.UTF8.GetBytes($\"{tenant}:{document}\");\n        var digest = SHA256.HashData(payload);\n\n        using var mac = new HMACSHA256(DeriveKey(tenant));\n        var tag = mac.ComputeHash(payload);\n\n        return Convert.ToHexString(digest) + Convert.ToHexString(tag);\n    }\n\n    private static byte[] DeriveKey(string tenant) =>\n        Rfc2898DeriveBytes.Pbkdf2(tenant, salt: new byte[16], iterations: 210_000, HashAlgorithmName.SHA256, 32);\n}\n"
+      },
+      "gapNotes": "Only matches the static factory and one-shot forms. An instance created through CryptoConfig.CreateFromName(\"MD5\"), an algorithm name held in configuration, or a HashAlgorithmName.MD5 value passed to a KDF all evade the pattern - CA5350 and CA5351 catch most of those and are the reason both are wired here. Neither rule nor pattern can tell a genuine non-security checksum (cache key, ETag) from a security use, so waved-off sites need an .editorconfig scope.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Microsoft Learn code quality rules CA5350 'Do Not Use Weak Cryptographic Algorithms' (TripleDES, SHA1, RIPEMD160) and CA5351 'Do Not Use Broken Cryptographic Algorithms' (MD5, DES, RC2)."
+      }
+    },
+    {
+      "id": "sql-string-concatenation",
+      "title": "SQL built by string interpolation",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session interpolates a value straight into a command because parameterising it required touching the calling signature",
+        "a session converts a parameterised query into an interpolated one while 'simplifying' a repository method",
+        "a session builds a dynamic WHERE clause by concatenation to satisfy a filtering requirement"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "(?:new\\s+\\w*Command\\s*\\(\\s*|\\bCommandText\\s*\\+?=\\s*)\\$"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "dotnet-analyzers",
+            "rule": "CA2100",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System.Data.SqlClient;\n\nnamespace Directory;\n\npublic sealed class UserRepository\n{\n    private readonly SqlConnection _connection;\n\n    public UserRepository(SqlConnection connection) => _connection = connection;\n\n    public SqlDataReader FindByName(string name)\n    {\n        using var command = new SqlCommand($\"SELECT Id, Email FROM Users WHERE Name = '{name}'\", _connection);\n\n        command.CommandText = $\"{command.CommandText} ORDER BY {name}\";\n\n        return command.ExecuteReader();\n    }\n}\n",
+        "nearMiss": "using System.Data;\nusing System.Data.SqlClient;\nusing Microsoft.Extensions.Logging;\n\nnamespace Directory;\n\npublic sealed class UserRepository\n{\n    private const string FindByNameSql = \"SELECT Id, Email FROM Users WHERE Name = @name ORDER BY Id\";\n\n    private readonly SqlConnection _connection;\n    private readonly ILogger<UserRepository> _logger;\n\n    public UserRepository(SqlConnection connection, ILogger<UserRepository> logger)\n    {\n        _connection = connection;\n        _logger = logger;\n    }\n\n    public SqlDataReader FindByName(string name)\n    {\n        _logger.LogDebug($\"looking up user {name}\");\n\n        using var command = new SqlCommand(FindByNameSql, _connection);\n        command.Parameters.Add(\"@name\", SqlDbType.NVarChar, 200).Value = name;\n\n        return command.ExecuteReader();\n    }\n}\n"
+      },
+      "gapNotes": "Catches interpolation at the command boundary only. Concatenation with + into a local that is later assigned to CommandText, a query assembled by a StringBuilder, or raw SQL passed to Dapper or EF Core's FromSqlRaw are all missed by the pattern - CA2100 covers the IDbCommand.CommandText path but not the ORM helpers. The near-miss carries an interpolated log message on purpose: that is the shape a looser pattern would wrongly flag.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Microsoft Learn code quality rule CA2100 'Review SQL queries for security vulnerabilities'; the rule targets IDbCommand.CommandText built from string arguments."
+      }
+    }
+  ]
+}

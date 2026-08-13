@@ -1,11 +1,13 @@
 "use strict";
 
 // The review surface: the screen somebody reads before any guard is written.
-// Two claims are load-bearing here and neither can be checked by reading the
-// output — that every cell is DERIVED from the catalogue rather than written by
-// hand, and that the floor FAILS a plan rather than being a convention people
-// remember. So the suite checks the derivation against the catalogue itself,
-// and exercises the throw against a class the catalogue does not contain.
+//
+// Two claims are load-bearing and neither can be checked by reading the output
+// — that every cell is DERIVED from each detector's own metadata and from the
+// changes the plan writes, and that the host-neutral floor is REPORTED rather
+// than enforced. SCOPE turned the second one around: a class nothing
+// host-neutral catches is a disclosed gap now, not a refusal, so the suite
+// proves the sentence still reaches the page instead of proving a throw.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -14,9 +16,11 @@ const os = require("os");
 const path = require("path");
 
 const engine = require("../scripts/jig.js");
-const catalogue = require("../scripts/catalogue.json");
+const editions = require("../scripts/editions.js");
+const A = require("./authored.js");
 
-const ALL_FOUR = "silent-catch,focused-or-skipped-test,pipe-to-shell,test-file-deletion";
+const PLUGIN_ROOT = path.join(__dirname, "..");
+const CHECKS = [A.PIPED_INSTALLER, A.EMPTY_CATCH];
 
 const roots = [];
 
@@ -35,12 +39,20 @@ function project(files) {
   return root;
 }
 
-function planOnly(root, select, opts) {
-  return engine.cmdPlan(root, { _: [], change: [], select, ...(opts || {}) });
+// A Node project, so exactly one edition is detected and the backlog it
+// produces is a fixed list rather than whatever the machine happened to match.
+function nodeProject(files) {
+  return project({ "package.json": "{ \"private\": true }\n", "src/a.ts": "export const a = 1;\n", ...(files || {}) });
 }
 
-function install(root, select, opts) {
-  const plan = planOnly(root, select, opts);
+function planOnly(root, opts, checks) {
+  return engine.cmdPlan(root, {
+    _: [], change: [], authored: A.writeChecks(root, checks || CHECKS), provenance: "elicited", ...(opts || {}),
+  });
+}
+
+function install(root, opts, checks) {
+  const plan = planOnly(root, opts, checks);
   const applied = engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
   return { plan, applied };
 }
@@ -49,20 +61,14 @@ function readJson(root, rel) {
   return JSON.parse(fs.readFileSync(path.join(root, rel), "utf-8"));
 }
 
-function classOf(id) {
-  return catalogue.classes.find((c) => c.id === id);
-}
-
-// A class the catalogue does not ship, so the floor can be exercised without
-// first breaking the catalogue every other suite reads.
+// A class nothing ships, so the pure grading functions can be exercised without
+// first bending an edition every other suite reads.
 function synthetic(overrides) {
   return {
     id: "synthetic-class",
     title: "A class invented by this test",
     severity: "hygiene",
     axes: ["agent"],
-    installableAtV1: false,
-    enforcementGap: false,
     detectors: [],
     ...overrides,
   };
@@ -72,101 +78,88 @@ const HOOK_DETECTOR = { actor: "claude-session", lever: "bash-guard", runner: "P
 const DRIVER_DETECTOR = { actor: "human-editor", lever: "check-driver", runner: "checks", confidence: "deterministic" };
 
 // ---------------------------------------------------------------------------
-// The host-neutral floor
+// The host-neutral floor, as a report
 // ---------------------------------------------------------------------------
 
 test("a class with a host-neutral deterministic lever clears the floor", () => {
   const cls = synthetic({ detectors: [DRIVER_DETECTOR] });
   assert.equal(engine.hostNeutralFloor(cls), true);
-  assert.equal(engine.floorProblem(cls), null);
+  assert.equal(engine.floorNote(cls), null);
 });
 
 test("a lever only an agent host can run does not clear the floor, however deterministic", () => {
   const cls = synthetic({ detectors: [HOOK_DETECTOR] });
-  assert.equal(catalogue.levers["bash-guard"].hostNeutral, false);
+  assert.equal(engine.LEVERS["bash-guard"].hostNeutral, false);
   assert.equal(engine.hostNeutralFloor(cls), false);
-  assert.match(engine.floorProblem(cls), /no host-neutral deterministic lever/);
+  assert.match(engine.floorNote(cls), /no host-neutral deterministic lever/);
 });
 
 test("a host-neutral lever that can be wrong does not clear the floor either", () => {
   const cls = synthetic({ detectors: [{ ...DRIVER_DETECTOR, confidence: "heuristic" }] });
   assert.equal(engine.hostNeutralFloor(cls), false);
-  assert.equal(typeof engine.floorProblem(cls), "string");
+  assert.equal(typeof engine.floorNote(cls), "string");
 });
 
-test("the ENFORCEMENT GAP stamp is the only way past the floor", () => {
-  const bare = synthetic({ detectors: [HOOK_DETECTOR] });
-  assert.equal(typeof engine.floorProblem(bare), "string");
-  assert.equal(engine.floorProblem({ ...bare, enforcementGap: true }), null);
+test("the floor names the class and refuses nothing — it is a report now, not a gate", () => {
+  // SCOPE, "Does hostNeutralFloor stay a release gate": no. A class nothing
+  // catches is a disclosed gap, and there is no throwing floor left to call.
+  assert.equal(typeof engine.floorProblem, "undefined");
+  assert.equal(typeof engine.floorCheck, "undefined");
+  assert.match(engine.floorNote(synthetic({ detectors: [HOOK_DETECTOR] })), /synthetic-class/);
 });
 
-test("the floor throws, naming the class — it is a construction, not a convention", () => {
-  assert.throws(
-    () => engine.floorCheck([synthetic({ detectors: [HOOK_DETECTOR] })]),
-    /host-neutral floor[\s\S]*synthetic-class/);
-});
-
-test("a selection where one class fails the floor throws for that class alone", () => {
-  const ok = synthetic({ id: "clears-the-floor", detectors: [DRIVER_DETECTOR] });
-  const bad = synthetic({ id: "fails-the-floor", detectors: [HOOK_DETECTOR] });
-  try {
-    engine.floorCheck([ok, bad]);
-    assert.fail("the floor let a class through");
-  } catch (err) {
-    assert.equal(err.expected, true);
-    assert.match(err.message, /fails-the-floor/);
-    assert.equal(err.message.includes("clears-the-floor"), false);
-  }
-});
-
-test("every class the catalogue ships already clears the floor or carries the stamp", () => {
-  // Which is why the throw above cannot fire in production. The pairing is the
-  // point: the construction is real, and today nothing trips it.
-  assert.doesNotThrow(() => engine.floorCheck(catalogue.classes));
-});
-
-test("a plan that clears the floor leaves the plan artifact, one that does not writes nothing", () => {
-  const root = project({});
-  assert.doesNotThrow(() => planOnly(root, "silent-catch"));
+test("a plan whose class fails the floor still writes the plan, and says so on the page", () => {
+  const root = nodeProject();
+  const plan = planOnly(root, { "no-ci": true }, [A.HEURISTIC_ONLY]);
+  assert.equal(plan.ok, true);
+  assert.deepEqual(plan.floorGaps.map((g) => g.classId), ["test-file-removal"]);
   assert.ok(fs.existsSync(path.join(root, ".jig", "plan.json")));
 
-  const empty = project({});
-  assert.throws(() => planOnly(empty, "nested-ternary"), /ships as data at v1/);
-  assert.equal(fs.existsSync(path.join(empty, ".jig")), false);
+  const md = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
+  assert.match(md, /## ENFORCEMENT GAP/);
+  assert.ok(md.includes("`test-file-removal`"));
+});
+
+test("a plan with nothing to install at all is a refusal, not an empty install", () => {
+  const root = nodeProject();
+  assert.throws(() => engine.cmdPlan(root, { _: [], change: [], select: "  ,  " }),
+    /needs --select|--from <file>/);
+  assert.equal(fs.existsSync(path.join(root, ".jig")), false, "asking created state");
 });
 
 // ---------------------------------------------------------------------------
 // The matrix is computed, never authored
 // ---------------------------------------------------------------------------
 
-test("the columns are the catalogue's own actor list, in its own order", () => {
-  const root = project({});
-  planOnly(root, ALL_FOUR);
+test("the columns are the engine's own actor list, in its own order", () => {
+  const root = nodeProject();
+  planOnly(root);
   const matrix = readJson(root, ".jig/plan.json");
-  assert.deepEqual(matrix.actors, catalogue.actors);
-  for (const row of matrix.rows) assert.deepEqual(Object.keys(row.cells), catalogue.actors);
+  assert.deepEqual(matrix.actors, engine.ACTORS);
+  for (const row of matrix.rows) assert.deepEqual(Object.keys(row.cells), engine.ACTORS);
 });
 
 test("there is one row per selected class and nothing else", () => {
-  const root = project({});
-  planOnly(root, "silent-catch,pipe-to-shell");
+  const root = nodeProject();
+  planOnly(root);
   const matrix = readJson(root, ".jig/plan.json");
-  assert.deepEqual(matrix.rows.map((r) => r.classId), ["pipe-to-shell", "silent-catch"]);
-  assert.deepEqual(matrix.selection, ["pipe-to-shell", "silent-catch"]);
+  assert.deepEqual(matrix.rows.map((r) => r.classId), ["empty-catch", "piped-installer"]);
+  assert.deepEqual(matrix.selection, ["empty-catch", "piped-installer"]);
 });
 
-test("every cell traces back to a detector the catalogue defines, or says none does", () => {
-  const root = project({});
-  planOnly(root, ALL_FOUR);
+test("every cell traces back to a detector the class carries, or says none does", () => {
+  const root = nodeProject();
+  planOnly(root);
+  const byId = new Map(CHECKS.map((c) => [c.id, c]));
   for (const row of readJson(root, ".jig/plan.json").rows) {
-    const cls = classOf(row.classId);
+    const cls = byId.get(row.classId);
     for (const [actor, cell] of Object.entries(row.cells)) {
       if (cell.lever === null) {
         assert.equal(cell.grade, "GAP");
-        assert.match(cell.why, new RegExp("no detector in the catalogue names " + actor));
+        assert.match(cell.why, new RegExp("no detector on this class names " + actor));
         continue;
       }
-      assert.ok(catalogue.levers[cell.lever], cell.lever + " is not a lever");
+      assert.ok(engine.LEVERS[cell.lever], cell.lever + " is not a lever");
       assert.ok(cls.detectors.some((d) => d.actor === actor && d.lever === cell.lever),
         row.classId + "/" + actor + " names a detector the class does not carry");
     }
@@ -174,8 +167,8 @@ test("every cell traces back to a detector the catalogue defines, or says none d
 });
 
 test("every covered cell names an artifact this plan actually writes", () => {
-  const root = project({});
-  const { plan } = install(root, ALL_FOUR);
+  const root = nodeProject();
+  const { plan } = install(root);
   const guards = readJson(root, ".jig/config.json").guards.map((g) => g.id);
   const paths = plan.changes.map((c) => c.path);
   for (const row of readJson(root, ".jig/plan.json").rows) {
@@ -187,62 +180,64 @@ test("every covered cell names an artifact this plan actually writes", () => {
   }
 });
 
-test("the Codex column is GAP without the region, and PROB the moment the plan writes it", () => {
-  const root = project({});
-  planOnly(root, ALL_FOUR);
-  for (const row of readJson(root, ".jig/plan.json").rows) {
-    assert.equal(row.cells["codex-session"].grade, "GAP");
-    assert.equal(row.cells["codex-session"].artifact, null);
-    assert.match(row.cells["codex-session"].why, /writes no agents-region artifact/);
-  }
-
-  const wired = project({});
-  planOnly(wired, ALL_FOUR, { "agents-region": true, provenance: "elicited" });
-  for (const row of readJson(wired, ".jig/plan.json").rows) {
-    assert.equal(row.cells["codex-session"].grade, "PROB");
-    assert.equal(row.cells["codex-session"].artifact, "AGENTS.md");
-    assert.equal(row.cells["codex-session"].ceiling, "unmeasured");
-  }
+test("a class the editions carry and nobody authored reads GAP in every column", () => {
+  // The catalogue informs and never gates (SCOPE): selecting an edition class
+  // puts it on the matrix, and the matrix says plainly that this plan writes
+  // nothing for it, because only an admitted check becomes an artifact.
+  const root = nodeProject();
+  planOnly(root, { select: "javascript-typescript/swallowed-exception" });
+  const row = readJson(root, ".jig/plan.json").rows
+    .find((r) => r.classId === "javascript-typescript/swallowed-exception");
+  assert.equal(row.edition, "javascript-typescript");
+  assert.equal(row.authored, false);
+  for (const cell of Object.values(row.cells)) assert.equal(cell.grade, "GAP");
+  assert.match(row.cells["human-editor"].why, /writes no check-driver artifact/);
 });
 
-test("a detector on a lever that ships later reads GAP, naming the release", () => {
-  const later = { actor: "human-editor", lever: "review", runner: "none", confidence: "heuristic" };
-  assert.equal(engine.leverAvailable(catalogue.levers["review"]), false);
-  const cell = engine.detectorCell(synthetic({}), later, 0, "elicited", [], []);
-  assert.equal(cell.grade, "GAP");
-  assert.match(cell.why, /review lever ships at never/);
-});
-
-test("a class covered by both a shipping lever and a later one is graded on the shipping one", () => {
-  const cls = classOf("silent-catch");
-  const ci = cls.detectors.filter((d) => d.actor === "human-ci").map((d) => d.lever).sort();
-  assert.deepEqual(ci, ["ci-workflow", "detekt-rule", "eslint-rule"]);
-  const root = project({});
-  planOnly(root, "silent-catch");
-  const cell = readJson(root, ".jig/plan.json").rows[0].cells["human-ci"];
-  assert.equal(cell.grade, "DET");
-  assert.equal(cell.lever, "ci-workflow");
-});
-
-test("a lever the catalogue names and this build does not ship reads GAP by name", () => {
+test("a detector on a lever this build does not run reads GAP by name", () => {
   const cell = engine.detectorCell(synthetic({}),
     { actor: "human-ci", lever: "invented-lever", runner: "ci", confidence: "deterministic" }, 0, "elicited", [], []);
   assert.equal(engine.leverOf("invented-lever"), null);
   assert.equal(cell.grade, "GAP");
-  assert.match(cell.why, /does not ship/);
+  assert.match(cell.why, /does not run/);
+});
+
+test("a detector on a lever that ships later reads GAP, naming the release", () => {
+  const later = { actor: "human-editor", lever: "check-driver", runner: "checks", confidence: "deterministic" };
+  assert.equal(engine.leverAvailable({ availableAt: "9.9.9" }), false);
+  const cell = engine.detectorCell(synthetic({}), later, 0, "elicited", [], []);
+  // Nothing writes an artifact for a synthetic class, so this cell is the other
+  // GAP: available lever, no artifact.
+  assert.equal(cell.grade, "GAP");
+  assert.match(cell.why, /writes no check-driver artifact/);
+});
+
+test("a class covered by both a shipping lever and a later one is graded on the shipping one", () => {
+  // Best-of, not first-of: two detectors on one actor, and the cell takes the
+  // stronger grade rather than whichever came first in the list.
+  const cls = synthetic({
+    detectors: [
+      { actor: "human-ci", lever: "prose-rule", runner: "none", confidence: "heuristic" },
+      { actor: "human-ci", lever: "ci-workflow", runner: "ci", confidence: "deterministic" },
+    ],
+  });
+  const changes = [{ id: "ci", path: ".github/workflows/jig.yml", template: { name: "ci-workflow" }, classIds: [cls.id] }];
+  const row = engine.matrixRow(cls, "elicited", changes, []);
+  assert.equal(row.cells["human-ci"].grade, "DET");
+  assert.equal(row.cells["human-ci"].lever, "ci-workflow");
 });
 
 test("skipping the CI workflow drops the CI column rather than quietly keeping the claim", () => {
-  const root = project({});
-  planOnly(root, "silent-catch", { "no-ci": true });
+  const root = nodeProject();
+  planOnly(root, { "no-ci": true });
   const cell = readJson(root, ".jig/plan.json").rows[0].cells["human-ci"];
   assert.equal(cell.grade, "GAP");
-  assert.match(cell.why, /writes no ci-workflow artifact for silent-catch/);
+  assert.match(cell.why, /writes no ci-workflow artifact for empty-catch/);
 });
 
 test("a detector that can be wrong reads PROB carrying the kind of doubt, never a number", () => {
-  const root = project({});
-  planOnly(root, "pipe-to-shell");
+  const root = nodeProject();
+  planOnly(root, { "no-ci": true }, [A.HEURISTIC_ONLY]);
   const cell = readJson(root, ".jig/plan.json").rows[0].cells["human-editor"];
   assert.equal(cell.grade, "PROB");
   assert.equal(cell.ceiling, "heuristic");
@@ -251,16 +246,16 @@ test("a detector that can be wrong reads PROB carrying the kind of doubt, never 
 
 test("a probabilistic lever says its ceiling is unmeasured rather than inventing one", () => {
   const prose = { actor: "claude-session", lever: "prose-rule", runner: "none", confidence: "heuristic" };
-  assert.equal(catalogue.levers["prose-rule"].probabilistic, true);
+  assert.equal(engine.LEVERS["prose-rule"].probabilistic, true);
   assert.equal(engine.detectorCeiling(prose), "unmeasured");
   assert.equal(engine.detectorCeiling({ ...DRIVER_DETECTOR, confidence: "heuristic" }), "heuristic");
 });
 
 test("AVAILABLE_NOW picks out exactly the levers this build can emit an artifact for", () => {
-  const now = Object.keys(catalogue.levers).filter((id) => engine.leverAvailable(catalogue.levers[id]));
+  const now = Object.keys(engine.LEVERS).filter((id) => engine.leverAvailable(engine.LEVERS[id]));
   assert.deepEqual(now.sort(), [
-    "agents-region", "bash-guard", "check-driver", "ci-workflow", "detekt-rule",
-    "edit-observe-guard", "eslint-rule", "prose-rule", "test-suite", "type-system",
+    "agents-region", "bash-guard", "check-driver", "ci-workflow",
+    "edit-observe-guard", "prose-rule", "tool-rule",
   ]);
   // …and the ordering really is an ordering: an earlier release's lever stays
   // available, a later one does not.
@@ -270,59 +265,49 @@ test("AVAILABLE_NOW picks out exactly the levers this build can emit an artifact
 });
 
 // ---------------------------------------------------------------------------
-// Provenance bars arming
+// What makes a guard armable
 // ---------------------------------------------------------------------------
+//
+// REVERSED by SCOPE. Provenance used to bar arming and a ten-session ladder
+// used to earn it; what arms a guard now is that its own fixture pair passed
+// and the proof hash binds the module to it. Provenance is still recorded and
+// still disclosed — it just decides nothing, and the runner does not read it
+// either, so a cell claiming it did would be a coverage claim nothing enforces.
 
-test("an assumed row can never arm a deny-capable lever", () => {
-  const root = project({});
-  planOnly(root, ALL_FOUR, { provenance: "assumed" });
-  const rows = readJson(root, ".jig/plan.json").rows;
-  const deny = rows.flatMap((r) => Object.values(r.cells)).filter((c) => c.armable !== null);
-  assert.ok(deny.length > 0, "no deny-capable cell to test");
-  for (const cell of deny) assert.equal(cell.armable, false);
-});
-
-test("quick-start installs as assumed, so quick-start arms nothing", () => {
-  const root = project({});
-  planOnly(root, ALL_FOUR);
-  const matrix = readJson(root, ".jig/plan.json");
-  assert.equal(matrix.provenance, "assumed");
-  assert.ok(matrix.rows.every((r) => Object.values(r.cells).every((c) => c.armable !== true)));
-});
-
-test("no option makes an assumed row armable — the bar holds under every configuration", () => {
-  for (const opts of [{}, { "no-ci": true }, { provenance: "assumed" }, { provenance: "nonsense" }]) {
-    const root = project({});
-    planOnly(root, ALL_FOUR, opts);
+test("an admitted check is armable from install, whatever its provenance", () => {
+  for (const provenance of ["assumed", "elicited", "forensic"]) {
+    const root = nodeProject();
+    planOnly(root, { provenance, "no-ci": true });
     const matrix = readJson(root, ".jig/plan.json");
-    assert.equal(matrix.provenance, "assumed", JSON.stringify(opts));
-    for (const row of matrix.rows) {
-      for (const cell of Object.values(row.cells)) {
-        assert.notEqual(cell.armable, true, JSON.stringify(opts) + " armed " + row.classId);
-      }
-    }
+    assert.equal(matrix.provenance, provenance);
+    const deny = matrix.rows.flatMap((r) => Object.values(r.cells)).filter((c) => c.armable !== null);
+    assert.ok(deny.length > 0, "no deny-capable cell to test");
+    for (const cell of deny) assert.equal(cell.armable, true, provenance + " left a proven check unarmable");
   }
 });
 
-test("an elicited or forensic row may arm later, which is what makes provenance load-bearing", () => {
-  for (const provenance of ["elicited", "forensic"]) {
-    const root = project({});
-    planOnly(root, ALL_FOUR, { provenance });
-    const cells = readJson(root, ".jig/plan.json").rows.flatMap((r) => Object.values(r.cells));
-    assert.ok(cells.some((c) => c.armable === true), provenance + " armed nothing");
-    assert.equal(cells.some((c) => c.armable === false), false);
-  }
+test("armable is the proof, said in the cell text a person reads", () => {
+  const root = nodeProject();
+  planOnly(root, { "no-ci": true });
+  const matrix = readJson(root, ".jig/plan.json");
+  const row = matrix.rows.find((r) => r.classId === "piped-installer");
+  assert.match(row.proof, /^[0-9a-f]{64}$/);
+  assert.match(engine.cellText(row.cells["claude-session"]), /proven by its fixture pair/);
+  // A class with no admitted check behind it carries no proof and cannot arm.
+  assert.equal(engine.detectorCell(synthetic({}), HOOK_DETECTOR, 0, "elicited", [], []).armable, false);
 });
 
 test("only a hook detector raises the arming question at all", () => {
-  const root = project({});
-  planOnly(root, ALL_FOUR, { provenance: "elicited" });
+  const root = nodeProject();
+  planOnly(root);
+  const byId = new Map(CHECKS.map((c) => [c.id, c]));
   for (const row of readJson(root, ".jig/plan.json").rows) {
-    const cls = classOf(row.classId);
+    const cls = byId.get(row.classId);
     for (const [actor, cell] of Object.entries(row.cells)) {
       if (cell.armable === null) continue;
       const det = cls.detectors.find((d) => d.actor === actor && d.lever === cell.lever);
-      assert.ok(engine.HOOK_RUNNERS.includes(det.runner), row.classId + "/" + actor + " is not a hook");
+      assert.ok(["bash-guard", "edit-observe-guard"].includes(det.lever),
+        row.classId + "/" + actor + " is not a hook");
     }
   }
 });
@@ -333,6 +318,17 @@ test("deny capability is read off the runner, so no list of lever names can go s
   assert.equal(engine.denyCapable({ runner: "checks" }), false);
   assert.equal(engine.denyCapable({ runner: "ci" }), false);
   assert.equal(engine.denyCapable({ runner: "none" }), false);
+});
+
+test("the plan says which mode every guard row takes, and observe is a choice", () => {
+  const root = nodeProject();
+  assert.equal(planOnly(root, { "no-ci": true }).mode, engine.DEFAULT_INSTALL_MODE);
+  assert.equal(engine.DEFAULT_INSTALL_MODE, "armed");
+  const observing = nodeProject();
+  const plan = planOnly(observing, { "no-ci": true, observe: true });
+  assert.equal(plan.mode, "observe");
+  const md = fs.readFileSync(path.join(observing, ".jig", "plan.md"), "utf-8");
+  assert.match(md, /you asked for observe/);
 });
 
 // ---------------------------------------------------------------------------
@@ -346,8 +342,8 @@ function tableRows(md) {
 }
 
 test("every cell in plan.json is rendered verbatim in plan.md", () => {
-  const root = project({});
-  planOnly(root, ALL_FOUR, { provenance: "elicited" });
+  const root = nodeProject();
+  planOnly(root);
   const matrix = readJson(root, ".jig/plan.json");
   const rendered = tableRows(fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8"));
   assert.equal(rendered.length, matrix.rows.length);
@@ -362,39 +358,56 @@ test("every cell in plan.json is rendered verbatim in plan.md", () => {
 });
 
 test("plan.md's header names every actor column, so no column is rendered unlabelled", () => {
-  const root = project({});
-  planOnly(root, ALL_FOUR);
+  const root = nodeProject();
+  planOnly(root);
   const md = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
   const header = md.split("\n").find((l) => l.startsWith("| class |"));
-  assert.deepEqual(header.slice(1, -1).split(" | ").map((s) => s.trim()), ["class", "provenance", ...catalogue.actors]);
+  assert.deepEqual(header.slice(1, -1).split(" | ").map((s) => s.trim()), ["class", "provenance", ...engine.ACTORS]);
 });
 
 test("both files name the same plan, so a review can be tied to the transaction it reviews", () => {
-  const root = project({});
-  const plan = planOnly(root, ALL_FOUR);
+  const root = nodeProject();
+  const plan = planOnly(root);
   const matrix = readJson(root, ".jig/plan.json");
   assert.equal(matrix.planId, plan.planId);
   assert.ok(fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8").includes("# jig plan " + plan.planId));
 });
 
-test("the stamped classes and the unverifiable artifacts both reach the rendered page", () => {
-  const root = project({});
-  planOnly(root, ALL_FOUR);
+test("the unverifiable artifacts reach the rendered page", () => {
+  const root = nodeProject();
+  planOnly(root);
   const md = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
   const matrix = readJson(root, ".jig/plan.json");
-  assert.deepEqual(matrix.enforcementGaps.sort(), [".github/workflows/jig.yml", ".jig/activation.md", ".jig/hooks/pre-commit"]);
+  assert.deepEqual(matrix.enforcementGaps.sort(),
+    [".github/workflows/jig.yml", ".jig/activation.md", ".jig/hooks/pre-commit"]);
   for (const p of matrix.enforcementGaps) assert.ok(md.includes("`" + p + "`"), p + " is not on the page");
-  for (const row of matrix.rows.filter((r) => r.enforcementGap)) {
-    assert.ok(md.includes("`" + row.classId + "` — no host-neutral deterministic lever"));
-  }
+});
+
+test("a discarded check is reported on the page and never counted as coverage", () => {
+  const root = nodeProject();
+  const broken = A.authored({
+    ...A.PIPED_INSTALLER,
+    id: "cannot-prove-itself",
+    detectors: [{ lever: "check-driver", actor: "human-editor", confidence: "deterministic",
+      params: { patterns: ["never-in-either-fixture"], paths: ["**/*.sh"] } }],
+  });
+  const plan = planOnly(root, { "no-ci": true }, [A.PIPED_INSTALLER, broken]);
+  assert.deepEqual(plan.discarded.map((d) => d.id), ["cannot-prove-itself"]);
+  assert.equal(plan.discardedFile, ".jig/discarded.json");
+  assert.equal(plan.selection.includes("cannot-prove-itself"), false, "a discard was counted as coverage");
+  assert.deepEqual(readJson(root, ".jig/discarded.json").discarded.map((d) => d.id), ["cannot-prove-itself"]);
+
+  const md = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
+  assert.match(md, /## Discarded/);
+  assert.ok(md.includes("`cannot-prove-itself`"));
 });
 
 test("a refusal reaches the review surface rather than being swallowed", () => {
-  const root = project({ ".github/workflows/jig.yml": "name: someone else's\n" });
-  const plan = planOnly(root, "silent-catch");
-  assert.equal(plan.consent.item.length, 1);
+  const root = nodeProject({ ".github/workflows/jig.yml": "name: someone else's\n" });
+  planOnly(root);
   const matrix = readJson(root, ".jig/plan.json");
   assert.equal(matrix.refused.length, 1);
+  assert.match(matrix.refused[0], /already exists and jig did not write it/);
   assert.ok(fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8").includes(matrix.refused[0]));
 });
 
@@ -403,36 +416,47 @@ test("a refusal reaches the review surface rather than being swallowed", () => {
 // ---------------------------------------------------------------------------
 
 test("everything that can refuse something is approved one at a time", () => {
-  const root = project({});
-  const plan = planOnly(root, ALL_FOUR);
+  const root = nodeProject();
+  const plan = planOnly(root);
   const matrix = readJson(root, ".jig/plan.json");
   const item = matrix.artifacts.filter((a) => a.tier === "item");
-  assert.deepEqual(item.map((a) => a.path).sort(), [".github/workflows/jig.yml", ".jig/config.json"]);
+  assert.deepEqual(item.map((a) => a.path).sort(), [
+    ".github/workflows/jig.yml",
+    ".jig/checks/empty-catch.check.mjs",
+    ".jig/checks/piped-installer.check.mjs",
+    ".jig/config.json",
+  ]);
   assert.deepEqual(plan.consent.item.sort(), item.map((a) => a.id).sort());
   assert.match(item.find((a) => a.path === ".jig/config.json").why, /refuse a tool call/);
   assert.match(item.find((a) => a.path.startsWith(".github/")).why, /fails the build/);
+  assert.match(item.find((a) => a.path.endsWith(".check.mjs")).why, /can fail a build/);
 });
 
 test("everything that only reports is approved in one go", () => {
-  const root = project({});
-  planOnly(root, ALL_FOUR);
+  const root = nodeProject();
+  planOnly(root);
   const batch = readJson(root, ".jig/plan.json").artifacts.filter((a) => a.tier === "batch");
   assert.deepEqual(batch.map((a) => a.path).sort(), [
     ".jig/activation.md",
-    ".jig/checks/focused-or-skipped-test.check.mjs",
-    ".jig/checks/pipe-to-shell.check.mjs",
     ".jig/checks/run.mjs",
-    ".jig/checks/silent-catch.check.mjs",
-    ".jig/checks/test-file-deletion.check.mjs",
     ".jig/hooks/pre-commit",
     ".jig/proposed-permissions.json",
   ]);
   for (const a of batch) assert.match(a.why, /reports only, and refuses nothing/);
 });
 
+test("a file outside .jig/ is approved one at a time, because it is yours", () => {
+  // The widened boundary's own tier: inside `.jig/` a side-file is jig's own
+  // reporting; outside it, the file belongs to the owner.
+  const mine = engine.consentFor({ kind: "write-side-file", path: "eslint.config.mjs" }, []);
+  assert.equal(mine.tier, "item");
+  assert.match(mine.why, /a file outside \.jig\/ that is yours/);
+  assert.equal(engine.consentFor({ kind: "write-side-file", path: ".jig/backlog.json" }, []).tier, "batch");
+});
+
 test("every artifact lands in exactly one tier and both lists cover the plan", () => {
-  const root = project({});
-  const plan = planOnly(root, ALL_FOUR);
+  const root = nodeProject();
+  const plan = planOnly(root);
   const matrix = readJson(root, ".jig/plan.json");
   for (const a of matrix.artifacts) assert.ok(engine.CONSENT_TIERS.includes(a.tier));
   assert.deepEqual(
@@ -452,48 +476,61 @@ test("a config wiring no guard is not treated as deny-capable", () => {
 // The backlog
 // ---------------------------------------------------------------------------
 
-test("every class the user did not take is written down", () => {
-  const root = project({});
-  planOnly(root, "silent-catch");
+test("every class the editions matched and the user did not take is written down", () => {
+  const root = nodeProject();
+  planOnly(root, { select: "javascript-typescript/swallowed-exception" });
   const { schemaVersion, backlog } = readJson(root, ".jig/backlog.json");
   assert.equal(schemaVersion, 1);
-  assert.deepEqual(
-    backlog.map((b) => b.classId).sort(),
-    catalogue.classes.map((c) => c.id).filter((id) => id !== "silent-catch").sort());
+  const edition = editions.loadEdition(PLUGIN_ROOT, "javascript-typescript");
+  const expected = edition.classes
+    .map((c) => editions.namespacedId("javascript-typescript", c.id))
+    .filter((id) => id !== "javascript-typescript/swallowed-exception")
+    .sort();
+  assert.deepEqual(backlog.map((b) => b.classId).sort(), expected);
   assert.equal(new Set(backlog.map((b) => b.classId)).size, backlog.length);
 });
 
-test("a selected class is never also in the backlog", () => {
-  const root = project({});
-  planOnly(root, ALL_FOUR);
-  const taken = new Set(ALL_FOUR.split(","));
-  for (const row of readJson(root, ".jig/backlog.json").backlog) assert.equal(taken.has(row.classId), false);
-});
-
-test("the backlog says why each class is on it, and ranks what jig could do about it", () => {
-  const root = project({});
-  planOnly(root, ALL_FOUR);
-  for (const row of readJson(root, ".jig/backlog.json").backlog) {
-    const cls = classOf(row.classId);
-    assert.equal(row.installableAtV1, cls.installableAtV1);
-    assert.equal(row.enforcementGap, cls.enforcementGap);
-    assert.ok(engine.CELL_RANK[row.best] !== undefined);
-    assert.equal(row.reason, cls.installableAtV1 ? "not selected" : "ships as data at v1 — no lever jig can install for it yet");
+test("a selected class is never also in the backlog, and an authored one is never in it at all", () => {
+  const root = nodeProject();
+  planOnly(root, { select: "javascript-typescript/swallowed-exception" });
+  const rows = readJson(root, ".jig/backlog.json").backlog;
+  for (const row of rows) {
+    assert.notEqual(row.classId, "javascript-typescript/swallowed-exception");
+    // Authored ids are not edition ids, so they never appear on a shelf.
+    assert.equal(CHECKS.some((c) => c.id === row.classId), false);
   }
 });
 
-test("an installable class left out says so, rather than blaming the release", () => {
-  const root = project({});
-  planOnly(root, "silent-catch");
-  const rows = readJson(root, ".jig/backlog.json").backlog.filter((b) => b.installableAtV1);
-  assert.deepEqual(rows.map((b) => b.classId).sort(),
-    ["focused-or-skipped-test", "pipe-to-shell", "test-file-deletion"]);
-  for (const row of rows) assert.equal(row.reason, "not selected");
+test("every backlog row is namespaced by its edition, so a shared id is never ambiguous", () => {
+  const root = project({
+    "package.json": "{ \"private\": true }\n",
+    "src/a.ts": "export const a = 1;\n",
+    "go.mod": "module example.test/x\n",
+    "main.go": "package main\n",
+  });
+  planOnly(root, { "no-ci": true });
+  const rows = readJson(root, ".jig/backlog.json").backlog;
+  const shared = rows.filter((r) => r.classId.endsWith("/swallowed-exception")).map((r) => r.classId).sort();
+  assert.deepEqual(shared, ["go/swallowed-exception", "javascript-typescript/swallowed-exception"]);
+  for (const row of rows) assert.equal(row.classId, row.edition + "/" + row.classId.split("/").slice(1).join("/"));
+});
+
+test("the backlog says why each class is on it, and ranks what jig could do about it", () => {
+  const root = nodeProject();
+  planOnly(root);
+  const edition = editions.loadEdition(PLUGIN_ROOT, "javascript-typescript");
+  for (const row of readJson(root, ".jig/backlog.json").backlog) {
+    const cls = edition.classes.find((c) => editions.namespacedId("javascript-typescript", c.id) === row.classId);
+    assert.ok(cls, row.classId + " is on the backlog and in no edition");
+    assert.equal(row.title, cls.title);
+    assert.ok(engine.CELL_RANK[row.best] !== undefined);
+    assert.equal(row.reason, "not selected");
+  }
 });
 
 test("the count on the page is the count in the file", () => {
-  const root = project({});
-  planOnly(root, "silent-catch");
+  const root = nodeProject();
+  planOnly(root);
   const matrix = readJson(root, ".jig/plan.json");
   const { backlog } = readJson(root, ".jig/backlog.json");
   assert.equal(matrix.backlogCount, backlog.length);
@@ -507,8 +544,8 @@ test("the count on the page is the count in the file", () => {
 // ---------------------------------------------------------------------------
 
 test("a generated plan writes the whole review surface into .jig", () => {
-  const root = project({});
-  const plan = planOnly(root, ALL_FOUR);
+  const root = nodeProject();
+  const plan = planOnly(root);
   assert.deepEqual(
     [plan.review, plan.matrix, plan.backlog],
     [".jig/plan.md", ".jig/plan.json", ".jig/backlog.json"]);
@@ -519,7 +556,7 @@ test("a generated plan writes the whole review surface into .jig", () => {
 });
 
 test("a hand-written draft gets no review surface — there is no selection behind it", () => {
-  const root = project({});
+  const root = nodeProject();
   fs.writeFileSync(path.join(root, "draft.json"), JSON.stringify({
     changes: [{ id: "hand", kind: "write-side-file", path: ".jig/hand.json", content: "{}\n" }],
   }));
@@ -531,24 +568,24 @@ test("a hand-written draft gets no review surface — there is no selection behi
 });
 
 test("the review surface is the current one, not a pile of them", () => {
-  const root = project({});
-  const first = planOnly(root, "silent-catch");
-  const second = planOnly(root, "pipe-to-shell");
+  const root = nodeProject();
+  const first = planOnly(root, { "no-ci": true }, [A.PIPED_INSTALLER, A.EMPTY_CATCH]);
+  const second = planOnly(root, { "no-ci": true }, [A.PIPED_INSTALLER]);
   assert.notEqual(first.planId, second.planId);
   assert.equal(readJson(root, ".jig/plan.json").planId, second.planId);
-  assert.deepEqual(readJson(root, ".jig/plan.json").selection, ["pipe-to-shell"]);
+  assert.deepEqual(readJson(root, ".jig/plan.json").selection, ["piped-installer"]);
 });
 
 test("plan.json is a review, never mistaken for a transaction plan to apply", () => {
-  const root = project({});
-  const plan = planOnly(root, "silent-catch");
+  const root = nodeProject();
+  const plan = planOnly(root);
   assert.equal(readJson(root, ".jig/plan.json").kind, "review");
   assert.deepEqual(engine.planFiles(root).map((f) => path.basename(f)), ["plan-" + plan.planId + ".json"]);
 });
 
 test("the review surface is not an installed artifact, so revert leaves it where it is", () => {
-  const root = project({});
-  install(root, ALL_FOUR);
+  const root = nodeProject();
+  install(root);
   engine.cmdRevert(root, { _: [], change: [], all: true });
   assert.equal(fs.existsSync(path.join(root, ".jig", "manifest.json")), false);
   for (const name of ["plan.md", "plan.json", "backlog.json"]) {
@@ -557,8 +594,8 @@ test("the review surface is not an installed artifact, so revert leaves it where
 });
 
 test("the review surface never claims coverage the manifest does not hold", () => {
-  const root = project({});
-  install(root, ALL_FOUR, { provenance: "elicited" });
+  const root = nodeProject();
+  install(root);
   const installed = new Set(engine.readManifest(root).artifacts.map((a) => a.path));
   const guards = new Set(readJson(root, ".jig/config.json").guards.map((g) => g.id));
   for (const row of readJson(root, ".jig/plan.json").rows) {
@@ -571,163 +608,148 @@ test("the review surface never claims coverage the manifest does not hold", () =
 });
 
 // ---------------------------------------------------------------------------
-// The review surface and the arming cycle (0.2.0)
+// The review surface and the arming cycle
+// ---------------------------------------------------------------------------
 
-const GUARD = "silent-catch-edit-observe-guard";
+const GUARD = "piped-installer-bash-guard-0";
 
 function armProject() {
-  const root = project({ "package.json": "{ \"private\": true }\n" });
-  const plan = engine.cmdPlan(root, {
-    _: [], change: [], select: "silent-catch", provenance: "elicited", "no-ci": true,
-  });
-  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  const root = nodeProject();
+  install(root, { "no-ci": true, observe: true });
   return root;
 }
 
-function seedSessions(root, n) {
-  const rows = Array.from({ length: n }, (_, i) =>
-    JSON.stringify({ session: "s" + i, guardId: GUARD, decision: "pass" }));
-  fs.appendFileSync(path.join(root, ".jig", "ledger.jsonl"), rows.join("\n") + "\n");
+function configRow(root, id) {
+  return readJson(root, ".jig/config.json").guards.find((g) => g.id === (id || GUARD));
 }
 
-function configRow(root) {
-  const config = JSON.parse(fs.readFileSync(path.join(root, ".jig", "config.json"), "utf-8"));
-  return config.guards.find((g) => g.id === GUARD);
-}
-
-test("review names the barrier while the gate is unmet, and arm refuses with the same words", () => {
+test("an observing guard reports that nobody asked it to arm, and arming is offered", () => {
   const root = armProject();
-  const review = engine.cmdReview(root);
-  const row = review.guards.find((g) => g.guardId === GUARD);
+  const row = engine.cmdReview(root).guards.find((g) => g.guardId === GUARD);
   assert.equal(row.provenance, "elicited");
   assert.equal(row.mode, "observe");
-  assert.equal(row.armable, false);
-  assert.match(row.barrier, /0 of 10/);
-  assert.throws(() => engine.cmdArm(root, { _: [], change: [], guard: GUARD }),
-    /arming gate is not met.*0 of 10/s);
+  assert.match(row.why, /not asked to arm/);
+  assert.equal(row.armable, true);
+  assert.equal(row.barrier, null);
+  assert.equal(row.fired, 0);
 });
 
-test("ten clean sessions arm the guard through a journaled config change", () => {
+test("arming is a journaled config change, and the review agrees afterwards", () => {
   const root = armProject();
-  seedSessions(root, 10);
-  assert.equal(engine.cmdReview(root).guards.find((g) => g.guardId === GUARD).armable, true);
-
   const journalBefore = engine.readJournal(root).length;
   const armed = engine.cmdArm(root, { _: [], change: [], guard: GUARD });
   assert.equal(armed.ok, true);
+  assert.match(armed.evidence, /proof matches the check on disk/);
   assert.equal(configRow(root).mode, "armed");
   assert.equal(configRow(root).provenance, "elicited");
   assert.ok(engine.readJournal(root).length > journalBefore, "the arm was not journaled");
-
-  const review = engine.cmdReview(root);
-  assert.equal(review.guards.find((g) => g.guardId === GUARD).mode, "armed");
+  assert.equal(engine.cmdReview(root).guards.find((g) => g.guardId === GUARD).mode, "armed");
 });
 
-test("a recorded false positive resets the gate, and disarm returns the guard to observe", () => {
+test("a recorded false positive holds the guard in observe, and disarm drops its mode", () => {
   const root = armProject();
-  seedSessions(root, 10);
   engine.cmdArm(root, { _: [], change: [], guard: GUARD });
 
   const fp = engine.cmdFp(root, { _: [], change: [], guard: GUARD });
   assert.equal(fp.recorded, "false-positive");
-  const review = engine.cmdReview(root);
-  const row = review.guards.find((g) => g.guardId === GUARD);
+  const row = engine.cmdReview(root).guards.find((g) => g.guardId === GUARD);
   assert.equal(row.wavedOff, 1);
   assert.equal(row.mode, "observe", "the false positive did not pull the guard back to observe");
-  assert.match(row.why, /false positive reset/);
+  assert.match(row.why, /false positive/);
+  assert.equal(row.armable, false);
+  assert.match(row.barrier, /false positive/);
 
   engine.cmdDisarm(root, { _: [], change: [], guard: GUARD });
   assert.equal(configRow(root).mode, undefined);
 });
 
-test("an assumed install can never reach arm, and the refusal says so", () => {
-  const root = project({ "package.json": "{ \"private\": true }\n" });
-  const plan = engine.cmdPlan(root, { _: [], change: [], select: "silent-catch", "no-ci": true });
-  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
-  seedSessions(root, 50);
+test("arming refuses with the same words the runner would use, when the proof no longer holds", () => {
+  const root = armProject();
+  fs.appendFileSync(path.join(root, ".jig", "checks", "piped-installer.check.mjs"), "\n// widened by hand\n");
+  const row = engine.cmdReview(root).guards.find((g) => g.guardId === GUARD);
+  assert.equal(row.armable, false);
+  assert.match(row.barrier, /does not match the check on disk/);
   assert.throws(() => engine.cmdArm(root, { _: [], change: [], guard: GUARD }),
-    /assumed.*never arm/s);
+    /arming gate is not met.*does not match the check on disk/s);
+});
+
+test("arm, disarm, fp and retire all refuse a guard the config does not carry", () => {
+  const root = armProject();
+  for (const cmd of [engine.cmdArm, engine.cmdDisarm, engine.cmdFp, engine.cmdRetire]) {
+    assert.throws(() => cmd(root, { _: [], change: [], guard: "no-such-guard" }), /not a configured guard/);
+  }
 });
 
 // ---------------------------------------------------------------------------
-// Toolchain levers (0.3.0) — the repo's own tools, side-files, never a download
+// The toolchain, on the surface the owner approves from
+// ---------------------------------------------------------------------------
+//
+// REVERSED by SCOPE: jig proposes the exact install command and runs it on
+// approval. So the plan has to carry the command, the config path and the way
+// back out — an install approved from a surface nobody read is the failure this
+// section exists to prevent.
 
-test("a repo carrying eslint gets the side-file, the wiring line, and a DET ci cell", () => {
-  const root = project({
-    "package.json": "{ \"private\": true }\n",
-    "node_modules/eslint/package.json": "{ \"name\": \"eslint\" }\n",
-  });
-  const plan = engine.cmdPlan(root, {
-    _: [], change: [], select: "silent-catch,focused-or-skipped-test", provenance: "elicited", "no-ci": true,
-  });
-  assert.equal(plan.toolchain.included.length, 1);
-  assert.equal(plan.toolchain.included[0].tool, "eslint");
-  assert.match(plan.toolchain.included[0].wiring, /lint:jig/);
-  assert.ok(plan.changes.some((c) => c.path === ".jig/eslint.jig.config.mjs"));
+test("a tool the machine does not carry becomes a named install item on the reviewed plan", () => {
+  const root = nodeProject({ "package-lock.json": "{ \"lockfileVersion\": 3 }\n" });
+  const plan = planOnly(root, { "no-ci": true, tools: "eslint" });
+  assert.equal(plan.toolchain.packageManager, "npm");
+  const row = plan.toolchain.items.find((t) => t.id === "eslint");
+  assert.ok(row, "eslint was asked for and is not on the plan");
+  assert.equal(row.present, false);
+  assert.equal(row.installKind, "package");
+  assert.match(row.command, /^npm install --save-dev eslint\b/);
+  assert.ok(row.uninstall, "an install with no way back out reached the plan");
 
-  const matrix = readJson(root, ".jig/plan.json");
-  const sc = matrix.rows.find((r) => r.classId === "silent-catch");
-  assert.equal(sc.cells["human-ci"].grade, "DET");
-  assert.equal(sc.cells["human-ci"].artifact, ".jig/eslint.jig.config.mjs");
+  const change = plan.changes.find((c) => c.kind === "run-install");
+  assert.equal(change.path, row.configPath);
+  const md = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
+  assert.ok(md.includes("`" + row.command + "`"), "the command that will run is not on the page");
+  assert.ok(md.includes("`" + row.uninstall + "`"), "the way back out is not on the page");
 });
 
-test("an absent tool is a named note that says jig never downloads, and the cell stays honest", () => {
-  const root = project({ "package.json": "{ \"private\": true }\n" });
-  const plan = engine.cmdPlan(root, {
-    _: [], change: [], select: "silent-catch", provenance: "elicited", "no-ci": true,
-  });
-  assert.equal(plan.toolchain.included.length, 0);
-  const absent = plan.toolchain.absent.map((t) => t.tool).sort();
-  assert.deepEqual([...new Set(absent)], ["detekt", "eslint"]);
-  for (const row of plan.toolchain.absent) assert.match(row.why, /never downloads/);
-  assert.equal(plan.changes.some((c) => c.path.startsWith(".jig/eslint")), false);
-  const sc = readJson(root, ".jig/plan.json").rows.find((r) => r.classId === "silent-catch");
-  assert.equal(sc.cells["human-ci"].grade, "GAP");
+test("an install is approved one at a time, naming the command that will run", () => {
+  const root = nodeProject({ "package-lock.json": "{ \"lockfileVersion\": 3 }\n" });
+  const plan = planOnly(root, { "no-ci": true, tools: "eslint" });
+  const change = plan.changes.find((c) => c.kind === "run-install");
+  const artifact = readJson(root, ".jig/plan.json").artifacts.find((a) => a.id === change.id);
+  assert.equal(artifact.tier, "item");
+  assert.match(artifact.why, /against this machine/);
+  assert.ok(plan.consent.item.includes(change.id));
 });
 
-test("a Kotlin-Gradle repo carrying detekt gets the detekt side-file and a DET ci cell", () => {
-  const root = project({
-    "build.gradle.kts": 'plugins { id("io.gitlab.arturbosch.detekt") version "1.23.6" }\n',
-  });
-  const plan = engine.cmdPlan(root, {
-    _: [], change: [], select: "silent-catch", provenance: "forensic", "no-ci": true,
-  });
-  assert.deepEqual(plan.toolchain.included.map((t) => t.tool), ["detekt"]);
-  assert.ok(plan.changes.some((c) => c.path === ".jig/detekt.jig.yml"));
+test("a toolchain question jig cannot answer honestly is refused onto the page, never guessed", () => {
+  const noManager = nodeProject();
+  const plan = planOnly(noManager, { "no-ci": true, tools: "eslint" });
+  assert.deepEqual(plan.toolchain.items, []);
+  assert.equal(plan.refused.length, 1);
+  assert.match(plan.refused[0], /no package manager is conclusive/);
+  assert.ok(fs.readFileSync(path.join(noManager, ".jig", "plan.md"), "utf-8").includes(plan.refused[0]));
 
-  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
-  const sc = readJson(root, ".jig/plan.json").rows.find((r) => r.classId === "silent-catch");
-  assert.equal(sc.cells["human-ci"].grade, "DET");
-  assert.equal(sc.cells["human-ci"].artifact, ".jig/detekt.jig.yml");
-  // A yml side-file cannot be read back without a dependency, so it is a
-  // stamped gap — D17 the same way activation.md is.
-  assert.ok(plan.enforcementGaps.includes(".jig/detekt.jig.yml"));
+  const unknown = nodeProject({ "package-lock.json": "{}\n" });
+  const second = planOnly(unknown, { "no-ci": true, tools: "not-a-tool" });
+  assert.match(second.refused.join(" "), /is not a tool in any edition/);
 });
 
 // ---------------------------------------------------------------------------
-// Prose emission (0.4.0) — budgeted, labeled, on request only
+// Prose emission — budgeted, labeled, on request only
+// ---------------------------------------------------------------------------
 
-test("prose is emitted only on request, lands under jig- names, and reverts clean", () => {
-  const root = project({ "package.json": "{ \"private\": true }\n" });
-  const bare = planOnly(root, "silent-catch", { "no-ci": true });
-  assert.equal(bare.changes.some((c) => c.kind === "write-rule"), false,
-    "a default install emitted prose");
+test("a default install emits no always-loaded prose at all", () => {
+  const root = nodeProject();
+  const plan = planOnly(root, { "no-ci": true });
+  assert.equal(plan.changes.some((c) => c.kind === "write-rule"), false);
+});
 
-  const plan = engine.cmdPlan(root, {
-    _: [], change: [], select: "silent-catch", "no-ci": true,
-    prose: "env-read-at-use-site,implicit-clock", provenance: "elicited",
-  });
-  const rules = plan.changes.filter((c) => c.path.startsWith(".claude/rules/"));
-  assert.deepEqual(rules.map((c) => c.path).sort(),
-    [".claude/rules/jig-env-read.md", ".claude/rules/jig-implicit-clock.md"]);
-
-  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
-  const text = fs.readFileSync(path.join(root, ".claude/rules/jig-env-read.md"), "utf-8");
-  assert.match(text, /generated by jig/);
-  assert.match(text, /evidence:/);
-
-  engine.cmdRevert(root, { _: [], change: [], all: true });
-  assert.equal(fs.existsSync(path.join(root, ".claude", "rules", "jig-env-read.md")), false);
+test("--prose refuses a class with no prose-rule detector rather than inventing one", () => {
+  const root = nodeProject();
+  assert.throws(() => engine.cmdPlan(root, {
+    _: [], change: [], provenance: "elicited", "no-ci": true,
+    authored: A.writeChecks(root, CHECKS), prose: "piped-installer",
+  }), /has no prose-rule detector/);
+  assert.throws(() => engine.cmdPlan(root, {
+    _: [], change: [], provenance: "elicited", "no-ci": true,
+    authored: A.writeChecks(root, CHECKS), prose: "not-in-this-plan",
+  }), /is not in this plan's selection/);
 });
 
 test("the prose budget refuses a plan that would out-spend it, naming the number", () => {
@@ -754,16 +776,13 @@ test("unlabeled prose is refused, and a rule outside the jig- namespace is refus
 });
 
 test("wire-governance emits one computed pointer rule from the scan's own orphans", () => {
-  const root = project({
+  const root = nodeProject({
     "CLAUDE.md": "# House\n",
     "SCOPE.md": "# Scope\n",
     "docs/adr/0001-x.md": "# ADR\n",
   });
   engine.cmdScan(root, { _: [], change: [] });
-  const plan = engine.cmdPlan(root, {
-    _: [], change: [], select: "silent-catch", "no-ci": true,
-    "wire-governance": true, provenance: "elicited",
-  });
+  const plan = planOnly(root, { "no-ci": true, "wire-governance": true });
   const rule = plan.changes.find((c) => c.path === ".claude/rules/jig-governance.md");
   assert.ok(rule, "no governance rule was planned");
   engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
@@ -772,19 +791,19 @@ test("wire-governance emits one computed pointer rule from the scan's own orphan
   assert.match(text, /docs\/adr\/0001-x\.md/);
   assert.match(text, /generated by jig/);
 
-  const clean = project({ "CLAUDE.md": "read SCOPE.md\n", "SCOPE.md": "# Scope\n" });
+  const clean = nodeProject({ "CLAUDE.md": "read SCOPE.md\n", "SCOPE.md": "# Scope\n" });
   engine.cmdScan(clean, { _: [], change: [] });
-  assert.throws(() => engine.cmdPlan(clean, {
-    _: [], change: [], select: "silent-catch", "no-ci": true, "wire-governance": true,
-  }), /no orphaned governance docs/);
+  assert.throws(() => planOnly(clean, { "no-ci": true, "wire-governance": true }),
+    /no orphaned governance docs/);
 });
 
 // ---------------------------------------------------------------------------
-// The re-run regimen (0.5.0)
+// The re-run regimen
+// ---------------------------------------------------------------------------
 
 test("rerun reports drift, the firing record, the quiet guards and the backlog in one read", () => {
-  const root = project({ "package.json": "{ \"private\": true }\n" });
-  install(root, "silent-catch,focused-or-skipped-test", { provenance: "elicited", "no-ci": true });
+  const root = nodeProject();
+  install(root, { "no-ci": true });
 
   fs.appendFileSync(path.join(root, ".jig", "ledger.jsonl"),
     JSON.stringify({ session: "s1", guardId: GUARD, decision: "would-deny" }) + "\n");
@@ -793,22 +812,21 @@ test("rerun reports drift, the firing record, the quiet guards and the backlog i
   const report = engine.cmdRerun(root);
   assert.ok(report.installedAt, "no install timestamp");
   assert.deepEqual(report.drifted, [".jig/checks/run.mjs"]);
-  const quiet = report.guards.find((g) => g.guardId === "focused-or-skipped-test-edit-observe-guard");
+  const quiet = report.guards.find((g) => g.guardId === "empty-catch-edit-observe-guard-0");
   assert.equal(quiet.fired, 0);
-  assert.ok(report.neverFired.includes("focused-or-skipped-test-edit-observe-guard"));
+  assert.ok(report.neverFired.includes("empty-catch-edit-observe-guard-0"));
   assert.equal(report.neverFired.includes(GUARD), false, "a fired guard was called dead");
   assert.ok(report.backlog.length > 0);
 });
 
 test("retiring a guard is a journaled config change the ledger survives", () => {
-  const root = project({ "package.json": "{ \"private\": true }\n" });
-  install(root, "silent-catch", { provenance: "elicited", "no-ci": true });
+  const root = nodeProject();
+  install(root, { "no-ci": true });
   const before = engine.readJournal(root).length;
 
   const out = engine.cmdRetire(root, { _: [], change: [], guard: GUARD });
   assert.equal(out.retired, GUARD);
-  const config = readJson(root, ".jig/config.json");
-  assert.equal(config.guards.some((g) => g.id === GUARD), false);
+  assert.equal(readJson(root, ".jig/config.json").guards.some((g) => g.id === GUARD), false);
   assert.ok(engine.readJournal(root).length > before);
   assert.throws(() => engine.cmdRetire(root, { _: [], change: [], guard: GUARD }), /not a configured guard/);
 });

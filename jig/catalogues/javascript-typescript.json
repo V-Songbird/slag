@@ -1,0 +1,1448 @@
+{
+  "schemaVersion": 3,
+  "edition": "javascript-typescript",
+  "displayName": "JavaScript & TypeScript",
+  "researchedOn": "2026-08-13",
+  "detect": {
+    "files": [
+      "package.json",
+      "tsconfig.json",
+      "pnpm-lock.yaml",
+      "yarn.lock",
+      "package-lock.json",
+      "bun.lock"
+    ],
+    "extensions": [
+      ".js",
+      ".mjs",
+      ".cjs",
+      ".jsx",
+      ".ts",
+      ".mts",
+      ".cts",
+      ".tsx"
+    ],
+    "commentSyntax": {
+      ".js": "slash",
+      ".mjs": "slash",
+      ".cjs": "slash",
+      ".jsx": "slash",
+      ".ts": "slash",
+      ".mts": "slash",
+      ".cts": "slash",
+      ".tsx": "slash"
+    },
+    "packageManagers": [
+      "npm",
+      "pnpm",
+      "yarn",
+      "bun"
+    ]
+  },
+  "toolchain": [
+    {
+      "id": "eslint",
+      "role": "linter",
+      "why": "The only tool that sees test-suite intent (focused tests, missing assertions), suppression comments and unresolvable imports; with typescript-eslint's type-aware configs it also sees floating promises the type checker happily accepts.",
+      "install": {
+        "npm": "npm install --save-dev eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
+        "pnpm": "pnpm add -D eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
+        "yarn": "yarn add -D eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
+        "bun": "bun add -d eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin"
+      },
+      "installKind": "package",
+      "uninstall": {
+        "npm": "npm uninstall eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
+        "pnpm": "pnpm remove eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
+        "yarn": "yarn remove eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
+        "bun": "bun remove eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin"
+      },
+      "configPath": "eslint.config.mjs",
+      "configSample": "import js from '@eslint/js';\nimport { defineConfig, globalIgnores } from 'eslint/config';\nimport tseslint from 'typescript-eslint';\nimport { importX } from 'eslint-plugin-import-x';\nimport n from 'eslint-plugin-n';\nimport security from 'eslint-plugin-security';\nimport vitest from '@vitest/eslint-plugin';\n\nexport default defineConfig([\n  globalIgnores(['dist/**', 'coverage/**', 'node_modules/**']),\n  {\n    files: ['**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],\n    extends: [\n      js.configs.recommended,\n      tseslint.configs.strictTypeChecked,\n      importX.flatConfigs.recommended,\n      importX.flatConfigs.typescript,\n      security.configs.recommended,\n    ],\n    plugins: { n },\n    languageOptions: {\n      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },\n    },\n    rules: {\n      'eqeqeq': ['error', 'always'],\n      'no-console': ['error', { allow: ['error', 'warn'] }],\n      'no-debugger': 'error',\n      'no-eval': 'error',\n      'no-implied-eval': 'error',\n      'no-empty': ['error', { allowEmptyCatch: false }],\n      'no-unused-vars': 'off',\n      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],\n      '@typescript-eslint/no-explicit-any': 'error',\n      '@typescript-eslint/no-non-null-assertion': 'error',\n      '@typescript-eslint/no-floating-promises': 'error',\n      '@typescript-eslint/no-misused-promises': 'error',\n      '@typescript-eslint/ban-ts-comment': ['error', { 'ts-expect-error': 'allow-with-description' }],\n      '@typescript-eslint/only-throw-error': 'error',\n      '@typescript-eslint/switch-exhaustiveness-check': 'error',\n      'import-x/no-unresolved': 'error',\n      'import-x/no-extraneous-dependencies': 'error',\n      'import-x/no-cycle': 'error',\n      'n/no-process-exit': 'error',\n    },\n  },\n  {\n    files: ['**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],\n    plugins: { vitest },\n    rules: {\n      ...vitest.configs.recommended.rules,\n      'vitest/no-focused-tests': 'error',\n      'vitest/no-disabled-tests': 'error',\n      'vitest/no-commented-out-tests': 'error',\n      'vitest/expect-expect': 'error',\n      'vitest/no-conditional-expect': 'error',\n      'vitest/no-identical-title': 'error',\n      'vitest/no-standalone-expect': 'error',\n    },\n  },\n]);\n",
+      "wiring": "\"lint\": \"eslint . --max-warnings 0 --report-unused-disable-directives\"",
+      "ciStep": "npm run lint",
+      "verify": {
+        "argv": [
+          "npx",
+          "eslint",
+          "--max-warnings",
+          "0",
+          "--format",
+          "stylish",
+          "."
+        ],
+        "expected": "exit code 1 with a line naming the seeded file, the rule id in brackets (e.g. vitest/no-focused-tests) and '1 problem (1 error, 0 warnings)'",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "tests/jig-seed-lint.test.ts",
+        "sample": "import { describe, it, expect } from 'vitest';\n\ndescribe('jig lint seed', () => {\n  it.only('is focused, which the linter must refuse', () => {\n    expect(1 + 1).toBe(2);\n  });\n});\n"
+      }
+    },
+    {
+      "id": "typescript",
+      "role": "type-checker",
+      "why": "Only tsc knows whether an imported symbol, method or module path actually exists and whether a widened type hides a real narrowing failure; the linter never resolves types on its own.",
+      "install": {
+        "npm": "npm install --save-dev typescript",
+        "pnpm": "pnpm add -D typescript",
+        "yarn": "yarn add -D typescript",
+        "bun": "bun add -d typescript"
+      },
+      "installKind": "package",
+      "uninstall": {
+        "npm": "npm uninstall typescript",
+        "pnpm": "pnpm remove typescript",
+        "yarn": "yarn remove typescript",
+        "bun": "bun remove typescript"
+      },
+      "configPath": "tsconfig.json",
+      "configSample": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2023\",\n    \"lib\": [\"ES2023\"],\n    \"module\": \"nodenext\",\n    \"moduleResolution\": \"nodenext\",\n    \"strict\": true,\n    \"noUncheckedIndexedAccess\": true,\n    \"exactOptionalPropertyTypes\": true,\n    \"noImplicitOverride\": true,\n    \"noImplicitReturns\": true,\n    \"noFallthroughCasesInSwitch\": true,\n    \"noPropertyAccessFromIndexSignature\": true,\n    \"useUnknownInCatchVariables\": true,\n    \"noUnusedLocals\": true,\n    \"noUnusedParameters\": true,\n    \"verbatimModuleSyntax\": true,\n    \"isolatedModules\": true,\n    \"allowJs\": true,\n    \"checkJs\": true,\n    \"skipLibCheck\": true,\n    \"noEmit\": true\n  },\n  \"include\": [\"src\", \"tests\"]\n}\n",
+      "wiring": "\"typecheck\": \"tsc --noEmit\"",
+      "ciStep": "npm run typecheck",
+      "verify": {
+        "argv": [
+          "npx",
+          "tsc",
+          "--noEmit",
+          "--pretty",
+          "false"
+        ],
+        "expected": "exit code 2 with a 'file(line,col): error TSxxxx: ...' line, e.g. TS2551 for an invented method or TS2532/TS18048 under noUncheckedIndexedAccess",
+        "expectedExit": 2
+      },
+      "seed": {
+        "path": "src/jig-seed-type.ts",
+        "sample": "export function firstWord(line: string): string {\n  const words = line.split(' ');\n  const head = words[0];\n  return head.toUpperCase();\n}\n"
+      }
+    },
+    {
+      "id": "vitest",
+      "role": "test-runner",
+      "why": "The only tool that proves the suite actually executed and that coverage did not fall; it also refuses `.only` in CI, which no static check can guarantee for dynamically built suites.",
+      "install": {
+        "npm": "npm install --save-dev vitest @vitest/coverage-v8",
+        "pnpm": "pnpm add -D vitest @vitest/coverage-v8",
+        "yarn": "yarn add -D vitest @vitest/coverage-v8",
+        "bun": "bun add -d vitest @vitest/coverage-v8"
+      },
+      "installKind": "package",
+      "uninstall": {
+        "npm": "npm uninstall vitest @vitest/coverage-v8",
+        "pnpm": "pnpm remove vitest @vitest/coverage-v8",
+        "yarn": "yarn remove vitest @vitest/coverage-v8",
+        "bun": "bun remove vitest @vitest/coverage-v8"
+      },
+      "configPath": "vitest.config.ts",
+      "configSample": "import { defineConfig } from 'vitest/config';\n\nexport default defineConfig({\n  test: {\n    include: ['**/*.{test,spec}.{js,mjs,ts,mts,tsx}'],\n    allowOnly: false,\n    passWithNoTests: false,\n    coverage: {\n      provider: 'v8',\n      reporter: ['text', 'json-summary'],\n      thresholds: { lines: 80, statements: 80, functions: 80, branches: 70 },\n    },\n  },\n});\n",
+      "wiring": "\"test\": \"vitest run --coverage\"",
+      "ciStep": "npm test -- --reporter=github-actions",
+      "verify": {
+        "argv": [
+          "npx",
+          "vitest",
+          "run",
+          "--allowOnly=false",
+          "--passWithNoTests=false"
+        ],
+        "expected": "non-zero exit; a seeded `.only` prints an error naming the focused test, an emptied suite prints 'No test files found' and a broken assertion prints 'AssertionError: expected ... to be ...'",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "tests/jig-seed-only.test.ts",
+        "sample": "import { describe, it, expect } from 'vitest';\n\ndescribe('jig runner seed', () => {\n  it.only('is focused, so the runner must refuse the run', () => {\n    expect(1 + 1).toBe(2);\n  });\n\n  it('is the case the focus would silently skip', () => {\n    expect(2 + 2).toBe(4);\n  });\n});\n"
+      }
+    },
+    {
+      "id": "prettier",
+      "role": "formatter",
+      "why": "Removes formatting from review entirely, so a diff that claims to be a fix cannot hide behind a reflow; ESLint no longer ships stylistic rules that do this.",
+      "install": {
+        "npm": "npm install --save-dev --save-exact prettier",
+        "pnpm": "pnpm add -D --save-exact prettier",
+        "yarn": "yarn add -D --exact prettier",
+        "bun": "bun add -d --exact prettier"
+      },
+      "installKind": "package",
+      "uninstall": {
+        "npm": "npm uninstall prettier",
+        "pnpm": "pnpm remove prettier",
+        "yarn": "yarn remove prettier",
+        "bun": "bun remove prettier"
+      },
+      "configPath": ".prettierrc.json",
+      "configSample": "{\n  \"semi\": true,\n  \"singleQuote\": true,\n  \"trailingComma\": \"all\",\n  \"printWidth\": 100,\n  \"endOfLine\": \"lf\"\n}\n",
+      "wiring": "\"format:check\": \"prettier --check .\"",
+      "ciStep": "npm run format:check",
+      "verify": {
+        "argv": [
+          "npx",
+          "prettier",
+          "--check",
+          "."
+        ],
+        "expected": "exit code 1 with '[warn] <file>' followed by 'Code style issues found in the above file(s). Run Prettier with --write to fix.'",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "src/jig-seed-format.ts",
+        "sample": "export const seedRoute = {\"method\":\"GET\",   \"path\":\"/orders\",\n      \"labels\":[ \"alpha\",\"beta\" ]\n   }\n"
+      }
+    },
+    {
+      "id": "audit",
+      "role": "security-scanner",
+      "why": "Cross-references the installed lockfile against the GitHub Advisory Database; no linter or type checker knows that a transitive dependency has a published CVE.",
+      "install": {
+        "npm": "npm audit --audit-level=high",
+        "pnpm": "pnpm audit --audit-level=high",
+        "yarn": "yarn npm audit --severity high",
+        "bun": "bun audit --audit-level=high"
+      },
+      "installKind": "audit",
+      "configPath": ".npmrc",
+      "configSample": "audit-level=high\nfund=false\n",
+      "wiring": "\"audit\": \"npm audit --audit-level=high\"",
+      "ciStep": "npm run audit",
+      "verify": {
+        "argv": [
+          "npm",
+          "audit",
+          "--audit-level=high"
+        ],
+        "expected": "exit code 1 with 'found N vulnerabilities (… high, … critical)' after a package with a known advisory is added to the lockfile",
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "package-lock.json",
+        "sample": "{\n  \"name\": \"jig-audit-seed\",\n  \"version\": \"0.0.0\",\n  \"lockfileVersion\": 3,\n  \"requires\": true,\n  \"packages\": {\n    \"\": {\n      \"name\": \"jig-audit-seed\",\n      \"version\": \"0.0.0\",\n      \"dependencies\": {\n        \"minimist\": \"1.2.5\"\n      }\n    },\n    \"node_modules/minimist\": {\n      \"version\": \"1.2.5\",\n      \"resolved\": \"https://registry.npmjs.org/minimist/-/minimist-1.2.5.tgz\"\n    }\n  }\n}\n"
+      }
+    }
+  ],
+  "classes": [
+    {
+      "id": "softened-assertion",
+      "title": "Assertion weakened until the test passes",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Replaces a value equality check with toBeTruthy/toBeDefined after the real expectation fails",
+        "Swaps a concrete expected object for expect.any(...) or expect.anything() rather than fixing the producer",
+        "Keeps the test name unchanged so the diff reads as a passing test, not a lowered bar"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\.toBeTruthy\\s*\\(\\s*\\)",
+              "\\.toBeFalsy\\s*\\(\\s*\\)",
+              "\\.toBeDefined\\s*\\(\\s*\\)",
+              "expect\\.(?:any|anything)\\s*\\("
+            ],
+            "paths": [
+              "**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import { describe, it, expect } from 'vitest';\nimport { priceOrder } from '../src/pricing.js';\n\ndescribe('priceOrder', () => {\n  it('applies the volume discount above 100 units', () => {\n    const order = { unitPrice: 10, quantity: 120, currency: 'EUR' };\n    const result = priceOrder(order);\n    expect(result.total).toBeTruthy();\n    expect(result.discount).toBeDefined();\n    expect(result.error).toBeFalsy();\n    expect(result).toEqual(expect.anything());\n  });\n});\n",
+        "nearMiss": "import { describe, it, expect } from 'vitest';\nimport { priceOrder } from '../src/pricing.js';\n\ndescribe('priceOrder', () => {\n  it('applies the volume discount above 100 units', () => {\n    const order = { unitPrice: 10, quantity: 120, currency: 'EUR' };\n    const result = priceOrder(order);\n    expect(result.total).toBe(1080);\n    expect(result.discount).toBeCloseTo(0.1, 5);\n    expect(result.currency).toStrictEqual('EUR');\n    expect(Object.keys(result)).toHaveLength(3);\n  });\n});\n"
+      },
+      "gapNotes": "toBeDefined and toBeTruthy are legitimate against genuinely boolean or optional APIs, so this fires on honest tests too; it is a review prompt, not a verdict. It cannot see the opposite softening — an assertion whose expected literal was edited to match the wrong actual value — because that shape is indistinguishable from a correct test. Nothing here detects an assertion moved inside an `if`; vitest/no-conditional-expect covers that instead.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Matcher names from the Vitest expect API; the class itself is behavioural and the regexes are reasoned, not tool-backed."
+      }
+    },
+    {
+      "id": "emptied-test-body",
+      "title": "Test body emptied instead of fixed",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Deletes the body of a failing test but leaves the it(...) shell so the file still looks covered",
+        "Replaces the body with a bare return or a TODO comment after failing to diagnose the failure",
+        "Reports the suite as green because an empty test passes"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\b(?:it|test)\\s*\\([\\s\\S]{0,120}?(?:async\\s*)?\\([^)]*\\)\\s*=>\\s*\\{\\s*\\}\\s*\\)",
+              "\\b(?:it|test)\\s*\\([\\s\\S]{0,120}?(?:async\\s*)?function\\s*\\([^)]*\\)\\s*\\{\\s*\\}\\s*\\)"
+            ],
+            "paths": [
+              "**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "vitest/expect-expect",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import { describe, it, expect } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\ndescribe('parseCron', () => {\n  it('rejects a six-field expression with a bad day-of-week', () => {});\n\n  it('normalises @daily to the five-field form', function () {});\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *').minute).toBe('*/5');\n  });\n});\n",
+        "nearMiss": "import { describe, it, expect, beforeEach } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\nconst test = () => ({ minute: '0' });\n\ndescribe('parseCron', () => {\n  beforeEach(() => {});\n\n  it('rejects a six-field expression with a bad day-of-week', () => {\n    expect(() => parseCron('0 0 0 0 0 9')).toThrow(/day-of-week/);\n  });\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *')).toStrictEqual(test());\n  });\n});\n"
+      },
+      "gapNotes": "Only catches the shell left behind. A test file deleted outright leaves no source to match — that needs a git-diff detector comparing test counts between revisions, which this lever does not have. It also misses a body reduced to a single trivially true assertion such as expect(true).toBe(true); vitest/expect-expect sees an assertion there and passes it. An empty beforeEach/afterEach hook is deliberately not matched, which means a suite gutted by moving its work into a now-empty hook slips through.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Rule vitest/expect-expect confirmed in the @vitest/eslint-plugin rule list."
+      }
+    },
+    {
+      "id": "focused-test",
+      "title": "Focused test left in the suite",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Adds .only to iterate on one failure and never removes it, so CI silently runs one test",
+        "Uses describe.only around the file it is editing to shorten its own feedback loop",
+        "Declares the suite green from a run that executed a single case"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\b(?:describe|it|test|suite|bench)\\s*\\.\\s*only\\s*[\\(`]",
+              "\\b(?:describe|it|test)\\s*\\.\\s*(?:concurrent|sequential|each)\\s*\\.\\s*only\\b"
+            ],
+            "paths": [
+              "**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "vitest/no-focused-tests",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "vitest",
+            "rule": "allowOnly",
+            "options": {
+              "allowOnly": false
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import { describe, it, expect } from 'vitest';\nimport { normalise } from '../src/text.js';\n\ndescribe('normalise', () => {\n  it.only('collapses runs of whitespace', () => {\n    expect(normalise('a   b')).toBe('a b');\n  });\n\n  it.concurrent.only('trims the ends', () => {\n    expect(normalise('  a  ')).toBe('a');\n  });\n\n  it('strips zero-width joiners', () => {\n    expect(normalise('a\\u200db')).toBe('ab');\n  });\n});\n",
+        "nearMiss": "import { describe, it, expect } from 'vitest';\nimport { normalise } from '../src/text.js';\n\nconst only = (xs) => xs.filter(Boolean);\nconst matcher = { only: true };\n\ndescribe('normalise', () => {\n  it('collapses runs of whitespace', () => {\n    expect(normalise('a   b')).toBe('a b');\n    expect(only([null, 'a'])).toStrictEqual(['a']);\n    expect(matcher.only).toBe(true);\n  });\n});\n"
+      },
+      "gapNotes": "A focus applied dynamically — `const t = condition ? it.only : it;` or a runner flag such as `--testNamePattern` — produces no `.only` token and is invisible here. The regex is Vitest/Jest-shaped; a project on `node --test` focuses with `{ only: true }` options plus the `--test-only` flag, which this does not model. The Jasmine-era spellings `fit` and `fdescribe` are deliberately not matched, because `fit(` collides with ordinary identifiers such as a curve-fitting helper; a Jest repo that still uses them needs jest/no-focused-tests, which does cover them.",
+      "evidence": {
+        "tier": "documented",
+        "source": "vitest/no-focused-tests listed in @vitest/eslint-plugin; Vitest CLI documents --allowOnly defaulting to !process.env.CI."
+      }
+    },
+    {
+      "id": "skipped-test",
+      "title": "Test skipped and left that way",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Marks a failing test .skip or .todo rather than diagnosing it, then reports the work complete",
+        "Renames it to xit/xdescribe, which reads as a legacy spelling and survives review",
+        "Adds a conditional skipIf whose condition is always true in CI"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\b(?:describe|it|test|suite|bench)\\s*\\.\\s*(?:skip|todo|failing)\\s*[\\(`]",
+              "\\b(?:describe|it|test)\\s*\\.\\s*skipIf\\s*\\("
+            ],
+            "paths": [
+              "**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "vitest/no-disabled-tests",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import { describe, it, expect } from 'vitest';\nimport { retry } from '../src/retry.js';\n\ndescribe('retry', () => {\n  it.skip('gives up after the configured attempt budget', async () => {\n    await expect(retry(() => Promise.reject(new Error('nope')), 3)).rejects.toThrow();\n  });\n\n  it.todo('applies jitter to the backoff window');\n\n  it.skipIf(process.env.CI)('honours the abort signal', async () => {\n    await expect(retry(async () => 1, 1, AbortSignal.timeout(1))).rejects.toThrow();\n  });\n\n  it('resolves on the first success', async () => {\n    await expect(retry(async () => 7, 3)).resolves.toBe(7);\n  });\n});\n",
+        "nearMiss": "import { describe, it, expect } from 'vitest';\nimport { paginate } from '../src/paginate.js';\n\ndescribe('paginate', () => {\n  it('honours the skip and take arguments', () => {\n    const page = paginate({ skip: 20, take: 10 });\n    expect(page.skip).toBe(20);\n    expect(page.cursor.skip).toBe(20);\n  });\n\n  it('treats a todo list as ordinary data', () => {\n    expect(paginate({ skip: 0, take: 1 }).items).toHaveLength(1);\n  });\n});\n"
+      },
+      "gapNotes": "The Jest/Jasmine spellings xit, xtest and xdescribe are not matched by regex — they are ordinary identifiers in a Vitest repo — so a Jest project must lean on jest/no-disabled-tests for those. Cannot distinguish a deliberate, documented quarantine from an abandoned one — a skip with an owner and an expiry is the same token as a skip added ten minutes ago to make CI green. It also does not fire on a test disabled by narrowing the runner's `include` glob or by adding the file to `exclude` in vitest.config.ts, which removes a whole file with no marker in the test source at all.",
+      "evidence": {
+        "tier": "documented",
+        "source": "vitest/no-disabled-tests listed in @vitest/eslint-plugin; equivalent jest/no-disabled-tests confirmed in eslint-plugin-jest."
+      }
+    },
+    {
+      "id": "commented-out-test",
+      "title": "Test commented out rather than removed or fixed",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Comments out a failing case to unblock itself, leaving it as apparent documentation",
+        "Wraps a whole describe block in a block comment while refactoring and never restores it"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "vitest/no-commented-out-tests",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import { describe, it, expect } from 'vitest';\nimport { toSlug } from '../src/slug.js';\n\ndescribe('toSlug', () => {\n  // it('transliterates accented characters', () => {\n  //   expect(toSlug('Crème Brûlée')).toBe('creme-brulee');\n  // });\n\n  it('lowercases and hyphenates', () => {\n    expect(toSlug('Hello World')).toBe('hello-world');\n  });\n});\n",
+        "nearMiss": "import { describe, it, expect } from 'vitest';\nimport { toSlug } from '../src/slug.js';\n\ndescribe('toSlug', () => {\n  // Transliteration is handled by the Intl segmenter, see ADR-014.\n  // The expectation below is deliberately exact rather than a regex.\n  it('transliterates accented characters', () => {\n    expect(toSlug('Crème Brûlée')).toBe('creme-brulee');\n  });\n\n  it('lowercases and hyphenates', () => {\n    expect(toSlug('Hello World')).toBe('hello-world');\n  });\n});\n"
+      },
+      "gapNotes": "No check-driver detector: the driver blanks comments before matching, so by construction it can never see commented-out code. Only the linter can catch this class. The rule is also prose-heuristic inside the plugin — a comment that merely mentions `it(` in an explanatory sentence can trip it, and a commented-out test written without the `it(`/`test(` call shape (for example a lone `expect(...)` line) is missed.",
+      "evidence": {
+        "tier": "documented",
+        "source": "vitest/no-commented-out-tests listed in @vitest/eslint-plugin; jest/no-commented-out-tests confirmed in eslint-plugin-jest."
+      }
+    },
+    {
+      "id": "test-without-assertion",
+      "title": "Test that asserts nothing",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Writes a test that only calls the function under test, so it passes unless the call throws",
+        "Moves the only expect into a conditional branch that never executes",
+        "Awaits a promise and never checks the resolved value, then counts the case as coverage"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "vitest/expect-expect",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "vitest/no-conditional-expect",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "vitest/no-standalone-expect",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import { describe, it } from 'vitest';\nimport { migrate } from '../src/migrate.js';\n\ndescribe('migrate', () => {\n  it('runs the 003 migration without throwing', async () => {\n    const db = { exec: async () => undefined, version: 2 };\n    await migrate(db, 3);\n  });\n});\n",
+        "nearMiss": "import { describe, it, expect } from 'vitest';\nimport { migrate } from '../src/migrate.js';\n\ndescribe('migrate', () => {\n  it('runs the 003 migration and bumps the version', async () => {\n    const statements = [];\n    const db = { exec: async (sql) => void statements.push(sql), version: 2 };\n    const next = await migrate(db, 3);\n    expect(next.version).toBe(3);\n    expect(statements).toHaveLength(1);\n  });\n});\n"
+      },
+      "gapNotes": "No honest regex exists: proving a test asserts nothing needs the call graph, because the assertion is usually inside a helper such as `assertMigrated(db)`. expect-expect accepts a custom helper only if it is listed in the rule's assertFunctionNames option, so a project with wrapper assertions must configure that or live with false positives. None of these rules catch a test whose assertion runs but is tautological.",
+      "evidence": {
+        "tier": "documented",
+        "source": "vitest/expect-expect, vitest/no-conditional-expect and vitest/no-standalone-expect all listed in @vitest/eslint-plugin."
+      }
+    },
+    {
+      "id": "swallowed-exception",
+      "title": "Exception caught and discarded",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Wraps a call it could not make work in try/catch with an empty body so the path stops failing",
+        "Attaches .catch(() => {}) to a rejected promise to clear an unhandled-rejection warning",
+        "Returns a default value from the catch block, converting a hard failure into silent wrong data"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "catch\\s*(?:\\([^)]*\\))?\\s*\\{\\s*\\}",
+              "\\.catch\\s*\\(\\s*(?:\\(\\s*[\\w$,\\s]*\\s*\\)|[\\w$]+)\\s*=>\\s*(?:\\{\\s*\\}|undefined|null|void 0)\\s*\\)",
+              "catch\\s*\\([^)]*\\)\\s*\\{\\s*return\\s*(?:null|undefined|false|\\[\\s*\\]|\\{\\s*\\})\\s*;?\\s*\\}"
+            ],
+            "paths": [
+              "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "no-empty",
+            "options": {
+              "allowEmptyCatch": false
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import { readFile } from 'node:fs/promises';\n\nexport async function loadManifest(path) {\n  try {\n    return JSON.parse(await readFile(path, 'utf8'));\n  } catch (error) {\n    return null;\n  }\n}\n\nexport async function warmCache(paths, cache) {\n  for (const path of paths) {\n    try {\n      cache.set(path, await loadManifest(path));\n    } catch {}\n  }\n  await cache.flush().catch(() => {});\n}\n",
+        "nearMiss": "import { readFile } from 'node:fs/promises';\n\nexport class ManifestError extends Error {}\n\nexport async function loadManifest(path, logger) {\n  try {\n    return JSON.parse(await readFile(path, 'utf8'));\n  } catch (error) {\n    logger.warn({ path, error }, 'manifest unreadable');\n    throw new ManifestError(`cannot read ${path}`, { cause: error });\n  } finally {\n  }\n}\n\nexport async function warmCache(paths, cache, logger) {\n  await Promise.all(paths.map((p) => loadManifest(p, logger))).catch((error) => {\n    logger.error(error);\n    throw error;\n  });\n}\n"
+      },
+      "gapNotes": "A catch body containing only a comment is blanked to an empty block and will be flagged — that false positive is the price of the deterministic form, and no-empty behaves the same way unless the comment is allowed via allowEmptyCatch. The third pattern only lists literal default returns; `catch { return this.fallback; }` is equally a swallow and is not matched. Nothing here sees a catch that logs at debug level and then continues, which hides the failure just as effectively.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ESLint core rule no-empty and its allowEmptyCatch option are documented in the ESLint rules reference."
+      }
+    },
+    {
+      "id": "type-widened-to-any",
+      "title": "Type widened to any to silence the checker",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Annotates a parameter or return as any once tsc rejects the real type",
+        "Casts an expression `as any` at the one call site the checker complains about",
+        "Changes a generic constraint to any rather than threading the type through"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              ":\\s*any\\b",
+              "\\bas\\s+any\\b",
+              "[<,]\\s*any\\s*[,>]",
+              "\\bany\\s*\\[\\s*\\]"
+            ],
+            "paths": [
+              "**/*.{ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "@typescript-eslint/no-explicit-any",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "export interface Envelope {\n  id: string;\n  payload: any;\n}\n\nexport function decode(raw: any): Envelope {\n  const parsed = JSON.parse(raw) as any;\n  const headers: Record<string, any> = parsed.headers ?? {};\n  const items: any[] = parsed.items ?? [];\n  return { id: String(headers.id), payload: items };\n}\n",
+        "nearMiss": "export interface Envelope {\n  id: string;\n  payload: unknown;\n}\n\ntype AnyOf<T> = T[keyof T];\nconst anyMatch = (xs: readonly string[]): boolean => xs.some(Boolean);\n\nexport function decode(raw: string): Envelope {\n  const parsed: unknown = JSON.parse(raw);\n  if (typeof parsed !== 'object' || parsed === null) throw new TypeError('not an envelope');\n  const headers: Record<string, unknown> = 'headers' in parsed ? (parsed.headers as Record<string, unknown>) : {};\n  const id: AnyOf<{ id: string }> = String(headers['id']);\n  return anyMatch([id]) ? { id, payload: parsed } : { id: '', payload: null };\n}\n"
+      },
+      "gapNotes": "Only sees the word `any`. A session that widens to `unknown` and then casts, uses `object`, `Function`, `{}` or an index signature of `Record<string, unknown>` gets the same escape with none of these tokens. The regex also fires on legitimate `any` in ambient declaration files and in third-party type shims, so .d.ts should usually be excluded from the paths glob, and on a call to a function actually named `any` written in value position (`{ check: any(p, xs) }`), which is the one shape that keeps this from being literally exact. It says nothing about implicit any, which only `strict`/`noImplicitAny` catches. A `typescript: strict` tool-rule detector was deleted on 2026-08-13: tsc never reports an explicit `any` at any strictness — `strict`/`noImplicitAny` govern inferred any only — so the row claimed a catch the type checker does not perform.",
+      "evidence": {
+        "tier": "documented",
+        "source": "@typescript-eslint/no-explicit-any confirmed in the typescript-eslint rules index (typescript-eslint.io/rules)."
+      }
+    },
+    {
+      "id": "double-cast-through-unknown",
+      "title": "Type laundered through a double cast",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Writes `as unknown as T` once tsc rejects the direct cast, defeating the check entirely",
+        "Casts a partial test fixture to the full domain type so a mock compiles",
+        "Uses a non-null-plus-cast chain to make an optional field look required"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bas\\s+unknown\\s+as\\b"
+            ],
+            "paths": [
+              "**/*.{ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import type { Account, LedgerEntry } from './domain.js';\n\nexport function fixtureAccount(overrides: Partial<Account>): Account {\n  return { id: 'acc_1', ...overrides } as unknown as Account;\n}\n\nexport function coerceEntry(row: Record<string, string>): LedgerEntry {\n  const entry = row as unknown as LedgerEntry;\n  return entry;\n}\n",
+        "nearMiss": "import type { Account, LedgerEntry } from './domain.js';\n\nconst DEFAULTS = { id: 'acc_1', balance: 0, currency: 'EUR' } as const;\n\nexport function fixtureAccount(overrides: Partial<Account>): Account {\n  return { ...DEFAULTS, ...overrides } satisfies Account;\n}\n\nexport function coerceEntry(row: Record<string, string>): LedgerEntry {\n  const amount = Number(row['amount']);\n  if (Number.isNaN(amount)) throw new TypeError('amount is not numeric');\n  const unknownSource: unknown = row;\n  void unknownSource;\n  return { id: String(row['id']), amount };\n}\n"
+      },
+      "gapNotes": "Matches the classic spelling only. The same laundering written across two statements — `const tmp: unknown = x; const y = tmp as T;` — has no adjacent `as unknown as` and is missed, and so is the equivalent via a helper such as `cast<T>(x)`. typescript-eslint has no rule that bans double casts outright (no-unnecessary-type-assertion targets a different shape), so there is no tool-rule detector to pair with this regex.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "Regex is behavioural; deliberately no rule id claimed, because no confirmed typescript-eslint rule bans `as unknown as`."
+      }
+    },
+    {
+      "id": "non-null-assertion",
+      "title": "Non-null assertion used to silence a narrowing failure",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Appends ! to a possibly-undefined access instead of handling the undefined case",
+        "Adds ! after enabling noUncheckedIndexedAccess so array indexing compiles again",
+        "Chains !. through an optional object graph a caller can legitimately leave empty"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "[\\w$\\]\\)]!\\s*\\.",
+              "[\\w$\\]\\)]!\\s*[;,\\)\\]]"
+            ],
+            "paths": [
+              "**/*.{ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "@typescript-eslint/no-non-null-assertion",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "interface Route { handler?: (req: Request) => Response; prefix?: string }\n\nexport function dispatch(routes: Map<string, Route>, path: string, req: Request): Response {\n  const route = routes.get(path)!;\n  const handler = route.handler!;\n  const segments = path.split('/');\n  const head = segments[1]!;\n  const prefix = route.prefix!.trim();\n  return handler(new Request(prefix + '/' + head, req));\n}\n",
+        "nearMiss": "interface Route { handler?: (req: Request) => Response; prefix?: string }\n\nexport function dispatch(routes: Map<string, Route>, path: string, req: Request): Response {\n  const route = routes.get(path);\n  if (!route?.handler) throw new Error(`no handler for ${path}`);\n  const segments = path.split('/');\n  const head = segments[1];\n  if (head === undefined || head !== path) {\n    return new Response(null, { status: 404 });\n  }\n  return route.handler(new Request(`/${head}`, req));\n}\n"
+      },
+      "gapNotes": "Heuristic because `!` is overloaded. The lookaround-free patterns avoid `!==`, `!=` and prefix negation by requiring a word, `]` or `)` immediately before the `!`, but `foo(a)!` and `foo(a) !== b` written without the space around the operator can still confuse it in dense expressions. A non-null assertion moved into a helper (`function must<T>(x: T | undefined): T`) has the identical effect and no `!` token. A `typescript: noUncheckedIndexedAccess` tool-rule detector was deleted on 2026-08-13: that flag is what makes the `!` necessary, it never reports the `!` itself, so tsc contributes no detection to this class at all.",
+      "evidence": {
+        "tier": "documented",
+        "source": "@typescript-eslint/no-non-null-assertion confirmed in the typescript-eslint rules index (typescript-eslint.io/rules)."
+      }
+    },
+    {
+      "id": "blanket-type-suppression",
+      "title": "Type error suppressed by comment",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Drops // @ts-ignore above the line tsc rejects rather than fixing the type",
+        "Adds // @ts-nocheck at the top of a file it could not make compile",
+        "Uses @ts-expect-error with no description, so the suppression carries no reason for the next reader"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "@typescript-eslint/ban-ts-comment",
+            "options": {
+              "ts-expect-error": "allow-with-description",
+              "ts-ignore": true,
+              "ts-nocheck": true
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "// @ts-nocheck\nimport { createClient } from './client.js';\n\nexport async function push(events) {\n  const client = createClient({ retries: 'three' });\n  // @ts-ignore the SDK types are wrong here\n  return client.sendBatch(events, { compress: 1 });\n}\n",
+        "nearMiss": "import { createClient } from './client.js';\n\nexport async function push(events: readonly unknown[]) {\n  const client = createClient({ retries: 3 });\n  // @ts-expect-error upstream types omit the compress option; tracked in vendor#412\n  return client.sendBatch(events, { compress: true });\n}\n"
+      },
+      "gapNotes": "No check-driver detector, and none is possible. A check-driver detector matching `@ts-ignore`/`@ts-nocheck` was deleted on 2026-08-13 after it missed its own violation fixture: blankRegions in scripts/templates/run.mjs blanks comments unconditionally — it takes only a `strings` option — so the catalogue's `stripComments: false` was inert and both directives were whitespace by the time any pattern ran. Only the linter catches this class, which means it is silent in a repo that does not run ESLint over the file. @ts-expect-error is reported by ban-ts-comment only when it carries no description, and a description of three characters satisfies it. Suppression achieved by excluding the file from tsconfig's include is invisible here — see relaxed-tsconfig-strictness.",
+      "evidence": {
+        "tier": "documented",
+        "source": "@typescript-eslint/ban-ts-comment confirmed in the typescript-eslint rules index, with the documented allow-with-description option value."
+      }
+    },
+    {
+      "id": "blanket-lint-suppression",
+      "title": "Lint suppressed for a whole file or line without a reason",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Puts /* eslint-disable */ at the top of a file to clear every remaining error at once",
+        "Disables the specific rule that was about to catch the shortcut it just took",
+        "Leaves the suppression in place after the underlying problem is fixed"
+      ],
+      "severity": "safety",
+      "detectors": [],
+      "fixtures": {
+        "violation": "/* eslint-disable */\nimport { spawnSync } from 'node:child_process';\n\nexport function build(target) {\n  // eslint-disable-next-line n/no-sync\n  const out = spawnSync('npm', ['run', target], { encoding: 'utf8' });\n  console.log(out.stdout);\n  return out.status;\n}\n",
+        "nearMiss": "import { spawn } from 'node:child_process';\n\nexport function build(target: string): Promise<number> {\n  // eslint-disable-next-line security/detect-child-process -- target is validated against a fixed allowlist above\n  const child = spawn('npm', ['run', target], { stdio: 'inherit' });\n  return new Promise((resolve) => child.on('close', (code) => resolve(code ?? 1)));\n}\n"
+      },
+      "gapNotes": "Nothing in this edition detects this class — the detector list is empty on purpose and the class is recorded as a known blind spot. The check-driver patterns that used to sit here (`eslint-disable`, and an inline directive without a `--` reason) were deleted on 2026-08-13 after they missed their own violation fixture: an ESLint directive is only ever a comment, and blankRegions in scripts/templates/run.mjs blanks comments unconditionally — it takes only a `strings` option, so the catalogue's `stripComments: false` was inert. No tool-rule replaces them either: ESLint reports an unused directive through `--report-unused-disable-directives` (a CLI flag, carried in this edition's lint wiring line, not a rule id) and reports nothing at all about a directive that is genuinely in use but unjustified. Catching this needs either a plugin outside this edition's toolchain or a raw-text guard that does not blank comments. Suppressions written into eslint.config.mjs as an ignores entry are the sibling class lint-rule-turned-off, which is also undetected here.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ESLint CLI reference confirms --report-unused-disable-directives and --max-warnings; the reason-comment `--` convention is ESLint's documented directive-description syntax. No detector is claimed."
+      }
+    },
+    {
+      "id": "relaxed-tsconfig-strictness",
+      "title": "Type-checker strictness turned down to make the build pass",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Flips \"strict\" or \"strictNullChecks\" to false after failing to fix the reported errors",
+        "Adds the failing file to tsconfig's exclude list so tsc stops looking at it",
+        "Turns on skipLibCheck plus allowJs without checkJs so a whole language surface stops being checked"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\"(?:strict|strictNullChecks|strictFunctionTypes|strictBindCallApply|strictPropertyInitialization|noImplicitAny|noImplicitThis|alwaysStrict|useUnknownInCatchVariables)\"\\s*:\\s*false",
+              "\"(?:noUncheckedIndexedAccess|exactOptionalPropertyTypes|noImplicitOverride|noImplicitReturns|noFallthroughCasesInSwitch|noUnusedLocals|noUnusedParameters)\"\\s*:\\s*false",
+              "\"suppressImplicitAnyIndexErrors\"\\s*:\\s*true",
+              "\"allowJs\"\\s*:\\s*true[\\s\\S]{0,400}?\"checkJs\"\\s*:\\s*false"
+            ],
+            "paths": [
+              "**/tsconfig*.json",
+              "**/jsconfig.json"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2023\",\n    \"module\": \"nodenext\",\n    \"moduleResolution\": \"nodenext\",\n    \"strict\": false,\n    \"noImplicitAny\": false,\n    \"noUncheckedIndexedAccess\": false,\n    \"suppressImplicitAnyIndexErrors\": true,\n    \"allowJs\": true,\n    \"checkJs\": false,\n    \"skipLibCheck\": true,\n    \"noEmit\": true\n  },\n  \"include\": [\"src\"],\n  \"exclude\": [\"src/legacy/importer.ts\"]\n}\n",
+        "nearMiss": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2023\",\n    \"module\": \"nodenext\",\n    \"moduleResolution\": \"nodenext\",\n    \"strict\": true,\n    \"noUncheckedIndexedAccess\": true,\n    \"exactOptionalPropertyTypes\": true,\n    \"allowJs\": true,\n    \"checkJs\": true,\n    \"declaration\": false,\n    \"sourceMap\": false,\n    \"skipLibCheck\": true,\n    \"noEmit\": true\n  },\n  \"include\": [\"src\", \"tests\"]\n}\n"
+      },
+      "gapNotes": "Downgraded from deterministic to heuristic on 2026-08-13, because the driver's blanking makes the match order-dependent: this detector must run with stripStrings off (the flag names are inside quotes), and with strings left intact blankRegions treats the `/*` inside an ordinary glob such as \"include\": [\"src/**/*\"] as the start of a block comment and blanks everything up to the next `*/` — the rest of the file, in a typical tsconfig. Any relaxed flag written after such a glob is silently missed. It sees a flag written as false but not a flag quietly deleted — removing \"noUncheckedIndexedAccess\" entirely has the same effect and leaves no token, which is the most common way this actually happens. It also cannot judge the exclude list: a new path in \"exclude\" may be a legitimate build split or may be the file that would not compile. Detection is per-file, so a strict base config softened in an extending tsconfig.build.json is only caught if that file is in the paths glob. A `typescript: strict` tool-rule detector was deleted on 2026-08-13: a tsconfig whose strictness has been turned down is exactly the state in which tsc reports nothing, so the type checker cannot detect its own relaxation.",
+      "evidence": {
+        "tier": "documented",
+        "source": "All flag names verified against the TypeScript TSConfig reference (typescriptlang.org/tsconfig); suppressImplicitAnyIndexErrors is included as a legacy escape hatch and is a deprecated option, so it appears only in older configs."
+      }
+    },
+    {
+      "id": "lint-rule-turned-off",
+      "title": "Lint rule disabled in config instead of obeyed",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Sets the offending rule to 'off' in eslint.config.mjs rather than changing the code",
+        "Adds the file it is editing to globalIgnores so the linter stops visiting it",
+        "Downgrades an error to 'warn' knowing the CI line only fails on errors"
+      ],
+      "severity": "safety",
+      "detectors": [],
+      "fixtures": {
+        "violation": "import js from '@eslint/js';\nimport { defineConfig } from 'eslint/config';\nimport tseslint from 'typescript-eslint';\n\nexport default defineConfig([\n  {\n    files: ['**/*.ts'],\n    extends: [js.configs.recommended, tseslint.configs.recommended],\n    rules: {\n      '@typescript-eslint/no-explicit-any': 'off',\n      '@typescript-eslint/no-floating-promises': 0,\n      'vitest/no-focused-tests': 'warn',\n    },\n  },\n]);\n",
+        "nearMiss": "import js from '@eslint/js';\nimport { defineConfig, globalIgnores } from 'eslint/config';\nimport tseslint from 'typescript-eslint';\n\nexport default defineConfig([\n  globalIgnores(['dist/**', 'coverage/**']),\n  {\n    files: ['**/*.ts'],\n    extends: [js.configs.recommended, tseslint.configs.strictTypeChecked],\n    languageOptions: { parserOptions: { projectService: true } },\n    linterOptions: { reportUnusedDisableDirectives: 'error' },\n    rules: {\n      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],\n      '@typescript-eslint/no-explicit-any': 'error',\n      'vitest/no-focused-tests': 'error',\n    },\n  },\n]);\n"
+      },
+      "gapNotes": "Nothing in this edition detects this class — the detector list is empty on purpose and the class is recorded as a known blind spot. Three check-driver patterns over eslint.config.* and biome.json were deleted on 2026-08-13 after all three missed their own violation fixture, and the reason is structural, not a typo: every signal here lives inside a string literal (the rule id and the severity), so the detector must run with stripStrings off, and with strings intact blankRegions in scripts/templates/run.mjs reads the `/*` inside the mandatory `files: ['**/*.ts']` glob as the start of a block comment and blanks the rest of the file, rules block included. Turning stripStrings on instead blanks the interior of every quoted rule id and severity, so the patterns have nothing left to match. Even had it run, it was knowingly noisy: turning a core rule 'off' is mandatory when its typescript-eslint replacement is enabled — `'no-unused-vars': 'off'` beside `'@typescript-eslint/no-unused-vars': 'error'` is the documented pairing — and it would have flagged that. No ESLint rule reports a config that disables rules, so there is no tool-rule to fall back on; catching this needs a config-aware check (loading the resolved config and diffing severities), which this lever cannot perform. A rule silently dropped by swapping a strictTypeChecked extends for recommended leaves no 'off' token anywhere and would have been invisible regardless.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ESLint flat-config file names and severity values ('off' | 0 | 'warn' | 'error') from the ESLint configuration-files reference. No detector is claimed."
+      }
+    },
+    {
+      "id": "unawaited-async-call",
+      "title": "Promise never awaited or handled",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Drops the await when converting a function to synchronous to make a signature line up",
+        "Calls an async function inside forEach, so the caller returns before any of the work finishes",
+        "Passes an async callback where a void-returning one is expected, discarding the rejection"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "@typescript-eslint/no-floating-promises",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "@typescript-eslint/no-misused-promises",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "@typescript-eslint/await-thenable",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import { writeFile } from 'node:fs/promises';\n\nexport function persistAll(records: readonly { id: string; body: string }[]): void {\n  records.forEach(async (record) => {\n    await writeFile(`./out/${record.id}.json`, record.body, 'utf8');\n  });\n  writeFile('./out/index.json', JSON.stringify(records.map((r) => r.id)), 'utf8');\n}\n",
+        "nearMiss": "import { writeFile } from 'node:fs/promises';\n\nexport async function persistAll(records: readonly { id: string; body: string }[]): Promise<void> {\n  await Promise.all(\n    records.map((record) => writeFile(`./out/${record.id}.json`, record.body, 'utf8')),\n  );\n  await writeFile('./out/index.json', JSON.stringify(records.map((r) => r.id)), 'utf8');\n  void reportProgress(records.length);\n}\n\nfunction reportProgress(n: number): void {\n  console.error(`persisted ${n} records`);\n}\n"
+      },
+      "gapNotes": "No check-driver detector, and honestly so: deciding whether an expression is thenable needs the type of the callee, which a regex over blanked source cannot know — `save(x);` is a floating promise or an ordinary void call depending entirely on save's return type. These rules require type-aware linting (parserOptions.projectService), so they are silent in a project that lints without a tsconfig, and they do not apply to plain .js files outside the TypeScript program.",
+      "evidence": {
+        "tier": "documented",
+        "source": "no-floating-promises, no-misused-promises and await-thenable all confirmed in the typescript-eslint rules index; typed-linting setup confirmed on typescript-eslint.io."
+      }
+    },
+    {
+      "id": "invented-import-or-api",
+      "title": "Import path or exported symbol that does not exist",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Invents a module specifier that matches the naming convention but no file",
+        "Imports a named export the package does not actually publish",
+        "Guesses a deep subpath import that the package's exports map does not expose"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "import-x/no-unresolved",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "import-x/named",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "n/no-missing-import",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "typescript",
+            "rule": "moduleResolution",
+            "options": {
+              "module": "nodenext",
+              "moduleResolution": "nodenext"
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import { createLogger } from '../utils/logger-factory.js';\nimport { chunkBy } from 'lodash-es/collection/chunkBy.js';\nimport { setTimeout as delay } from 'node:timers/promise';\n\nconst log = createLogger('ingest');\n\nexport async function ingest(rows) {\n  for (const batch of chunkBy(rows, 100)) {\n    await delay(50);\n    log.info(batch.length);\n  }\n}\n",
+        "nearMiss": "import { createLogger } from '../utils/logger.js';\nimport { chunk } from 'lodash-es';\nimport { setTimeout as delay } from 'node:timers/promises';\n\nconst log = createLogger('ingest');\n\nexport async function ingest(rows) {\n  for (const batch of chunk(rows, 100)) {\n    await delay(50);\n    log.info(batch.length);\n  }\n}\n"
+      },
+      "gapNotes": "No check-driver detector is possible: module specifiers are string literals, which the driver blanks before matching, and even unblanked a regex cannot know what resolves on disk. import-x/no-unresolved needs configured for path aliases or it produces false positives on every `@/…` import, and it does not evaluate package.json exports maps, so a deep subpath blocked by exports may resolve for the linter and fail at runtime. Dynamic `await import(variable)` is outside all four detectors.",
+      "evidence": {
+        "tier": "documented",
+        "source": "import-x/no-unresolved and import-x/named confirmed in eslint-plugin-import-x; n/no-missing-import confirmed in eslint-plugin-n; module/moduleResolution values confirmed in the TSConfig reference."
+      }
+    },
+    {
+      "id": "phantom-dependency",
+      "title": "Package imported but never declared",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Imports a package it saw in another repo, relying on it being hoisted into node_modules transitively",
+        "Uses a devDependency from production source, so the import breaks on an install without dev deps",
+        "Adds the import without touching package.json, so the lockfile and the code disagree"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "import-x/no-extraneous-dependencies",
+            "options": {
+              "devDependencies": [
+                "**/*.{test,spec}.*",
+                "**/*.config.*"
+              ]
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "n/no-extraneous-import",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import express from 'express';\nimport { faker } from '@faker-js/faker';\n\nexport function createServer() {\n  const app = express();\n  app.get('/health', (_req, res) => res.json({ id: faker.string.uuid(), ok: true }));\n  return app;\n}\n",
+        "nearMiss": "import { createServer as createHttpServer } from 'node:http';\nimport { randomUUID } from 'node:crypto';\n\nexport function createServer() {\n  return createHttpServer((req, res) => {\n    if (req.url === '/health') {\n      res.writeHead(200, { 'content-type': 'application/json' });\n      res.end(JSON.stringify({ id: randomUUID(), ok: true }));\n      return;\n    }\n    res.writeHead(404).end();\n  });\n}\n"
+      },
+      "gapNotes": "No check-driver detector: the regex would have to read package.json and cross-reference every specifier, which is resolution work, not pattern work. Both rules judge against the nearest package.json, so in a pnpm or yarn workspace a dependency declared only at the root is reported as extraneous in a leaf package unless the config accounts for it. Neither rule catches the reverse mistake — a declared dependency nobody imports — which needs a separate unused-dependency audit.",
+      "evidence": {
+        "tier": "documented",
+        "source": "import-x/no-extraneous-dependencies confirmed in eslint-plugin-import-x; n/no-extraneous-import confirmed in eslint-plugin-n."
+      }
+    },
+    {
+      "id": "hardcoded-secret",
+      "title": "Credential or token written into source",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Inlines a key it found in a log, a fixture or an error message to make an integration test run",
+        "Pastes a sample token from vendor documentation into production configuration",
+        "Replaces a failing env lookup with the literal value it was given during the session"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "(?:[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Aa][Cc][Cc][Ee][Ss][Ss][_-]?[Tt][Oo][Kk][Ee][Nn]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee][_-]?[Kk][Ee][Yy])\\b\\s*[:=]\\s*[\"'`][^\"'`\\n]{8,}[\"'`]",
+              "[\"'`]sk-[A-Za-z0-9_-]{16,}[\"'`]",
+              "[\"'`]gh[pousr]_[A-Za-z0-9]{20,}[\"'`]",
+              "[\"'`]AKIA[0-9A-Z]{16}[\"'`]",
+              "[\"'`]-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"
+            ],
+            "paths": [
+              "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx,json}"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "export const config = {\n  region: 'eu-central-1',\n  apiKey: 'sk-live-9fJ2kQ4mZp01xR7bV8dLn3TuA',\n  clientSecret: 'ZmFrZS1jbGllbnQtc2VjcmV0LXZhbHVl',\n  githubToken: 'ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8',\n  awsKeyId: 'AKIAIOSFODNN7EXAMPLE',\n  signingKey: '-----BEGIN RSA PRIVATE KEY-----\\nMIIBOgIBAAJBAKj34G\\n-----END RSA PRIVATE KEY-----',\n};\n\nexport function authHeader() {\n  return { authorization: `Bearer ${config.apiKey}` };\n}\n",
+        "nearMiss": "const required = (name) => {\n  const value = process.env[name];\n  if (!value) throw new Error(`missing required environment variable ${name}`);\n  return value;\n};\n\nexport const config = {\n  region: 'eu-central-1',\n  apiKey: required('BILLING_API_KEY'),\n  clientSecret: required('BILLING_CLIENT_SECRET'),\n};\n\nconst tokenHeader = 'authorization';\n\nexport function authHeader() {\n  return { [tokenHeader]: `Bearer ${config.apiKey}` };\n}\n"
+      },
+      "gapNotes": "This detector runs with stripStrings off — it must, since the secret is the string — so it is the noisiest in the edition: a fixture password like 'correct-horse-battery' in a test file matches, and any long placeholder does too. Leaving strings intact also costs it real coverage, because blankRegions in scripts/templates/run.mjs then reads the `//` and `/*` inside ordinary string literals as comment openers: a file containing a URL literal loses the rest of that line, and one containing a `/*` glob loses everything up to the next `*/`, so a secret written after either is missed. It only recognises the vendor prefixes listed; a bare 32-hex-character key assigned to a variable named `k` matches nothing. A `security/detect-possible-timing-attacks` tool-rule detector was deleted on 2026-08-13: the rule exists and is spelled correctly, but it flags `==`/`===` comparison of secret-named variables, which is a different defect — it never reports a credential written into source. No lint rule in this edition's toolchain scans for secrets; a dedicated scanner such as gitleaks belongs in CI beside this check.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "Behavioural class; the credential prefixes are public vendor token formats and the regexes are reasoned. No rule id is claimed, because no rule in this edition's toolchain detects a hardcoded credential."
+      }
+    },
+    {
+      "id": "hardcoded-config-value",
+      "title": "Configuration value inlined instead of read",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Gives a required env var a literal default so the code runs in its own sandbox",
+        "Inlines a hostname, port or bucket name after the config lookup returned undefined",
+        "Hardcodes a path or timeout that the caller was supposed to supply"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "process\\.env(?:\\.[A-Z][A-Z0-9_]*|\\[[\"'][^\"'\\n]*[\"']\\])\\s*(?:\\|\\||\\?\\?)\\s*[\"'`]"
+            ],
+            "paths": [
+              "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "export const settings = {\n  apiBase: process.env.API_BASE || 'http://localhost:8080/v1',\n  cacheDir: '/home/runner/.cache/ingest',\n  timeoutMs: 30_000,\n};\n\nexport function endpoint(path) {\n  return new URL(path, settings.apiBase).toString();\n}\n",
+        "nearMiss": "import { tmpdir } from 'node:os';\nimport { join } from 'node:path';\n\nfunction requireEnv(name) {\n  const value = process.env[name];\n  if (value === undefined) throw new Error(`${name} is not configured`);\n  return value;\n}\n\nexport const settings = {\n  apiBase: requireEnv('API_BASE'),\n  cacheDir: process.env.CACHE_DIR ?? join(tmpdir(), 'ingest'),\n  timeoutMs: Number(process.env.TIMEOUT_MS ?? 30_000),\n};\n\nexport function endpoint(path) {\n  return new URL(path, settings.apiBase).toString();\n}\n"
+      },
+      "gapNotes": "Reduced to a single pattern on 2026-08-13. Two patterns were deleted — one for a localhost URL literal, one for a `/home/<user>/…` path literal — because both required the string body to survive blanking and neither can: with stripStrings off, blankRegions in scripts/templates/run.mjs reads the `//` in `'http://localhost:8080'` as a line comment and the leading `/home/` as a regular-expression literal, and both were blanked before the pattern ran; with stripStrings on the body is blanked by definition. They missed their own violation fixture. The surviving pattern anchors on the opening quote rather than the literal's contents, which is all that reliably survives the driver, so it fires on any env lookup with a string fallback and says nothing about what the fallback is: it cannot tell a sensible default (a cache directory) from a dangerous one (a production endpoint), and a project that legitimately defaults an optional variable will need those sites excluded by path. Values hardcoded as numbers (a port, a retry budget) carry no quotes and are invisible, as is a literal assigned without an env lookup anywhere near it — the class's second and third agent modes are therefore not covered by any detector here.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "Behavioural class; no rule id claimed because no confirmed ESLint rule bans env-var literal fallbacks."
+      }
+    },
+    {
+      "id": "debug-artifact-left-behind",
+      "title": "Debug output or breakpoint left in the code",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Adds console.log tracing while diagnosing and ships it with the fix",
+        "Leaves a debugger statement in a browser path, which halts every session with devtools open",
+        "Prints request or user objects, quietly turning debug output into a log-privacy incident"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bconsole\\s*\\.\\s*(?:log|debug|dir|trace|table|count|time|timeEnd)\\s*\\(",
+              "\\bdebugger\\s*;"
+            ],
+            "paths": [
+              "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "no-console",
+            "options": {
+              "allow": [
+                "error",
+                "warn"
+              ]
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "no-debugger",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "export function reconcile(local, remote) {\n  console.log('reconcile called', { local, remote });\n  const merged = { ...remote, ...local };\n  if (merged.version !== remote.version) {\n    debugger;\n    console.table(merged);\n  }\n  return merged;\n}\n",
+        "nearMiss": "import { createLogger } from './logger.js';\n\nconst logger = createLogger('reconcile');\nlet debuggerAttached = false;\n\nexport function reconcile(local, remote) {\n  logger.debug({ local, remote }, 'reconcile called');\n  const merged = { ...remote, ...local };\n  if (merged.version !== remote.version) {\n    console.warn('version drift detected');\n    debuggerAttached = true;\n  }\n  return { ...merged, debuggerAttached };\n}\n"
+      },
+      "gapNotes": "A CLI whose entire job is printing to stdout will match constantly, so tool entry points need excluding by path or the class becomes noise. It does not see debug output routed through a real logger at debug level, which is the same information leak with better manners, nor a console call built dynamically as `console['log'](…)`. Severity is hygiene rather than safety, but the log-privacy variant — printing a request or user object — is genuinely a safety problem this class cannot grade.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ESLint core rules no-console (with its allow option) and no-debugger, from the ESLint rules reference."
+      }
+    },
+    {
+      "id": "toothless-test-command",
+      "title": "Test or CI step that cannot fail",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Rewrites the npm test script to echo or exit 0 so `npm test` reports success",
+        "Appends `|| true` to a check so the CI job stays green regardless of the result",
+        "Adds continue-on-error or --passWithNoTests to a workflow step, then claims the suite passed"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\"(?:test|lint|typecheck|check|ci)[^\"]*\"\\s*:\\s*\"[^\"]*(?:\\|\\|\\s*true|\\bexit\\s+0|;\\s*true\\b)",
+              "\"[^\"]*\"\\s*:\\s*\"[^\"]*--passWithNoTests"
+            ],
+            "paths": [
+              "**/package.json"
+            ],
+            "stripComments": false,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "{\n  \"name\": \"ingest\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"vitest run --passWithNoTests || true\",\n    \"lint\": \"eslint . ; true\",\n    \"typecheck\": \"tsc --noEmit || exit 0\"\n  },\n  \"devDependencies\": {\n    \"vitest\": \"^3.2.4\"\n  }\n}\n",
+        "nearMiss": "{\n  \"name\": \"ingest\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"vitest run --coverage --allowOnly=false\",\n    \"lint\": \"eslint . --max-warnings 0 --report-unused-disable-directives\",\n    \"typecheck\": \"tsc --noEmit\",\n    \"clean\": \"rm -rf dist coverage\",\n    \"verify\": \"npm run lint && npm run typecheck && npm test\"\n  },\n  \"devDependencies\": {\n    \"vitest\": \"^3.2.4\"\n  }\n}\n"
+      },
+      "gapNotes": "--passWithNoTests is legitimate at a monorepo root where some packages genuinely ship no tests, so that pattern needs a per-repo waiver rather than blanket enforcement. It reads only package.json, so a suite neutered inside a Makefile, a turbo.json task or a nested workspace script is missed. It also runs with stripStrings off, which it must — the scripts are the strings — and package.json is matched with the driver's slash comment style, so a `/*` inside any string above the scripts block (a `files` or `exports` glob such as \"dist/**/*\") blanks the rest of the file and the scripts with it, and a `//` in a repository or homepage URL blanks the rest of that line. Nothing here proves the suite actually ran and passed — only a coverage or JUnit artifact published from the run does that, which is a CI-artifact check this lever cannot perform.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Vitest CLI reference documents --passWithNoTests and --allowOnly (default !process.env.CI); npm scripts semantics from the npm CLI docs."
+      }
+    },
+    {
+      "id": "ci-step-allowed-to-fail",
+      "title": "CI step neutered so the job stays green",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Adds continue-on-error to the step whose failure it could not fix",
+        "Appends || true to a run line so a red check reports success",
+        "Sets if: false on the test step, leaving the workflow looking complete"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "continue-on-error\\s*:\\s*true",
+              "\\|\\|\\s*true\\s*$",
+              "if\\s*:\\s*false\\b"
+            ],
+            "paths": [
+              ".github/workflows/*.yml",
+              ".github/workflows/*.yaml",
+              ".gitlab-ci.yml"
+            ],
+            "stripComments": false,
+            "stripStrings": false,
+            "perLine": true
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "name: verify\non: [push, pull_request]\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n      - run: npm ci\n      - run: npm run lint\n        continue-on-error: true\n      - run: npm run typecheck || true\n      - run: npm test\n        if: false\n",
+        "nearMiss": "name: verify\non: [push, pull_request]\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n          cache: npm\n      - run: npm ci\n      - run: npm run lint\n      - run: npm run typecheck\n      - run: npm test\n      - run: npm run audit\n        if: github.event_name == 'push'\n      - uses: actions/upload-artifact@v4\n        if: always()\n        with:\n          name: coverage\n          path: coverage/\n"
+      },
+      "gapNotes": "A regex over YAML, not a parser: `continue-on-error: ${{ inputs.soft }}` and a step disabled through a reusable-workflow input evaluate to the same thing at run time and match nothing. It also cannot see the most effective neutering of all — deleting the step, or removing the workflow's required-check status in branch protection, neither of which leaves a token in the file. The `|| true` pattern is anchored per line, so a continuation written with a YAML block scalar over two lines escapes it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "continue-on-error and if are documented GitHub Actions workflow-syntax keys."
+      }
+    },
+    {
+      "id": "dynamic-code-execution",
+      "title": "Code built from data and executed",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Reaches for eval or new Function to parse or template something the stdlib already handles",
+        "Builds a require path from a variable so a plugin loads by name",
+        "Constructs a RegExp from unvalidated input, opening a redos path"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "(?:^|[^.\\w$])eval\\s*\\(",
+              "new\\s+Function\\s*\\(",
+              "\\bsetTimeout\\s*\\(\\s*[\"'`]",
+              "\\bnew\\s+RegExp\\s*\\(\\s*(?!['\"`])[\\w$][\\w$.\\[\\]]*"
+            ],
+            "paths": [
+              "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "no-eval",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "no-implied-eval",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "security/detect-eval-with-expression",
+            "options": {}
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "heuristic",
+          "params": {
+            "tool": "eslint",
+            "rule": "security/detect-non-literal-regexp",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "export function applyRule(rule, record) {\n  const predicate = new Function('r', `return ${rule.expression};`);\n  if (eval(rule.guard)) {\n    setTimeout('flush()', 100);\n  }\n  const matcher = new RegExp(rule.pattern);\n  return predicate(record) && matcher.test(record.name);\n}\n",
+        "nearMiss": "const PREDICATES = {\n  isActive: (r) => r.status === 'active',\n  isStale: (r) => Date.now() - r.updatedAt > 86_400_000,\n};\n\nexport function applyRule(rule, record, flush) {\n  const predicate = PREDICATES[rule.name];\n  if (predicate === undefined) throw new Error(`unknown rule ${rule.name}`);\n  const evaluate = (r) => predicate(r);\n  if (rule.guard === 'always') {\n    setTimeout(() => flush(), 100);\n  }\n  const matcher = new RegExp('^[a-z0-9-]+$', 'u');\n  return evaluate(record) && matcher.test(record.name);\n}\n"
+      },
+      "gapNotes": "The fourth pattern flags every non-literal RegExp, including ones built from a vetted constant, which is why that detector's paired rule is marked heuristic. stripStrings was switched on on 2026-08-13: none of the four patterns needs a string's contents (the third one anchors on the opening quote, which blanking preserves), and leaving strings intact made the driver read the `//` and `/*` inside ordinary literals as comment openers, silently blanking source that could contain the very call this looks for. Indirect execution — `globalThis['ev' + 'al'](s)`, `import(dataUrl)`, a worker constructed from a Blob, or `vm.runInNewContext` — matches nothing here. This class does not attempt to judge redos in a literal regex; that is what security/detect-unsafe-regex covers, and it is not wired in above.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ESLint core no-eval and no-implied-eval; security/detect-eval-with-expression and security/detect-non-literal-regexp confirmed in the eslint-plugin-security rule list."
+      }
+    },
+    {
+      "id": "unchecked-index-access",
+      "title": "Array or record index treated as always present",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Indexes an array inside a loop bound it derived from a different array",
+        "Reads a Map or Record entry and dereferences it without checking for undefined",
+        "Destructures a fixed number of elements from a split whose length it never validated"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "typescript",
+            "rule": "noUncheckedIndexedAccess",
+            "options": {
+              "noUncheckedIndexedAccess": true
+            }
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "typescript",
+            "rule": "noPropertyAccessFromIndexSignature",
+            "options": {
+              "noPropertyAccessFromIndexSignature": true
+            }
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "export function parseHeaders(lines: string[]): Record<string, string> {\n  const out: Record<string, string> = {};\n  for (let i = 0; i < lines.length; i += 1) {\n    const [name, value] = lines[i].split(': ');\n    out[name.toLowerCase()] = value.trim();\n  }\n  return out;\n}\n",
+        "nearMiss": "export function parseHeaders(lines: readonly string[]): Record<string, string> {\n  const out: Record<string, string> = {};\n  for (const line of lines) {\n    const separator = line.indexOf(': ');\n    if (separator === -1) continue;\n    const name = line.slice(0, separator);\n    const value = line.slice(separator + 2);\n    if (name.length === 0) continue;\n    out[name.toLowerCase()] = value.trim();\n  }\n  return out;\n}\n"
+      },
+      "gapNotes": "No check-driver detector, because `xs[i].foo` is only a defect when the element type does not already include undefined — a regex cannot know that and would flag every array access in the repo. Both flags are TypeScript-only, so a plain-JS package gets nothing from this class unless allowJs and checkJs are on with JSDoc types. noUncheckedIndexedAccess is also easy to defeat with the non-null assertion this catalogue flags separately.",
+      "evidence": {
+        "tier": "documented",
+        "source": "noUncheckedIndexedAccess and noPropertyAccessFromIndexSignature confirmed in the TypeScript TSConfig reference."
+      }
+    },
+    {
+      "id": "loose-equality-coercion",
+      "title": "Loose equality where coercion changes the answer",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Switches === to == after a comparison between a string and a number fails",
+        "Writes == null deliberately in one place and == elsewhere by imitation of that line"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "(?<![=!<>])==(?!=)",
+              "(?<![!=])!=(?!=)"
+            ],
+            "paths": [
+              "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "eslint",
+            "rule": "eqeqeq",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "export function isMatchingVersion(record, requested) {\n  if (record.version == requested) {\n    return true;\n  }\n  if (record.retries != 0 && record.status == 'ready') {\n    return record.id == Number(requested);\n  }\n  return false;\n}\n",
+        "nearMiss": "export function isMatchingVersion(record, requested) {\n  let attempts = 0;\n  attempts += 1;\n  if (record.version === String(requested)) {\n    return true;\n  }\n  if (record.retries !== 0 && record.status !== 'pending' && attempts <= 3) {\n    return record.id === Number(requested);\n  }\n  return record.deletedAt === null || record.deletedAt === undefined;\n}\n"
+      },
+      "gapNotes": "The lookbehind excludes ===, !==, >=, <= and compound assignment, but any arrow function written `=>` is unaffected only because it is a single `=`; a fat-arrow typo `==>` would match. The rule's smart/allow-null options make `== null` legal in many codebases, and the regex has no such exemption, so a project that uses `x == null` idiomatically will need it excluded. Coercion bugs that use `===` on values already coerced upstream by `+` or template interpolation are outside this class entirely.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ESLint core rule eqeqeq and its 'always' option, from the ESLint rules reference."
+      }
+    }
+  ]
+}

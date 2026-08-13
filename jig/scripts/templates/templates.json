@@ -9,47 +9,7 @@
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "a457013f8b72d632b27a51b9b7d5611368fa5de6561d104c8f0fba887185d30d"
-    },
-    {
-      "name": "check-silent-catch",
-      "version": "1.0.0",
-      "file": "checks/silent-catch.check.mjs",
-      "target": ".jig/checks/silent-catch.check.mjs",
-      "kind": "write-side-file",
-      "ownership": "file",
-      "classId": "silent-catch",
-      "sha256": "db333e9c9cbfca60ede4ad9fe432d3cabc3c515eabe3c476b910d3429c79f6ea"
-    },
-    {
-      "name": "check-focused-or-skipped-test",
-      "version": "1.0.0",
-      "file": "checks/focused-or-skipped-test.check.mjs",
-      "target": ".jig/checks/focused-or-skipped-test.check.mjs",
-      "kind": "write-side-file",
-      "ownership": "file",
-      "classId": "focused-or-skipped-test",
-      "sha256": "ef590e1a1ee42411d7f01088746cf3eb03074afa20d5ce0e0cc2cd005408b702"
-    },
-    {
-      "name": "check-pipe-to-shell",
-      "version": "1.0.0",
-      "file": "checks/pipe-to-shell.check.mjs",
-      "target": ".jig/checks/pipe-to-shell.check.mjs",
-      "kind": "write-side-file",
-      "ownership": "file",
-      "classId": "pipe-to-shell",
-      "sha256": "04abe77df3b937046eca06bd19de7742d6a3d62e74de3dcbd2922731a26b74c5"
-    },
-    {
-      "name": "check-test-file-deletion",
-      "version": "1.0.0",
-      "file": "checks/test-file-deletion.check.mjs",
-      "target": ".jig/checks/test-file-deletion.check.mjs",
-      "kind": "write-side-file",
-      "ownership": "file",
-      "classId": "test-file-deletion",
-      "sha256": "c34e46e8b2298923c919c7d3ac22095f48610b59b45b1ee953ccec322c367686"
+      "sha256": "494da0044be64fd56d2211472a7a147429ddc8f911fe0a3b6931ef6e5c6876c6"
     },
     {
       "name": "ci-workflow",

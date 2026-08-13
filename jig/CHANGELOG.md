@@ -4,6 +4,26 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.0.0] — 2026-08-13
+
+### Added
+
+- jig now sets up your toolchain instead of only writing configs for tools you already had. It shows the exact install command and the exact config it would write, and runs it once you approve that item. A tool it cannot uninstall again is a tool it refuses to install.
+- Six language editions ship: JavaScript and TypeScript, Python, Go, Rust, the JVM, and .NET. Each carries its own tools, install commands, config samples and mistake catalogue.
+- Describe a mistake in your own words and jig writes a check for it, together with the violation and near-miss samples that prove the check works. A check that fails either half is discarded and written to `.jig/discarded.json` rather than counted as coverage.
+- An existing install upgrades in place. jig reads what is there, carries each guard's history forward, and does it as one reversible transaction.
+
+### Changed
+
+- A check that passed its fixture pair now blocks from the moment it installs. Observe mode is still there whenever you want a guard to only watch, but it is no longer a probation every guard has to serve first.
+- jig writes wherever you approve, one named path at a time, instead of only under `.jig/` and `.github/workflows/`. Every write still records the bytes that were there before, so `revert` puts them back — including your manifest and lockfile after an install.
+
+### Fixed
+
+- Checks now read each language's own comment syntax. Previously only six file extensions were recognised, so a `#` comment in a Python or Ruby file was read as code.
+- A `//` inside a URL or a `/*` inside a glob no longer blanks the rest of the line or file, which had been silently hiding real findings.
+- Path patterns with brace alternation, such as `**/*.{ts,tsx}`, now match.
+
 ## [1.0.1] — 2026-08-11
 
 ### Fixed

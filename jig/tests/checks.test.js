@@ -1,10 +1,15 @@
 "use strict";
 
-// Two halves of one entry: the templates jig installs and the driver it
-// installs them as. They share a suite because neither claim means anything
-// alone — a template that is not what the catalogue says, and a driver that
-// does not catch what the template promised, are the same failure seen from
-// two ends.
+// Two halves of one entry: what jig installs and the driver it installs them
+// as. They share a suite because neither claim means anything alone — an
+// installed check that is not what admission proved, and a driver that does not
+// catch what the check promised, are the same failure seen from two ends.
+//
+// SCOPE moved where a check comes from: the model authors it and the fixture
+// pair admits it, so there is no per-class template any more and no catalogue
+// gating what may be installed. What survives is the template machinery for the
+// four artifacts jig still copies verbatim — the driver, the activation note,
+// the hook shim and the CI workflow.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -13,17 +18,15 @@ const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const { spawnSync } = require("child_process");
-const { pathToFileURL } = require("url");
 
 const engine = require("../scripts/jig.js");
 const lib = require("../hooks/jig-lib.js");
-const catalogue = require("../scripts/catalogue.json");
+const A = require("./authored.js");
 
-const REPO_ROOT = path.join(__dirname, "..", "..");
 const TEMPLATE_DIR = path.join(__dirname, "..", "scripts", "templates");
 const INDEX = JSON.parse(fs.readFileSync(path.join(TEMPLATE_DIR, "templates.json"), "utf-8"));
 
-const ALL_FOUR = "silent-catch,focused-or-skipped-test,pipe-to-shell,test-file-deletion";
+const CHECKS = [A.PIPED_INSTALLER, A.EMPTY_CATCH];
 
 const roots = [];
 
@@ -47,10 +50,12 @@ function project(files) {
   return root;
 }
 
-function install(root, select, opts) {
-  const plan = engine.cmdPlan(root, { _: [], change: [], select, ...(opts || {}) });
-  const applied = engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
-  return { plan, applied };
+function nodeProject(files) {
+  return project({ "package.json": "{ \"private\": true }\n", "src/a.ts": "export const a = 1;\n", ...(files || {}) });
+}
+
+function install(root, opts, checks) {
+  return A.installChecks(engine, root, checks || CHECKS, { provenance: "elicited", ...(opts || {}) });
 }
 
 function listFiles(root, dir) {
@@ -83,16 +88,21 @@ function driverJson(root, args) {
   return { status: run.status, out: JSON.parse(run.stdout) };
 }
 
-// Fixtures are copied as bytes. Reading one as text on the way in would launder
-// the exact thing the near-miss cases exist to catch.
-function seedFixture(root, rel, fixtureRel) {
-  const full = path.join(root, rel);
-  fs.mkdirSync(path.dirname(full), { recursive: true });
-  fs.writeFileSync(full, fs.readFileSync(path.join(REPO_ROOT, fixtureRel)));
+// The two seeded violations every driver test below is scored against, and the
+// two near misses they must leave alone. Both pairs are the fixtures admission
+// already proved these checks on.
+function seedViolations(root) {
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "src", "bad.js"), A.EMPTY_CATCH.fixtures.violation);
+  fs.writeFileSync(path.join(root, "scripts", "bad.sh"), A.PIPED_INSTALLER.fixtures.violation);
 }
 
-function classOf(id) {
-  return catalogue.classes.find((c) => c.id === id);
+function seedNearMisses(root) {
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "src", "ok.js"), A.EMPTY_CATCH.fixtures.nearMiss);
+  fs.writeFileSync(path.join(root, "scripts", "ok.sh"), A.PIPED_INSTALLER.fixtures.nearMiss);
 }
 
 // ---------------------------------------------------------------------------
@@ -141,42 +151,27 @@ test("every template lands somewhere the engine's own allowlist permits", () => 
   }
 });
 
-test("each installable class ships exactly one check template", () => {
-  const shipped = INDEX.templates.filter((t) => t.classId && t.name.startsWith("check-")).map((t) => t.classId).sort();
-  const installable = catalogue.classes.filter((c) => c.installableAtV1).map((c) => c.id).sort();
-  assert.deepEqual(shipped, installable);
-});
-
-test("a check template's patterns are the catalogue's, character for character", async () => {
-  for (const entry of INDEX.templates.filter((t) => t.classId && t.name.startsWith("check-"))) {
-    const mod = await import(pathToFileURL(path.join(TEMPLATE_DIR, entry.file)).href);
-    const cls = classOf(entry.classId);
-    const fromCatalogue = cls.detectors
-      .filter((d) => d.runner === "checks" && Array.isArray(d.params.patterns))
-      .flatMap((d) => d.params.patterns);
-    assert.equal(mod.id, entry.classId);
-    if (mod.patterns) {
-      assert.deepEqual(mod.patterns, fromCatalogue, entry.classId + ": patterns drifted from the catalogue");
-    }
-    if (mod.command) {
-      const staged = cls.detectors.find((d) => Array.isArray(d.params.command));
-      assert.deepEqual(mod.command, staged.params.command, entry.classId + ": command drifted from the catalogue");
-    }
+test("a plan installs no shipped check template — every check module is an admitted one", () => {
+  // SCOPE: "there is no per-class check template any more". The only modules
+  // under .jig/checks/ besides the driver are the ones the fixture pair let in,
+  // and each one is named after its own slug.
+  const root = nodeProject();
+  const { plan } = install(root, { "no-ci": true });
+  const modules = plan.changes
+    .filter((c) => c.path.startsWith(".jig/checks/") && c.path.endsWith(".check.mjs"))
+    .map((c) => c.path).sort();
+  assert.deepEqual(modules, [".jig/checks/empty-catch.check.mjs", ".jig/checks/piped-installer.check.mjs"]);
+  for (const c of plan.changes) {
+    assert.equal(/^check-(?:silent-catch|focused-or-skipped-test|pipe-to-shell|test-file-deletion)-/.test(c.id), false,
+      c.id + " came from a shipped per-class template");
   }
-});
-
-test("a check template's path globs are the catalogue's too", async () => {
-  for (const entry of INDEX.templates.filter((t) => t.classId && t.name.startsWith("check-"))) {
-    const mod = await import(pathToFileURL(path.join(TEMPLATE_DIR, entry.file)).href);
-    const cls = classOf(entry.classId);
-    const det = cls.detectors.find((d) => d.runner === "checks" && (d.params.paths || d.params.pathPatterns));
-    assert.deepEqual(mod.paths, det.params.paths || det.params.pathPatterns, entry.classId + ": paths drifted");
-  }
+  assert.deepEqual(fs.readdirSync(path.join(root, ".jig", "checks")).sort(),
+    ["empty-catch.check.mjs", "piped-installer.check.mjs", "run.mjs"]);
 });
 
 test("nothing is interpolated into a template on the way out", () => {
-  const root = project({});
-  install(root, ALL_FOUR);
+  const root = nodeProject();
+  install(root);
   for (const entry of INDEX.templates) {
     if (!fs.existsSync(path.join(root, entry.target))) continue;
     const installed = fs.readFileSync(path.join(root, entry.target), "utf-8").replace(/\r\n/g, "\n");
@@ -186,8 +181,8 @@ test("nothing is interpolated into a template on the way out", () => {
 });
 
 test("every generated artifact carries the ownership marker a reader can see", () => {
-  const root = project({});
-  install(root, ALL_FOUR);
+  const root = nodeProject();
+  install(root);
   for (const entry of INDEX.templates) {
     if (!fs.existsSync(path.join(root, entry.target))) continue;
     const text = fs.readFileSync(path.join(root, entry.target), "utf-8");
@@ -199,27 +194,33 @@ test("every generated artifact carries the ownership marker a reader can see", (
 // The selection
 // ---------------------------------------------------------------------------
 
-test("a class that ships as data at v1 cannot be selected, and is refused by name", () => {
-  const root = project({});
-  assert.throws(() => engine.cmdPlan(root, { _: [], change: [], select: "nested-ternary" }),
-    /nested-ternary ships as data at v1/);
+test("an id no edition carries is a disclosed gap, not a refusal", () => {
+  // REVERSED by SCOPE: the catalogue informs and never gates. A selected id
+  // nothing answers is a class with nothing behind it, and the matrix says so.
+  const root = nodeProject();
+  const plan = engine.cmdPlan(root, {
+    _: [], change: [], select: "make-me-a-guard", provenance: "elicited", "no-ci": true,
+  });
+  assert.equal(plan.ok, true);
+  assert.deepEqual(plan.selection, ["make-me-a-guard"]);
+  const row = JSON.parse(fs.readFileSync(path.join(root, ".jig", "plan.json"), "utf-8")).rows[0];
+  assert.equal(row.classId, "make-me-a-guard");
+  assert.equal(row.edition, null);
+  assert.equal(row.authored, false);
+  for (const cell of Object.values(row.cells)) assert.equal(cell.grade, "GAP");
+  assert.equal(fs.existsSync(path.join(root, ".jig", "config.json")), false, "a class with nothing behind it wired a guard");
 });
 
-test("a class that is not in the catalogue at all is refused by name", () => {
-  const root = project({});
-  assert.throws(() => engine.cmdPlan(root, { _: [], change: [], select: "make-me-a-guard" }),
-    /not a class in the catalogue: make-me-a-guard/);
-});
-
-test("an empty selection is a refusal, not an empty install", () => {
-  const root = project({});
+test("a plan with neither a selection nor an authored check is a refusal", () => {
+  const root = nodeProject();
   assert.throws(() => engine.cmdPlan(root, { _: [], change: [], select: "  ,  " }),
-    /needs at least one class id/);
+    /needs --select <classId,…>|--from <file>/);
+  assert.equal(fs.existsSync(path.join(root, ".jig")), false, "asking created state");
 });
 
 test("the generated config passes the runner's own validator, guard for guard", () => {
-  const root = project({});
-  install(root, ALL_FOUR);
+  const root = nodeProject();
+  install(root);
   const config = JSON.parse(fs.readFileSync(path.join(root, ".jig", "config.json"), "utf-8"));
   const checked = lib.validateConfig(config);
   assert.deepEqual(checked.problems, []);
@@ -227,29 +228,52 @@ test("the generated config passes the runner's own validator, guard for guard", 
   assert.ok(checked.guards.length > 0);
   for (const guard of checked.guards) {
     assert.ok(lib.HOOK_RUNNERS.includes(guard.runner));
+    assert.ok(fs.existsSync(path.join(root, ".jig", "checks", guard.check + ".check.mjs")),
+      guard.id + " names a check that is not installed");
   }
 });
 
 test("the generated config carries no key that could become a matcher", () => {
-  const config = engine.configFromSelection(["pipe-to-shell", "silent-catch"]);
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const config = JSON.parse(fs.readFileSync(path.join(root, ".jig", "config.json"), "utf-8"));
   const text = JSON.stringify(config);
   for (const key of lib.MATCHER_KEYS) {
     assert.equal(text.includes('"' + key + '"'), false, "the config names " + key);
   }
   for (const guard of config.guards) {
-    assert.deepEqual(Object.keys(guard).sort(), ["classId", "detector", "id", "runner"]);
+    assert.deepEqual(Object.keys(guard).sort(),
+      ["check", "classId", "id", "mode", "proof", "provenance", "runner"]);
+    assert.match(guard.proof, /^[0-9a-f]{64}$/);
   }
-});
-
-test("a class with no hook detector installs a check module and no guard", () => {
-  const config = engine.configFromSelection(["silent-catch"]);
-  assert.ok(config.guards.every((g) => g.classId === "silent-catch"));
-  assert.equal(config.mode, "observe");
+  // No top-level mode: one word that silently arms twenty checks is too much
+  // blast radius (SCOPE).
+  assert.deepEqual(Object.keys(config).sort(), ["guards", "schemaVersion"]);
   assert.equal(config.schemaVersion, engine.SCHEMA_VERSION);
 });
 
+test("a check with no hook detector installs a module and wires no guard", () => {
+  const driverOnly = A.authored({
+    id: "driver-only",
+    title: "Caught by the committed driver and nothing else",
+    detectors: [
+      { lever: "check-driver", actor: "human-editor", confidence: "deterministic",
+        params: { patterns: [A.CATCH_PATTERN], paths: ["**/*.js"] } },
+    ],
+    fixtures: A.EMPTY_CATCH.fixtures,
+    deny: A.DENY_CATCH,
+  });
+  const root = nodeProject();
+  const { plan } = install(root, { "no-ci": true }, [driverOnly]);
+  assert.ok(plan.changes.some((c) => c.path === ".jig/checks/driver-only.check.mjs"));
+  const config = JSON.parse(fs.readFileSync(path.join(root, ".jig", "config.json"), "utf-8"));
+  assert.deepEqual(config.guards, []);
+});
+
 test("the permissions proposal names no host rule and says why it cannot", () => {
-  const proposal = engine.permissionsProposal(["pipe-to-shell", "test-file-deletion"]);
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const proposal = JSON.parse(fs.readFileSync(path.join(root, ".jig", "proposed-permissions.json"), "utf-8"));
   assert.ok(proposal.proposals.length > 0);
   for (const row of proposal.proposals) {
     assert.equal(row.hostRule, null);
@@ -259,9 +283,8 @@ test("the permissions proposal names no host rule and says why it cannot", () =>
 });
 
 test("a selection with nothing an agent runs proposes no permissions at all", () => {
-  assert.equal(engine.permissionsProposal(["silent-catch"]), null);
-  const root = project({});
-  install(root, "silent-catch");
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
   assert.equal(fs.existsSync(path.join(root, ".jig", "proposed-permissions.json")), false);
 });
 
@@ -270,8 +293,8 @@ test("a selection with nothing an agent runs proposes no permissions at all", ()
 // ---------------------------------------------------------------------------
 
 test("a file jig did not write is refused, and the rest of the plan still goes ahead", () => {
-  const root = project({ ".github/workflows/jig.yml": "name: somebody else\n" });
-  const { plan } = install(root, "silent-catch");
+  const root = nodeProject({ ".github/workflows/jig.yml": "name: somebody else\n" });
+  const { plan } = install(root);
   assert.equal(plan.refused.length, 1);
   assert.match(plan.refused[0], /already exists and jig did not write it/);
   assert.equal(fs.readFileSync(path.join(root, ".github/workflows/jig.yml"), "utf-8"), "name: somebody else\n");
@@ -279,22 +302,22 @@ test("a file jig did not write is refused, and the rest of the plan still goes a
 });
 
 test("an artifact edited after jig wrote it is refused rather than overwritten", () => {
-  const root = project({});
-  install(root, "silent-catch");
-  const rel = path.join(root, ".jig", "checks", "silent-catch.check.mjs");
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const rel = path.join(root, ".jig", "checks", "empty-catch.check.mjs");
   fs.appendFileSync(rel, "\n// a teammate changed this\n");
   const after = fs.readFileSync(rel, "utf-8");
-  const { plan } = install(root, "silent-catch");
+  const { plan } = install(root, { "no-ci": true });
   assert.ok(plan.refused.some((r) => /was edited after jig wrote it/.test(r)));
   assert.equal(fs.readFileSync(rel, "utf-8"), after);
 });
 
 test("the config is the user's to edit — changing it is not drift", () => {
-  const root = project({});
-  install(root, ALL_FOUR);
+  const root = nodeProject();
+  install(root, { "no-ci": true });
   const rel = path.join(root, ".jig", "config.json");
   const config = JSON.parse(fs.readFileSync(rel, "utf-8"));
-  config.guards = config.guards.filter((g) => g.classId !== "pipe-to-shell");
+  config.guards = config.guards.filter((g) => g.classId !== "piped-installer");
   fs.writeFileSync(rel, JSON.stringify(config, null, 2) + "\n");
   const states = engine.manifestStates(root, engine.readManifest(root));
   const row = states.find((s) => s.path === ".jig/config.json");
@@ -303,27 +326,25 @@ test("the config is the user's to edit — changing it is not drift", () => {
 });
 
 test("a removed artifact reads as retired, not as missing", () => {
-  const root = project({});
-  install(root, "silent-catch");
+  const root = nodeProject();
+  install(root, { "no-ci": true });
   fs.rmSync(path.join(root, ".jig", "activation.md"));
   const states = engine.manifestStates(root, engine.readManifest(root));
   assert.equal(states.find((s) => s.path === ".jig/activation.md").state, "retired");
 });
 
 test("every slot taken means nothing is planned, and the reasons are all named", () => {
-  const root = project({});
-  install(root, "silent-catch");
-  for (const rel of [".jig/checks/run.mjs", ".jig/checks/silent-catch.check.mjs", ".jig/activation.md",
-    ".github/workflows/jig.yml", ".jig/config.json"]) {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  for (const rel of [".jig/checks/run.mjs", ".jig/checks/empty-catch.check.mjs", ".jig/activation.md",
+    ".jig/config.json"]) {
     fs.appendFileSync(path.join(root, rel), "\n");
   }
-  // config.json is schema-owned and stays writable, so a selection that needs
-  // only the frozen ones is what proves the refusal.
-  fs.writeFileSync(path.join(root, ".jig", "manifest-probe"), "");
+  // config.json is schema-owned and stays writable, so the frozen set is what
+  // proves the refusal.
   const states = engine.manifestStates(root, engine.readManifest(root));
   const frozen = states.filter((s) => s.state === "drifted").map((s) => s.path).sort();
-  assert.deepEqual(frozen, [".github/workflows/jig.yml", ".jig/activation.md",
-    ".jig/checks/run.mjs", ".jig/checks/silent-catch.check.mjs"]);
+  assert.deepEqual(frozen, [".jig/activation.md", ".jig/checks/empty-catch.check.mjs", ".jig/checks/run.mjs"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -331,33 +352,36 @@ test("every slot taken means nothing is planned, and the reasons are all named",
 // ---------------------------------------------------------------------------
 
 test("apply records every generated artifact with the whole row shape", () => {
-  const root = project({});
-  const { applied } = install(root, ALL_FOUR, { provenance: "elicited" });
+  const root = nodeProject();
+  const { applied } = install(root);
   assert.equal(applied.manifest, ".jig/manifest.json");
   const manifest = engine.readManifest(root);
   assert.equal(manifest.schemaVersion, 1);
-  assert.equal(manifest.artifacts.length, 10);
+  assert.equal(manifest.artifacts.length, 8);
   for (const row of manifest.artifacts) {
     assert.deepEqual(Object.keys(row).sort(), [
-      "classIds", "hash", "id", "installedAt", "kind", "mode", "ownership", "path",
-      "provenance", "state", "template", "txId",
+      "classIds", "hash", "id", "install", "installedAt", "kind", "ownership", "path",
+      "proof", "provenance", "state", "template", "txId",
     ]);
     assert.equal(row.txId, applied.tx);
-    assert.equal(row.mode, "observe");
     assert.equal(row.provenance, "elicited");
     assert.equal(row.hash, crypto.createHash("sha256").update(fs.readFileSync(path.join(root, row.path))).digest("hex"));
     assert.ok(engine.OWNERSHIPS.includes(row.ownership));
   }
+  // The proof rides the manifest for exactly the rows that carry a check, which
+  // is what a config claiming a proof gets checked against.
+  const proven = manifest.artifacts.filter((a) => a.proof !== null).map((a) => a.path).sort();
+  assert.deepEqual(proven, [".jig/checks/empty-catch.check.mjs", ".jig/checks/piped-installer.check.mjs"]);
 });
 
 test("provenance defaults to assumed, which is what quick-start installs as", () => {
-  const root = project({});
-  install(root, "silent-catch");
+  const root = nodeProject();
+  A.installChecks(engine, root, CHECKS, { "no-ci": true });
   assert.ok(engine.readManifest(root).artifacts.every((a) => a.provenance === "assumed"));
 });
 
 test("a hand-written draft writes no manifest — the manifest records what jig generated", () => {
-  const root = project({});
+  const root = nodeProject();
   fs.writeFileSync(path.join(root, "draft.json"), JSON.stringify({
     changes: [{ id: "hand", kind: "write-side-file", path: ".jig/hand.json", content: "{}\n" }],
   }));
@@ -375,44 +399,48 @@ test("a manifest written by a newer jig is refused, not guessed at", () => {
   assert.throws(() => engine.readManifest(root), /schemaVersion 2 and this engine reads 1/);
 });
 
-test("installing a second class keeps the first one's rows", () => {
-  const root = project({});
-  install(root, "silent-catch");
+test("installing a second check keeps the first one's rows", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.PIPED_INSTALLER]);
   const first = engine.readManifest(root).artifacts.map((a) => a.path);
-  install(root, "silent-catch,focused-or-skipped-test");
+  install(root, { "no-ci": true }, CHECKS);
   const second = engine.readManifest(root).artifacts.map((a) => a.path);
   assert.ok(first.every((p) => second.includes(p)));
-  assert.ok(second.includes(".jig/checks/focused-or-skipped-test.check.mjs"));
+  assert.ok(second.includes(".jig/checks/empty-catch.check.mjs"));
 });
 
 test("re-applying the same plan changes nothing and says so", () => {
-  const root = project({});
-  const { plan } = install(root, ALL_FOUR);
+  const root = nodeProject();
+  const { plan } = install(root);
   const again = engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
   assert.ok(again.applied.every((r) => r.outcome === "already-applied"));
 });
 
 test("revert takes every generated artifact back out, manifest included", () => {
-  const root = project({ "package.json": "{}\n" });
+  const root = nodeProject();
   const before = snapshot(root);
-  install(root, ALL_FOUR);
+  install(root);
   engine.cmdRevert(root, { _: [], change: [], all: true });
-  const after = snapshot(root).filter((line) => !line.startsWith(".jig/"));
+  const after = snapshot(root).filter((line) => !line.startsWith(".jig/") && !line.startsWith("authored.json "));
   assert.deepEqual(after, before);
   assert.equal(fs.existsSync(path.join(root, ".jig", "manifest.json")), false);
   assert.equal(fs.existsSync(path.join(root, ".github")), false);
 });
 
-test("an install writes nothing outside .jig and .github/workflows", () => {
-  const root = project({ "package.json": "{}\n", "src/index.js": "module.exports = 1;\n" });
-  install(root, ALL_FOUR);
-  const touched = listFiles(root).filter((rel) => !rel.startsWith(".jig/") && !rel.startsWith(".github/workflows/"));
-  assert.deepEqual(touched, ["package.json", "src/index.js"]);
+test("an install writes only where the plan named, and every name was approved", () => {
+  const root = nodeProject({ "src/index.js": "module.exports = 1;\n" });
+  const { plan } = install(root);
+  const approved = new Set(plan.changes.map((c) => c.path));
+  const touched = listFiles(root)
+    .filter((rel) => !rel.startsWith(".jig/") && rel !== "package.json" && rel !== "src/index.js" &&
+      rel !== "src/a.ts" && rel !== "authored.json");
+  for (const rel of touched) assert.ok(approved.has(rel), "jig wrote " + rel + ", which no change named");
+  assert.deepEqual(touched, [".github/workflows/jig.yml"]);
 });
 
 test("the run is journalled, so what apply wrote is replayable from the record", () => {
-  const root = project({});
-  const { applied } = install(root, ALL_FOUR);
+  const root = nodeProject();
+  const { applied } = install(root);
   const status = engine.cmdStatus(root);
   const paths = status.changes.flatMap((c) => c.files).sort();
   assert.ok(paths.includes(".jig/manifest.json"));
@@ -423,59 +451,56 @@ test("the run is journalled, so what apply wrote is replayable from the record",
 // ---------------------------------------------------------------------------
 // The check driver
 // ---------------------------------------------------------------------------
+//
+// The driver reads the checks the engine installs — which since SCOPE are
+// authored modules carrying `detectors` and an inline fixture pair, not the
+// 1.0.1 `check(ctx)` plus `selftest` shape. SCOPE, "Does the driver keep
+// reading the legacy selftest shape": no; migration rewrites every installed
+// check to the pair shape rather than carrying a second contract forever.
+//
+// These tests assert that contract. They are red against the shipped
+// `scripts/templates/run.mjs`, which still selects modules by
+// `typeof mod.check === "function"` and therefore loads none of the checks
+// `plan` installs today.
 
-test("the driver catches every seeded violation the catalogue ships", () => {
-  const root = project({});
-  install(root, ALL_FOUR);
-  seedFixture(root, "src/bad.js", classOf("silent-catch").fixtures.violation[0]);
-  seedFixture(root, "test/bad.test.js", classOf("focused-or-skipped-test").fixtures.violation[0]);
-  seedFixture(root, "scripts/bad.sh", classOf("pipe-to-shell").fixtures.violation[0]);
+test("the driver runs every installed check and reports each violation with its own line", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  seedViolations(root);
   const { status, out } = driverJson(root);
-  assert.equal(status, 1);
-  const caught = new Set(out.findings.map((f) => f.classId));
-  assert.deepEqual([...caught].sort(), ["focused-or-skipped-test", "pipe-to-shell", "silent-catch"]);
   assert.deepEqual(out.broken, []);
+  const caught = [...new Set(out.findings.map((f) => f.classId))].sort();
+  assert.deepEqual(caught, ["empty-catch", "piped-installer"]);
+  assert.equal(status, 1);
+  const emptyCatch = out.findings.find((f) => f.classId === "empty-catch");
+  assert.equal(emptyCatch.path, "src/bad.js");
+  assert.equal(emptyCatch.line, 4, "the finding names the file's first line instead of the violation's");
 });
 
-test("the deterministic checks find nothing in their near-miss fixtures", () => {
-  const root = project({});
-  install(root, "silent-catch,focused-or-skipped-test");
-  seedFixture(root, "src/ok.js", classOf("silent-catch").fixtures.nearMiss[0]);
-  seedFixture(root, "test/ok.test.js", classOf("focused-or-skipped-test").fixtures.nearMiss[0]);
+test("every installed check leaves its own near miss alone", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  seedNearMisses(root);
   const { status, out } = driverJson(root);
   assert.deepEqual(out.findings, []);
   assert.equal(status, 0);
 });
 
-// The near-miss file holds five commands that look like the defect. Four of
-// them are clean here, and the fifth is a `curl … | sh` inside an echoed
-// string — a shell string this check does not parse. That is the whole reason
-// the catalogue labels this detector heuristic, and pinning the number is how
-// the limit stays a known one instead of a surprise.
-test("the heuristic shell check misses only the echoed command, and says it is heuristic", () => {
-  const root = project({});
-  install(root, "pipe-to-shell");
-  seedFixture(root, "scripts/ok.sh", classOf("pipe-to-shell").fixtures.nearMiss[0]);
-  const { out } = driverJson(root);
-  assert.equal(out.findings.length, 1);
-  assert.equal(out.findings[0].line, 5);
-  const detector = classOf("pipe-to-shell").detectors.find((d) => d.runner === "checks");
-  assert.equal(detector.confidence, "heuristic");
-});
-
-test("a download and an unrelated pipe on different lines are not one violation", () => {
-  const root = project({});
-  install(root, "pipe-to-shell");
-  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
-  fs.writeFileSync(path.join(root, "scripts", "spread.sh"),
-    "#!/bin/sh\ncurl -fsSL https://example.test/a -o a\nls -1\ncat a | sh_helper\n");
-  const { out } = driverJson(root);
-  assert.deepEqual(out.findings, []);
+test("a finding names the file, the line and the pattern, and never the text that matched", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.writeFileSync(path.join(root, "src", "secret.js"), "function f() {\n  try { OWNED_BY_THE_REPO(); } catch {}\n}\n");
+  const run = driver(root, ["--json"]);
+  assert.equal(run.stdout.includes("OWNED_BY_THE_REPO"), false);
+  const finding = JSON.parse(run.stdout).findings[0];
+  assert.ok(finding, "the driver reported nothing for a seeded violation");
+  assert.deepEqual(Object.keys(finding).sort(), ["classId", "line", "note", "path", "pattern"]);
 });
 
 test("a violation inside a comment or a string literal is not a violation", () => {
-  const root = project({});
-  install(root, "silent-catch,focused-or-skipped-test");
+  const root = nodeProject();
+  install(root, { "no-ci": true });
   fs.mkdirSync(path.join(root, "src"), { recursive: true });
   fs.writeFileSync(path.join(root, "src", "quoted.js"), [
     "// try { x() } catch (err) { }",
@@ -485,35 +510,16 @@ test("a violation inside a comment or a string literal is not a violation", () =
     "const re = /catch\\s*\\{\\s*\\}/;",
     "module.exports = { sample, other, re };",
   ].join("\n") + "\n");
+  fs.mkdirSync(path.join(root, "src", "real"), { recursive: true });
+  fs.writeFileSync(path.join(root, "src", "real", "live.js"), "try { x(); } catch {}\n");
   const { out } = driverJson(root);
-  assert.deepEqual(out.findings, []);
-});
-
-test("a violation is reported with its own line number, not the file's first line", () => {
-  const root = project({});
-  install(root, "silent-catch");
-  fs.mkdirSync(path.join(root, "src"), { recursive: true });
-  fs.writeFileSync(path.join(root, "src", "late.js"),
-    "// a comment\n\n/* a block\n   spanning lines */\n\nfunction f() {\n  try { g(); } catch (e) {}\n}\n");
-  const { out } = driverJson(root);
-  assert.equal(out.findings.length, 1);
-  assert.equal(out.findings[0].line, 7);
-});
-
-test("a finding names the file, the line and the pattern, and never the text that matched", () => {
-  const root = project({});
-  install(root, "silent-catch");
-  fs.mkdirSync(path.join(root, "src"), { recursive: true });
-  fs.writeFileSync(path.join(root, "src", "secret.js"), "function f() {\n  try { OWNED_BY_THE_REPO(); } catch {}\n}\n");
-  const run = driver(root, ["--json"]);
-  assert.equal(run.stdout.includes("OWNED_BY_THE_REPO"), false);
-  const finding = JSON.parse(run.stdout).findings[0];
-  assert.deepEqual(Object.keys(finding).sort(), ["classId", "line", "note", "path", "pattern"]);
+  assert.deepEqual(out.findings.map((f) => f.path), ["src/real/live.js"],
+    "the driver read a shape living only in a comment, a string or a regex as code");
 });
 
 test("named paths are the only ones checked when paths are named", () => {
-  const root = project({});
-  install(root, "silent-catch");
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
   fs.mkdirSync(path.join(root, "src"), { recursive: true });
   fs.writeFileSync(path.join(root, "src", "a.js"), "try { x(); } catch {}\n");
   fs.writeFileSync(path.join(root, "src", "b.js"), "try { y(); } catch {}\n");
@@ -522,59 +528,22 @@ test("named paths are the only ones checked when paths are named", () => {
   assert.equal(out.findings[0].path, "src/a.js");
 });
 
-test("the driver reads and never writes", () => {
-  const root = project({ "src/bad.js": "try { x(); } catch {}\n" });
-  install(root, ALL_FOUR);
-  const before = snapshot(root);
-  driver(root);
-  driver(root, ["--selftest"]);
-  assert.deepEqual(snapshot(root), before);
-});
-
-test("the driver skips its own state directory and node_modules", () => {
-  const root = project({});
-  install(root, "silent-catch");
-  fs.mkdirSync(path.join(root, "node_modules", "dep"), { recursive: true });
-  fs.writeFileSync(path.join(root, "node_modules", "dep", "index.js"), "try { x(); } catch {}\n");
-  const { out } = driverJson(root);
-  assert.deepEqual(out.findings, []);
-});
-
-test("a staged-deletion check outside a repository says so instead of reporting clean", () => {
-  const root = project({});
-  install(root, "test-file-deletion");
-  const { out } = driverJson(root);
-  assert.equal(out.skipped.length, 1);
-  assert.equal(out.skipped[0].id, "test-file-deletion");
-  assert.match(out.skipped[0].command, /git diff --cached --diff-filter=D --name-only/);
-});
-
-test("the staged-deletion globs match a test path and leave a doc about testing alone", async () => {
-  const mod = await import(pathToFileURL(path.join(TEMPLATE_DIR, "checks", "test-file-deletion.check.mjs")).href);
-  const lines = (rel) => fs.readFileSync(path.join(REPO_ROOT, rel), "utf-8")
-    .split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
-  const cls = classOf("test-file-deletion");
-  const root = project({});
-  install(root, "test-file-deletion");
-  // The module's own matcher is exercised through the driver's contract: seed
-  // the fixture paths as if git had printed them.
-  const check = mod;
-  const fakeCtx = {
-    git: () => ({ ok: true, stdout: lines(cls.fixtures.violation[0]).join("\n") }),
-    finding: (classId, rel) => ({ classId, path: rel }),
-  };
-  assert.equal(check.check(fakeCtx).length, 3);
-  const clean = {
-    git: () => ({ ok: true, stdout: lines(cls.fixtures.nearMiss[0]).join("\n") }),
-    finding: (classId, rel) => ({ classId, path: rel }),
-  };
-  assert.deepEqual(clean.git().stdout.split("\n").length, 4);
-  assert.deepEqual(check.check(clean), []);
+test("the driver's selftest runs each check against the fixture pair that admitted it", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const run = driver(root, ["--selftest", "--json"]);
+  assert.equal(run.status, 0);
+  const results = JSON.parse(run.stdout).selftest;
+  assert.deepEqual(results.map((r) => r.id).sort(), ["empty-catch", "piped-installer"],
+    "the selftest reported on a different set of checks than the plan installed");
+  for (const r of results) assert.equal(r.caught, true, r.id + " did not catch its own violation fixture");
 });
 
 test("a check module that will not load is reported and the others still run", () => {
-  const root = project({ "src/bad.js": "try { x(); } catch {}\n" });
-  install(root, "silent-catch");
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.writeFileSync(path.join(root, "src", "bad.js"), "try { x(); } catch {}\n");
   fs.writeFileSync(path.join(root, ".jig", "checks", "broken.check.mjs"), "export const id = ; // not javascript\n");
   const { status, out } = driverJson(root);
   assert.equal(out.broken.length, 1);
@@ -582,54 +551,74 @@ test("a check module that will not load is reported and the others still run", (
   assert.equal(status, 1);
 });
 
+test("the driver reads and never writes", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  seedViolations(root);
+  const before = snapshot(root);
+  driver(root);
+  driver(root, ["--selftest"]);
+  assert.deepEqual(snapshot(root), before);
+});
+
+test("the driver skips its own state directory and node_modules", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  fs.mkdirSync(path.join(root, "node_modules", "dep"), { recursive: true });
+  fs.writeFileSync(path.join(root, "node_modules", "dep", "index.js"), "try { x(); } catch {}\n");
+  const { out } = driverJson(root);
+  assert.deepEqual(out.findings, []);
+});
+
 // ---------------------------------------------------------------------------
 // The witnessed catch
 // ---------------------------------------------------------------------------
 
-test("the driver's own selftest catches every check that can seed itself", () => {
-  const root = project({});
-  install(root, ALL_FOUR);
-  const run = driver(root, ["--selftest", "--json"]);
-  assert.equal(run.status, 0);
-  const results = JSON.parse(run.stdout).selftest;
-  const caught = results.filter((r) => r.caught === true).map((r) => r.id).sort();
-  assert.deepEqual(caught, ["focused-or-skipped-test", "pipe-to-shell", "silent-catch"]);
-  const skipped = results.find((r) => r.caught === null);
-  assert.equal(skipped.id, "test-file-deletion");
-  assert.match(skipped.command, /git rm --cached/);
-});
-
-test("selftest --live watches every installed guard catch its own violation", () => {
-  const root = project({});
-  install(root, ALL_FOUR);
+test("selftest --live watches every installed guard catch its own violation fixture", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
   const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
   assert.equal(result.witnessed, true);
   const guards = result.probes.filter((p) => p.kind === "guard");
-  assert.equal(guards.length, 4);
+  assert.deepEqual(guards.map((p) => p.probe).sort(),
+    ["empty-catch-edit-observe-guard-0", "piped-installer-bash-guard-0"]);
   for (const probe of guards) {
     assert.equal(probe.ran, true, probe.probe + " did not run");
     assert.equal(probe.caught, true, probe.probe + " did not catch its own violation");
-    assert.equal(probe.decision, "would-deny");
-    assert.equal(probe.mode, "observe");
-    assert.match(probe.output, /"decision":"would-deny"/);
+    assert.equal(probe.decision, "deny");
+    assert.equal(probe.mode, "armed");
+    assert.match(probe.what, /violation fixture/);
+    assert.match(probe.output, /"decision":"deny"/);
   }
 });
 
 test("a witnessed catch means a ledger line exists, not just a decision on screen", () => {
-  const root = project({});
-  install(root, ALL_FOUR);
+  const root = nodeProject();
+  install(root, { "no-ci": true });
   const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
   assert.equal(result.ledger.linesBefore, 0);
   assert.ok(result.ledger.linesAfter > 0);
   const rows = fs.readFileSync(path.join(root, ".jig", "ledger.jsonl"), "utf-8")
     .split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
-  assert.ok(rows.some((r) => r.decision === "would-deny"));
-  assert.ok(rows.every((r) => r.mode === "observe"));
+  assert.ok(rows.some((r) => r.decision === "deny"));
+  assert.ok(rows.every((r) => r.mode === "armed"));
+});
+
+test("an observing install is witnessed the same way, and refuses nothing while doing it", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true, observe: true });
+  const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
+  assert.equal(result.witnessed, true);
+  for (const probe of result.probes.filter((p) => p.kind === "guard")) {
+    assert.equal(probe.caught, true);
+    assert.equal(probe.decision, "would-deny");
+    assert.equal(probe.mode, "observe");
+  }
 });
 
 test("without --live nothing runs, and every probe prints the command to run by hand", () => {
-  const root = project({});
-  install(root, ALL_FOUR);
+  const root = nodeProject();
+  install(root, { "no-ci": true });
   const before = snapshot(root);
   const result = engine.cmdSelftest(root, { _: [], change: [] });
   assert.equal(result.witnessed, false);
@@ -650,9 +639,19 @@ test("selftest on a project with no guards says so and does not fail", () => {
 });
 
 test("a missing check driver degrades to the exact command, and the guards still run", () => {
-  const root = project({});
-  install(root, ALL_FOUR);
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const config = fs.readFileSync(path.join(root, ".jig", "config.json"));
+  const checks = fs.readdirSync(path.join(root, ".jig", "checks"))
+    .map((f) => [f, fs.readFileSync(path.join(root, ".jig", "checks", f))]);
   fs.rmSync(path.join(root, ".jig", "checks"), { recursive: true, force: true });
+  // The guards need their modules; it is the driver that is gone.
+  fs.mkdirSync(path.join(root, ".jig", "checks"), { recursive: true });
+  for (const [name, bytes] of checks) {
+    if (name !== "run.mjs") fs.writeFileSync(path.join(root, ".jig", "checks", name), bytes);
+  }
+  fs.writeFileSync(path.join(root, ".jig", "config.json"), config);
+
   const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
   const driverProbe = result.probes.find((p) => p.kind === "checks");
   assert.equal(driverProbe.ran, false);
@@ -662,16 +661,25 @@ test("a missing check driver degrades to the exact command, and the guards still
   assert.ok(result.notes.some((n) => n.includes("node .jig/checks/run.mjs --selftest")));
 });
 
-test("only the classes actually installed are probed", () => {
-  const root = project({});
-  install(root, "silent-catch");
+test("only the guards actually installed are probed", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.PIPED_INSTALLER]);
   const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
-  assert.deepEqual(result.probes.filter((p) => p.kind === "guard").map((p) => p.probe), ["silent-catch"]);
+  assert.deepEqual(result.probes.filter((p) => p.kind === "guard").map((p) => p.probe),
+    ["piped-installer-bash-guard-0"]);
 });
 
-test("every installable class has a probe, so nothing installs unwatched", () => {
-  const installable = catalogue.classes.filter((c) => c.installableAtV1).map((c) => c.id).sort();
-  assert.deepEqual(Object.keys(engine.LIVE_PROBES).sort(), installable);
+test("a guard whose check carries no violation fixture is reported unprobed, never skipped", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.PIPED_INSTALLER]);
+  // Strip the fixtures out of the installed module: the guard is still there,
+  // and a guard nobody watched must not look like a guard that passed.
+  const rel = path.join(root, ".jig", "checks", "piped-installer.check.mjs");
+  fs.writeFileSync(rel, fs.readFileSync(rel, "utf-8").replace(/^export const fixtures[\s\S]*?^\];?$/m, "export const fixtures = {};"));
+  const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
+  const probe = result.probes.find((p) => p.kind === "guard");
+  assert.equal(probe.ran, false);
+  assert.ok(result.notes.some((n) => n.includes(probe.probe)));
 });
 
 // ---------------------------------------------------------------------------
@@ -679,16 +687,16 @@ test("every installable class has a probe, so nothing installs unwatched", () =>
 // ---------------------------------------------------------------------------
 
 test("apply says out loud that the pre-commit line and the permissions are yours to apply", () => {
-  const root = project({});
-  const { applied } = install(root, ALL_FOUR);
+  const root = nodeProject();
+  const { applied } = install(root);
   assert.equal(applied.proposals.length, 2);
   assert.ok(applied.proposals.some((n) => /activation\.md/.test(n) && /does not edit it/.test(n)));
   assert.ok(applied.proposals.some((n) => /proposed-permissions\.json/.test(n) && /never edits your settings/.test(n)));
 });
 
 test("the activation file names both hook shapes and the version-manager hazard", () => {
-  const root = project({});
-  install(root, "silent-catch");
+  const root = nodeProject();
+  install(root, { "no-ci": true });
   const text = fs.readFileSync(path.join(root, ".jig", "activation.md"), "utf-8");
   assert.match(text, /node \.jig\/checks\/run\.mjs \|\| exit 1/);
   assert.match(text, /#!\/usr\/bin\/env node/);
@@ -696,9 +704,9 @@ test("the activation file names both hook shapes and the version-manager hazard"
 });
 
 test("no host settings file is written, read back, or named as a target", () => {
-  const root = project({ ".claude/settings.json": '{"hooks":{}}\n' });
+  const root = nodeProject({ ".claude/settings.json": '{"hooks":{}}\n' });
   const before = fs.readFileSync(path.join(root, ".claude", "settings.json"), "utf-8");
-  install(root, ALL_FOUR);
+  install(root);
   assert.equal(fs.readFileSync(path.join(root, ".claude", "settings.json"), "utf-8"), before);
   for (const entry of INDEX.templates) {
     assert.equal(entry.target.includes("settings.json"), false);
@@ -706,57 +714,44 @@ test("no host settings file is written, read back, or named as a target", () => 
 });
 
 test("an artifact jig cannot read back is stamped a gap rather than reported as a guarantee", () => {
-  const root = project({});
-  const { plan } = install(root, ALL_FOUR);
-  assert.deepEqual(plan.enforcementGaps.sort(), [".github/workflows/jig.yml", ".jig/activation.md", ".jig/hooks/pre-commit"]);
+  const root = nodeProject();
+  const { plan } = install(root);
+  assert.deepEqual(plan.enforcementGaps.sort(),
+    [".github/workflows/jig.yml", ".jig/activation.md", ".jig/hooks/pre-commit"]);
   const manifest = engine.readManifest(root);
   assert.ok(manifest.artifacts.every((a) => a.hash !== null));
 });
 
 // ---------------------------------------------------------------------------
-// Toolchain probes in the witnessed catch (0.3.0)
+// Toolchain probes in the witnessed catch
+// ---------------------------------------------------------------------------
 
-test("selftest --live runs the repo's own eslint against the side-file and shows the catch", () => {
-  const root = project({
-    "package.json": "{ \"private\": true }\n",
-    "node_modules/eslint/package.json": "{ \"name\": \"eslint\", \"bin\": { \"eslint\": \"bin/eslint.js\" } }\n",
-    // A stub with eslint's shape: reads stdin, exits 1 when the seeded
-    // violation is present. It proves jig resolves and spawns the REPO'S tool
-    // with the side-file config — the mechanics, not eslint itself.
-    "node_modules/eslint/bin/eslint.js":
-      'let s = "";\n' +
-      'process.stdin.on("data", (d) => { s += d; }).on("end", () => {\n' +
-      '  process.exit(s.includes("catch") ? 1 : 0);\n' +
-      "});\n",
+test("a tool config is proven by the tool's own verify run, named with its expected exit code", () => {
+  // SCOPE, "How is a tool config proven": by running the tool's own
+  // `verify.argv`, and `expectedExit` is machine-readable now — but jig does not
+  // spawn somebody's linter behind a selftest. It says exactly what to run.
+  const root = nodeProject({
+    "package.json": "{ \"private\": true, \"devDependencies\": { \"eslint\": \"^9.0.0\" } }\n",
+    "package-lock.json": "{ \"lockfileVersion\": 3 }\n",
   });
-  const plan = engine.cmdPlan(root, {
-    _: [], change: [], select: "silent-catch", provenance: "elicited", "no-ci": true,
-  });
-  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  const { plan } = install(root, { "no-ci": true, tools: "eslint" });
+  assert.equal(plan.toolchain.items[0].present, true);
+  assert.ok(plan.changes.some((c) => c.path === "eslint.config.mjs"));
 
   const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
   const probe = result.probes.find((p) => p.probe === "toolchain-eslint");
-  assert.ok(probe, "no toolchain probe ran for the installed eslint side-file");
-  assert.equal(probe.ran, true);
-  assert.equal(probe.caught, true);
-  assert.equal(probe.exitCode, 1);
-  assert.match(probe.command, /eslint\.jig\.config\.mjs/);
+  assert.ok(probe, "no toolchain probe ran for the installed eslint config");
+  assert.equal(probe.artifact, "eslint.config.mjs");
+  assert.equal(probe.ran, false);
+  assert.equal(typeof probe.expectedExit, "number");
+  assert.ok(probe.seed, "the probe names no seeded violation to plant");
+  assert.match(probe.why, /does not spawn/);
+  assert.ok(result.notes.some((n) => n.includes("toolchain-eslint")));
 });
 
-test("a detekt side-file probe degrades to the exact command instead of spawning a build", () => {
-  const root = project({
-    "build.gradle.kts": 'plugins { id("io.gitlab.arturbosch.detekt") version "1.23.6" }\n',
-  });
-  const plan = engine.cmdPlan(root, {
-    _: [], change: [], select: "silent-catch", provenance: "forensic", "no-ci": true,
-  });
-  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
-
+test("a repository with no installed tool config gets no toolchain probe at all", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
   const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
-  const probe = result.probes.find((p) => p.probe === "toolchain-detekt");
-  assert.ok(probe);
-  assert.equal(probe.ran, false);
-  assert.match(probe.why, /does not spawn/);
-  assert.match(probe.command, /gradlew detekt/);
-  assert.ok(result.notes.some((n) => n.includes("toolchain-detekt")));
+  assert.deepEqual(result.probes.filter((p) => p.kind === "toolchain"), []);
 });
