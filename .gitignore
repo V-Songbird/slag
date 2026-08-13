@@ -30,6 +30,7 @@ ROADMAP.jsonl.backup-*
 # Machine-local plugin state from running the plugins on this repo
 .assay/
 .jig/
+.scribe/
 
 # This repo's dev config ported to other agent CLIs — local-only, not published
 .agents/
