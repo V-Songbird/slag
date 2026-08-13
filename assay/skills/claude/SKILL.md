@@ -1,17 +1,15 @@
 ---
 name: claude
 description: >-
-  Grades every rule in the project's CLAUDE.md and .claude/rules/ for structural
-  hygiene — verb strength, framing, trigger distance, loading scope, position in
-  the file, concreteness — and detects rules that would work better as hooks,
-  skills, or subagents. Also grades each project skill's frontmatter description
-  in .claude/skills/ against the trigger recipe. Most of the scoring is a
-  deterministic Node script; the model judges only two factors.
-  Offers to rewrite weak rules and to park placement candidates for promotion.
-  English-only scoring. Use when the user wants feedback on existing rule files
+  Grades every rule in the project's CLAUDE.md and .claude/rules/ on how it is
+  written, scoped and placed, and flags the ones a hook or a skill would enforce
+  better than prose. Also grades each project skill's frontmatter description in
+  .claude/skills/ against the trigger recipe, and offers to rewrite what it
+  finds. English-only scoring. Use when the user wants feedback on existing rule files
   — e.g. "are my rules any good", "check my CLAUDE.md", "grade my instruction
   files", "which rules are weak or vague", "audit my rules", "which rules should
-  be hooks" — or invokes /assay:claude with any flags. Do NOT use to review code,
+  be hooks", "Claude keeps ignoring my instructions" — or invokes /assay:claude
+  with any flags. Do NOT use to review code,
   PRs, non-Claude config like eslint, or the AGENTS.md chain — auditing that is
   /assay:codex.
 argument-hint: "[--fix] [--verbose] [--json] [--no-verify] [--deterministic] [--semantic] [--project-only]"
@@ -39,15 +37,26 @@ this step and to every later `assay.js` call:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" scan
 ```
 
-If `node` is not on PATH (fnm/nvm setups), register it the way the project's
-CLAUDE.md says to, then rerun. The output JSON has a `judge` list — every rule
-needing your judgment — and writes full data to `.assay-tmp/scan.json`. The scan
-also grades every `.claude/skills/*/SKILL.md` description against the trigger
-recipe; those need no judgment.
+assay needs Node 18 or newer. If `node` is not on PATH (fnm/nvm setups),
+register it the way the project says to — its `CLAUDE.md` if there is one, else
+its README or `.nvmrc`/`.node-version`. On a project with none of those, ask the
+user how they start node rather than pointing at a file that does not exist.
+Then rerun.
 
-If `ruleCount` and `skillCount` are both 0, tell the user nothing was found and
-stop. If only `ruleCount` is 0, write `{}` to `.assay-tmp/judgments.json`, skip
-step 2, and continue.
+The output JSON has a `judge` list — every rule needing your judgment — and
+writes full data to `.assay-tmp/scan.json`. The scan also grades every
+`.claude/skills/*/SKILL.md` description against the trigger recipe; those need no
+judgment.
+
+Then say one sentence before the silence of step 2: how many rules in how many
+files were found, that each is being graded and then checked, and that it takes
+about a minute. Between the scan and the report the only thing the user can see
+is a `Write` of hash-keyed decimals.
+
+If `ruleCount` and `skillCount` are both 0, tell the user nothing was found,
+**run step 6's clean-up**, and stop — the scan wrote `.assay-tmp/`, and leaving
+it behind is litter in someone's repository. If only `ruleCount` is 0, write
+`{}` to `.assay-tmp/judgments.json`, skip step 2, and continue.
 
 Under `--deterministic`, go straight to step 3 and write no judgments file at
 all. The engine has no such flag and never needs one — the absence of
@@ -152,7 +161,14 @@ worst problem, and carries no score, factor code or evidence tag. That is gated:
 a release test fails if it runs past 40 lines, repeats a rule, or uses a word
 that needs Claude Code internals.
 
-Add a flag only when `$ARGUMENTS` carried it. `--json` prints the record instead.
+Add a flag only when `$ARGUMENTS` carried it. `--json` prints the whole record —
+over a thousand lines on a four-rule project, and unreadable in a chat. Redirect
+it to a file, then tell the user the path and how big it is and print none of the
+body:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" report --json > .assay-tmp/audit.json
+```
 **`--verbose` prints the full report** — coverage, hard gates, every finding with
 its evidence tag, the enforcement ladder, per-file grades, User scope, weak
 descriptions, and everything the verify pass suppressed. Pass it when the user
@@ -167,8 +183,11 @@ yours to work from and never printed. Use it on the hook-candidate list only:
 where a candidate is plainly covered by a wired hook (same trigger, same action),
 say so beside the entry and drop it from the counts in step 4.
 
-A conflict names both rules and neither winner. Do not resolve it: say which two
-disagree, and ask which one they meant. Anything you proposed under `--semantic`
+A conflict names both rules and neither winner, and no change this engine applies
+can retire a rule — so do not ask a question nothing here can carry out. Say
+which two disagree, print the finding's own next steps from `--verbose` as the
+manual options they are, and say plainly that acting on one of them is the user's
+own edit. Anything you proposed under `--semantic`
 prints as a proposal — ask about each one in the same message and record the
 answer back into `_candidates[].accepted` before you clean up. An accepted
 proposal never changes a rule's state, its score, or the grade.
@@ -193,30 +212,48 @@ report behind it asks the user to choose blind.
 
 ## 4. Offer fixes
 
-Skip to step 6 when the report has no weak rules, no weak descriptions and no
-placement candidates. Under `--fix`, skip the question instead: put every rewrite
-into one batch named `fix-batch` in the draft plan and apply that batch by name,
-which is what keeps `--fix` a recorded approval rather than an implicit one.
+Skip to step 6 when the report has no weak rules, no weak descriptions, no dead
+references and no placement candidates.
+
+Under `--fix`, skip the question instead: put every **wording rewrite** into one
+batch named `fix-batch` in the draft plan and apply that batch by name, which is
+what keeps `--fix` a recorded approval rather than an implicit one. `--fix`
+covers rewrites and nothing else, so name in the final message which options
+below were NOT offered — dead references, building a mechanism, writing a plan
+down — and say that `/assay:claude` with no flag offers them.
 
 Otherwise ask ONE question with `AskUserQuestion` (`multiSelect: true`, header
 `"Fix menu"`), including only the options that have evidence:
 
-- `Rewrite [N] weak rules` — "Rewrite the rules below their quality floor; you
-  approve each patch and every write is reversible." N counts rules whose problem
-  is **wording**. The short report's "N rules need work" also counts dead
-  references, which a rewrite does not fix — take the wording count from the rows
-  whose problem is a wording one, or from `--verbose`'s Weak rules table.
-- `Rewrite [N] weak skill descriptions` — "Rewrite each skill's frontmatter
-  description to the trigger recipe; you approve each patch." Count weak subagent
-  descriptions here too: same recipe, same patch shape, different file.
-- `Promote [N] candidates now` — "Preview each hook, skill, or subagent built
-  from the live official docs, and install the ones you approve; the rules stay
-  active."
-- `Park [N] placement candidates` — "Record a deferred plan for each; nothing is
-  written to the rules and the plan artifact keeps the promotion notes."
+Every label below is read by the user, so it says what happens in words they had
+before they installed anything — never "quality floor", "plan artifact",
+"placement candidate", or a bare "park".
 
-If both promote and park are checked, promotion wins and parking covers the
-remainder. Everything checked goes into ONE draft plan.
+- `Reword [N] unclear rules` — "Rewrite the rules the report calls too vague or
+  says have no clear action. You see each change before it lands, and any of them
+  can be undone." N counts rules whose problem is **wording**: the short report's
+  "N rules need work" is exactly that count, since dead paths, duplicates and
+  disagreements each have their own line now.
+- `Repair [N] dead references` — "Repoint the rules naming a file that is not
+  there, or drop the mention. You see each change first." This is the
+  `stale-reference-repair` kind the engine already implements; offer it whenever
+  the report has a "points at … which is not there" row, and rank it above the
+  rewrites, exactly as the report does.
+- `Rewrite [N] skill descriptions` and `Rewrite [N] subagent descriptions` — two
+  separate options, mirroring the report's two headings. "A description is how
+  Claude decides to reach for it, and these read as summaries instead." Never
+  fold subagents under a label that says skill: they are different files, and the
+  count then matches no number the user has seen.
+- `Build the mechanism now (N)` — "Preview the hook, skill, or subagent built
+  from the current official docs, and install the ones you approve. The rules
+  stay where they are."
+- `Just write down the plan (N)` — "Write the plan for each one into a file you
+  keep, and change nothing else."
+
+The last two cover **the same N items** — say so in the question text, because
+the two counts being equal looks like a mistake otherwise. If both are checked,
+building wins and the plan is written for whatever is left. Everything checked
+goes into ONE draft plan.
 
 ## 5. Plan, preview, apply, validate
 
@@ -236,13 +273,33 @@ may be stated twice on purpose.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" clean
 ```
 
-Always run this last, whether or not fixes were applied. It removes
-`.assay-tmp/`, and the change journal too once every applied change has been
-validated or rolled back. It exits 1 and keeps the journal when one is
-still open — a journal holds the only copy of a pre-image, so it is never deleted
-while a write is unresolved. That exit is a prompt, not a failure of the audit:
-name the open changes it listed, and offer to validate or roll each one back.
-Parked plans survive either way.
+Run this last. It removes `.assay-tmp/`, and the change journal too once every
+applied change has been validated or rolled back.
+
+**Say what it destroys before running it.** Removing the journal removes the
+undo — after this, `git diff` is the only way back. While the user is still
+deciding whether to keep a change, offer to leave it and clean up later.
+
+It exits 1 and keeps the journal when a change is still open: a journal holds the
+only copy of a file as it was, so it is never deleted while a write is
+unresolved. That exit is a prompt, not a failure of the audit — name the open
+changes it listed, and offer to validate or roll each one back. Plans written
+down rather than applied survive either way, and `clean` prints their paths;
+name them in the final message so the user can find them.
+
+## 7. Say what the fixes did
+
+Only when something was applied, and before step 6, because it reads the journal
+and the judgment cache:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" remeasure
+```
+
+It re-scans, reuses every cached judgment whose rule is unchanged, and prints the
+before and after. A reworded rule comes back as a `judge` worklist instead of a
+report — judge only those, **merge** them into `.assay-tmp/judgments.json`
+without disturbing the rest, and run it once more. At most twice.
 
 Then write the final message: whatever step 3 did not already show, your two
-sentences, and what step 5 changed.
+sentences, what step 5 changed, and the before/after this step measured.

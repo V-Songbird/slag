@@ -6,10 +6,10 @@ description: >-
   `.claude/rules/<topic>.md` — after checking the draft against the rules already
   active, and applies it as a reviewed, reversible change. Use when the user
   wants a rule written or made to stick — e.g. "add a rule", "write a CLAUDE.md
-  rule for X", "make Claude always do X", "Claude keeps ignoring my
-  instructions", "help me write a rule" — or invokes /assay:craft-rules. Do NOT
-  use to grade or rewrite existing rules — that is /assay:claude — and not for
-  skill descriptions — that is /assay:craft-skill.
+  rule for X", "make Claude always do X", "help me write a rule" — or invokes
+  /assay:craft-rules. Do NOT use to grade or rewrite existing rules, or when the
+  user says Claude keeps ignoring their instructions — that is /assay:claude —
+  and not for skill descriptions, which is /assay:craft-skill.
 argument-hint: "[what the rule should enforce]"
 allowed-tools: Bash, Read, Write, Glob, AskUserQuestion, WebFetch
 ---
@@ -53,29 +53,60 @@ go; never assume a filename:
 Collect, from the conversation or at most two `AskUserQuestion` rounds. Don't
 ask for what the user already said; only fill real gaps.
 
-- The behavior: what the agent must do or stop doing, ideally with one example
-  of it going wrong.
-- The firing moment: which action, file, or phase should make the agent notice
-  the rule applies.
-- For prohibitions: what replaces the banned action — and when nothing does,
-  the escape hatch.
-- Scope: the whole project, or bound to specific file types, paths, or one
-  subdirectory.
-- The specifics that make compliance checkable: exact paths, identifiers,
-  thresholds.
-- Stakes: preference, standing mandate, or must-never-be-violated.
+Ask in this order, and say in one short clause WHY each answer matters — a
+question with no stated reason reads as a form to fill in. The order is by what a
+wrong answer costs: the first three decide where the rule lives and whether it
+should be a rule at all, so a wrong answer there throws the draft away; the rest
+only weaken it.
 
-Spend the limited rounds in order of what they void. Ask first about the answers
-that decide where the rule lives or which primitive owns it — scope, stakes,
-whether a command could check it instead — before wording-level specifics: a
-wrong answer of the first kind voids the draft, a missing specific only weakens
-it. This orders the real gaps; it never licenses re-asking what the user already
-said.
+1. **Scope** — the whole project, or bound to file types, paths, or one
+   subdirectory? *This picks the file it goes in, and a rule in the wrong file
+   never loads for the work it is about.*
+2. **How much it matters** — a preference, something you want followed, or
+   something that must never happen? *A preference held to a mandate's standard
+   reads as broken; a mandate written as a preference gets skipped.*
+3. **Could a command check it instead?** *If an exit code can settle it, a hook
+   does it every time and a rule only asks.*
+4. **The firing moment** — which action, file, or phase should make Claude notice
+   this applies? *A rule with no moment is one Claude has to remember unprompted.*
+5. **The behaviour** — what must happen or stop happening, ideally with one
+   example of it going wrong. *The example is what turns a wish into something
+   checkable.*
+6. **For a prohibition, what replaces it** — and if nothing does, what to do
+   instead of stopping. *A ban with no alternative can stall a run outright.*
+7. **The specifics** — exact paths, identifiers, thresholds. *These are what make
+   "done properly" mean one thing.*
+
+**"I don't know" is a real answer, and it never ends the interview.** Offer the
+fallback that fits:
+
+- Scope unknown → offer a file glob as the firing moment: "shall we bind it to
+  the files it is about — say `src/**/*.ts` — so it only loads there?" Confirm
+  the glob matches a real file with `Glob` before you use it.
+- Firing moment unknown → offer the same glob, or the nearest lifecycle moment
+  they can name ("before committing", "when you open a pull request").
+- Stakes unknown → default to the words they used and say so; never promote a
+  "prefer" into a "must" on their behalf.
+
+Never put the plugin's own vocabulary to the user. Say "something that must
+never happen", not "a must-never-be-violated standing mandate".
 
 Push back on vague answers. "Write clean code" is a wish, not a rule — ask
-what a violation looks like and write the rule against that. A wish with no
-actionable trigger and no actionable action is **not written**: name it a wish,
-say what is missing, and stop there.
+what a violation looks like and write the rule against that.
+
+A wish with no actionable trigger and no actionable action is **not written** —
+and refusing is not the end of the turn. Give all three of these, in this order:
+
+1. **The closest rule you could write today**, quoted, from whatever they did
+   say. "The nearest rule I can write from this is: *Before opening a pull
+   request, run `npm run lint` and fix what it reports.* Is that the duty?"
+2. **The one answer that would unlock it** — name the single missing piece, not
+   a list. Usually the firing moment or one concrete artifact.
+3. **The redirect**, if the ask belongs somewhere else — step 3's table below
+   holds those, and a wish is exactly the case that never reaches it. A procedure
+   goes to `/assay:craft-skill`; something a command can check goes to a hook.
+
+Stop only after all three, and only if the user declines them.
 
 Keep the author's intent exactly. You clarify and tighten wording; you never
 strengthen a preference into a mandate, and never add a duty nobody asked for.
@@ -181,7 +212,8 @@ blind and nothing is reversible.
    and rerun. Never route around a rejection by editing the file yourself.
 
 3. **Preview from the plan artifact**, not from your draft: read
-   `.assay/plan-<id>.json` and show the user the change id, the target path, why
+   the `planFile` path `plan` printed — `.assay/plan-<planId>.json`, named
+   for the plan and not for a change id — and show the user the change id, the target path, why
    that placement fits, and the exact `old` → `new` text. The plan is what will
    be applied, so it is what they get to see.
 

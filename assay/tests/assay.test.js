@@ -663,11 +663,14 @@ test("a prose-heavy corpus gets per-rule advice, not one fix repeated down the t
 
   const rows = report.split("\n").filter((l) => /^\| \[R\d+/.test(l));
   assert.equal(rows.length, 4);
-  // [Foreman: 075] columns are Rule | State | Evidence | Score | Main issue | Fix
-  const fixes = new Set(rows.map((l) => l.split("|")[6].trim()));
+  // [Foreman: 097] columns are Rule | Evidence | Score | Main issue | Fix — the
+  // State column left, because a rule with no finding of its own printed as
+  // "healthy" inside a table headed "Weak rules"
+  const fixes = new Set(rows.map((l) => l.split("|")[5].trim()));
   assert.ok(fixes.size > 1, "every weak row carried the same fix: " + [...fixes][0]);
   // the dominant weakness still leads each diagnosis — the secondary one follows
-  assert.ok(rows.every((l) => l.split("|")[5].trim().startsWith("too vague, ")));
+  assert.ok(rows.every((l) => /^(too vague to act on|“)/.test(l.split("|")[4].trim())),
+    "the diagnosis no longer leads with the dominant weakness:\n" + rows.join("\n"));
 });
 
 test("weak skill descriptions land in the report as a rewritable fix", () => {
@@ -1391,11 +1394,12 @@ test("loadJudgments rejects a notRule that carries no reason", () => {
   const key = scanData.rules[0].key;
   const write = (j) => fs.writeFileSync(path.join(root, ".assay-tmp", "judgments.json"), JSON.stringify(j));
 
+  // [Foreman: 097] the error groups by cause now, so the check is the cause
   write({ [key]: { F3: 0.5, F8: 0.5, notRule: "  " } });
-  assert.match(engine.loadJudgments(root, scanData.rules).error, /\.notRule/);
+  assert.match(engine.loadJudgments(root, scanData.rules).error, /suppression\(s\) carry no reason/);
 
   write({ [key]: { F3: 0.5, F8: 0.5, notRule: true } });
-  assert.match(engine.loadJudgments(root, scanData.rules).error, /\.notRule/);
+  assert.match(engine.loadJudgments(root, scanData.rules).error, /suppression\(s\) carry no reason/);
 
   write({ [key]: { F3: 0.5, F8: 0.5, notRule: "Narration, not a directive." } });
   assert.equal(engine.loadJudgments(root, scanData.rules).error, undefined);
@@ -1846,7 +1850,8 @@ test("a variant the host never selected is shadowed, not graded as live policy",
   assert.match(gates, /same-level variant — CLAUDE\.md was selected/);
   // the weak rule inside it never reaches the weak-rules table
   assert.doesNotMatch(report, /### Weak rules/);
-  assert.match(report, /\| \.claude\/CLAUDE\.md \| 1 \| [^|]+ \| not loaded — shadowed \|/);
+  // [Foreman: 097] the Files table links its paths through the one shared helper
+  assert.match(report, /\| \[\.claude\/CLAUDE\.md\]\([^)]*\) \| 1 \| [^|]+ \| not loaded — shadowed \|/);
 });
 
 test("a shadowed rule is never paired with a live one", () => {
@@ -2221,7 +2226,7 @@ test("the ladder renders the levels present, skips the empty ones, and never say
   }, {}, { F3: 0.7, F8: 0.15 }));
   assert.match(full, /### Enforcement ladder/);
   assert.match(full, /A mechanism listed here is configured\. Only validation can show it runs — assay never infers execution from presence\./);
-  assert.match(full, /- \*\*Level 1 — advisory prose\*\*: 2 active rule\(s\)/);
+  assert.match(full, /- \*\*Level 1 — the rules themselves\*\*: 2 active rule\(s\)/);
   assert.match(full, /- \*\*Level 2 — skill and subagent workflows\*\*: 1 skill, 1 subagent \(deploy, reviewer\) — configured, not verified/);
   assert.match(full, /- \*\*Level 3 — agent lifecycle guardrails\*\*: 2 hooks \(PreToolUse: check-tests\.js, Stop: gate\.js\) — configured, not verified/);
   assert.match(full, /- \*\*Level 4 — repository enforcement\*\*: 1 repository check \(npm script: lint\) — configured, not verified/);
@@ -2248,13 +2253,17 @@ test("the ladder renders the levels present, skips the empty ones, and never say
 test("--verbose prints each mechanism's state chain and its coverage limits", () => {
   const audit = ladderAudit({ ".claude/settings.json": LADDER_HOOKS });
   const verbose = engine.renderReport(audit, { verbose: true });
-  assert.match(verbose, /- M001 `check-tests\.js` \(project\) — configured ✓ · enabled ✓ · trusted \? · applicable ✓ · verified ✗/);
-  assert.match(verbose, / {4}- the `Bash` matcher is the whole of this hook's reach/);
-  assert.match(verbose, / {4}- workspace trust is not introspectable from a static read/);
-  // the default report keeps the chain out and points at the flag
+  // [Foreman: 097] One line per mechanism, carrying what it reaches. The two
+  // sentences true of every hook are the section's preamble, not 64 repeats.
+  assert.match(verbose, /- M001 `check-tests\.js` \(project\) — PreToolUse on `Bash`/);
+  assert.match(verbose, /Nothing below was watched running/);
+  assert.match(verbose, /trusted workspace, which no static read can confirm/);
+  assert.equal(verbose.split("workspace trust is not introspectable").length - 1, 0,
+    "the blanket limit is being repeated under every mechanism again");
+  // the default report lists the levels only and points at the flag
   const plain = engine.renderReport(audit);
-  assert.doesNotMatch(plain, /verified ✗/);
-  assert.match(plain, /Rerun with `--verbose` for each mechanism's full state chain and coverage limits\./);
+  assert.doesNotMatch(plain, /- M001 /);
+  assert.match(plain, /Rerun with `--verbose` to list every mechanism, with what each one reaches\./);
 });
 
 test("a skill defined in both project and user scope is flagged, and only then", () => {
@@ -2499,8 +2508,10 @@ test("scan exits 0 and writes a parseable scan.json carrying coverage", () => {
     filesDiscovered: 1, filesParsed: 1, inaccessible: [], proseChunks: 1, excludedLines: 0,
     // [Foreman: 074] what the audit saw and did not grade
     userFilesIncluded: false, userSkills: [], agents: [],
-    // [ADR 2026-08-05 B5] the Claude adapter now discloses its residual coverage
-    profileNotes: engine.ADAPTERS["claude-code"].coverageNotes(),
+    // [ADR 2026-08-05 B5] the Claude adapter discloses its residual coverage —
+    // [Foreman: 097] and only about surfaces this project actually has, so a
+    // fixture with no auto memory and no saved workflows carries no note and the
+    // key is absent entirely.
   });
 });
 
@@ -2604,7 +2615,7 @@ test("report without a judgments file lands a deterministic-only audit", () => {
   // the banner, the coverage gap, and the score's evidence mix all say it
   assert.match(out, /· deterministic only$/m);
   assert.match(out, /- model-judged checks did not run \(trigger clarity, enforceability, rule-verification\); deterministic findings only/);
-  assert.match(out, /Evidence mix: deterministic factors only/);
+  assert.match(out, /No model judged anything in this run/);
   // it is a real report, not a stub: the findings-first sections all print
   for (const header of ["## Coverage", "## Hard gates", "## Operational findings", "## Policy placement", "## Structural hygiene (secondary)"]) {
     assert.ok(out.includes(header), "missing " + header);
@@ -2634,8 +2645,10 @@ test("report on malformed judgments exits 1 and names the problem", () => {
   fs.writeFileSync(judgeFile, JSON.stringify({ [summary.judge[0].key]: { F3: 5, F8: 0.9 } }));
   const outOfRange = cli(root, "report", "--verbose");
   assert.equal(outOfRange.code, 1);
-  assert.match(outOfRange.err, /out of range \[0,1\]/);
-  assert.match(outOfRange.err, new RegExp(summary.judge[0].key));
+  assert.match(outOfRange.err, /value\(s\) outside the 0–1 range/);
+  assert.match(outOfRange.err, /F3 = 5/);
+  // and the recovery that needs no model at all is named
+  assert.match(outOfRange.err, /delete \.assay-tmp\/judgments\.json/);
 
   // schema-invalid: notRule present but not a non-empty string
   fs.writeFileSync(judgeFile, JSON.stringify({
@@ -2644,14 +2657,16 @@ test("report on malformed judgments exits 1 and names the problem", () => {
   }));
   const badNotRule = cli(root, "report", "--verbose");
   assert.equal(badNotRule.code, 1);
-  assert.match(badNotRule.err, /\.notRule/);
+  assert.match(badNotRule.err, /suppression\(s\) carry no reason/);
 });
 
 test("report before scan exits 1 and says to run scan first", () => {
   const root = cliFixture();
   const { code, err } = cli(root, "report", "--verbose");
   assert.equal(code, 1);
-  assert.match(err, /No \.assay-tmp\/scan\.json — run scan first/);
+  assert.match(err, /No \.assay-tmp\/scan\.json to report from — run `assay\.js scan` here first/);
+  // [Foreman: 097] and it names the door a person actually goes through
+  assert.match(err, /\/assay:claude/);
 });
 
 test("remeasure lists reworded rules first, then composes a before/after report", () => {
@@ -2922,7 +2937,16 @@ test("an unknown command, an unknown flag, or a bare --root prints usage and exi
   const noCommand = cli(root);
   assert.equal(noCommand.code, 1);
   assert.match(noCommand.err, /No command given\./);
-  assert.match(noCommand.err, /Usage: assay\.js <scan\|report\|remeasure\|clean\|plan\|apply\|validate\|rollback\|ci>/);
+  assert.match(noCommand.err, /Usage: assay\.js <command>/);
+  // [Foreman: 097] the block says which commands a person runs and which the
+  // skill drives, and asking for help is not an error
+  assert.match(noCommand.err, /Commands to run yourself:/);
+  assert.match(noCommand.err, /Driven by the skill, not by hand/);
+  for (const flag of ["--help", "-h", "help"]) {
+    const helped = cli(root, flag);
+    assert.equal(helped.code, 0, flag + ": " + helped.err);
+    assert.match(helped.out, /Usage: assay\.js <command>/);
+  }
 
   const badCommand = cli(root, "frobnicate");
   assert.equal(badCommand.code, 1);
@@ -3069,7 +3093,7 @@ test("report rejects a pre-schema artifact and says to rerun scan", () => {
   fs.writeFileSync(scanFile, JSON.stringify(stripEnvelope(readJson(root, "scan.json"))));
   const stale = cli(root, "report", "--verbose");
   assert.equal(stale.code, 1);
-  assert.match(stale.err, /scan\.json is not a schema 1 scan record \(found schema pre-1\) — rerun `scan`\./);
+  assert.match(stale.err, /scan\.json is not a schema 1 scan record \(found schema pre-1\) — rerun `assay\.js scan` to replace it\./);
 
   // a future schema is named by the version found, not silently misread
   fs.writeFileSync(scanFile, JSON.stringify({ ...readJson(root, "scan.json"), schemaVersion: 2 }));
@@ -3396,8 +3420,16 @@ test("an unclosed fence and an unclosed comment are named, not silently swallowe
   assert.match(comment.unsupported[0].reason, /unclosed HTML comment/);
   assert.equal(comment.unsupported[0].startLine, 3);
 
-  // a nested map is metadata no analyzer reads — inventoried, never an error
-  const nested = engine.stripMetadata("---\nname: x\nhooks:\n  pre: run\n---\n\n- Run the tests.\n");
+  // [Foreman: 097] A one-level nested map is read as `key.subkey`, not reported
+  // as a construct the parser gave up on — a file that declares its own kind in
+  // `metadata: { node_type: … }` used to be flagged for the block that answers
+  // the question.
+  const flat = engine.stripMetadata("---\nname: x\nmetadata:\n  node_type: memory\n---\n\n- Run the tests.\n");
+  assert.deepEqual(flat.unsupported, []);
+  assert.equal(engine.parseFrontmatter("---\nmetadata:\n  node_type: memory\n---\n")["metadata.node_type"], "memory");
+
+  // deeper than one level still has no faithful flat form, and is still named
+  const nested = engine.stripMetadata("---\nname: x\nhooks:\n  pre:\n    run: true\n---\n\n- Run the tests.\n");
   assert.equal(nested.unsupported.length, 1);
   assert.match(nested.unsupported[0].reason, /`hooks` holds a nested map/);
 });
@@ -4147,9 +4179,16 @@ test("--host names the profile discovery runs under, and an unknown one is a usa
   assert.equal(record.coverage.skillBudget.amount, 8000);
   assert.ok(record.coverage.profileNotes.some((n) => /no live Codex host was probed/.test(n)));
 
-  const reported = cli(root, "report", "--verbose", "--host", "codex");
+  // [Foreman: 097] `report` composes from the record, which already names the
+  // profile — so it reads the host off the scan and REFUSES the flag rather than
+  // accepting a label it would never honor.
+  const reported = cli(root, "report", "--verbose");
   assert.equal(reported.code, 0, reported.err);
   assert.match(reported.out, /codex profile · schema 1/);
+
+  const misplaced = cli(root, "report", "--host", "codex");
+  assert.equal(misplaced.code, 1);
+  assert.match(misplaced.err, /--host belongs to the commands that scan/);
 });
 
 test("no --host is the Claude profile, and the record it writes is the one it always wrote", () => {
@@ -4168,7 +4207,10 @@ test("no --host is the Claude profile, and the record it writes is the one it al
   assert.deepEqual(Object.keys(implicit.context), ["projectRoot", "startupDirectory", "userDir", "projectOnly", "ancestorStop", "hostVersion", "analysisTime"]);
   assert.equal("budget" in implicit.coverage, false);
   // [ADR 2026-08-05 B5] the Claude adapter now discloses residual coverage
-  assert.deepEqual(implicit.coverage.profileNotes, engine.ADAPTERS["claude-code"].coverageNotes());
+  // [Foreman: 097] Gated on the surface existing: this fixture has no auto memory
+  // and no saved workflows, so the profile has nothing to disclose about it.
+  assert.equal("profileNotes" in implicit.coverage, false);
+  assert.deepEqual(engine.ADAPTERS["claude-code"].coverageNotes({ sources: [{ autoMemory: true }] }).length, 3);
   assert.equal(implicit.files.some((f) => "startsAtByte" in f || "loaded" in f), false);
 
   for (const r of [implicit, explicit]) {
@@ -4241,7 +4283,9 @@ test("the Claude wording rubric is not applied to a profile it was never measure
   assert.doesNotMatch(report, /corpus grade/);
   assert.doesNotMatch(report, /## All rules/);
   assert.match(report, /\*\*7 rules across 1 file\(s\)\*\* — no grade\./);
-  assert.match(report, /The structural-hygiene rubric is measured on the Claude Code profile\./);
+  // [Foreman: 097] Host-neutral: a Codex session is told to print this markdown
+  // verbatim, so the sentence may not name the other host.
+  assert.match(report, /The structural-hygiene rubric is measured on one host profile and carries no evidence for this one\./);
   assert.doesNotMatch(report, /experiment-supported/, "no Claude-tier evidence tag survives into a Codex report");
   // maintainability is reported apart from the reliability findings
   const maintainability = report.slice(report.indexOf("## Maintainability"), report.indexOf("## Policy placement"));
@@ -4557,7 +4601,9 @@ test("Codex trust: nothing beyond configured is assumed, and a managed-only poli
 
   const audit = engine.composeAudit(engine.scan(root, { adapter: codex, projectOnly: true, userDir: home }), null);
   const report = engine.renderReport(audit, { verbose: true });
-  assert.match(report, /configured ✓ · enabled \? · trusted \? · applicable \? · verified ✗/);
+  // [Foreman: 097] The chain is no longer spelled out per mechanism; what the
+  // record says about trust still reaches the reader through the limits, which
+  // are the part that names an actual consequence.
   assert.match(report, /trust is recorded against this definition's hash — editing the command marks it for review again/);
   assert.match(report, /project-local hooks load only when the project `\.codex\/` layer is trusted/);
   // verified is never true anywhere, on any mechanism, under any source
@@ -4591,7 +4637,9 @@ test("Codex trust: nothing beyond configured is assumed, and a managed-only poli
     engine.composeAudit(engine.scan(locked.root, { adapter: codex, projectOnly: true, userDir: locked.home }), null),
     { verbose: true });
   assert.match(lockedReport, /an `allow_managed_hooks_only` policy is in force, so this source is skipped whatever it says/);
-  assert.match(lockedReport, /configured ✓ · enabled ✗ · trusted \? · applicable ✗ · verified ✗/);
+  // [Foreman: 097] A state that is FALSE is the one worth a word, and it is the
+  // only part of the chain the report still spells out.
+  assert.match(lockedReport, /— not enabled, not applicable/);
   // managed by policy is trusted by policy — and still never observed
   assert.match(lockedReport, /trusted without review and not disableable from the hook browser — assay still never saw it run/);
 });
@@ -5090,7 +5138,10 @@ test("clean keeps a journal with an open change and removes a closed one, keepin
   assert.equal(cli(root, "validate", "--change", "c-rewrite").code, 0);
   const closed = cli(root, "clean");
   assert.equal(closed.code, 0);
-  assert.match(closed.out, /Removed \.assay-tmp\/ and the closed journal\. Kept 1 plan artifact\(s\)/);
+  // [Foreman: 097] `clean` says what it destroyed and names what it kept — a
+  // parked plan the user cannot find is a plan they cannot act on
+  assert.match(closed.out, /Removed \.assay-tmp\/ and the change journal — the undo history is gone/);
+  assert.match(closed.out, /Kept the parked plan\(s\): \.assay\/plan-[0-9a-f]+\.json\./);
   assert.equal(fs.existsSync(path.join(root, ".assay", "journal.jsonl")), false);
   // the plan artifact is the park record, so cleaning never takes it
   assert.equal(fs.readdirSync(path.join(root, ".assay")).length, 1);
@@ -5311,7 +5362,7 @@ function codexSkillPromotion(sidecar) {
 test("a skill metadata sidecar that is not valid YAML is restored, and a valid one validates", () => {
   const broken = tmpProject({ "AGENTS.md": "# Rules\n\n- Never use `var` — use `const` instead.\n" });
   assert.equal(planDraft(broken, { changes: [codexSkillPromotion("policy: [unclosed\n")] }).code, 0);
-  const refused = cli(broken, "apply", "--change", "c-codex-skill", "--host", "codex");
+  const refused = cli(broken, "apply", "--change", "c-codex-skill");
   assert.equal(refused.code, 1);
   assert.match(refused.err, /agents\/openai\.yaml is not valid YAML/);
   assert.match(refused.err, /was restored/);
@@ -5323,7 +5374,7 @@ test("a skill metadata sidecar that is not valid YAML is restored, and a valid o
   const sidecar = ["interface:", "  display_name: Deploy", "policy:", "  allow_implicit_invocation: false",
     "dependencies:", "  tools:", "    - type: command", "      value: kubectl", ""].join("\n");
   assert.equal(planDraft(ok, { changes: [codexSkillPromotion(sidecar)] }).code, 0);
-  assert.equal(cli(ok, "apply", "--change", "c-codex-skill", "--host", "codex").code, 0);
+  assert.equal(cli(ok, "apply", "--change", "c-codex-skill").code, 0);
 
   // validate under the SELECTED profile: reparse covers both files, and
   // host-discovery asks the Codex profile whether it finds the skill at all
@@ -5626,10 +5677,13 @@ test("ci --json emits a stable, deterministic, schema-versioned shape", () => {
   assert.deepEqual(record.gates, engine.CI_DEFAULT_GATES);
   assert.deepEqual(record.allowedGates, engine.CI_GATE_NAMES);
   assert.equal(record.exitCode, 2);
+  // [Foreman: 097] `fix` is the finding's own first safe action, so a CI log
+  // names the repair beside the failure instead of only the path.
   assert.deepEqual(record.failed, [{
     gate: "stale-targets", state: "blocked", severity: "high", evidence: "mechanical",
     path: "CLAUDE.md", line: 3,
     summary: "it requires `docs/missing-guide.md`, which the project does not contain",
+    fix: "repair reference",
   }]);
   // the language modes reach CI as advisory counts, carrying the mode
   assert.equal(record.advisory["unsupported-language:latin-unsupported:es"], 1);
@@ -6196,7 +6250,7 @@ test("the brief report says what it looked at and what needs doing, in plain wor
   assert.match(out, /\*\*1 rule needs work\.\*\*/);
   assert.match(out, /## Fix these first/);
   assert.match(out, /too vague to act on/);
-  assert.match(out, /Name a path, or show an example/);
+  assert.match(out, /Name a file, a command, or show an example/);
   // the reader is told where to go next, never left with a bare table
   assert.match(out, /--fix/);
   assert.match(out, /--verbose/);
@@ -6218,8 +6272,8 @@ test("validate honors --startup on the codex host, and non-scanning commands ref
       patches: [{ path: "sub/AGENTS.md", old: "- Follow `docs/release.md` before tagging.", new: "- Keep the tagging steps in this file." }],
     }],
   }));
-  assert.equal(cli(root, "plan", "--from", ".assay-tmp/draft-plan.json", "--host", "codex").code, 0);
-  assert.equal(cli(root, "apply", "--change", "c-sub", "--host", "codex").code, 0);
+  assert.equal(cli(root, "plan", "--from", ".assay-tmp/draft-plan.json").code, 0);
+  assert.equal(cli(root, "apply", "--change", "c-sub").code, 0);
 
   // the re-scan reads the root-to-startup chain: both files, both rules
   const validated = cli(root, "validate", "--change", "c-sub", "--host", "codex", "--startup", "sub");
@@ -6232,10 +6286,13 @@ test("validate honors --startup on the codex host, and non-scanning commands ref
   assert.equal(claude.code, 1);
   assert.match(claude.err, /--startup is not supported by the .* profile/);
 
-  // and a command that runs no scan refuses the flag outright
-  const report = cli(root, "report", "--host", "codex", "--startup", "sub");
+  // and a command that runs no scan refuses either flag outright
+  const report = cli(root, "report", "--startup", "sub");
   assert.equal(report.code, 1);
   assert.match(report.err, /--startup belongs to the commands that scan/);
+  const hosted = cli(root, "plan", "--from", ".assay-tmp/draft-plan.json", "--host", "codex");
+  assert.equal(hosted.code, 1);
+  assert.match(hosted.err, /--host belongs to the commands that scan/);
 });
 
 // [Foreman: 095] The codex-host brief is read behind two different front doors
@@ -6243,7 +6300,7 @@ test("validate honors --startup on the codex host, and non-scanning commands ref
 test("the codex brief names flags, never a front door another host owns", () => {
   const root = tmpProject({ "AGENTS.md": "# Rules\n\n- Keep things tidy.\n- Follow `docs/missing.md` before tagging.\n" });
   assert.equal(cli(root, "scan", "--host", "codex").code, 0);
-  const { code, out } = cli(root, "report", "--host", "codex");
+  const { code, out } = cli(root, "report");
   assert.equal(code, 0);
   assert.match(out, /--verbose/);
   assert.doesNotMatch(out, /\/assay:/);
@@ -6265,7 +6322,9 @@ test("a rule that cannot load is named once, and outranks anything about its wor
     ".claude/rules/orphan.md": "---\npaths:\n  - '**/*.no-such-extension'\n---\n\n- Be careful out there.\n",
   });
   assert.match(out, /\*\*1 rule never loads\.\*\*/);
-  assert.match(out, /never reaches the assistant/);
+  // [Foreman: 097] The row is the finding's own sentence, so it says WHY this
+  // rule does not load — a hardcoded line said the same thing about every state.
+  assert.match(out, /scoped to globs that match no file/);
   const hits = out.split("\n").filter((l) => l.includes("orphan.md:6"));
   assert.equal(hits.length, 1, "a rule that cannot load must be reported once:\n" + out);
 });
@@ -6442,7 +6501,10 @@ test("a rule the reader cannot fix here is pointed at, never counted as clean", 
   // and the reader's own weak rules are named rather than silently dropped
   assert.doesNotMatch(out, /\*\*Nothing here needs fixing\.\*\*/);
   assert.match(out, /\*\*Nothing in this repo's rules needs fixing\.\*\*/);
-  assert.match(out, /2 of your own rules need work, from files outside this repo/);
+  assert.match(out, /2 of the rules outside this repo need work/);
+  // [Foreman: 097] and the count that reconciles the headline with the scan is in
+  // the run's own line, not last in a list that truncates it away
+  assert.match(out, /2 more rules load from outside this repo — `--project-only` leaves them out\./);
 });
 
 test("a weak subagent description reaches the short report, described the same way as in the full one", () => {
@@ -6478,6 +6540,6 @@ test("a rule the host never loads is listed above a pair that argues", () => {
   });
   const out = engine.renderBrief(engine.composeAudit(engine.scan(root), null));
   const rows = out.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Rule") && !l.startsWith("|---"));
-  assert.match(rows[0], /never reaches the assistant/, "a rule that cannot load must come first:\n" + out);
+  assert.match(rows[0], /the host never loads it/, "a rule that cannot load must come first:\n" + out);
   assert.match(rows[1], /two rules disagree/, "a conflicting pair comes after the hard gates:\n" + out);
 });

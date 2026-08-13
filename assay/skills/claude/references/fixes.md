@@ -75,7 +75,8 @@ plan stale and the journal blind.
   trim it to one short plain sentence and delete the trigger machinery, because
   nothing routes on it. A skill neither side can invoke is reported, never
   edited.
-- **Stale reference** → `stale-reference-repair`. "likely moved to `X`" repoints
+- **Dead reference** → `stale-reference-repair`, the kind behind the menu's
+  `Repair [N] dead references`. "likely moved to `X`" repoints
   to `X`, keeping the sentence intact. Several matches means pick the one the
   rule meant, asking only when it is genuinely ambiguous. "No file by that name"
   means delete the reference or repoint it at the current source of truth. Only
@@ -121,12 +122,25 @@ plan stale and the journal blind.
    show the user each change: its id, the target path, why that mechanism fits,
    and the exact `old` → `new` text. The plan is what will be applied, so it is
    what they get to see.
-3. **Collect approval per change**, then `apply --change <id> --change <id>` with
-   exactly the ids approved — or `apply --batch fix-batch` under `--fix`, where
-   the batch is the boundary instead. There is no apply-everything default, and a
-   change the user did not name is not applied even though the plan carries it. A
-   stale file exits 1 naming both fingerprints and writes nothing; re-plan rather
-   than forcing it. A write whose result does not parse is restored and exits 1.
+
+   **Flag anything the new text introduces.** If `new` names a path, an
+   identifier, a flag or a number that is not in `old`, say so in one line under
+   that preview — "this adds `scripts/check.js`, which the old wording did not
+   name". A reader who did not write the rule cannot see that from a diff, and it
+   is the one way a rewrite changes what the rule MEANS rather than how it reads.
+3. **Collect approval per change, in a surface that has one.** With four or fewer
+   changes, one `AskUserQuestion` (`multiSelect: true`) whose options are the
+   change ids with a one-line summary each. With more, a numbered list followed by
+   an explicit instruction — "reply with the numbers you want applied, or `all`" —
+   and wait for the answer. Never treat silence, "looks good" on the preview, or
+   an earlier yes to the menu as approval for a specific patch.
+
+   Then `apply --change <id> --change <id>` with exactly the ids approved — or
+   `apply --batch fix-batch` under `--fix`, where the batch is the boundary
+   instead. There is no apply-everything default, and a change the user did not
+   name is not applied even though the plan carries it. A stale file exits 1
+   naming both fingerprints and writes nothing; re-plan rather than forcing it. A
+   write whose result does not parse is restored and exits 1.
 4. `validate --change <id>` per applied change. It re-parses what was written,
    re-runs the static analysis and records the delta, and for a promotion checks
    that the host actually discovers the new mechanism. It reports `configured`
@@ -145,10 +159,5 @@ Every applied change stays reversible for as long as the journal exists, through
 `rollback --change <id>`, including after an apply interrupted mid-write. Offer
 it whenever a validation fails or the user dislikes the result.
 
-`remeasure` is never a step here and runs only when the user asks for it by name.
-It answers "what did the fixes do to the grades" with the full report; it
-re-scans and reuses every cached judgment whose rule is unchanged, and a reworded
-rule comes back as a `judge` worklist instead of a report — judge only those,
-**merge** them into `.assay-tmp/judgments.json` without disturbing the rest, and
-run it once more. At most twice. It reads the journal and the cache, so run it
-before the clean-up step.
+`remeasure` — "what did the fixes actually do" — is step 7 of the audit skill and
+runs whenever anything was applied. It is described there.

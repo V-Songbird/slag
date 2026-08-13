@@ -2,12 +2,11 @@
 name: assay
 description: >-
   Audits the instruction system Codex loads for a project — the AGENTS.md chain
-  it actually reads, the .agents/skills it lists with their agents/openai.yaml
-  metadata, and the hooks wired around them — and reports what never takes
-  effect, with reviewable fixes: a file shadowed further up the chain, a file
-  the host stops reading at its size limit, a rule pointing at a path that no
-  longer exists, two rules that contradict each other, a skill description too
-  long to survive the listing budget. Use when the user wants their instruction
+  it reads, the .agents/skills it lists, the hooks around them — and reports what
+  never takes effect, with reviewable fixes. A file shadowed further up the chain
+  or past the host's size limit. A path that no longer exists. Two rules that
+  contradict each other. More skills listed than the shared budget holds.
+  Use when the user wants their instruction
   files checked — "audit my AGENTS.md", "check my instruction files", "what
   does Codex actually load here", "which AGENTS.md files get ignored", "audit
   the skills" — or invokes $assay. Do not use to review source code, pull
@@ -22,10 +21,11 @@ in every command below. If `node` is not on PATH, activate it the way the
 project's own setup notes say to, then rerun.
 
 Every engine call that reads or writes the project's instruction files carries
-`--host codex` — `scan`, `report`, `plan`, `apply`, `validate`. The profile
-decides which files are sources, which analyses apply, and what `validate`
-checks, so never drop it partway through. `rollback` and `clean` work off the
-journal and take no host.
+`--host codex` only where it runs discovery — `scan`, `remeasure`, `ci` and
+`validate`. Every other command reads the host off the saved records and refuses
+the flag outright. The profile decides which files are sources, which analyses
+apply, and what `validate` checks, so pass it wherever it is taken and nowhere
+else. `rollback` and `clean` work off the journal and take no host.
 
 Flags the user's request may carry: `--startup <path>` (audit a session that
 begins in a subdirectory — the chain runs from the project root down to where
@@ -142,7 +142,7 @@ is always `null` here — it is the user's answer, not yours. Propose only what 
 ## 3. Report
 
 ```
-node <engine> report --host codex
+node <engine> report
 ```
 
 Bare, this prints the short report: what was looked at, **Fix these first**,
@@ -258,17 +258,20 @@ file this flow is going to write.
   park by design and `clean` never deletes a plan artifact: the plan file
   **is** the park record.
 
-**Then run the transaction**, `--host codex` on every command:
+**Then run the transaction.** Only `validate` re-scans, so it is the only step
+here that takes `--host codex`; the rest read the host off the plan and the
+journal.
 
-1. `plan --from .assay-tmp/draft-plan.json --host codex`. Exit 1 means the
+1. `plan --from .assay-tmp/draft-plan.json`. Exit 1 means the
    draft was rejected — an anchor that is not in the file, an anchor that
    matches twice, a promotion with no provenance. Fix what the message names
    and rerun; never route around a rejection by editing the file yourself.
 2. **Preview from the plan artifact, not from your draft.** Read
-   `.assay/plan-<id>.json` and show the user each change id, the target path,
+   the `planFile` path `plan` printed — `.assay/plan-<planId>.json`, named
+   for the plan and not for a change id — and show the user each change id, the target path,
    why that mechanism fits, and the exact `old` → `new` text.
-3. **Collect approval per change**, then `apply --change <id> --host codex`
-   with exactly the ids approved — or `apply --batch fix-batch --host codex`
+3. **Collect approval per change**, then `apply --change <id>`
+   with exactly the ids approved — or `apply --batch fix-batch`
    under `--fix`. There is no apply-everything default. A stale file exits 1
    naming both fingerprints and writes nothing; re-plan rather than forcing
    it. A write whose result does not parse is restored and exits 1.

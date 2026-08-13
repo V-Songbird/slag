@@ -4,6 +4,107 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.15.0] — 2026-08-13
+
+### Added
+
+- `assay.js --help` prints the commands and exits 0. The list now says which ones you run and which the skill drives on your behalf
+- **Repair dead references** is an option in the fix menu. The engine could already do it; nothing offered it
+- After a fix is applied, the audit re-measures and shows you the before and after
+- A page explaining every wording check behind a verdict, with a worked example each, and the mechanical checks it never scores — [references/what-assay-measures.md](./references/what-assay-measures.md), linked from `--verbose`
+- A skill or subagent description whose opening sentence lists too much is now flagged. That opening is what a description is routed on
+- `scan` writes a `.gitignore` into its own temp directory, so a first run leaves nothing in your working tree
+- `scan`, `report` and `ci` now say up front when an earlier fix was left half-finished
+
+### Changed
+
+- The fix menu is written in plain words. Building a mechanism and writing the plan down are labelled as what they do, and both say they cover the same items
+- Skill descriptions and subagent descriptions are two options, matching the two headings in the report
+- Before applying a rewrite, assay points out any path, name or number the new wording introduces that the old one did not have
+- Approval is collected in a surface that has one — a question with the changes as options, or a numbered list you answer
+- `clean` says what it destroys: removing the change journal removes the undo, and it names any plan it kept instead of counting them
+- Validating a rewrite finds the rewritten rule and says where it is now. It used to report that the rule "no longer exists" beside a pass
+- A broken judgments file reports its problems grouped by cause, with each rule's file and line, and names the recovery that needs no model at all
+- Error messages name commands you can actually type
+- craft-rules asks its questions in one order, says why each answer matters, and has an answer for "I don't know". A request it will not write as a rule now comes back with the closest rule it could write, the one answer that would unlock it, and where else to take it
+- craft-skill shows the old description beside the new one when refitting, and says in the close why the old one was not firing
+- `--json` writes the record to a file and tells you the path, instead of printing a thousand lines into the conversation
+- On a monorepo, the report says how many of the rules load only when Claude works in their own folder, and puts the always-loaded ones first
+- On Codex the report no longer offers a flag that host does not take
+- "Claude keeps ignoring my instructions" now routes to the audit rather than to writing a new rule
+
+## [1.14.0] — 2026-08-13
+
+### Changed
+
+- `--verbose` is roughly half the length it was, and a release test now holds it there. Limits true of every wired mechanism are stated once per section, the enforcement ladder is one line per mechanism carrying what it reaches, and mechanisms inherited from your settings and installed plugins are summarized by source; the rest is still in `--json`
+- The full report opens with a one-line contents list
+- "All rules" covers this project's rules; everything else is still in `--json`
+- The weak-rules table no longer prints a per-rule state beside the grade — a rule with nothing else wrong read as "healthy" in a table headed "Weak rules"
+- Both reports now use the same words for the same problem. The full one adds the score and the kind of evidence around that sentence instead of replacing it with a terser one
+- Every state word in the full report gets a one-line legend, and the tick-and-cross chain after each mechanism is gone — a state that is switched off is named, and the rest is stated once
+- Lists of rules from outside the repository are capped, with the count and a pointer at `--json`
+- Notes about a surface your project does not have — auto memory, saved workflows — no longer open the report
+- Paths render the same way everywhere: no raw backslashes in a link, no full home directory in a shareable report
+- "3 could be handled by a script instead" says what it is counting
+
+## [1.13.0] — 2026-08-13
+
+### Changed
+
+- Claude's own memory notes for a project are no longer graded as project rules. They are read and listed, so you can see what is in your context, and they stay out of the fix list, out of the counts the grade averages, and out of the restructure advice
+- A dated note citing a file that has since moved is no longer reported as a rule the host cannot apply. That is the note working
+- Nothing outside the repository can fail a `ci` run any more — not your own instruction files, not the ones above the project root, not the memory notes. They are still reported, and `ci` says how many files it saw that the checkout does not contain
+- The short report says how many rules load from outside the repo, and names the flag that leaves them out. That sentence used to be pushed last into a capped list and cut
+- "Rules across N files" in the full report now counts the rules the grade beside it actually averages
+- The full report's hard gates are the project's own. A gated rule in a file outside the repo is still reported, under the section for the files it lives in
+- A file that declares its own kind in its frontmatter is read instead of being reported as something the parser could not handle
+- The list of rules sent for judging now carries which file each one came from, so notes can be set aside by where they live instead of guessed at from their text
+
+## [1.12.0] — 2026-08-13
+
+### Added
+
+- Every finding in `--verbose` now prints its own next step under it
+- Duplicated rules reach the short report. One duty written twice is one row naming every place it appears, with the copy worth keeping named
+- `report --top <n>` shows more rows without dropping into the full analysis
+- `assay.js ci` prints the repair beside each failure
+
+### Changed
+
+- "Too vague to act on" now quotes the words that made it vague, and asks for what passes instead of a path the rule may not have
+- A rule a script could own gets that as its fix, instead of a wording lecture
+- A rule a wired hook already covers is no longer proposed for automation. It gets its own line saying to check the hook first
+- The closing line follows the table above it: a rewrite offer when something is weak, the manual decisions when there are dead paths or disagreements, `/assay:craft-skill` when a description never fires
+- "4 rules sit near the bottom of a long file" now names the file and links it
+- The fix for a rule with no clear action asks for the action, not for four specific opening words
+
+## [1.11.0] — 2026-08-13
+
+### Added
+
+- The report now says what it read and what it did not check. One line under the headline names the files it looked at, any file it could not open, and any whole check that never ran — a run with no model behind it, a corpus too large to compare rule against rule, a host whose wording checks do not apply, or rules written in a language assay does not score
+- A rule pointing at a missing `@path` import is now a finding. The host pulls that file into the session, so a dead one is reported beside every other dead path instead of grading well
+- `assay.js ci` prints what it looked at — rules, files and skills — so a run that scanned nothing no longer reads like a clean project
+- A file assay could not read now fails a `ci` run by default
+
+### Changed
+
+- A rule that cites a missing file is no longer reported as one the host never loads. It loads fine; the path is what is gone, and the report now says that and offers the fix that repairs it
+- Every "the host never loads this" row now carries the analyzer's own reason and its own next step, instead of one sentence written for every case
+- Missing paths get their own line in the headline, apart from rules that need rewording
+- Two rules that disagree are one row even when the same pair is written into several files — one decision, named once, with every location
+- A rule explained after a semicolon or a full stop is compared on the part that gives the order. An added "; the gateway does it" used to hide the disagreement entirely
+- A project with no rules is no longer congratulated. It says there is nothing to look at yet and points at `/assay:craft-rules`
+- Run from a subdirectory, assay now finds the project root by looking upward instead of auditing wherever you stood
+
+### Fixed
+
+- `--root` at a path that does not exist is refused instead of silently creating the directory and reporting it clean; `--root` at a file says so instead of throwing
+- `report` refuses a `.assay-tmp/scan.json` taken from another project instead of rendering a full report about files that are not here
+- `report`, `plan`, `apply`, `clean` and `rollback` refuse `--host` instead of accepting it and quietly ignoring it — the flag belongs to the commands that scan
+- Under `--project-only`, the hook inventory no longer reaches past a configured user directory into the real home folder
+
 ## [1.10.0] — 2026-08-06
 
 ### Added

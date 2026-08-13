@@ -69,8 +69,8 @@ ask for what the user already said; only fill real gaps.
 Then fetch `profile.targets.skill.docs` with `WebFetch` and follow the fetched
 format exactly — frontmatter keys, directory layout, naming. Never build from a
 remembered format. If the fetch fails, stop and tell the user to retry later; a
-stale-format skill is worse than no skill. Keep the URL and the date you fetched
-it: step 5 records them as the change's provenance.
+stale-format skill is worse than no skill. Keep the URL and what the page told
+you: step 5 records that pair as the change's `provenance`.
 
 ## 3. Write the metadata
 
@@ -82,6 +82,13 @@ the finished description once against the recipe's refit checklist before puttin
 it in the plan. On a refit, edit only the frontmatter description (and
 `when_to_use` if the format still uses it) — never the body's instructions beyond
 what the user asked.
+
+**On a refit, keep the diagnosis.** The checklist tells you exactly which parts
+were missing — no trigger clause, no exclusion, nothing concrete named, an
+enumeration too long to route on. Write that down as you go: step 5 shows the old
+description beside the new one, and step 7 says which of these was why it was not
+firing. Working it out and never telling the user leaves them with a new
+description and no idea what was wrong with the last one.
 
 Where `coverage.skillBudget` exists, keep the name and description short: they
 are spent from a shared listing budget before any skill is selected, and a long
@@ -121,8 +128,10 @@ sidecar, rule, or settings file directly.
    once, or `null` to create a file:
 
    - the new skill is one `placement-promotion` change carrying
-     `"mechanism": { "type": "skill", "name": "<name>" }` and a `provenance`
-     entry holding the doc URL and the date you fetched it in step 2. Its
+     `"mechanism": { "type": "skill", "name": "<name>" }` and one `provenance`
+     entry per format claim, each `{ "claim": "<what the page documents>",
+     "url": "<the page from step 2>" }` — `plan` rejects an entry missing
+     either key, and never reads a date. Its
      `SKILL.md` and every metadata sidecar are **patches of that same change**,
      each with `"old": null`, so they land together or not at all;
    - a companion rule is a separate `rule-rewrite` change;
@@ -144,10 +153,16 @@ sidecar, rule, or settings file directly.
    and rerun. Never route around a rejection by writing the file yourself.
 
 3. **Preview from the plan artifact**, not from your draft: read
-   `.assay/plan-<id>.json` and show the user each change id, every file it
+   the `planFile` path `plan` printed — `.assay/plan-<planId>.json`, named
+   for the plan and not for a change id — and show the user each change id, every file it
    writes, why that mechanism fits, and the full text of each new file. Name the
    skill's declared tool dependencies here — they are what the skill will be
    allowed to reach, and the preview is the last point before that is true.
+
+   **On a refit, show the old description above the new one**, both in full, with
+   one line naming what the old one was missing. The user is being asked to
+   approve a replacement for something they wrote; showing only the replacement
+   asks them to approve it blind.
 
 4. **Collect approval per change**, then apply exactly the approved ids:
 
@@ -198,7 +213,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" clean
 
 Run it last. Exit 1 means a change is still open — name it and offer to validate
 or roll it back. Then report in a few lines: what was built and where, that it
-loads from the next session on, and the two invocation facts kept separate —
+loads from the next session on, and — on a refit — **why the old description was
+not firing**, in one sentence, from the diagnosis you kept in step 3, and the two invocation facts kept separate —
 **explicit** invocation, where a session names the skill and it runs, and
 **implicit** routing, where the description is matched and it may not. Say the
 measured line plainly: description routing is probabilistic, and a duty that

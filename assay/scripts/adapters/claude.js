@@ -655,7 +655,11 @@ function discoverHooks(ctx) {
   // The hook inventory is the author's working input, not graded content, so it
   // reads the user's settings even under --project-only: a hook wired there
   // still fires on this project.
-  const userDir = ctx.userDir || path.join(os.homedir(), ".claude");
+  // [Foreman: 097] ASSAY_USER_DIR fences the home directory here too. Without
+  // it, --project-only fell back to the real `~/.claude` and a fixture project
+  // inherited whatever hooks the developer's own installed plugins wire — an
+  // audit of the machine wearing the project's name.
+  const userDir = ctx.userDir || process.env.ASSAY_USER_DIR || path.join(os.homedir(), ".claude");
   readHookConfig(path.join(userDir, "settings.json"), "user", entries, inaccessible);
   try {
     const reg = JSON.parse(fs.readFileSync(path.join(userDir, "plugins", "installed_plugins.json"), "utf-8"));
@@ -791,13 +795,28 @@ function docs() {
 // residual limits travel with the adapter that owns them.
 // [ADR 2026-08-05 B5] Discovery of auto memory (B1) still leaves gaps a file
 // read cannot close; C5's saved-workflows line rides here too.
-function coverageNotes() {
-  return [
-    "auto memory: topic files load on demand and assay cannot observe which of them a session actually followed",
-    "auto memory: the ~/.claude/projects/<project> directory encoding, and auto memory's position in the loaded context relative to other user-scope sources, are observed, not documented — an absent directory is treated as no auto memory rather than a discovery failure",
-    "auto memory: an `autoMemoryDirectory` relocation is honored only where a settings file was read, and its project/local trust gate cannot be confirmed by a static read",
-    "saved workflow scripts (.claude/workflows/, ~/.claude/workflows/, plugin workflows/) are documented but explicit-invocation only, so assay does not discover them — their absence never falsifies the always-loaded byte total or the load order",
-  ];
+// [Foreman: 097] Gated on the surface existing. A promise about what was looked
+// at is only worth reading when it is about something that is there — four
+// disclaimers about surfaces a project does not have opened the report ahead of
+// any finding, and taught the reader to skip the block that also names the file
+// assay could not open.
+function coverageNotes(found = {}) {
+  const notes = [];
+  if ((found.sources || []).some((s) => s.autoMemory)) {
+    notes.push(
+      "auto memory: topic files load on demand and assay cannot observe which of them a session actually followed",
+      "auto memory: the ~/.claude/projects/<project> directory encoding, and auto memory's position in the loaded context relative to other user-scope sources, are observed, not documented — an absent directory is treated as no auto memory rather than a discovery failure",
+      "auto memory: an `autoMemoryDirectory` relocation is honored only where a settings file was read, and its project/local trust gate cannot be confirmed by a static read",
+    );
+  }
+  const workflowDirs = [
+    found.projectRoot ? path.join(found.projectRoot, ".claude", "workflows") : null,
+    found.userDir ? path.join(found.userDir, "workflows") : null,
+  ].filter(Boolean);
+  if (workflowDirs.some(exists)) {
+    notes.push("saved workflow scripts (.claude/workflows/, ~/.claude/workflows/, plugin workflows/) are documented but explicit-invocation only, so assay does not discover them — their absence never falsifies the always-loaded byte total or the load order");
+  }
+  return notes;
 }
 
 module.exports = {

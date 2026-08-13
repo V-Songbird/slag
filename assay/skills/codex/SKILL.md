@@ -2,13 +2,11 @@
 name: codex
 description: >-
   Audits the instruction system Codex loads for a project — the AGENTS.md chain
-  it actually reads, the .agents/skills it lists with their agents/openai.yaml
-  metadata, and the hooks wired around them — and reports what never takes
-  effect: a file shadowed further up the chain, a file the host stops reading at
-  its size limit, a rule pointing at a path that no longer exists, two rules that
-  contradict each other, and a skill description too long to survive the listing
-  budget. Findings only, with no letter grade and no wording score, because those
-  weights were measured against a different host. Use when the user wants their
+  it reads, the .agents/skills it lists, the hooks around them — and reports what
+  never takes effect. A file shadowed or past the size limit. A path that no
+  longer exists. Two rules that contradict each other. Findings only, with no
+  letter grade, because that rubric was measured on a different host.
+  Use when the user wants their
   Codex setup checked — e.g. "audit my AGENTS.md", "check my Codex instructions",
   "what does Codex actually load here", "which AGENTS.md files get ignored",
   "audit the Codex skills" — or invokes /assay:codex with any flags. Do NOT use
@@ -21,10 +19,11 @@ allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent
 # assay:codex
 
 Every `assay.js` call that reads or writes the project's instruction files
-carries `--host codex` — `scan`, `report`, `plan`, `apply`, `validate`. The
-profile decides which files are sources, which analyses apply, and what
-`validate` checks, so never drop it partway through. `rollback` and `clean` work
-off the journal and take no host.
+carries `--host codex` only where it runs discovery — `scan`, `remeasure`,
+`ci` and `validate`. Every other command reads the host off the saved records and
+refuses the flag outright. The profile decides which files are sources, which
+analyses apply, and what `validate` checks, so pass it wherever it is taken and
+nowhere else. `rollback` and `clean` work off the journal and take no host.
 
 `--startup <path>` belongs to this skill: Codex reads the chain from the project
 root down to the directory the session began in, so auditing a session that
@@ -139,7 +138,7 @@ Without the flag, write no `_candidates` key at all.
 ## 3. Report
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" report --host codex
+node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" report
 ```
 
 Bare, this prints the short report: what was looked at, **Fix these first**,
@@ -259,17 +258,20 @@ this flow is going to write.
   design and `clean` never deletes a plan artifact: the plan file **is** the park
   record.
 
-**Then run the transaction**, `--host codex` on every command:
+**Then run the transaction.** Only `validate` re-scans, so it is the only step
+here that takes `--host codex`; the rest read the host off the plan and the
+journal.
 
-1. `plan --from .assay-tmp/draft-plan.json --host codex`. Exit 1 means the draft
+1. `plan --from .assay-tmp/draft-plan.json`. Exit 1 means the draft
    was rejected — an anchor that is not in the file, an anchor that matches
    twice, a promotion with no provenance. Fix what the message names and rerun;
    never route around a rejection by editing the file yourself.
 2. **Preview from the plan artifact, not from your draft.** Read
-   `.assay/plan-<id>.json` and show the user each change id, the target path, why
+   the `planFile` path `plan` printed — `.assay/plan-<planId>.json`, named
+   for the plan and not for a change id — and show the user each change id, the target path, why
    that mechanism fits, and the exact `old` → `new` text.
-3. **Collect approval per change**, then `apply --change <id> --host codex` with
-   exactly the ids approved — or `apply --batch fix-batch --host codex` under
+3. **Collect approval per change**, then `apply --change <id>` with
+   exactly the ids approved — or `apply --batch fix-batch` under
    `--fix`. There is no apply-everything default. A stale file exits 1 naming
    both fingerprints and writes nothing; re-plan rather than forcing it. A write
    whose result does not parse is restored and exits 1.
