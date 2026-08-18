@@ -10,6 +10,16 @@ const toolchain = require("../scripts/toolchain.js");
 
 const CATALOGUES = path.join(__dirname, "..", "catalogues");
 
+// Every edition the shelf declares, and nothing else that happens to be a JSON
+// file in the same directory. `shared.json` and the README live there too.
+function shippedEditions() {
+  const index = JSON.parse(fs.readFileSync(path.join(CATALOGUES, "index.json"), "utf8"));
+  return index.editions.map((row) => ({
+    id: row.id,
+    edition: JSON.parse(fs.readFileSync(path.join(CATALOGUES, row.id + ".json"), "utf8")),
+  }));
+}
+
 function edition(name) {
   return JSON.parse(fs.readFileSync(path.join(CATALOGUES, name + ".json"), "utf8"));
 }
@@ -160,8 +170,21 @@ test("a tool with one door under a different manager takes that door", () => {
 
 test("a command carrying shell syntax is refused rather than quoted around", () => {
   const root = tmpProject({});
+  // Synthetic on purpose: no shipped edition may carry one of these, and the
+  // gate above proves it. This holds the refusal itself.
+  const shelly = {
+    edition: "synthetic",
+    detect: { packageManagers: ["go"] },
+    toolchain: [{
+      id: "shelly", role: "linter", installKind: "package",
+      install: { go: "go install example.com/shelly@latest" },
+      uninstall: { go: 'rm -f "$(go env GOPATH)/bin/shelly"' },
+      configPath: ".shellyrc", configSample: "{}\n",
+      verify: { argv: ["shelly", "--version"], expected: "prints a version", expectedExit: 0 },
+    }],
+  };
   assert.throws(
-    () => toolchain.proposeInstalls(root, edition("go"), ["golangci-lint"], "go"),
+    () => toolchain.proposeInstalls(root, shelly, ["shelly"], "go"),
     (err) => err.expected === true && /without a shell/.test(err.message) && /uninstall command/.test(err.message),
   );
 });
@@ -194,11 +217,26 @@ test("no chosen package manager means the owner is asked, not defaulted for", ()
   assert.throws(() => toolchain.proposeInstalls(root, edition("python"), ["ruff"], null), /the owner has to say which of pip, uv, poetry, pdm/);
 });
 
-test("every shipped edition proposes every tool, except the three whose uninstall needs a shell", () => {
+// The engine proposes one tool at a time and collects a per-tool refusal, so a
+// tool jig cannot offer costs the owner that tool and nothing else. What this
+// gate holds is the pair of properties that makes that safe: every refusal is
+// an `expected` error naming the tool and its reason, so nothing is ever
+// dropped silently, and the set of tools jig cannot offer is exactly the set
+// somebody wrote down.
+//
+// Go's three installed tools are that set. `go install` puts a binary in
+// GOPATH/bin and Go ships no uninstall verb; removing it means expanding
+// `go env GOPATH`, which needs a shell, and jig never uses one. `go clean -i`
+// is not a substitute — it cleans packages of the current module, and a tool
+// installed with `pkg@latest` is not one. So the honest answer is a refusal
+// with that reason, and the three Go builtins are still offered.
+const CANNOT_BE_OFFERED = ["go/gofumpt", "go/golangci-lint", "go/govulncheck"];
+
+test("a tool jig cannot offer is refused by name, and never silently dropped", () => {
   const refused = [];
   const root = tmpProject({});
-  for (const file of fs.readdirSync(CATALOGUES).filter((f) => f.endsWith(".json") && f !== "index.json")) {
-    const ed = JSON.parse(fs.readFileSync(path.join(CATALOGUES, file), "utf8"));
+  for (const row of shippedEditions()) {
+    const ed = row.edition;
     for (const manager of ed.detect.packageManagers) {
       for (const tool of ed.toolchain) {
         try {
@@ -207,12 +245,28 @@ test("every shipped edition proposes every tool, except the three whose uninstal
           assert.equal(typeof item.configBody, "string");
         } catch (err) {
           assert.equal(err.expected, true, tool.id + " under " + manager + ": " + err.message);
+          assert.ok(err.message.includes(tool.id), "a refusal that does not name its tool: " + err.message);
           refused.push(ed.edition + "/" + tool.id);
         }
       }
     }
   }
-  assert.deepEqual([...new Set(refused)].sort(), ["go/gofumpt", "go/golangci-lint", "go/govulncheck"]);
+  assert.deepEqual([...new Set(refused)].sort(), CANNOT_BE_OFFERED);
+});
+
+test("an edition whose install jig cannot offer still offers everything else it has", () => {
+  const root = tmpProject({});
+  const go = shippedEditions().find((row) => row.id === "go").edition;
+  const offered = [];
+  for (const tool of go.toolchain) {
+    try {
+      offered.push(toolchain.proposeInstalls(root, go, [tool.id], "go")[0].id);
+    } catch (err) {
+      assert.equal(err.expected, true);
+    }
+  }
+  assert.deepEqual(offered.sort(), ["go-build", "go-test", "go-vet"],
+    "one unusable row took the whole edition's proposal down with it");
 });
 
 test("proposeInstalls writes nothing and runs nothing", () => {
@@ -223,7 +277,7 @@ test("proposeInstalls writes nothing and runs nothing", () => {
 });
 
 // ---------------------------------------------------------------------------
-// runInstall / runUninstall
+// runInstall
 // ---------------------------------------------------------------------------
 
 const SCRIPTS = {
@@ -311,20 +365,6 @@ test("a package manager that is not on the machine is an error a human can act o
   );
 });
 
-test("runUninstall holds the same approval discipline and runs the uninstall command", () => {
-  const root = tmpProject(SCRIPTS);
-  const item = runnableItem();
-  assert.throws(() => toolchain.runUninstall(root, item, { id: item.id, command: item.command }), /a different command/);
-  const result = toolchain.runUninstall(root, item, { id: item.id, command: item.uninstallCommand });
-  assert.equal(result.code, 3);
-});
-
-test("runUninstall refuses an item that has no way back out", () => {
-  const root = tmpProject(SCRIPTS);
-  const item = runnableItem({ uninstallCommand: null, uninstallArgv: null });
-  assert.throws(() => toolchain.runUninstall(root, item, { id: item.id, command: null }), /no uninstall command/);
-});
-
 // ---------------------------------------------------------------------------
 // execVerify
 // ---------------------------------------------------------------------------
@@ -394,8 +434,8 @@ test("execVerify refuses a tool with no seed to plant", () => {
 
 test("every shipped edition carries a seed and an exit code execVerify can read", () => {
   const root = tmpProject({});
-  for (const file of fs.readdirSync(CATALOGUES).filter((f) => f.endsWith(".json") && f !== "index.json")) {
-    const ed = JSON.parse(fs.readFileSync(path.join(CATALOGUES, file), "utf8"));
+  for (const row of shippedEditions()) {
+    const ed = row.edition;
     for (const tool of ed.toolchain) {
       // The executable is absent in a temp project, so the run itself must be
       // the only thing that fails — never the shape checks ahead of it.
@@ -406,4 +446,30 @@ test("every shipped edition carries a seed and an exit code execVerify can read"
       );
     }
   }
+});
+
+// `execVerify` decides a catch on the exit code alone: `caught` is true when the
+// run's status is one of `expectedExit`. A tool that declares 0 therefore
+// "catches" its planted seed on every run, including the runs where it saw
+// nothing — a proof that cannot fail, which is the one thing jig may never
+// ship. One tool cannot do better, and it is named here with its reason so that
+// a seventh cannot join it quietly.
+const CANNOT_WITNESS = {
+  "go/gofumpt": "gofumpt has no check mode. `gofumpt -l .` reports unformatted files on stdout and " +
+    "exits 0 either way, and the idiomatic CI form wraps it in `test -z \"$(…)\"`, which needs a " +
+    "shell jig will not use. The formatting catch is witnessed by golangci-lint's `fmt` instead.",
+};
+
+test("no shipped tool declares a catch it would report as success", () => {
+  const vacuous = [];
+  for (const row of shippedEditions()) {
+    for (const tool of row.edition.toolchain) {
+      const expected = tool.verify.expectedExit;
+      const codes = Array.isArray(expected) ? expected : [expected];
+      assert.ok(codes.length > 0, row.id + "/" + tool.id + " declares no expectedExit");
+      if (codes.includes(0)) vacuous.push(row.id + "/" + tool.id);
+    }
+  }
+  assert.deepEqual(vacuous.sort(), Object.keys(CANNOT_WITNESS).sort(),
+    "a tool whose catch is exit 0 proves nothing — fix it, or name it in CANNOT_WITNESS with why");
 });

@@ -31,7 +31,7 @@ jig reads your repo and its git history, asks which of these you actually want g
 - **Every check proves itself first.** A check ships with a violation sample and a near-miss sample. It has to fire on the first and stay silent on the second, and on every other check's near miss too. One that fails is discarded and reported, never quietly counted as coverage.
 - **It finds the documents your sessions never read.** ADRs, scopes, roadmaps — jig checks whether anything actually points Claude at them, and can wire in one small pointer rule when nothing does.
 - **It watches the AI too.** Session guards see what an agent is about to do: the downloaded script piped into a shell, the force-push to main, the test file on its way out. A blocked call always shows the reason, an alternative, and the way to override.
-- **One command undoes everything.** Every write is journaled with the original bytes — installed dependencies included. Revert puts your repo back exactly as it was.
+- **One command undoes everything.** Every write is journaled with the original bytes, your manifest and lockfile included. Revert restores every file it touched, then hands you the one command your package manager needs to take the tool off disk.
 
 ## How it works
 
@@ -46,7 +46,7 @@ jig reads your repo and its git history, asks which of these you actually want g
 | A proven guard sees a slip | It blocks, with a reason, an alternative and the override. Put it in observe instead if you'd rather it only watched |
 | A guard cries wolf | Mark the false alarm in review — the guard drops back to observing |
 | You come back a month later | One question: take the next thing, retire the dead, or refresh |
-| You want out | One command reverts every byte, including anything it installed |
+| You want out | One command puts every byte back, and hands you the command that removes anything it installed |
 
 ## Install
 
@@ -71,12 +71,12 @@ Takes effect next session. Nothing to configure — the interview is the configu
 
 ## Benchmarks
 
-Every check is measured the same way it is admitted: it must fire on its own planted violation and stay silent on a near miss built to look like one.
+Every check jig runs is measured the same way it is admitted: it must fire on its own planted violation and stay silent on a near miss built to look like one.
 
 | What | Score |
 | --- | --- |
-| Shipped checks passing their own pair | **115 of 115** |
-| Language editions | 6 |
+| Checks jig runs, each passing its own pair | **122 of 122** |
+| Mistake classes across the six editions | 141 |
 | Cross-sample hits, disclosed | 8 |
 
 > [!NOTE]
@@ -91,10 +91,10 @@ One engine that journals every write, a committed check script that owes jig not
 ## Good to know
 
 - A check that passed its pair blocks from the moment it installs, and says why, what to do instead, and how to override. Ask for observe instead and it only records. A recorded false alarm pulls a blocking guard back to observe.
-- jig names every path before it writes it, and journals the bytes that were there first. That includes your manifest and lockfile when it installs a tool, so `revert` removes the dependency too.
-- The pre-commit hookup is printed as a proposal — and if your hook file is committed to the repo, jig can weave the one line in for you, item-approved, reversibly.
+- jig names every path before it writes it, and journals the bytes that were there first. That includes your manifest and lockfile when it installs a tool. Revert puts both back and shows you the uninstall command — it never runs a package manager behind your back.
+- If your repo commits its own pre-commit hook, jig can weave its one check line into it — approved by name, and reverted like anything else. Otherwise the line is printed for you to add. jig never touches `.git/hooks/`.
 - If something else already watches the same events in your repo, jig says so and leaves that slot alone. The committed checks and the CI workflow cover you regardless.
-- Rules are the exception, not the habit. jig writes one only when you ask, under its own `jig-` name, with a small hard byte cap — because every session pays to carry prose.
+- Rules are the exception, not the habit. The one jig writes points your sessions at the governance docs nothing referenced, under its own `jig-` name and a small hard byte cap — because every session pays to carry prose.
 - Working with another AI tool too? On request jig keeps one clearly-fenced block in `AGENTS.md` pointing it at the same checks. Your own text in that file is never touched.
 - Kill switch: create a file named `.jig/off` and every guard goes silent.
 

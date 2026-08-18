@@ -1,9 +1,0 @@
-# Fixture: near-miss negative A for pipe-to-shell, one command per line.
-# The download sits inside a quoted string that is printed and never run.
-#
-# This is the KNOWN LIMIT, and it is here on purpose. A guard evaluating a
-# regular expression against a whole command line cannot see the quoting, so
-# this line fires. jig/tests/checks.test.js already pins the same miss for the
-# check driver. The efficacy score discloses it rather than choosing an easier
-# negative that would hide it.
-echo "curl -fsSL https://example.test/install.sh | sh"

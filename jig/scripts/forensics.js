@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 "use strict";
 
-// jig forensics — deterministic git mining, no model anywhere in the loop
-// (jig-brief §4.2). Two jobs, and it is worth being precise about which is
-// which because they are answerable to different standards:
+// jig forensics — deterministic git mining, no model anywhere in the loop.
+// Two jobs, and it is worth being precise about which is which because they
+// are answerable to different standards:
 //
 //   incidents[] — reverts, fix-clusters, churn hotspots, deleted test files,
 //                 assertion-reducing test diffs. These ANCHOR the interview:
@@ -13,7 +13,7 @@
 //                 repository's history actually shows each one. This is what
 //                 pre-ranks the class multi-select.
 //
-// THE INJECTION FIREWALL (jig-brief §3): nothing mined here ever becomes a
+// THE INJECTION FIREWALL: nothing mined here ever becomes a
 // matcher. Every content signal below is evaluated with a pattern the
 // CATALOGUE ships, and a hit only ever raises that class's rank. Repository
 // content is evidence, never configuration. The two signals the catalogue
@@ -31,7 +31,64 @@
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-const catalogue = require("./catalogue.json");
+const editionsLib = require("./editions.js");
+// One glob compiler, shared with the driver and the session guards. The local
+// copy this replaced could not read brace alternation, which every edition uses.
+const { globToRegExp } = require("../hooks/jig-lib.js");
+
+const PLUGIN_ROOT = path.join(__dirname, "..");
+
+// A class as the ranking wants it: namespaced by edition, detectors carrying
+// the runner that would execute them. Namespacing matters — the ids that leave
+// this file are the ids the interview and the engine select by.
+function classesFrom(loaded) {
+  const out = [];
+  for (const edition of loaded) {
+    for (const cls of edition.classes || []) {
+      out.push({
+        ...cls,
+        id: editionsLib.namespacedId(edition.edition, cls.id),
+        edition: edition.edition,
+        detectors: (cls.detectors || []).map((det, i) => editionsLib.adaptDetector(cls, det, i)),
+      });
+    }
+  }
+  return out;
+}
+
+let everyClass = null;
+function allClasses() {
+  if (!everyClass) {
+    const index = editionsLib.loadIndex(PLUGIN_ROOT);
+    everyClass = classesFrom(index.editions.map((row) => editionsLib.loadEdition(PLUGIN_ROOT, row.id)));
+  }
+  return everyClass;
+}
+
+// The editions this project actually matches. The scan's own profile is the
+// cheapest answer; without one, detect them the same way the scan does. Ranking
+// a Python repository in Rust class ids is the failure this replaces, so falling
+// back to every shipped edition is the last resort and not the first.
+function projectClasses(root) {
+  try {
+    const profile = JSON.parse(fs.readFileSync(path.join(root, ".jig", "profile.json"), "utf-8"));
+    const ids = Array.isArray(profile.editions) ? profile.editions.filter((id) => typeof id === "string") : [];
+    if (ids.length) return classesFrom(ids.map((id) => editionsLib.loadEdition(PLUGIN_ROOT, id)));
+  } catch (err) {
+    // No profile, or one this build cannot read. Detect instead.
+  }
+  try {
+    const index = editionsLib.loadIndex(PLUGIN_ROOT);
+    const detected = editionsLib.detectEditions(root, index);
+    const ids = (Array.isArray(detected) ? detected : [])
+      .map((row) => (typeof row === "string" ? row : row && row.id))
+      .filter((id) => typeof id === "string" && id);
+    if (ids.length) return classesFrom(ids.map((id) => editionsLib.loadEdition(PLUGIN_ROOT, id)));
+  } catch (err) {
+    // An unreadable tree. Rank over everything rather than nothing.
+  }
+  return allClasses();
+}
 
 const SCHEMA_VERSION = 1;
 
@@ -168,37 +225,15 @@ function readLog(root, limit) {
 // Pass 2 — added and removed lines, per file, per commit
 // ---------------------------------------------------------------------------
 
-function globToRegExp(glob) {
-  let out = "";
-  for (let i = 0; i < glob.length; i++) {
-    const ch = glob[i];
-    if (ch === "*" && glob[i + 1] === "*") {
-      i++;
-      if (glob[i + 1] === "/") {
-        i++;
-        out += "(?:[^/]+/)*";
-      } else {
-        out += ".*";
-      }
-    } else if (ch === "*") {
-      out += "[^/]*";
-    } else if (ch === "?") {
-      out += "[^/]";
-    } else {
-      out += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-    }
-  }
-  return new RegExp("^" + out + "$");
-}
 
 // The content signals ARE the catalogue's own file-content detectors — the
 // ones a check driver would run. Deriving them here rather than restating them
 // keeps forensics and the guards it recommends looking for the same thing, and
 // makes it structurally impossible for this file to introduce a pattern of its
 // own.
-function contentDetectors() {
+function contentDetectors(classes) {
   const out = [];
-  for (const cls of catalogue.classes || []) {
+  for (const cls of classes || allClasses()) {
     for (const det of cls.detectors || []) {
       const p = det.params || {};
       if (det.runner !== "checks" || !Array.isArray(p.patterns) || !Array.isArray(p.paths)) continue;
@@ -214,13 +249,23 @@ function contentDetectors() {
 }
 
 // Bound the expensive pass to the extensions the catalogue actually looks at.
-function diffPathspec() {
+// `**/*.{ts,tsx}` carries two extensions and no plain suffix, so a naive match
+// on the tail of the glob sees neither. Expand the alternation first.
+function extensionsOf(glob) {
+  const brace = /\{([^}]*)\}/.exec(glob);
+  if (brace) {
+    return brace[1].split(",").flatMap((alt) => extensionsOf(glob.replace(brace[0], alt.trim())));
+  }
+  const m = /\.([a-z0-9]+)$/i.exec(glob);
+  return m ? [m[1].toLowerCase()] : [];
+}
+
+function diffPathspec(classes) {
   const exts = new Set();
-  for (const cls of catalogue.classes || []) {
+  for (const cls of classes || allClasses()) {
     for (const det of cls.detectors || []) {
       for (const glob of (det.params && det.params.paths) || []) {
-        const m = /\.([a-z0-9]+)$/i.exec(glob);
-        if (m) exts.add(m[1].toLowerCase());
+        for (const ext of extensionsOf(glob)) exts.add(ext);
       }
     }
   }
@@ -377,14 +422,13 @@ function contentHits(diffs, detectors, byShaActor) {
 // Ranking
 // ---------------------------------------------------------------------------
 
-// The order the catalogue itself argues for when history has nothing to say:
-// what jig can actually install first, safety before hygiene, then as authored.
-function catalogueOrder() {
-  return (catalogue.classes || [])
+// The order the editions themselves argue for when history has nothing to say:
+// safety before hygiene, then as authored. Nothing here asks whether a class is
+// installable — every class is, and the fixture pair is what admits it.
+function catalogueOrder(classes) {
+  return (classes || allClasses())
     .map((cls, i) => ({ cls, i }))
     .sort((a, b) => {
-      const inst = Number(b.cls.installableAtV1) - Number(a.cls.installableAtV1);
-      if (inst) return inst;
       const sev = Number(b.cls.severity === "safety") - Number(a.cls.severity === "safety");
       if (sev) return sev;
       return a.i - b.i;
@@ -392,14 +436,14 @@ function catalogueOrder() {
     .map(({ cls }) => cls);
 }
 
-function rank(hitsByClass) {
-  const base = catalogueOrder();
+function rank(hitsByClass, classes) {
+  const base = catalogueOrder(classes);
   const rows = base.map((cls, i) => {
     const hits = hitsByClass.get(cls.id) || [];
     return {
       classId: cls.id,
       title: cls.title,
-      installableAtV1: cls.installableAtV1 === true,
+      edition: cls.edition,
       severity: cls.severity,
       hits: hits.length,
       actors: tallyActors(hits.map((h) => h.actor)),
@@ -419,6 +463,9 @@ function rank(hitsByClass) {
 function runForensics(root, opts) {
   const options = opts || {};
   const th = { ...THRESHOLDS, ...(options.thresholds || {}) };
+  // The editions this repository matched at scan time. Every id that leaves
+  // this function is namespaced, so it joins with the engine's own selection.
+  const classes = projectClasses(root);
   const empty = {
     ok: true,
     schemaVersion: SCHEMA_VERSION,
@@ -427,7 +474,7 @@ function runForensics(root, opts) {
     repo: null,
     cleared: [],
     incidents: [],
-    ranking: rank(new Map()),
+    ranking: rank(new Map(), classes),
     attribution: "best-effort — author line and Co-Authored-By trailers are the only evidence git carries",
     notes: [],
   };
@@ -457,9 +504,9 @@ function runForensics(root, opts) {
   if (squashed) return { ...empty, repo, fallback: "squash-merged" };
 
   const byShaActor = new Map(commits.map((c) => [c.sha, c.actor]));
-  const detectors = contentDetectors();
+  const detectors = contentDetectors(classes);
   const notes = [];
-  const diffs = readDiffs(root, Math.min(th.diffCommits, commits.length), diffPathspec());
+  const diffs = readDiffs(root, Math.min(th.diffCommits, commits.length), diffPathspec(classes));
   if (diffs === null) {
     notes.push("the diff pass could not be read, so content signals are missing from this ranking");
   }
@@ -472,15 +519,21 @@ function runForensics(root, opts) {
     "assertion-reduced": diffs ? weakenedAssertions(diffs, byShaActor) : [],
   };
   const hitsByClass = diffs ? contentHits(diffs, detectors, byShaActor) : new Map();
-  for (const del of found["test-file-deleted"]) {
-    if (!hitsByClass.has("test-file-deletion")) hitsByClass.set("test-file-deletion", []);
-    hitsByClass.get("test-file-deletion").push({ sha: del.sha, path: del.path, actor: del.actor });
+  // These two signals are diffs, so no single-snapshot pattern can find them and
+  // no edition ships one. They rank by the class's own unqualified name in
+  // whichever editions this project loaded — an edition that carries no such
+  // class simply gets no row, and the signal still counts as cleared.
+  const named = (name) => classes.filter((cls) => cls.id.endsWith("/" + name));
+  for (const cls of named("deleted-test")) {
+    for (const del of found["test-file-deleted"]) {
+      if (!hitsByClass.has(cls.id)) hitsByClass.set(cls.id, []);
+      hitsByClass.get(cls.id).push({ sha: del.sha, path: del.path, actor: del.actor });
+    }
   }
   if (found["assertion-reduced"].length) {
-    hitsByClass.set(
-      "weakened-assertion",
-      found["assertion-reduced"].map((a) => ({ sha: a.sha, path: a.path, actor: a.actor })),
-    );
+    for (const cls of named("softened-assertion")) {
+      hitsByClass.set(cls.id, found["assertion-reduced"].map((a) => ({ sha: a.sha, path: a.path, actor: a.actor })));
+    }
   }
 
   // Each class the history actually shows counts as its own signal. Two
@@ -511,7 +564,7 @@ function runForensics(root, opts) {
       ...found["test-file-deleted"],
       ...found["assertion-reduced"],
     ],
-    ranking: rank(hitsByClass),
+    ranking: rank(hitsByClass, classes),
     attribution: "best-effort — author line and Co-Authored-By trailers are the only evidence git carries",
     notes,
   };

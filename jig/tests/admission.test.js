@@ -184,7 +184,7 @@ test("every shipped edition pair still passes its own admission", () => {
       if (typeof cls.fixtures?.violation !== "string") continue;
       if (!(cls.detectors || []).some((d) => d.lever === "check-driver")) continue;
       classes++;
-      const result = admission.ownPair({ ...cls, commentSyntax: edition.commentSyntax }, blank);
+      const result = admission.ownPair({ ...cls, commentSyntax: edition.detect.commentSyntax }, blank);
       if (!result.passes) failures.push(`${edition.edition}/${cls.id}: ${result.why}`);
     }
   }

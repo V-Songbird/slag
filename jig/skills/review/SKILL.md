@@ -11,7 +11,7 @@ description: >-
   "what did jig catch", "that jig warning was wrong", "stop the force-push
   guard blocking", "has anything drifted" — or invokes /jig:review. Do NOT use
   to install or set up guardrails — that is /jig:jig.
-argument-hint: "[fp <guardId>] [disarm <guardId>] [retire <guardId>]"
+argument-hint: "[fp <guardId>] [arm <guardId>] [disarm <guardId>] [retire <guardId>] [rerun]"
 allowed-tools: Bash, Read, AskUserQuestion
 ---
 
@@ -30,6 +30,10 @@ observe is something the owner picks, in either direction, at any time. There is
 no clean-session count that earns anything, and nothing here is a waiting
 period.
 
+If a command here refuses because the install predates the rework, that install
+needs upgrading before any of this reads correctly. Send the user to `/jig:jig`,
+which runs the migration, and stop.
+
 ## 1. Read the ledger
 
 ```
@@ -39,6 +43,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" review
 `guards[]` carries one row per installed guard:
 
 - `fired` — times it matched. `wavedOff` — false positives recorded.
+- `problem` — non-null means this guard is broken, not quiet: its check module
+  would not load, or it carries nothing for the event it is registered on. Say
+  so first and separately. A broken guard reported as "never fired" is coverage
+  the user thinks they have.
 - `mode` — `armed` (it blocks) or `observe` (it records and lets the call
   through). `why` states what put it there; print it verbatim, because
   paraphrasing an honest limit blurs it.
@@ -84,9 +92,12 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" arm <guardId>
 
 Back to blocking. From the next session a match denies the call and shows the
 reason, the alternative and the override path. Say that plainly before the user
-answers. Both commands re-check the guard's proof hash and refuse if the check
-module or its fixtures no longer match what was proven — report a refusal
-verbatim, never retry.
+answers.
+
+`arm` re-derives the guard's proof and refuses when the check module or its
+fixtures no longer match what was proven — report that refusal verbatim, never
+retry. `disarm` checks nothing, because lowering a guard to observe is always
+safe.
 
 ## 4. Retire a guard
 

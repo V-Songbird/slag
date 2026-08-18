@@ -4,10 +4,10 @@
 // The single dispatch point. `hooks.json` registers exactly one shell-free
 // entry per event and passes the event name as argv[1], so PreToolUse[Bash] and
 // PostToolUse[Edit|Write] cost one node process each and every guard for that
-// event is evaluated inside it — no chaining, no second spawn (jig-brief §3).
+// event is evaluated inside it — no chaining, no second spawn.
 //
 // Two spawns ride every Bash and every Edit/Write in every repo where jig is
-// installed (sign-off S2). That is why the two instant-exit checks happen
+// installed. That is why the two instant-exit checks happen
 // before stdin is read and before the config is parsed: in a repository that
 // never ran the interview, this file does two `existsSync` calls and stops.
 

@@ -4,6 +4,30 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.1.0] — 2026-08-18
+
+### Added
+
+- Upgrading an install made by an older jig now happens on its own. Run `/jig:jig` on a repo it already guards and it rewrites every installed check into the shape this release reads, keeps each guard's history, and reverts like any other change.
+- jig can weave its check line into a pre-commit hook your repository commits, approved by name and reversible. It still never touches `.git/hooks/`, and it still prints the line for you when there is nothing to weave into.
+- Answers the interview already collects now reach the install: guards that watch instead of block, the pointer rule for governance documents nothing references, and the `AGENTS.md` block for another AI tool. All three were being asked about and then dropped.
+
+### Changed
+
+- Seven more mistakes are caught. Checks that had been written around a bug in how jig reads comments and strings are back, including two about switching your linter off — the mistake jig exists to catch.
+- The history mining reads your project's own language. It was ranking every repository in one language's names, and looking at eight file types instead of twenty-eight.
+- Guard reports say when a guard is broken rather than just quiet, so a check that will not load stops reading as a check that never fired.
+
+### Fixed
+
+- Checks that read comments in Python, Ruby, PowerShell and .NET no longer describe a limitation that was fixed a release ago. Nineteen of them said your comments were read as live code; they are not.
+- Revert is described honestly: it puts every file back and hands you the one command that takes an installed package off disk. It never runs your package manager for you.
+- The Go toolchain no longer offers three tools with a removal command that does not remove anything. They are named, with the reason, and the rest of the Go tooling is still offered.
+
+### Removed
+
+- Three hand-written rule templates and the flag that emitted them. No selection could reach them, so nothing that worked has gone.
+
 ## [2.0.0] — 2026-08-13
 
 ### Added

@@ -497,7 +497,7 @@ test("release gate G1: no check ships whose fixture pair fails — all 141 pairs
       assert.equal(typeof f.nearMiss, "string", row.id + "/" + cls.id + " ships no near-miss fixture");
       pairs++;
       if (!(cls.detectors || []).some((d) => d.lever === "check-driver")) continue;
-      const result = admission.ownPair({ ...cls, commentSyntax: edition.commentSyntax }, lib.blankRegions);
+      const result = admission.ownPair({ ...cls, commentSyntax: edition.detect.commentSyntax }, lib.blankRegions);
       if (!result.passes) failures.push(row.id + "/" + cls.id + ": " + result.why);
     }
   }

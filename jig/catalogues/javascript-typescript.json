@@ -445,6 +445,22 @@
       "severity": "safety",
       "detectors": [
         {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "//[ \\t]*(?:it|test|describe)(?:\\.\\w+)?[ \\t]*\\("
+            ],
+            "paths": [
+              "**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
           "lever": "tool-rule",
           "actor": "human-ci",
           "confidence": "deterministic",
@@ -459,7 +475,7 @@
         "violation": "import { describe, it, expect } from 'vitest';\nimport { toSlug } from '../src/slug.js';\n\ndescribe('toSlug', () => {\n  // it('transliterates accented characters', () => {\n  //   expect(toSlug('Crème Brûlée')).toBe('creme-brulee');\n  // });\n\n  it('lowercases and hyphenates', () => {\n    expect(toSlug('Hello World')).toBe('hello-world');\n  });\n});\n",
         "nearMiss": "import { describe, it, expect } from 'vitest';\nimport { toSlug } from '../src/slug.js';\n\ndescribe('toSlug', () => {\n  // Transliteration is handled by the Intl segmenter, see ADR-014.\n  // The expectation below is deliberately exact rather than a regex.\n  it('transliterates accented characters', () => {\n    expect(toSlug('Crème Brûlée')).toBe('creme-brulee');\n  });\n\n  it('lowercases and hyphenates', () => {\n    expect(toSlug('Hello World')).toBe('hello-world');\n  });\n});\n"
       },
-      "gapNotes": "No check-driver detector: the driver blanks comments before matching, so by construction it can never see commented-out code. Only the linter can catch this class. The rule is also prose-heuristic inside the plugin — a comment that merely mentions `it(` in an explanatory sentence can trip it, and a commented-out test written without the `it(`/`test(` call shape (for example a lone `expect(...)` line) is missed.",
+      "gapNotes": "Heuristic, because a comment that merely quotes a test call — a note showing the `it(` signature, or a code sample in a docblock — is reported the same as a real test commented out. It recognises the call shape only: a commented-out test written without its `it(`/`test(`/`describe(` line, for example a stranded `expect(...)` block whose header was deleted, is missed, and so is a suite disabled by wrapping it in a `/* … */` block, whose inner lines carry no `//`. Nothing here dates a suppression, so a test commented out this session and one commented out a year ago are reported identically.",
       "evidence": {
         "tier": "documented",
         "source": "vitest/no-commented-out-tests listed in @vitest/eslint-plugin; jest/no-commented-out-tests confirmed in eslint-plugin-jest."
@@ -623,7 +639,7 @@
         "violation": "export interface Envelope {\n  id: string;\n  payload: any;\n}\n\nexport function decode(raw: any): Envelope {\n  const parsed = JSON.parse(raw) as any;\n  const headers: Record<string, any> = parsed.headers ?? {};\n  const items: any[] = parsed.items ?? [];\n  return { id: String(headers.id), payload: items };\n}\n",
         "nearMiss": "export interface Envelope {\n  id: string;\n  payload: unknown;\n}\n\ntype AnyOf<T> = T[keyof T];\nconst anyMatch = (xs: readonly string[]): boolean => xs.some(Boolean);\n\nexport function decode(raw: string): Envelope {\n  const parsed: unknown = JSON.parse(raw);\n  if (typeof parsed !== 'object' || parsed === null) throw new TypeError('not an envelope');\n  const headers: Record<string, unknown> = 'headers' in parsed ? (parsed.headers as Record<string, unknown>) : {};\n  const id: AnyOf<{ id: string }> = String(headers['id']);\n  return anyMatch([id]) ? { id, payload: parsed } : { id: '', payload: null };\n}\n"
       },
-      "gapNotes": "Only sees the word `any`. A session that widens to `unknown` and then casts, uses `object`, `Function`, `{}` or an index signature of `Record<string, unknown>` gets the same escape with none of these tokens. The regex also fires on legitimate `any` in ambient declaration files and in third-party type shims, so .d.ts should usually be excluded from the paths glob, and on a call to a function actually named `any` written in value position (`{ check: any(p, xs) }`), which is the one shape that keeps this from being literally exact. It says nothing about implicit any, which only `strict`/`noImplicitAny` catches. A `typescript: strict` tool-rule detector was deleted on 2026-08-13: tsc never reports an explicit `any` at any strictness — `strict`/`noImplicitAny` govern inferred any only — so the row claimed a catch the type checker does not perform.",
+      "gapNotes": "Only sees the word `any`. A session that widens to `unknown` and then casts, uses `object`, `Function`, `{}` or an index signature of `Record<string, unknown>` gets the same escape with none of these tokens. The regex also fires on legitimate `any` in ambient declaration files and in third-party type shims, so .d.ts should usually be excluded from the paths glob, and on a call to a function actually named `any` written in value position (`{ check: any(p, xs) }`), which is the one shape that keeps this from being literally exact. It says nothing about implicit any. tsc reports nothing here at any strictness — `strict` and `noImplicitAny` govern inferred any only, so an explicit `any` compiles clean and the linter is the only tool that objects.",
       "evidence": {
         "tier": "documented",
         "source": "@typescript-eslint/no-explicit-any confirmed in the typescript-eslint rules index (typescript-eslint.io/rules)."
@@ -715,7 +731,7 @@
         "violation": "interface Route { handler?: (req: Request) => Response; prefix?: string }\n\nexport function dispatch(routes: Map<string, Route>, path: string, req: Request): Response {\n  const route = routes.get(path)!;\n  const handler = route.handler!;\n  const segments = path.split('/');\n  const head = segments[1]!;\n  const prefix = route.prefix!.trim();\n  return handler(new Request(prefix + '/' + head, req));\n}\n",
         "nearMiss": "interface Route { handler?: (req: Request) => Response; prefix?: string }\n\nexport function dispatch(routes: Map<string, Route>, path: string, req: Request): Response {\n  const route = routes.get(path);\n  if (!route?.handler) throw new Error(`no handler for ${path}`);\n  const segments = path.split('/');\n  const head = segments[1];\n  if (head === undefined || head !== path) {\n    return new Response(null, { status: 404 });\n  }\n  return route.handler(new Request(`/${head}`, req));\n}\n"
       },
-      "gapNotes": "Heuristic because `!` is overloaded. The lookaround-free patterns avoid `!==`, `!=` and prefix negation by requiring a word, `]` or `)` immediately before the `!`, but `foo(a)!` and `foo(a) !== b` written without the space around the operator can still confuse it in dense expressions. A non-null assertion moved into a helper (`function must<T>(x: T | undefined): T`) has the identical effect and no `!` token. A `typescript: noUncheckedIndexedAccess` tool-rule detector was deleted on 2026-08-13: that flag is what makes the `!` necessary, it never reports the `!` itself, so tsc contributes no detection to this class at all.",
+      "gapNotes": "Heuristic because `!` is overloaded. The lookaround-free patterns avoid `!==`, `!=` and prefix negation by requiring a word, `]` or `)` immediately before the `!`, but `foo(a)!` and `foo(a) !== b` written without the space around the operator can still confuse it in dense expressions. A non-null assertion moved into a helper (`function must<T>(x: T | undefined): T`) has the identical effect and no `!` token. tsc contributes no detection at all: `noUncheckedIndexedAccess` is the flag that makes the `!` necessary in the first place, and it never reports the `!`.",
       "evidence": {
         "tier": "documented",
         "source": "@typescript-eslint/no-non-null-assertion confirmed in the typescript-eslint rules index (typescript-eslint.io/rules)."
@@ -736,6 +752,23 @@
       "severity": "safety",
       "detectors": [
         {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "@ts-nocheck\\b",
+              "@ts-ignore\\b"
+            ],
+            "paths": [
+              "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
           "lever": "tool-rule",
           "actor": "human-ci",
           "confidence": "deterministic",
@@ -754,10 +787,10 @@
         "violation": "// @ts-nocheck\nimport { createClient } from './client.js';\n\nexport async function push(events) {\n  const client = createClient({ retries: 'three' });\n  // @ts-ignore the SDK types are wrong here\n  return client.sendBatch(events, { compress: 1 });\n}\n",
         "nearMiss": "import { createClient } from './client.js';\n\nexport async function push(events: readonly unknown[]) {\n  const client = createClient({ retries: 3 });\n  // @ts-expect-error upstream types omit the compress option; tracked in vendor#412\n  return client.sendBatch(events, { compress: true });\n}\n"
       },
-      "gapNotes": "No check-driver detector, and none is possible. A check-driver detector matching `@ts-ignore`/`@ts-nocheck` was deleted on 2026-08-13 after it missed its own violation fixture: blankRegions in scripts/templates/run.mjs blanks comments unconditionally — it takes only a `strings` option — so the catalogue's `stripComments: false` was inert and both directives were whitespace by the time any pattern ran. Only the linter catches this class, which means it is silent in a repo that does not run ESLint over the file. @ts-expect-error is reported by ban-ts-comment only when it carries no description, and a description of three characters satisfies it. Suppression achieved by excluding the file from tsconfig's include is invisible here — see relaxed-tsconfig-strictness.",
+      "gapNotes": "The check needs the comment text, so it runs with comments intact and will also report an `@ts-ignore` written inside prose — a note explaining why one was removed reads exactly like the directive itself. `@ts-expect-error` is deliberately not matched: it fails the build once the underlying error is fixed, which makes it the honest form; ban-ts-comment reports it only when it carries no description, and a description of three characters satisfies the rule. Suppression achieved by excluding the file from tsconfig's include, or by turning the compiler flag down, leaves no directive in the source at all — see relaxed-tsconfig-strictness.",
       "evidence": {
         "tier": "documented",
-        "source": "@typescript-eslint/ban-ts-comment confirmed in the typescript-eslint rules index, with the documented allow-with-description option value."
+        "source": "@typescript-eslint/ban-ts-comment confirmed in the typescript-eslint rules index, with the documented allow-with-description option value; the @ts-ignore, @ts-nocheck and @ts-expect-error directive spellings are from the TypeScript handbook."
       }
     },
     {
@@ -773,15 +806,33 @@
         "Leaves the suppression in place after the underlying problem is fixed"
       ],
       "severity": "safety",
-      "detectors": [],
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "/\\*\\s*eslint-disable\\s*(?![^*\\n]*--)[^*\\n]*\\*/",
+              "//\\s*eslint-disable-(?:next-)?line(?![^\\n]*--)"
+            ],
+            "paths": [
+              "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
       "fixtures": {
         "violation": "/* eslint-disable */\nimport { spawnSync } from 'node:child_process';\n\nexport function build(target) {\n  // eslint-disable-next-line n/no-sync\n  const out = spawnSync('npm', ['run', target], { encoding: 'utf8' });\n  console.log(out.stdout);\n  return out.status;\n}\n",
         "nearMiss": "import { spawn } from 'node:child_process';\n\nexport function build(target: string): Promise<number> {\n  // eslint-disable-next-line security/detect-child-process -- target is validated against a fixed allowlist above\n  const child = spawn('npm', ['run', target], { stdio: 'inherit' });\n  return new Promise((resolve) => child.on('close', (code) => resolve(code ?? 1)));\n}\n"
       },
-      "gapNotes": "Nothing in this edition detects this class — the detector list is empty on purpose and the class is recorded as a known blind spot. The check-driver patterns that used to sit here (`eslint-disable`, and an inline directive without a `--` reason) were deleted on 2026-08-13 after they missed their own violation fixture: an ESLint directive is only ever a comment, and blankRegions in scripts/templates/run.mjs blanks comments unconditionally — it takes only a `strings` option, so the catalogue's `stripComments: false` was inert. No tool-rule replaces them either: ESLint reports an unused directive through `--report-unused-disable-directives` (a CLI flag, carried in this edition's lint wiring line, not a rule id) and reports nothing at all about a directive that is genuinely in use but unjustified. Catching this needs either a plugin outside this edition's toolchain or a raw-text guard that does not blank comments. Suppressions written into eslint.config.mjs as an ignores entry are the sibling class lint-rule-turned-off, which is also undetected here.",
+      "gapNotes": "The check matches a file-wide `/* eslint-disable */` and an inline `eslint-disable-line` or `eslint-disable-next-line` written without a `--` reason. A directive that carries a reason is treated as clean, so a plausible but false reason passes, and a reason that was true when written stays clean forever after the underlying problem is fixed. Only ESLint's directive spelling is matched: `// biome-ignore lint/suspicious/noExplicitAny: reason` is a different syntax and is not covered. A directive naming a rule that was never going to fire is dead weight rather than a suppression, and this cannot tell the two apart; ESLint reports that through `--report-unused-disable-directives`, a CLI flag carried in this edition's lint wiring rather than a rule id, and reports nothing at all about a directive that is genuinely in use but unjustified. Disabling the rule in eslint.config.mjs instead of in the source is the sibling class lint-rule-turned-off.",
       "evidence": {
         "tier": "documented",
-        "source": "ESLint CLI reference confirms --report-unused-disable-directives and --max-warnings; the reason-comment `--` convention is ESLint's documented directive-description syntax. No detector is claimed."
+        "source": "ESLint CLI reference confirms --report-unused-disable-directives and --max-warnings; the reason-comment `--` convention is ESLint's documented directive-description syntax, which is what the second pattern keys on."
       }
     },
     {
@@ -800,7 +851,7 @@
         {
           "lever": "check-driver",
           "actor": "human-editor",
-          "confidence": "heuristic",
+          "confidence": "deterministic",
           "params": {
             "patterns": [
               "\"(?:strict|strictNullChecks|strictFunctionTypes|strictBindCallApply|strictPropertyInitialization|noImplicitAny|noImplicitThis|alwaysStrict|useUnknownInCatchVariables)\"\\s*:\\s*false",
@@ -822,7 +873,7 @@
         "violation": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2023\",\n    \"module\": \"nodenext\",\n    \"moduleResolution\": \"nodenext\",\n    \"strict\": false,\n    \"noImplicitAny\": false,\n    \"noUncheckedIndexedAccess\": false,\n    \"suppressImplicitAnyIndexErrors\": true,\n    \"allowJs\": true,\n    \"checkJs\": false,\n    \"skipLibCheck\": true,\n    \"noEmit\": true\n  },\n  \"include\": [\"src\"],\n  \"exclude\": [\"src/legacy/importer.ts\"]\n}\n",
         "nearMiss": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2023\",\n    \"module\": \"nodenext\",\n    \"moduleResolution\": \"nodenext\",\n    \"strict\": true,\n    \"noUncheckedIndexedAccess\": true,\n    \"exactOptionalPropertyTypes\": true,\n    \"allowJs\": true,\n    \"checkJs\": true,\n    \"declaration\": false,\n    \"sourceMap\": false,\n    \"skipLibCheck\": true,\n    \"noEmit\": true\n  },\n  \"include\": [\"src\", \"tests\"]\n}\n"
       },
-      "gapNotes": "Downgraded from deterministic to heuristic on 2026-08-13, because the driver's blanking makes the match order-dependent: this detector must run with stripStrings off (the flag names are inside quotes), and with strings left intact blankRegions treats the `/*` inside an ordinary glob such as \"include\": [\"src/**/*\"] as the start of a block comment and blanks everything up to the next `*/` — the rest of the file, in a typical tsconfig. Any relaxed flag written after such a glob is silently missed. It sees a flag written as false but not a flag quietly deleted — removing \"noUncheckedIndexedAccess\" entirely has the same effect and leaves no token, which is the most common way this actually happens. It also cannot judge the exclude list: a new path in \"exclude\" may be a legitimate build split or may be the file that would not compile. Detection is per-file, so a strict base config softened in an extending tsconfig.build.json is only caught if that file is in the paths glob. A `typescript: strict` tool-rule detector was deleted on 2026-08-13: a tsconfig whose strictness has been turned down is exactly the state in which tsc reports nothing, so the type checker cannot detect its own relaxation.",
+      "gapNotes": "It sees a flag written as false but not a flag quietly deleted — removing \"noUncheckedIndexedAccess\" entirely has the same effect and leaves no token, which is the most common way this actually happens. It also cannot judge the exclude list: a new path in \"exclude\" may be a legitimate build split or may be the file that would not compile. Detection is per-file, so a strict base config softened in an extending tsconfig.build.json is only caught if that file is in the paths glob, and strictness inherited from an \"extends\" package is never read at all. tsc contributes nothing: a tsconfig whose strictness has been turned down is exactly the state in which the type checker reports nothing, so it cannot detect its own relaxation.",
       "evidence": {
         "tier": "documented",
         "source": "All flag names verified against the TypeScript TSConfig reference (typescriptlang.org/tsconfig); suppressImplicitAnyIndexErrors is included as a legacy escape hatch and is a deprecated option, so it appears only in older configs."
@@ -840,15 +891,38 @@
         "Downgrades an error to 'warn' knowing the CI line only fails on errors"
       ],
       "severity": "safety",
-      "detectors": [],
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "[\"'][@\\w][\\w@/.-]*[\"']\\s*:\\s*[\"']off[\"']",
+              "[\"'][@\\w][\\w@/.-]*[\"']\\s*:\\s*0\\s*[,}\\n]",
+              "[\"'][@\\w][\\w@/.-]*[\"']\\s*:\\s*[\"']warn[\"']"
+            ],
+            "paths": [
+              "**/eslint.config.mjs",
+              "**/eslint.config.{js,cjs,ts,mts,cts}",
+              "**/.eslintrc.{json,js,cjs}",
+              "**/biome.json",
+              "**/biome.jsonc"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
       "fixtures": {
         "violation": "import js from '@eslint/js';\nimport { defineConfig } from 'eslint/config';\nimport tseslint from 'typescript-eslint';\n\nexport default defineConfig([\n  {\n    files: ['**/*.ts'],\n    extends: [js.configs.recommended, tseslint.configs.recommended],\n    rules: {\n      '@typescript-eslint/no-explicit-any': 'off',\n      '@typescript-eslint/no-floating-promises': 0,\n      'vitest/no-focused-tests': 'warn',\n    },\n  },\n]);\n",
         "nearMiss": "import js from '@eslint/js';\nimport { defineConfig, globalIgnores } from 'eslint/config';\nimport tseslint from 'typescript-eslint';\n\nexport default defineConfig([\n  globalIgnores(['dist/**', 'coverage/**']),\n  {\n    files: ['**/*.ts'],\n    extends: [js.configs.recommended, tseslint.configs.strictTypeChecked],\n    languageOptions: { parserOptions: { projectService: true } },\n    linterOptions: { reportUnusedDisableDirectives: 'error' },\n    rules: {\n      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],\n      '@typescript-eslint/no-explicit-any': 'error',\n      'vitest/no-focused-tests': 'error',\n    },\n  },\n]);\n"
       },
-      "gapNotes": "Nothing in this edition detects this class — the detector list is empty on purpose and the class is recorded as a known blind spot. Three check-driver patterns over eslint.config.* and biome.json were deleted on 2026-08-13 after all three missed their own violation fixture, and the reason is structural, not a typo: every signal here lives inside a string literal (the rule id and the severity), so the detector must run with stripStrings off, and with strings intact blankRegions in scripts/templates/run.mjs reads the `/*` inside the mandatory `files: ['**/*.ts']` glob as the start of a block comment and blanks the rest of the file, rules block included. Turning stripStrings on instead blanks the interior of every quoted rule id and severity, so the patterns have nothing left to match. Even had it run, it was knowingly noisy: turning a core rule 'off' is mandatory when its typescript-eslint replacement is enabled — `'no-unused-vars': 'off'` beside `'@typescript-eslint/no-unused-vars': 'error'` is the documented pairing — and it would have flagged that. No ESLint rule reports a config that disables rules, so there is no tool-rule to fall back on; catching this needs a config-aware check (loading the resolved config and diffing severities), which this lever cannot perform. A rule silently dropped by swapping a strictTypeChecked extends for recommended leaves no 'off' token anywhere and would have been invisible regardless.",
+      "gapNotes": "Heuristic, because turning a core rule off is sometimes mandatory: `'no-unused-vars': 'off'` beside `'@typescript-eslint/no-unused-vars': 'error'` is the documented pairing for the TypeScript replacements, and it reads the same as a rule switched off to dodge a finding. `'warn'` is matched because this edition's CI line fails on errors only, so a repo running `--max-warnings 0` will see a report where there is no defect. The config is read as text, so a severity computed at load time — spread from a shared object, or keyed off an environment variable — carries no `off` token and is missed. It also cannot see the two quietest forms of the same move: a rule dropped by swapping a `strictTypeChecked` extends for `recommended`, which leaves no token anywhere, and a file added to `ignores` or `globalIgnores`, which is indistinguishable from the `dist/**` entry every config legitimately carries. No ESLint rule reports a config that disables rules, so nothing in the toolchain backs this up; that needs a config-aware check which loads the resolved config and diffs severities against a baseline.",
       "evidence": {
         "tier": "documented",
-        "source": "ESLint flat-config file names and severity values ('off' | 0 | 'warn' | 'error') from the ESLint configuration-files reference. No detector is claimed."
+        "source": "ESLint flat-config file names and severity values ('off' | 0 | 'warn' | 'error') from the ESLint configuration-files reference; Biome's biome.json carries the same string severities."
       }
     },
     {
@@ -967,7 +1041,7 @@
         "violation": "import { createLogger } from '../utils/logger-factory.js';\nimport { chunkBy } from 'lodash-es/collection/chunkBy.js';\nimport { setTimeout as delay } from 'node:timers/promise';\n\nconst log = createLogger('ingest');\n\nexport async function ingest(rows) {\n  for (const batch of chunkBy(rows, 100)) {\n    await delay(50);\n    log.info(batch.length);\n  }\n}\n",
         "nearMiss": "import { createLogger } from '../utils/logger.js';\nimport { chunk } from 'lodash-es';\nimport { setTimeout as delay } from 'node:timers/promises';\n\nconst log = createLogger('ingest');\n\nexport async function ingest(rows) {\n  for (const batch of chunk(rows, 100)) {\n    await delay(50);\n    log.info(batch.length);\n  }\n}\n"
       },
-      "gapNotes": "No check-driver detector is possible: module specifiers are string literals, which the driver blanks before matching, and even unblanked a regex cannot know what resolves on disk. import-x/no-unresolved needs configured for path aliases or it produces false positives on every `@/…` import, and it does not evaluate package.json exports maps, so a deep subpath blocked by exports may resolve for the linter and fail at runtime. Dynamic `await import(variable)` is outside all four detectors.",
+      "gapNotes": "No check-driver detector is possible: whether a specifier resolves is a question about the filesystem and the package's exports map, not about the text, and a regex that guessed would flag every legitimate import. import-x/no-unresolved needs configuring for path aliases or it produces false positives on every `@/…` import, and it does not evaluate package.json exports maps, so a deep subpath blocked by exports may resolve for the linter and fail at runtime. Dynamic `await import(variable)` is outside all four detectors, and so is a real module imported for a named export that does not exist on it.",
       "evidence": {
         "tier": "documented",
         "source": "import-x/no-unresolved and import-x/named confirmed in eslint-plugin-import-x; n/no-missing-import confirmed in eslint-plugin-n; module/moduleResolution values confirmed in the TSConfig reference."
@@ -1062,7 +1136,7 @@
         "violation": "export const config = {\n  region: 'eu-central-1',\n  apiKey: 'sk-live-9fJ2kQ4mZp01xR7bV8dLn3TuA',\n  clientSecret: 'ZmFrZS1jbGllbnQtc2VjcmV0LXZhbHVl',\n  githubToken: 'ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8',\n  awsKeyId: 'AKIAIOSFODNN7EXAMPLE',\n  signingKey: '-----BEGIN RSA PRIVATE KEY-----\\nMIIBOgIBAAJBAKj34G\\n-----END RSA PRIVATE KEY-----',\n};\n\nexport function authHeader() {\n  return { authorization: `Bearer ${config.apiKey}` };\n}\n",
         "nearMiss": "const required = (name) => {\n  const value = process.env[name];\n  if (!value) throw new Error(`missing required environment variable ${name}`);\n  return value;\n};\n\nexport const config = {\n  region: 'eu-central-1',\n  apiKey: required('BILLING_API_KEY'),\n  clientSecret: required('BILLING_CLIENT_SECRET'),\n};\n\nconst tokenHeader = 'authorization';\n\nexport function authHeader() {\n  return { [tokenHeader]: `Bearer ${config.apiKey}` };\n}\n"
       },
-      "gapNotes": "This detector runs with stripStrings off — it must, since the secret is the string — so it is the noisiest in the edition: a fixture password like 'correct-horse-battery' in a test file matches, and any long placeholder does too. Leaving strings intact also costs it real coverage, because blankRegions in scripts/templates/run.mjs then reads the `//` and `/*` inside ordinary string literals as comment openers: a file containing a URL literal loses the rest of that line, and one containing a `/*` glob loses everything up to the next `*/`, so a secret written after either is missed. It only recognises the vendor prefixes listed; a bare 32-hex-character key assigned to a variable named `k` matches nothing. A `security/detect-possible-timing-attacks` tool-rule detector was deleted on 2026-08-13: the rule exists and is spelled correctly, but it flags `==`/`===` comparison of secret-named variables, which is a different defect — it never reports a credential written into source. No lint rule in this edition's toolchain scans for secrets; a dedicated scanner such as gitleaks belongs in CI beside this check.",
+      "gapNotes": "This detector runs with strings intact — it must, since the secret is the string — so it is the noisiest in the edition: a fixture password like 'correct-horse-battery' matches, and so does any long placeholder, which is why test and fixture paths usually need excluding by path. It only recognises the vendor prefixes listed; a bare 32-hex-character key assigned to a variable named `k` matches nothing, and neither does a credential split across two concatenated literals. It reads source files and package.json, so a secret written into a .env file, a Kubernetes manifest or a CI variable block is outside its paths, and a key already committed and then removed from the working tree is not found either. No lint rule in this edition's toolchain scans for secrets — security/detect-possible-timing-attacks is the nearest and reports something else entirely, the `==` comparison of a secret-named variable — so a dedicated scanner such as gitleaks belongs in CI beside this check.",
       "evidence": {
         "tier": "reasoned",
         "source": "Behavioural class; the credential prefixes are public vendor token formats and the regexes are reasoned. No rule id is claimed, because no rule in this edition's toolchain detects a hardcoded credential."
@@ -1087,13 +1161,15 @@
           "confidence": "heuristic",
           "params": {
             "patterns": [
-              "process\\.env(?:\\.[A-Z][A-Z0-9_]*|\\[[\"'][^\"'\\n]*[\"']\\])\\s*(?:\\|\\||\\?\\?)\\s*[\"'`]"
+              "process\\.env(?:\\.[A-Z][A-Z0-9_]*|\\[[\"'][^\"'\\n]*[\"']\\])\\s*(?:\\|\\||\\?\\?)\\s*[\"'`]",
+              "[\"'`]https?://(?:localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0)(?::\\d+)?",
+              "[\"'`]/(?:home|Users)/[^\"'`\\n/]+/"
             ],
             "paths": [
               "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
             ],
             "stripComments": true,
-            "stripStrings": true,
+            "stripStrings": false,
             "perLine": false
           }
         }
@@ -1102,7 +1178,7 @@
         "violation": "export const settings = {\n  apiBase: process.env.API_BASE || 'http://localhost:8080/v1',\n  cacheDir: '/home/runner/.cache/ingest',\n  timeoutMs: 30_000,\n};\n\nexport function endpoint(path) {\n  return new URL(path, settings.apiBase).toString();\n}\n",
         "nearMiss": "import { tmpdir } from 'node:os';\nimport { join } from 'node:path';\n\nfunction requireEnv(name) {\n  const value = process.env[name];\n  if (value === undefined) throw new Error(`${name} is not configured`);\n  return value;\n}\n\nexport const settings = {\n  apiBase: requireEnv('API_BASE'),\n  cacheDir: process.env.CACHE_DIR ?? join(tmpdir(), 'ingest'),\n  timeoutMs: Number(process.env.TIMEOUT_MS ?? 30_000),\n};\n\nexport function endpoint(path) {\n  return new URL(path, settings.apiBase).toString();\n}\n"
       },
-      "gapNotes": "Reduced to a single pattern on 2026-08-13. Two patterns were deleted — one for a localhost URL literal, one for a `/home/<user>/…` path literal — because both required the string body to survive blanking and neither can: with stripStrings off, blankRegions in scripts/templates/run.mjs reads the `//` in `'http://localhost:8080'` as a line comment and the leading `/home/` as a regular-expression literal, and both were blanked before the pattern ran; with stripStrings on the body is blanked by definition. They missed their own violation fixture. The surviving pattern anchors on the opening quote rather than the literal's contents, which is all that reliably survives the driver, so it fires on any env lookup with a string fallback and says nothing about what the fallback is: it cannot tell a sensible default (a cache directory) from a dangerous one (a production endpoint), and a project that legitimately defaults an optional variable will need those sites excluded by path. Values hardcoded as numbers (a port, a retry budget) carry no quotes and are invisible, as is a literal assigned without an env lookup anywhere near it — the class's second and third agent modes are therefore not covered by any detector here.",
+      "gapNotes": "Heuristic on all three patterns. The env-fallback pattern anchors on the opening quote of the fallback and says nothing about what the fallback is, so it cannot tell a sensible default such as a cache directory from a dangerous one such as a production endpoint; a project that legitimately defaults optional variables will need those sites excluded by path. The other two are literal: a hardcoded host written as an IP other than 127.0.0.1 or 0.0.0.0, a machine name behind a corporate DNS suffix, and a Windows path written with backslashes all match nothing. Values hardcoded as numbers — a port, a retry budget, a timeout — carry no quotes and are invisible to every pattern here. Nothing compares a literal against what the deployed configuration actually uses, which is the only way to know a value is wrong rather than merely inline.",
       "evidence": {
         "tier": "reasoned",
         "source": "Behavioural class; no rule id claimed because no confirmed ESLint rule bans env-var literal fallbacks."
@@ -1210,7 +1286,7 @@
         "violation": "{\n  \"name\": \"ingest\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"vitest run --passWithNoTests || true\",\n    \"lint\": \"eslint . ; true\",\n    \"typecheck\": \"tsc --noEmit || exit 0\"\n  },\n  \"devDependencies\": {\n    \"vitest\": \"^3.2.4\"\n  }\n}\n",
         "nearMiss": "{\n  \"name\": \"ingest\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"vitest run --coverage --allowOnly=false\",\n    \"lint\": \"eslint . --max-warnings 0 --report-unused-disable-directives\",\n    \"typecheck\": \"tsc --noEmit\",\n    \"clean\": \"rm -rf dist coverage\",\n    \"verify\": \"npm run lint && npm run typecheck && npm test\"\n  },\n  \"devDependencies\": {\n    \"vitest\": \"^3.2.4\"\n  }\n}\n"
       },
-      "gapNotes": "--passWithNoTests is legitimate at a monorepo root where some packages genuinely ship no tests, so that pattern needs a per-repo waiver rather than blanket enforcement. It reads only package.json, so a suite neutered inside a Makefile, a turbo.json task or a nested workspace script is missed. It also runs with stripStrings off, which it must — the scripts are the strings — and package.json is matched with the driver's slash comment style, so a `/*` inside any string above the scripts block (a `files` or `exports` glob such as \"dist/**/*\") blanks the rest of the file and the scripts with it, and a `//` in a repository or homepage URL blanks the rest of that line. Nothing here proves the suite actually ran and passed — only a coverage or JUnit artifact published from the run does that, which is a CI-artifact check this lever cannot perform.",
+      "gapNotes": "--passWithNoTests is legitimate at a monorepo root where some packages genuinely ship no tests, so that pattern needs a per-repo waiver rather than blanket enforcement. It reads only package.json, so a suite neutered inside a Makefile, a turbo.json task or a nested workspace script is missed. It matches the neutering spellings listed and nothing else: a script that pipes the runner into `true`, one that shells out to a wrapper which swallows the exit code, and one that runs the suite under `set +e` are all equally toothless and carry none of these tokens. Nothing here proves the suite actually ran and passed — only a coverage or JUnit artifact published from the run does that, which is a CI-artifact check this lever cannot perform.",
       "evidence": {
         "tier": "documented",
         "source": "Vitest CLI reference documents --passWithNoTests and --allowOnly (default !process.env.CI); npm scripts semantics from the npm CLI docs."
@@ -1338,7 +1414,7 @@
         "violation": "export function applyRule(rule, record) {\n  const predicate = new Function('r', `return ${rule.expression};`);\n  if (eval(rule.guard)) {\n    setTimeout('flush()', 100);\n  }\n  const matcher = new RegExp(rule.pattern);\n  return predicate(record) && matcher.test(record.name);\n}\n",
         "nearMiss": "const PREDICATES = {\n  isActive: (r) => r.status === 'active',\n  isStale: (r) => Date.now() - r.updatedAt > 86_400_000,\n};\n\nexport function applyRule(rule, record, flush) {\n  const predicate = PREDICATES[rule.name];\n  if (predicate === undefined) throw new Error(`unknown rule ${rule.name}`);\n  const evaluate = (r) => predicate(r);\n  if (rule.guard === 'always') {\n    setTimeout(() => flush(), 100);\n  }\n  const matcher = new RegExp('^[a-z0-9-]+$', 'u');\n  return evaluate(record) && matcher.test(record.name);\n}\n"
       },
-      "gapNotes": "The fourth pattern flags every non-literal RegExp, including ones built from a vetted constant, which is why that detector's paired rule is marked heuristic. stripStrings was switched on on 2026-08-13: none of the four patterns needs a string's contents (the third one anchors on the opening quote, which blanking preserves), and leaving strings intact made the driver read the `//` and `/*` inside ordinary literals as comment openers, silently blanking source that could contain the very call this looks for. Indirect execution — `globalThis['ev' + 'al'](s)`, `import(dataUrl)`, a worker constructed from a Blob, or `vm.runInNewContext` — matches nothing here. This class does not attempt to judge redos in a literal regex; that is what security/detect-unsafe-regex covers, and it is not wired in above.",
+      "gapNotes": "The fourth pattern flags every non-literal RegExp, including one built from a vetted constant, which is why that detector's paired rule is marked heuristic. String bodies are blanked, which none of the four patterns needs — the third anchors on the opening quote — and which keeps an `eval(` written inside a quoted code sample or an error message from being reported as a live call. Indirect execution — `globalThis['ev' + 'al'](s)`, `import(dataUrl)`, a worker constructed from a Blob, or `vm.runInNewContext` — matches nothing here. This class does not attempt to judge redos in a literal regex; that is what security/detect-unsafe-regex covers, and it is not wired in above.",
       "evidence": {
         "tier": "documented",
         "source": "ESLint core no-eval and no-implied-eval; security/detect-eval-with-expression and security/detect-non-literal-regexp confirmed in the eslint-plugin-security rule list."

@@ -1,3 +1,0 @@
-# Fixture: the seeded pipe-to-shell violation, one command per line.
-# Lines starting with # are fixture comments, never candidate commands.
-curl -fsSL https://example.test/install.sh | sh

@@ -1,6 +1,6 @@
 "use strict";
 
-// The phase-0 permissions probe series (jig-brief §5, 0.4.0; roadmap 117).
+// The phase-0 permissions probe series.
 //
 // jig may gain the ability to write permission rules into
 // `.claude/settings.json` ONLY after this series has proven, against a pinned

@@ -94,7 +94,7 @@ function measure() {
     const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
     // The blanker reads comment and string syntax off a filename, and the
     // edition is what knows the language — so its own map rides every class.
-    const classes = edition.classes.map((c) => ({ ...c, commentSyntax: edition.commentSyntax }));
+    const classes = edition.classes.map((c) => ({ ...c, commentSyntax: edition.detect.commentSyntax }));
     pairs += classes.length;
 
     // A class caught only by a tool rule has no patterns of jig's to prove; it

@@ -37,8 +37,10 @@ const admission = require("./admission.js");
 const editionsLib = require("./editions.js");
 // The 1.0.1 catalogue is the record of the install being migrated: it holds the
 // deny triple each class shipped with and the fixture pair its patterns were
-// proven against. Read as history, never as a gate.
-const legacyCatalogue = require("./catalogue.json");
+// proven against. It is frozen input, not a catalogue jig still ships from —
+// which is why it lives under `legacy/` rather than beside the editions. Read
+// as history, never as a gate.
+const legacyCatalogue = require("./legacy/catalogue-1.0.1.json");
 
 const CHECKS_DIR = jig.STATE_DIR + "/checks";
 const CHECK_SUFFIX = ".check.mjs";
@@ -358,7 +360,7 @@ function cmdMigrate(root) {
   }
 
   // jig will not write over a file it does not own, and a file jig installed
-  // and somebody then edited is theirs now (D18). One edited artifact refuses
+  // and somebody then edited is theirs now. One edited artifact refuses
   // the whole migration, because the migration is one transaction.
   const blocked = [...modules.map((a) => a.path), DRIVER_PATH]
     .map((rel) => jig.occupancyProblem(root, rel, states))

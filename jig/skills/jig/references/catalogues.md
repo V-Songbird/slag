@@ -25,9 +25,10 @@ What matters at the operator surface is short:
 
 ## The superseded single-file catalogue
 
-`jig/scripts/catalogue.json` is the one-file Node-only catalogue the editions
-replace. **Verified on 2026-08-07.** It gated what could be installed, which is
-the stance the editions abandon. Its ids migrate by an explicit map:
+`jig/scripts/legacy/catalogue-1.0.1.json` is the one-file Node-only catalogue
+the editions replace, kept only as `migrate`'s input. **Verified on 2026-08-07.**
+It gated what could be installed, which is the stance the editions abandon. Its
+ids migrate by an explicit map:
 
 | Old id | New id |
 | --- | --- |

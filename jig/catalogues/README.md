@@ -205,19 +205,24 @@ extension without opening half a megabyte of class rows. Nothing else is duplica
   actually costs projects the most, because that has not been measured.
 - **Coverage is uneven across editions.** A shared id does not mean equal detection. The same class
   can carry two tool rules and a pattern in one edition and a single heuristic pattern in another.
-- **53 of 287 detectors are heuristic**, per detector rather than per lever. A deterministic lever
+- **58 of 296 detectors are heuristic**, per detector rather than per lever. A deterministic lever
   carries heuristic patterns in several places, which is why `confidence` sits on the detector.
-- **`dotnet` is the thinnest edition.** It has the fewest detectors per class (1.54 against 2.52
-  for `rust`), the highest heuristic share (12 of 37), eleven classes whose only detection is a
-  check-driver regular expression with no tool rule behind it, and three declared tools that no
-  detector references. `go` is second thinnest on the same measures.
+- **`dotnet` is the thinnest edition.** It has the fewest detectors per class (1.58 against 2.57
+  for `jvm`) and the highest heuristic share (13 of 38). `go` is second thinnest on the same
+  measures.
 - **`verify` blocks are declared, not executed.** Every tool in every edition carries an `argv`, an
   `expected` string and an `expectedExit`. None of the 37 has been run, and neither has any `seed`
   been planted: the exit code a seed is expected to produce is an assertion about the tool, not a
   measurement of it.
+- **One tool cannot witness its own catch.** A catch is decided on the exit code alone, and `gofumpt`
+  has no check mode — `gofumpt -l .` reports unformatted files on stdout and exits 0 either way. It
+  is the only tool of the 37 that declares a catch at exit 0, a test names it as the one exception,
+  and the formatting catch is witnessed by `golangci-lint fmt` instead.
 - **`uninstall` commands are declared, not executed either.** They are written to be runnable as
-  plain argv, with one exception: all three of `go`'s package tools state a removal that only a
-  shell could expand, so a reader that refuses shells has to hand those three back to the owner.
+  plain argv, with one exception: `go` ships no uninstall verb, so removing a `go install`ed binary
+  means expanding `go env GOPATH`. All three of `go`'s package tools state that shell form, and a
+  reader that refuses shells hands those three back to the owner by name — the three `go` builtins
+  are still offered.
 
 ## Deliberately absent
 

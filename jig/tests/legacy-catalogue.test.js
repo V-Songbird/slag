@@ -1,13 +1,26 @@
 "use strict";
 
+// The frozen 1.0.1 catalogue, and what still depends on it.
+//
+// This file no longer describes anything jig ships from — the six editions under
+// `catalogues/` do that. What it describes is the input `scripts/migrate.js`
+// reads when it upgrades an install made before the rework: the class rows, the
+// deny triple each guard shipped with, and the fixture pair its patterns were
+// proven against. `installableAtV1` and the rest of the 1.0.1 vocabulary are
+// asserted here because a migration reads them, not because anything gates on
+// them any more.
+//
+// It is frozen. If a test here fails, either the file was edited (it should not
+// be) or migration stopped reading something it needs.
+
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
 
-const CATALOGUE_PATH = path.join(__dirname, "..", "scripts", "catalogue.json");
+const CATALOGUE_PATH = path.join(__dirname, "..", "scripts", "legacy", "catalogue-1.0.1.json");
 const REPO_ROOT = path.join(__dirname, "..", "..");
-const REFERENCE = path.join(__dirname, "..", "skills", "jig", "references", "catalogue-node.md");
+const REFERENCE = path.join(__dirname, "..", "skills", "jig", "references", "catalogues.md");
 
 const raw = fs.readFileSync(CATALOGUE_PATH, "utf-8");
 const catalogue = JSON.parse(raw);

@@ -14,8 +14,8 @@ const fs = require("fs");
 const path = require("path");
 
 // The index and the edition files version independently: the index describes
-// the shelf, an edition describes a language. They are at 2 and 3 today and a
-// future edition bump must not have to rewrite the index.
+// the shelf, an edition describes a language. Both are at 3 today, and a future
+// edition bump must not have to rewrite the index.
 const INDEX_SCHEMA = 3;
 const EDITION_SCHEMA = 3;
 

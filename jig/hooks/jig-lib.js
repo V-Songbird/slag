@@ -153,7 +153,7 @@ function validateConfig(raw) {
     problems.push(CONFIG_FILE + " is not a JSON object");
     return done();
   }
-  // Additive-only rule (jig-brief §5): this build reads schemaVersion 1 and
+  // Additive-only rule: this build reads schemaVersion 1 and
   // refuses anything higher, because a field it cannot see could be the one
   // that narrowed a guard.
   if (raw.schemaVersion !== SCHEMA_VERSION) {
@@ -803,7 +803,7 @@ module.exports = {
   statePath, isOff, isConfigured, readInput,
   readConfig, validateConfig,
   loadCheck, sessionDetectors, denyOf, checkProof,
-  blankRegions, pushBranch, branchInScope, evaluateGuard,
+  blankRegions, globToRegExp, pushBranch, branchInScope, evaluateGuard,
   effectiveState, ledgerStats, zoneForcesObserve,
   appendLedger, runEvent,
 };

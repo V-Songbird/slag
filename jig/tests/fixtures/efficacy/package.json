@@ -1,9 +1,0 @@
-{
-  "name": "jig-efficacy-fixture",
-  "private": true,
-  "description": "A miniature Node project carrying jig's twelve efficacy cases. Never installed, never published, never run by any suite.",
-  "type": "commonjs",
-  "scripts": {
-    "test": "node --test test/*.test.js"
-  }
-}

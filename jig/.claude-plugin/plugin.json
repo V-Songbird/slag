@@ -1,6 +1,6 @@
 {
   "name": "jig",
-  "description": "Interviews you about the mistakes that keep landing in your repo, then installs reviewed, reversible guardrails: a committed check script any teammate or CI can run, plus session guards that observe first and can be armed to block once their clean record is in. Writes nothing into any file you own.",
+  "description": "Interviews you about the mistakes that keep landing in your repo, then sets up what catches them: your linter, type checker, test runner, CI, and checks written for your codebase. Every check must catch a planted violation before it counts as coverage, and nothing lands you did not approve.",
   "license": "MIT",
   "author": {
     "name": "Victor Villegas",

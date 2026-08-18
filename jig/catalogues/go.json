@@ -396,7 +396,7 @@
         "violation": "package storage\n\nimport \"os\"\n\nfunc Rotate(path string) error {\n\tf, err := os.Create(path + \".new\")\n\tif err != nil {\n\t\treturn err\n\t}\n\t_ = f.Close()\n\t_, _ = os.Stat(path)\n\t_ = os.Remove(path)\n\treturn os.Rename(path+\".new\", path)\n}\n",
         "nearMiss": "package storage\n\nimport (\n\t\"io\"\n\t\"os\"\n)\n\ntype Rotator interface {\n\tCopy(dst io.Writer, src io.Reader) error\n}\n\nvar _ Rotator = (*fileRotator)(nil)\n\ntype fileRotator struct{ dir string }\n\nfunc (r *fileRotator) Copy(dst io.Writer, src io.Reader) error {\n\tn, err := io.Copy(dst, src)\n\tif err != nil {\n\t\treturn err\n\t}\n\tif n == 0 {\n\t\treturn io.ErrUnexpectedEOF\n\t}\n\t_ = r.dir\n\treturn nil\n}\n\nfunc (r *fileRotator) Path() string { return os.TempDir() }\n"
       },
-      "gapNotes": "Downgraded to heuristic on 2026-08-13: the regex matches any blank assignment from any call and has no idea whether the discarded value is an error at all, so `_ = buf.Len()` and `_, _ = fmt.Fprintln(w, s)` read exactly like a swallowed Close error. Only errcheck, which is type-aware, knows the difference. It also cannot see the more common shape - calling an error-returning function and assigning nothing at all - because the regex has no way to know the callee's arity.",
+      "gapNotes": "The regex matches any blank assignment from any call and has no idea whether the discarded value is an error at all, so `_ = buf.Len()` and `_, _ = fmt.Fprintln(w, s)` read exactly like a swallowed Close error. Only errcheck, which is type-aware, knows the difference. It also cannot see the more common shape - calling an error-returning function and assigning nothing at all - because the regex has no way to know the callee's arity.",
       "evidence": {
         "tier": "documented",
         "source": "errcheck's check-blank option is documented in golangci-lint's linters settings page: 'Report about assignment of errors to blank identifier'"
@@ -732,6 +732,22 @@
       "severity": "safety",
       "detectors": [
         {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "//\\s*nolint(?::all\\b|\\s*$)"
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": true
+          }
+        },
+        {
           "lever": "tool-rule",
           "actor": "human-ci",
           "confidence": "deterministic",
@@ -750,7 +766,7 @@
         "violation": "package auth\n\nimport \"crypto/md5\" //nolint\n\nfunc Fingerprint(b []byte) string {\n\t//nolint:all\n\tsum := md5.Sum(b)\n\treturn string(sum[:])\n}\n",
         "nearMiss": "package auth\n\nimport (\n\t\"crypto/sha256\"\n\t\"encoding/hex\"\n)\n\n//nolint:gosec // the digest is a cache key, never a credential check\nfunc Fingerprint(b []byte) string {\n\tsum := sha256.Sum256(b)\n\treturn hex.EncodeToString(sum[:])\n}\n\n//lint:ignore SA1019 the replacement API lands in v2, tracked in #412\nvar _ = legacyHash\n"
       },
-      "gapNotes": "ENFORCEMENT GAP: no host-neutral detector. The check-driver detector that matched //nolint was deleted on 2026-08-13 because the driver blanks every comment before any pattern runs and has no switch to keep them, so a directive that lives in a comment is unreachable from the driver by construction - nolintlint in CI is the only catcher, and a project without golangci-lint has none. A specific directive with a fake reason (//nolint:errcheck // safe) satisfies nolintlint, which judges the form of the explanation and never whether it is true. Suppression moved into .golangci.yml as a linters.exclusions rule is invisible to this class entirely.",
+      "gapNotes": "The pattern reads only the two blanket forms, a bare //nolint and //nolint:all. A specific directive left unexplained (//nolint:errcheck on its own) is nolintlint's require-explanation to catch, and one carrying a fake reason (//nolint:errcheck // safe) satisfies both halves, because nolintlint judges the form of the explanation and never whether it is true. Suppression moved into .golangci.yml as a linters.exclusions rule is invisible to this class entirely, and a project without golangci-lint keeps only the pattern.",
       "evidence": {
         "tier": "documented",
         "source": "nolintlint is in the golangci-lint linter list ('reports ill-formed or insufficient nolint directives') with settings require-explanation, require-specific and allow-unused"
@@ -863,10 +879,10 @@
         }
       ],
       "fixtures": {
-        "violation": "package client\n\nconst (\n\tapiKey    = \"sk-live-9f2b7c11aa4d\"\n\tauthToken = \"ghp-8f30c1aa77bd41\"\n)\n\ntype Config struct {\n\tEndpoint string\n\tPassword string\n}\n\nfunc Default() Config {\n\treturn Config{\n\t\tEndpoint: \"https://api.example.com\",\n\t\tPassword: \"hunter2-prod-8811\",\n\t}\n}\n",
+        "violation": "package client\n\nconst (\n\tapiKey    = \"sk-live-9f2b7c11aa4d\"\n\tauthToken = \"ghp-8f30c1aa77bd41\"\n\tsecretDSN = \"https://svc:8f30c1aa77bd41@vault.example.com/v1\"\n)\n\ntype Config struct {\n\tEndpoint string\n\tPassword string\n}\n\nfunc Default() Config {\n\treturn Config{\n\t\tEndpoint: \"https://api.example.com\",\n\t\tPassword: \"hunter2-prod-8811\",\n\t}\n}\n",
         "nearMiss": "package client\n\nimport \"os\"\n\nconst (\n\tapiKeyEnv   = \"SERVICE_API_KEY\"\n\ttokenHeader = \"Authorization\"\n)\n\ntype Config struct {\n\tEndpoint string `json:\"endpoint\"`\n\tAPIKey   string `json:\"api_key\"`\n}\n\nfunc Default() Config {\n\treturn Config{\n\t\tEndpoint: os.Getenv(\"SERVICE_ENDPOINT\"),\n\t\tAPIKey:   os.Getenv(apiKeyEnv),\n\t}\n}\n"
       },
-      "gapNotes": "The pattern requires the value to contain a digit and to not look like an ALL_CAPS env-var name, which is what keeps the near-miss clean - but it also means a lowercase alphabetic secret ('correcthorsebattery') is missed, and a credential stored in a variable whose name avoids the listed words is missed entirely. gosec G101 is entropy- and name-based and carries its own false-positive rate, hence heuristic on both detectors. Neither sees a secret committed to a .env, a testdata fixture or a YAML manifest, since paths here are Go source only. One driver-level miss: this detector keeps string literals so it can read the value, and the driver still blanks comments in the same pass - a secret containing // or wrapped in / characters (base64 with slashes, a URL-shaped token) is partly blanked before the pattern runs and is missed.",
+      "gapNotes": "The pattern requires the value to contain a digit and to not look like an ALL_CAPS env-var name, which is what keeps the near-miss clean - but it also means a lowercase alphabetic secret ('correcthorsebattery') is missed, and a credential stored in a variable whose name avoids the listed words is missed entirely. gosec G101 is entropy- and name-based and carries its own false-positive rate, hence heuristic on both detectors. Neither sees a secret committed to a .env, a testdata fixture or a YAML manifest, since paths here are Go source only.",
       "evidence": {
         "tier": "documented",
         "source": "gosec rule G101 'Look for hardcoded credentials' from gosec's RULES.md; runnable through golangci-lint's gosec linter"
@@ -1031,10 +1047,10 @@
         }
       ],
       "fixtures": {
-        "violation": "package users\n\nimport (\n\t\"database/sql\"\n\t\"fmt\"\n)\n\nfunc Find(db *sql.DB, id string) (*User, error) {\n\trow := db.QueryRow(fmt.Sprintf(\"SELECT id, email FROM users WHERE id = %s\", id))\n\tvar u User\n\tif err := row.Scan(&u.ID, &u.Email); err != nil {\n\t\treturn nil, fmt.Errorf(\"scan user %s: %w\", id, err)\n\t}\n\treturn &u, nil\n}\n",
+        "violation": "package users\n\nimport (\n\t\"database/sql\"\n\t\"fmt\"\n)\n\nfunc Find(db *sql.DB, id string) (*User, error) {\n\trow := db.QueryRow(fmt.Sprintf(\"SELECT id, email FROM users WHERE id = %s\", id))\n\tvar u User\n\tif err := row.Scan(&u.ID, &u.Email); err != nil {\n\t\treturn nil, fmt.Errorf(\"scan user %s: %w\", id, err)\n\t}\n\treturn &u, nil\n}\n\nfunc Search(db *sql.DB, actor string) (*sql.Rows, error) {\n\treturn db.Query(\"SELECT id FROM audits WHERE src = 'https://api.example.com/v1' AND actor = \" + actor)\n}\n",
         "nearMiss": "package users\n\nimport (\n\t\"context\"\n\t\"database/sql\"\n\t\"fmt\"\n\t\"strings\"\n)\n\nconst findUser = \"SELECT id, email FROM users WHERE id = $1\"\n\nfunc Find(ctx context.Context, db *sql.DB, id string) (*User, error) {\n\trow := db.QueryRowContext(ctx, findUser, id)\n\tvar u User\n\tif err := row.Scan(&u.ID, &u.Email); err != nil {\n\t\treturn nil, fmt.Errorf(\"scan user %s: %w\", id, err)\n\t}\n\treturn &u, nil\n}\n\nfunc placeholders(n int) string {\n\treturn strings.TrimSuffix(strings.Repeat(\"?, \", n), \", \")\n}\n"
       },
-      "gapNotes": "Only catches interpolation written at the call site. A query built into a variable on an earlier line and then passed by name (q := \"...\" + filter; db.Query(q)) defeats the regex completely - that is exactly what gosec G201/G202 are there for, and they too need the taint to stay inside one function. Same driver-level miss as hardcoded-secret: string literals are kept so the concatenated fragment is visible, but comment blanking still runs over them, so a query literal containing // (a URL, a MySQL /*+ hint */) is truncated before matching.",
+      "gapNotes": "Only catches interpolation written at the call site. A query built into a variable on an earlier line and then passed by name (q := \"...\" + filter; db.Query(q)) defeats the regex completely - that is exactly what gosec G201/G202 are there for, and they too need the taint to stay inside one function. The method list is database/sql's own, so a query interpolated into a call on sqlx, GORM or a generated repository wrapper is not on a line this pattern recognises.",
       "evidence": {
         "tier": "documented",
         "source": "gosec RULES.md: G201 'SQL query construction using format string', G202 'SQL query construction using string concatenation'; database/sql method names from the standard library"
@@ -1079,7 +1095,7 @@
         "violation": "package fetch\n\nimport (\n\t\"encoding/json\"\n\t\"net/http\"\n)\n\nfunc Latest(url string) (*Release, error) {\n\tresp, err := http.Get(url)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tvar r Release\n\tif err := json.NewDecoder(resp.Body).Decode(&r); err != nil {\n\t\treturn nil, err\n\t}\n\treturn &r, nil\n}\n",
         "nearMiss": "package fetch\n\nimport (\n\t\"context\"\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n)\n\nfunc Latest(ctx context.Context, c *http.Client, url string) (*Release, error) {\n\treq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)\n\tif err != nil {\n\t\treturn nil, fmt.Errorf(\"build request: %w\", err)\n\t}\n\tresp, err := c.Do(req)\n\tif err != nil {\n\t\treturn nil, fmt.Errorf(\"get %s: %w\", url, err)\n\t}\n\tdefer func() {\n\t\t_, _ = io.Copy(io.Discard, resp.Body)\n\t\t_ = resp.Body.Close()\n\t}()\n\tif resp.StatusCode != http.StatusOK {\n\t\treturn nil, fmt.Errorf(\"get %s: status %s\", url, resp.Status)\n\t}\n\tvar r Release\n\tif err := json.NewDecoder(resp.Body).Decode(&r); err != nil {\n\t\treturn nil, fmt.Errorf(\"decode release: %w\", err)\n\t}\n\treturn &r, nil\n}\n"
       },
-      "gapNotes": "Tool-rule only: closing is proved by the absence of a defer, and no regex can assert an absence across a function body without producing noise on every correct call site. bodyclose works on the SSA of one function, so a response returned to a caller that closes it is reported as a leak, and a body closed inside a helper is missed. The noctx detector was deleted on 2026-08-13: noctx 'finds function calls without context.Context' and never looks at whether a body is closed, so listing it here claimed coverage it does not provide - the missing-context half of the third agent mode above is now uncovered. go vet's httpresponse only catches the defer-before-error-check ordering mistake, not an absent close.",
+      "gapNotes": "Tool-rule only: closing is proved by the absence of a defer, and no regex can assert an absence across a function body without producing noise on every correct call site. bodyclose works on the SSA of one function, so a response returned to a caller that closes it is reported as a leak, and a body closed inside a helper is missed. The missing-context half of the third agent mode is uncovered here: noctx reports calls made without a context.Context and never looks at whether a body is closed, so it is not a detector for this class. go vet's httpresponse only catches the defer-before-error-check ordering mistake, not an absent close.",
       "evidence": {
         "tier": "documented",
         "source": "bodyclose is in the golangci-lint linter list; httpresponse is in the default go vet analyzer set listed under cmd/vet ('check for mistakes using HTTP responses')"
@@ -1229,7 +1245,7 @@
         "violation": "name: ci\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v5\n      - uses: actions/setup-go@v6\n        with:\n          go-version: '1.25'\n      - name: unit tests\n        run: go test -short -run TestSmoke ./... || true\n",
         "nearMiss": "name: ci\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v5\n      - uses: actions/setup-go@v6\n        with:\n          go-version: '1.25'\n      - name: unit tests\n        run: go test -race -shuffle=on -count=1 -coverprofile=coverage.out ./...\n      - name: vet\n        run: go vet ./...\n"
       },
-      "gapNotes": "Sees only what is committed. A session that runs a narrowed command in its own shell and then claims the suite passed leaves no trace in any file, and a package silently dropped from the ./... expansion by an unsatisfiable build tag is invisible here too. Nothing checks that -race is present - only that the listed weakenings are absent. Comment blanking is extension-driven: a Makefile has no extension, so the driver treats it as a slash-comment file and a `# go test ... || true` line commented out in a Makefile still fires, while the same line in a .sh or .yml file is blanked.",
+      "gapNotes": "Sees only what is committed. A session that runs a narrowed command in its own shell and then claims the suite passed leaves no trace in any file, and a package silently dropped from the ./... expansion by an unsatisfiable build tag is invisible here too. Nothing checks that -race is present - only that the listed weakenings are absent. The command has to be spelled go test literally, so a Makefile recipe that runs $(GOTEST) or a script that calls a wrapper function hides every flag behind a name the pattern never reads, and a quoted narrowing (-run 'TestSmoke') does not match the flag alternatives either.",
       "evidence": {
         "tier": "documented",
         "source": "go test flag semantics from cmd/go: -count=1 is 'the idiomatic way to disable test caching', -shuffle=on seeds order from the system clock (Go 1.17+), -race enables the data race detector"

@@ -22,8 +22,7 @@
       ".sln"
     ],
     "packageManagers": [
-      "dotnet",
-      "nuget"
+      "dotnet"
     ],
     "commentSyntax": {
       ".cs": "slash",
@@ -307,6 +306,22 @@
       "severity": "safety",
       "detectors": [
         {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "//\\s*\\[\\s*(?:Fact|Theory)\\b"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": true
+          }
+        },
+        {
           "lever": "tool-rule",
           "actor": "human-ci",
           "confidence": "heuristic",
@@ -321,7 +336,7 @@
         "violation": "using Xunit;\n\nnamespace Shipping.Tests;\n\npublic class RateCardTests\n{\n    // [Fact]\n    public void Rate_ForOversizeParcel_AppliesSurcharge()\n    {\n        var card = new RateCard();\n\n        Assert.Equal(24.50m, card.Quote(weightKg: 12, oversize: true));\n    }\n\n    [Fact]\n    public void Rate_ForStandardParcel_UsesBaseRate()\n    {\n        var card = new RateCard();\n\n        Assert.Equal(6.90m, card.Quote(weightKg: 2, oversize: false));\n    }\n}\n",
         "nearMiss": "using Xunit;\n\nnamespace Shipping.Tests;\n\npublic class RateCardTests\n{\n    // Regression cover for issue 421: the surcharge was applied twice.\n    [Fact]\n    public void Rate_ForOversizeParcel_AppliesSurchargeOnce()\n    {\n        var card = new RateCard();\n\n        Assert.Equal(24.50m, card.Quote(weightKg: 12, oversize: true));\n    }\n\n    /// <summary>Covers the base rate path; see <see cref=\"RateCard.Quote\"/>.</summary>\n    [Theory]\n    [InlineData(1, 6.90)]\n    [InlineData(2, 6.90)]\n    public void Rate_ForStandardParcel_UsesBaseRate(int kg, decimal expected)\n    {\n        var card = new RateCard();\n\n        Assert.Equal(expected, card.Quote(weightKg: kg, oversize: false));\n    }\n}\n"
       },
-      "gapNotes": "Has no check-driver detector, and cannot have one. The pattern that used to sit here ('// [Fact]') needed comments left intact, but jig's driver blanks comments unconditionally - blankRegions in scripts/templates/run.mjs takes only a `strings` option, so the catalogue's stripComments field is inert and a commented-out attribute is whitespace by the time any pattern runs. The detector was deleted on 2026-08-13 after it missed its own violation fixture. What is left is Sonar S125, which is a general commented-out-code rule, not a test-aware one: it fires on any commented block that parses as code, so an explanatory comment containing a snippet is a false positive, and it will not distinguish a commented-out test from commented-out production code. A test method deleted outright still leaves no trace in the file - that needs a test-count comparison against the previous commit or a coverage baseline. #if false regions are missed by S125 as well.",
+      "gapNotes": "Matches a commented-out xUnit attribute only - '// [Fact]' or '// [Theory]', with the attribute first in the comment. A test disabled by wrapping the method in a /* ... */ block leaves nothing on a '//' line and is not matched, and NUnit's [Test] and MSTest's [TestMethod] spellings are not matched either. It cuts the other way too: a comment that quotes '[Fact]' while explaining something is flagged, so this class needs a wave-off path. S125 is the wider net for the shapes the pattern does not reach, but it is a general commented-out-code rule rather than a test-aware one - it fires on any commented block that parses as code, so an explanatory comment carrying a snippet is a false positive there as well, and it cannot tell a commented-out test from commented-out production code. Neither detector sees an '#if false' region, which disables a test with no comment marker at all. A test method deleted outright leaves no trace in the file for either to find - that needs a test-count comparison against the previous commit or a coverage baseline.",
       "evidence": {
         "tier": "documented",
         "source": "SonarSource rule csharpsquid:S125 'Sections of code should not be commented out' (sonar-dotnet); confirmed against next.sonarqube.com's rule index. Confidence is heuristic because SonarSource's own tracker (sonar-dotnet issue 3659) documents that S125's line-ends-in-semicolon-or-brace heuristic produces false positives."
@@ -711,7 +726,7 @@
         "violation": "<Project>\n\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>\n    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>\n    <NoWarn>$(NoWarn);CS8602;CA1031</NoWarn>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"SonarAnalyzer.CSharp\" PrivateAssets=\"all\" />\n  </ItemGroup>\n\n</Project>\n",
         "nearMiss": "<Project>\n\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>\n    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>\n    <GenerateDocumentationFile>true</GenerateDocumentationFile>\n    <NoWarn>$(NoWarn);CS1591;NU5104</NoWarn>\n    <WarningsNotAsErrors>NU1701</WarningsNotAsErrors>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"SonarAnalyzer.CSharp\" PrivateAssets=\"all\" />\n  </ItemGroup>\n\n</Project>\n"
       },
-      "gapNotes": "Only sees ids matching the shapes listed, so a numeric-only entry (<NoWarn>8602</NoWarn>, which the compiler accepts) slips through, as does <WarningsNotAsErrors>. The near-miss shows the legitimate case this must not break: CS1591 (missing XML doc) and NU5104 are routinely and correctly suppressed. It also cannot tell a suppression added today from one that predates the repository's guardrails.",
+      "gapNotes": "Only sees ids matching the shapes listed, so a numeric-only entry (<NoWarn>8602</NoWarn>, which the compiler accepts) slips through, as does <WarningsNotAsErrors>. The near-miss shows the legitimate case this must not break: CS1591 (missing XML doc) and NU5104 are routinely and correctly suppressed. It also cannot tell a suppression added today from one that predates the repository's guardrails. MSBuild files are read without an XML comment rule, so a <NoWarn> parked inside an <!-- --> comment counts as live and is reported even though the build never reads it.",
       "evidence": {
         "tier": "documented",
         "source": "Microsoft Learn C# compiler options - errors and warnings: NoWarn accepts warning numbers with or without the CS prefix and the literal 'nullable'; WarningsNotAsErrors overrides TreatWarningsAsErrors."
@@ -753,7 +768,7 @@
         "violation": "<Project>\n\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>\n    <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>\n    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>\n    <NuGetAudit>false</NuGetAudit>\n  </PropertyGroup>\n\n</Project>\n",
         "nearMiss": "<Project>\n\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>\n    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>\n    <NuGetAudit>true</NuGetAudit>\n    <NuGetAuditMode>all</NuGetAuditMode>\n    <GenerateDocumentationFile>false</GenerateDocumentationFile>\n    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n</Project>\n"
       },
-      "gapNotes": "Requires the closing angle bracket immediately after the element name, so a conditioned form - <TreatWarningsAsErrors Condition=\"'$(CI)' != 'true'\">false</TreatWarningsAsErrors> - is not matched, and that conditioned form is exactly how a session hides the change from a local build. It also cannot see the property being unset entirely, or -warnaserror being dropped from the CI command line, which has the same effect.",
+      "gapNotes": "Requires the closing angle bracket immediately after the element name, so a conditioned form - <TreatWarningsAsErrors Condition=\"'$(CI)' != 'true'\">false</TreatWarningsAsErrors> - is not matched, and that conditioned form is exactly how a session hides the change from a local build. It also cannot see the property being unset entirely, or -warnaserror being dropped from the CI command line, which has the same effect. MSBuild files are read without an XML comment rule, so a <TreatWarningsAsErrors>false</TreatWarningsAsErrors> left inside an <!-- --> comment is reported as if it were in force.",
       "evidence": {
         "tier": "documented",
         "source": "Microsoft Learn C# compiler options - errors and warnings (TreatWarningsAsErrors), code analysis overview (CodeAnalysisTreatWarningsAsErrors, EnforceCodeStyleInBuild) and NuGet auditing packages (NuGetAudit)."
@@ -905,7 +920,7 @@
           "confidence": "heuristic",
           "params": {
             "patterns": [
-              "new\\s+Uri\\s*\\(\\s*@?\"https?:"
+              "new\\s+Uri\\s*\\(\\s*@?\"https?://[^\"\\r\\n]+\""
             ],
             "paths": [
               "**/*.cs"
@@ -920,7 +935,7 @@
         "violation": "using System;\nusing System.Net.Http;\n\nnamespace Pricing;\n\npublic sealed class PricingClientFactory\n{\n    public HttpClient Create()\n    {\n        var client = new HttpClient\n        {\n            BaseAddress = new Uri(\"https://pricing.internal.example.com/v2/\"),\n            Timeout = TimeSpan.FromSeconds(30),\n        };\n\n        return client;\n    }\n}\n",
         "nearMiss": "using System;\nusing System.Net.Http;\nusing Microsoft.Extensions.Options;\n\nnamespace Pricing;\n\npublic sealed class PricingClientFactory\n{\n    private readonly PricingOptions _options;\n\n    public PricingClientFactory(IOptions<PricingOptions> options) => _options = options.Value;\n\n    public HttpClient Create()\n    {\n        var baseAddress = new Uri(_options.BaseAddress, UriKind.Absolute);\n\n        return new HttpClient\n        {\n            BaseAddress = baseAddress,\n            Timeout = _options.Timeout,\n        };\n    }\n}\n\npublic sealed class PricingOptions\n{\n    public string BaseAddress { get; init; } = \"https://localhost:5001/\";\n\n    public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);\n}\n"
       },
-      "gapNotes": "Narrow by design: only 'new Uri(\"http...\")' is matched, so a literal passed straight to HttpClient.GetAsync, an absolute filesystem path, a port number, or a magic timeout is missed entirely. The pattern deliberately stops at the scheme colon and never sees the host: jig's driver blanks '//' as a line comment before any pattern runs, so by match time the line reads 'new Uri(\"https:' followed by blanks. Everything after the scheme - which host, which environment, whether it is localhost - is therefore invisible to this class, and a commented-out endpoint is invisible too. Test projects and options-class defaults legitimately hold literal URLs, as the near-miss shows (its default survives only because it is not wrapped in new Uri), so this needs a paths exclusion for tests and for *Options.cs or it will be noisy enough to be waved off.",
+      "gapNotes": "Narrow by design: only a literal URL wrapped in 'new Uri(...)' is matched, so an address passed straight to HttpClient.GetAsync, an absolute filesystem path, a port number, or a magic timeout is missed entirely. Test projects and options-class defaults legitimately hold literal URLs, as the near-miss shows - its default survives only because it is not wrapped in new Uri - so this needs a paths exclusion for tests and for *Options.cs or it will be noisy enough to be waved off. No analyzer rule in this ecosystem reports a hardcoded endpoint, so nothing backstops the shapes the pattern misses.",
       "evidence": {
         "tier": "reasoned",
         "source": "No CA or IDE rule exists for hardcoded endpoints; the .NET options pattern (IOptions<T>, IConfiguration) is the documented alternative this class points at."
@@ -962,7 +977,7 @@
         "violation": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TestCaseFilter>(TestCategory != Flaky) &amp; (TestCategory != Integration)</TestCaseFilter>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\" />\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n",
         "nearMiss": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TestSessionTimeout>600000</TestSessionTimeout>\n    <MaxCpuCount>0</MaxCpuCount>\n  </RunConfiguration>\n  <TestRunParameters>\n    <Parameter name=\"webAppUrl\" value=\"http://localhost:5001\" />\n  </TestRunParameters>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\">\n        <Configuration>\n          <LogFileName>results.trx</LogFileName>\n        </Configuration>\n      </Logger>\n      <Logger friendlyName=\"blame\" enabled=\"True\" />\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n"
       },
-      "gapNotes": "Only sees an exclusionary filter committed to a runsettings or project file. The same narrowing done as --filter on the CI command line lives in a workflow YAML, which is not C# and is not in this class's paths - a separate CI-file class or a diff check on the test step is needed for that. An inclusive filter that quietly omits a suite (TestCategory = Unit only) is also missed, since it contains no != operator.",
+      "gapNotes": "Only sees an exclusionary filter committed to a runsettings or project file. The same narrowing done as --filter on the CI command line lives in a workflow YAML, which is not C# and is not in this class's paths - a separate CI-file class or a diff check on the test step is needed for that. An inclusive filter that quietly omits a suite (TestCategory = Unit only) is also missed, since it contains no != operator. Runsettings and MSBuild files are read without an XML comment rule, so a <TestCaseFilter> parked inside an <!-- --> comment is reported even though vstest never applies it.",
       "evidence": {
         "tier": "documented",
         "source": "Microsoft Learn 'Configure unit tests with a .runsettings file' (RunConfiguration/TestCaseFilter) and dotnet test with VSTest (--filter operators =, !=, ~, !~)."
@@ -1005,7 +1020,7 @@
         "violation": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>false</TreatNoTestsAsError>\n    <TreatTestAdapterErrorsAsWarnings>true</TreatTestAdapterErrorsAsWarnings>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\" />\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n",
         "nearMiss": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TreatTestAdapterErrorsAsWarnings>false</TreatTestAdapterErrorsAsWarnings>\n    <TestSessionTimeout>600000</TestSessionTimeout>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\">\n        <Configuration>\n          <LogFileName>results.trx</LogFileName>\n        </Configuration>\n      </Logger>\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n"
       },
-      "gapNotes": "Catches the setting being flipped, not the underlying condition. A repository with no .runsettings at all inherits the default of false and is silently exposed - the absence of a file cannot be detected by a pattern over files, so jig must assert the file exists as a separate install-time check. It also says nothing about a test project that was dropped from the solution, where discovery legitimately finds nothing to run.",
+      "gapNotes": "Catches the setting being flipped, not the underlying condition. A repository with no .runsettings at all inherits the default of false and is silently exposed - the absence of a file cannot be detected by a pattern over files, so jig must assert the file exists as a separate install-time check. It also says nothing about a test project that was dropped from the solution, where discovery legitimately finds nothing to run. Runsettings and MSBuild files are read without an XML comment rule, so a <TreatNoTestsAsError>false</TreatNoTestsAsError> sitting inside an <!-- --> comment is reported as if it were in force, while the opposite move - commenting out a working <TreatNoTestsAsError>true</TreatNoTestsAsError> - leaves nothing for the pattern to match and passes silently.",
       "evidence": {
         "tier": "documented",
         "source": "Microsoft Learn 'Configure unit tests with a .runsettings file' - TreatNoTestsAsError defaults to false; dotnet test with VSTest exit codes section states a run that discovers no tests returns 0 by default."

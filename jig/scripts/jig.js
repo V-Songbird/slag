@@ -2,10 +2,10 @@
 "use strict";
 
 // jig engine — the transaction core. Every byte jig ever writes goes through
-// here, which is what makes "reviewed, reversible, observed-before-armed" a
-// mechanical property instead of a promise: the target is fingerprinted before
-// the write, the pre-image is journalled before the write, and the write is
-// re-validated after it.
+// here, which is what makes "named, approved, reversible" a mechanical property
+// instead of a promise: the target is fingerprinted before the write, the
+// pre-image is journalled before the write, and the write is re-validated after
+// it.
 //
 // Commands (run from the project root being guarded):
 //   node jig.js scan                         read the project's own facts, the
@@ -42,11 +42,11 @@
 // Every command prints one JSON object to stdout and exits 0 on success, 1 on
 // an expected refusal (with the reason on stderr).
 //
-// Transaction CONCEPTS are vendored from assay's safe-change transaction and
-// rewritten fresh here (jig-brief locked D1): sha256 pre-image fingerprints
-// with stale refusal, path-escape guards, an append-only journal, per-change
-// apply and revert. There is deliberately no runtime dependency between the two
-// plugins — jig must work in a repo that has never heard of assay.
+// The transaction concepts are borrowed from a sibling in this marketplace and
+// rewritten fresh here: sha256 pre-image fingerprints with stale refusal,
+// path-escape guards, an append-only journal, per-change apply and revert.
+// There is deliberately no runtime dependency on anything — jig must work in a
+// repository that carries no other plugin at all.
 
 const fs = require("fs");
 const os = require("os");
@@ -64,7 +64,7 @@ const toolchainLib = require("./toolchain.js");
 
 const PLUGIN_ROOT = path.dirname(__dirname);
 
-// Additive-only rule (jig-brief §5): every jig schema ships at 1 and only ever
+// Additive-only rule: every jig schema ships at 1 and only ever
 // gains fields. Reading a plan stamped higher is a refusal rather than a guess,
 // because a field this build cannot see could be the one that made the write
 // safe. Unknown keys at the SAME version are warned about and ignored.
@@ -83,7 +83,7 @@ const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 const CHANGE_KINDS = ["write-side-file", "write-config", "include-line", "write-settings", "write-rule", "write-agents-region", "run-install"];
 const INSTALLABLE_KINDS = ["write-side-file", "write-config", "include-line", "write-settings", "write-rule", "write-agents-region", "run-install"];
 
-// The prose budget (jig-brief §5, 0.4.0): the most always-loaded bytes one
+// The prose budget: the most always-loaded bytes one
 // plan may add to the rule corpus. A default, stated as one — measured against
 // nothing but the cost every session pays to carry prose. Every emitted rule
 // must also carry its evidence label; both are refusals, not warnings.
@@ -109,7 +109,7 @@ function agentsRegionText(selection) {
 }
 
 // write-settings is additionally gated behind the permissions probe series
-// (jig-brief §5, 0.4.0): the capability exists only after a human has run
+//: the capability exists only after a human has run
 // scripts/probes/permissions.js against a pinned CLI and a green results.json
 // sits beside it. Probes first, capability second — a missing or red record
 // keeps the gate closed. JIG_PROBE_RESULTS points tests at a fixture.
@@ -534,9 +534,9 @@ function planFromDraft(draft, root) {
       continue;
     }
     if (raw.kind === "write-settings" && !probeGreen()) {
-      problems.push(label + ": write-settings is gated behind the permissions probe series — run" +
-        " scripts/probes/permissions.js against a pinned CLI and land a green results.json first." +
-        " Until then, permission rules stay a printed proposal.");
+      problems.push(label + ": jig does not write permission rules into your settings. They stay a" +
+        " printed proposal you apply yourself, which is the only shipped behaviour." +
+        " (Maintainers: the capability unlocks behind scripts/probes/permissions.js.)");
       continue;
     }
     const rel = toPosix(typeof raw.path === "string" ? raw.path.trim() : "");
@@ -691,10 +691,11 @@ function intendedBytes(change) {
   return applyStyle(change.content, { eol: change.eol, bom: change.bom });
 }
 
-// The include-line mechanism. Implemented and tested now, routed to by nothing
-// until 0.2.0. Three refusals, in the order that matters: the marker is already
-// there (a no-op, not an error), the anchor drifted (the host file is not the
-// one that was planned against), the anchor is ambiguous.
+// The include-line mechanism, reached by `plan --weave-precommit` against a
+// pre-commit hook the repository committed. Three refusals, in the order that
+// matters: the marker is already there (a no-op, not an error), the anchor
+// drifted (the host file is not the one that was planned against), the anchor
+// is ambiguous.
 function includeLineText(hostText, change) {
   const marker = String(change.marker || "");
   const anchor = String(change.anchor || "");
@@ -956,6 +957,10 @@ const CONFIG_FILE = "config.json";
 const MANIFEST_FILE = "manifest.json";
 const PERMISSIONS_FILE = "proposed-permissions.json";
 const ACTIVATION_FILE = "activation.md";
+// The one line that makes a committed pre-commit hook run the checks, per host.
+// It lives in `catalogues/shared.json` so the wiring and the editions ship as
+// one body of data rather than half data and half constant.
+const ACTIVATION = require("../catalogues/shared.json").activation;
 
 const OWNERSHIPS = ["file", "line", "schema"];
 const PROVENANCES = ["elicited", "forensic", "assumed"];
@@ -1053,6 +1058,11 @@ function editionClassById(loaded, id) {
         ...cls,
         id,
         edition: edition.edition,
+        // SCOPE, "Where does comment syntax live": the edition declares it per
+        // extension, and the blanker reads it off the check. Carried here so a
+        // class proves and runs against its own language's comment rules rather
+        // than the driver's fallback table.
+        commentSyntax: (edition.detect && edition.detect.commentSyntax) || null,
         detectors: cls.detectors.map((det, i) => editionsLib.adaptDetector(cls, det, i)),
       };
     }
@@ -1121,7 +1131,7 @@ function readManifest(root) {
 // is a field that goes stale.
 //
 // `schema`-owned artifacts are exempt from drift. The config is a file users
-// are meant to edit (jig-brief §3), so a hash that no longer matches means
+// are meant to edit, so a hash that no longer matches means
 // somebody used it, not that something broke — its correctness is the runner's
 // schema check, never a fingerprint.
 function manifestStates(root, manifest) {
@@ -1133,7 +1143,7 @@ function manifestStates(root, manifest) {
   });
 }
 
-// The occupancy rule, in one answer (jig-brief §4.1, D18). A file jig did not
+// The occupancy rule, in one answer. A file jig did not
 // install is somebody else's; a file jig installed and somebody then edited is
 // theirs now too. Both are refusals rather than overwrites.
 function occupancyProblem(root, rel, states) {
@@ -1522,19 +1532,6 @@ function draftFromTemplates(root, opts, checks) {
       JSON.stringify(permissions, null, 2) + "\n", selection);
   }
 
-  // Prose rules (0.4.0): emitted only on explicit request — the default
-  // install's zero-always-loaded claim is a release gate, and it stays true.
-  if (typeof opts.prose === "string") {
-    for (const classId of [...new Set(opts.prose.split(",").map((s) => s.trim()).filter(Boolean))]) {
-      const cls = classes.find((c) => c.id === classId);
-      if (!cls) throw expected(classId + " is not in this plan's selection, so there is no class to write prose for");
-      const det = cls.detectors.find((d) => d.lever === "prose-rule");
-      if (!det) throw expected(classId + " has no prose-rule detector — jig ships no vetted rule text for it");
-      const entry = byName.get(det.params.template);
-      if (!entry) throw expected(det.params.template + " is not a shipped template");
-      add(entry, templateBody(entry), [classId]);
-    }
-  }
   // The Codex region (0.5.0): computed from the selection, marker-fenced,
   // capped by the loadability ceiling at apply time. Explicit request only.
   if (opts["agents-region"]) {
@@ -1551,6 +1548,37 @@ function draftFromTemplates(root, opts, checks) {
       rationale: "point Codex sessions at the committed checks",
     });
   }
+  // The pre-commit weave: one line into a hook file the repository already
+  // committed, taken from shared catalogue data rather than anything typed.
+  // `.git/hooks/` is machine-local and jig never writes there, so the only
+  // hosts here are files a teammate would see in review anyway.
+  if (opts["weave-precommit"]) {
+    const { profile } = readProfile(root);
+    const hosts = ((profile.guardrails && profile.guardrails.precommit) || []).filter((h) => !h.woven);
+    if (!hosts.length) {
+      throw expected("there is no committed pre-commit hook here to weave into, or jig's line is already in it." +
+        " The activation line stays a printed proposal — see " + STATE_DIR + "/" + ACTIVATION_FILE + ".");
+    }
+    for (const host of hosts) {
+      const entry = ACTIVATION[host.host];
+      if (!entry) throw expected(host.path + " is a pre-commit host jig ships no activation line for");
+      changes.push({
+        id: changeId("weave-precommit", host.path + entry.line),
+        kind: "include-line",
+        path: host.path,
+        line: entry.line,
+        marker: entry.marker,
+        anchor: host.anchor || undefined,
+        content: entry.line,
+        classIds: selection,
+        ownership: "line",
+        provenance,
+        template: { name: "activation", version: "1.0.0" },
+        rationale: "run the committed checks from " + host.path,
+      });
+    }
+  }
+
   // The governance pointer rule: computed from the scan's own orphan list,
   // never from anything a person typed — the same discipline as the config.
   if (opts["wire-governance"]) {
@@ -1606,7 +1634,7 @@ function draftFromTemplates(root, opts, checks) {
 // metadata — from an edition or from the check the model authored — and the
 // changes this plan is about to write. A cell nobody can derive from those two
 // goes stale the first time either one moves, and a stale coverage claim is
-// worse than no claim at all (jig-brief §3).
+// worse than no claim at all.
 //
 // The columns are the engine's actor list, rendered by their exact ids. A
 // column comes out GAP everywhere when no detector in this plan names that
@@ -1671,7 +1699,7 @@ function denyCapable(det) {
   return HOOK_RUNNERS.includes(det.runner);
 }
 
-// The floor (jig-brief §3, locked D2): something a person or a CI runner can run
+// The floor: something a person or a CI runner can run
 // with no agent host involved, and that cannot be wrong about what it found.
 function hostNeutralFloor(cls) {
   return cls.detectors.some((d) => {
@@ -1698,7 +1726,7 @@ function detectorGrade(det) {
 
 // What bounds a PROB cell. jig ships no compliance measurement for any lever, so
 // this names the KIND of uncertainty instead of inventing a percentage — a
-// number nobody measured is the folklore this plugin exists to avoid (D11).
+// number nobody measured is the folklore this plugin exists to avoid.
 function detectorCeiling(det) {
   const lever = leverOf(det.lever);
   return lever && lever.probabilistic ? "unmeasured" : det.confidence;
@@ -1816,7 +1844,7 @@ function matrixRow(cls, provenance, changes, guards) {
   };
 }
 
-// Tiered consent (jig-brief §4.6, D24). Batch-approve what only ever reports;
+// Tiered consent. Batch-approve what only ever reports;
 // item-approve anything that can refuse a tool call or fail somebody's build.
 // Both tests are mechanical — the change's kind and its target — so no artifact
 // lands in the cheap tier because somebody classified it there by hand.
@@ -1879,7 +1907,8 @@ function backlogFor(loaded, selection) {
     for (const cls of edition.classes || []) {
       const id = editionsLib.namespacedId(edition.edition, cls.id);
       if (selection.includes(id)) continue;
-      const adapted = { ...cls, id, detectors: cls.detectors.map((d, i) => editionsLib.adaptDetector(cls, d, i)) };
+      const adapted = { ...cls, id, commentSyntax: (edition.detect && edition.detect.commentSyntax) || null,
+        detectors: cls.detectors.map((d, i) => editionsLib.adaptDetector(cls, d, i)) };
       rows.push({
         classId: id,
         edition: edition.edition,
@@ -2291,8 +2320,8 @@ function cmdApply(root, opts) {
     applied: results,
     enforcementGaps: results.filter((r) => r.enforcementGap).map((r) => r.path),
     manifest: manifest ? STATE_DIR + "/" + MANIFEST_FILE : null,
-    // Everything the user now has to do by hand, in one place, because jig
-    // wrote none of it into a file they own (jig-brief §2, amendment 1).
+    // Everything the user now has to do by hand, in one place: whatever jig
+    // could not vet, or was never approved to write, lands here as a proposal.
     proposals: proposalNotes(results),
   };
 }
@@ -2475,7 +2504,7 @@ function cmdRevert(root, opts) {
 // ---------------------------------------------------------------------------
 //
 // The interview is not finished when the files are on disk. It is finished
-// when somebody has watched a guard catch something (jig-brief §4.8), because
+// when somebody has watched a guard catch something, because
 // an installed guard that never fires and a guard that cannot fire look
 // identical from the outside.
 //
@@ -2670,7 +2699,7 @@ function cmdSelftest(root, opts) {
 // scan
 // ---------------------------------------------------------------------------
 //
-// Never ask what the machine can read (jig-brief §4.1). Everything scan
+// Never ask what the machine can read. Everything scan
 // gathers is a fact the interview is then forbidden to put to a human: the
 // stack, whether node is reachable, what guardrails already run here, and
 // which of jig's own slots are already taken.
@@ -2800,7 +2829,7 @@ function gitConfig(root, key) {
   return r.stdout.trim() || null;
 }
 
-// The fnm hazard, stated rather than assumed (jig-brief §7). A node that
+// The fnm hazard, stated rather than assumed. A node that
 // resolves here because this shell initialised a version manager is not a node
 // a git hook or another terminal will find, and jig's whole human floor is
 // node scripts.
@@ -2908,7 +2937,7 @@ function conflictPreflight(root, hooks) {
 // Governance documents by shape — ADRs, scopes, roadmaps, north stars — and
 // whether any surface a session actually loads points at them. A doc nothing
 // references is invisible however good it is; the scan calls that an orphan
-// and the interview turns it into a decision (roadmap 110).
+// and the interview turns it into a decision.
 const GOVERNANCE_SHAPES = [
   { kind: "adr", globs: ["adr/**", "adrs/**", "docs/adr/**", "docs/adrs/**", "docs/decisions/**", "DECISIONS.md"] },
   { kind: "scope", globs: ["SCOPE.md", "docs/SCOPE.md"] },
@@ -2917,6 +2946,31 @@ const GOVERNANCE_SHAPES = [
   { kind: "context", globs: ["CONTEXT.md", "docs/CONTEXT.md"] },
   { kind: "phases", globs: ["PHASES.md", "docs/phases/**", "docs/PLAN.md"] },
 ];
+
+// The committed pre-commit hooks jig could weave its line into. `.git/hooks/`
+// is machine-local and jig never writes there, so a repository only has one of
+// these if somebody committed it — which is exactly when weaving is safe.
+//
+// The host decides the line: a node-shebang hook gets the in-process form, and
+// everything else gets the sh form that skips silently when node is off PATH.
+function precommitHosts(root) {
+  const out = [];
+  for (const dir of KIND_TARGETS["include-line"]) {
+    const rel = toPosix(dir + "pre-commit");
+    const buf = readIfExists(path.join(root, rel));
+    if (buf === null) continue;
+    const body = stripBom(buf.toString("utf8"));
+    const host = /^#![^\r\n]*\bnode\b/.test(body) ? "node" : "sh";
+    const entry = ACTIVATION[host];
+    // Strict mode is a directive prologue: a line inserted above it silently
+    // turns strict mode off. Anchor below it when the host has one.
+    const anchor = host === "node" && /['"]use strict['"];/.test(body)
+      ? (/["']use strict["'];/.exec(body) || [null])[0]
+      : null;
+    out.push({ path: rel, host, anchor, woven: body.includes(entry.marker) });
+  }
+  return out;
+}
 
 function governanceFacts(root, rules, hooks) {
   const found = [];
@@ -3004,6 +3058,13 @@ function cmdScan(root) {
     }
   } catch { /* a scan disclosure is never worth failing the scan for */ }
 
+  const precommit = precommitHosts(root);
+  for (const host of precommit) {
+    if (host.woven) continue;
+    disclosures.push(host.path + " is a committed pre-commit hook, so jig can weave its one check line" +
+      " into it on request. Until it does, the line stays a printed proposal.");
+  }
+
   const rules = ruleCorpus(root);
   const governance = governanceFacts(root, rules, hooks);
   for (const orphan of governance.orphans) {
@@ -3029,7 +3090,7 @@ function cmdScan(root) {
     edition: stack.edition,
     editions: stack.editions,
     node,
-    guardrails: { hooks, coreHooksPath: gitConfig(root, "core.hooksPath"), rules },
+    guardrails: { hooks, coreHooksPath: gitConfig(root, "core.hooksPath"), rules, precommit },
     governance,
     slots,
     occupied: occupied.map((s) => s.slot),
@@ -3043,7 +3104,7 @@ function cmdScan(root) {
 
 // Same discipline as a plan: a profile written by a newer jig is refused
 // outright, and an unknown key at the version this build reads is a warning
-// rather than a stop (jig-brief §5, the additive-only rule).
+// rather than a stop, which is the additive-only rule.
 function readProfile(root) {
   const file = statePath(root, PROFILE_FILE);
   const buf = readIfExists(file);

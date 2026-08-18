@@ -474,7 +474,7 @@ test("the state directory jig creates keeps its own machine-local files out of g
 // include-line, applied for real (0.2.0 git-hook activation)
 
 const NODE_HOOK = fs.readFileSync(path.join(__dirname, "fixtures", "precommit-node"), "utf-8");
-const ACTIVATION = require("../scripts/catalogue.json").activation;
+const ACTIVATION = require("../catalogues/shared.json").activation;
 
 function hookProject(body) {
   return tmpProject({ "scripts/git-hooks/pre-commit": body });
@@ -540,7 +540,7 @@ test("write-settings is refused until the probe series is green, then installs i
   const gated = tmpProject({ ".claude/settings.json": "{}\n" });
   delete process.env.JIG_PROBE_RESULTS;
   const refused = engine.planFromDraft({ changes: settingsDraft }, gated);
-  assert.match(refused.problems.join(" "), /gated behind the permissions probe series/);
+  assert.match(refused.problems.join(" "), /does not write permission rules into your settings/);
 
   const green = tmpProject({ ".claude/settings.json": "{}\n" });
   const results = path.join(green, "probe-results.json");

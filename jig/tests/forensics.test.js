@@ -13,7 +13,16 @@ const path = require("path");
 
 const engine = require("../scripts/jig.js");
 const forensics = require("../scripts/forensics.js");
-const catalogue = require("../scripts/catalogue.json");
+const editions = require("../scripts/editions.js");
+
+const PLUGIN_ROOT = path.join(__dirname, "..");
+// The shelf forensics ranks over: every class of every shipped edition, under
+// the same namespaced id the engine selects by.
+const SHIPPED = editions.loadIndex(PLUGIN_ROOT).editions
+  .flatMap((row) => editions.loadEdition(PLUGIN_ROOT, row.id).classes
+    .map((cls) => ({ ...cls, id: editions.namespacedId(row.id, cls.id) })));
+// What a Node fixture repository narrows to once its edition is detected.
+const NODE_CLASSES = SHIPPED.filter((cls) => cls.id.startsWith("javascript-typescript/"));
 
 const REPO_ROOT = path.join(__dirname, "..", "..");
 const FORENSICS_SRC = fs.readFileSync(path.join(__dirname, "..", "scripts", "forensics.js"), "utf-8");
@@ -125,7 +134,7 @@ test("a directory that is not a repository falls back without an error", () => {
   assert.equal(out.usable, false);
   assert.equal(out.fallback, "not-a-repository");
   assert.deepEqual(out.incidents, []);
-  assert.equal(out.ranking.length, catalogue.classes.length);
+  assert.equal(out.ranking.length, SHIPPED.length);
 });
 
 test("a young history says nothing rather than guessing from six commits", () => {
@@ -194,17 +203,31 @@ test("churn needs eight commits on one file before it is a hotspot", () => {
   assert.equal(spots[0].count, 8);
 });
 
-test("a deleted test file is an incident and ranks the class that guards it", () => {
+test("a deleted test file is an incident once a second signal clears with it", () => {
   const root = newRepo();
   filler(root, 4);
   commit(root, { "tests/thing.test.js": "assert.ok(true);\n" }, "add a test");
   commit(root, { "tests/thing.test.js": null }, "drop the flaky test");
+
+  // On its own it is one signal, and one signal is a coincidence.
+  const alone = forensics.runForensics(root, MINI);
+  assert.deepEqual(alone.cleared, ["test-file-deleted"]);
+  assert.equal(alone.fallback, "below-threshold");
+  assert.deepEqual(alone.incidents, []);
+
+  // A second, different signal makes it evidence.
+  commit(root, { "src/swallow.js": "try { risky(); } catch {}\n" }, "wrap the risky call");
   const out = forensics.runForensics(root, MINI);
+  assert.equal(out.usable, true);
   const deleted = out.incidents.filter((i) => i.kind === "test-file-deleted");
   assert.deepEqual(deleted.map((d) => d.path), ["tests/thing.test.js"]);
-  const row = out.ranking.find((r) => r.classId === "test-file-deletion");
-  assert.equal(row.hits, 1);
-  assert.equal(row.basis, "forensics");
+  // It ranks a class only where the project's own edition ships one. This is a
+  // Node repository, and that edition carries no deleted-test class, so the
+  // incident stands on its own rather than being attributed to a foreign id.
+  assert.ok(out.ranking.every((r) => r.edition === "javascript-typescript"));
+  for (const row of out.ranking.filter((r) => r.classId.endsWith("/deleted-test") && r.hits > 0)) {
+    assert.equal(row.basis, "forensics");
+  }
 });
 
 test("a test diff that removes more assertions than it adds is a weakened assertion", () => {
@@ -219,7 +242,7 @@ test("a test diff that removes more assertions than it adds is a weakened assert
   assert.equal(weak.length, 1);
   assert.equal(weak[0].removed, 3);
   assert.equal(weak[0].added, 1);
-  assert.equal(out.ranking.find((r) => r.classId === "weakened-assertion").hits, 1);
+  assert.equal(out.ranking.find((r) => r.classId === "javascript-typescript/softened-assertion").hits, 1);
 });
 
 test("a test diff that adds assertions is not a weakened assertion", () => {
@@ -262,14 +285,22 @@ test("attribution survives a real repository and is labelled best-effort", () =>
 // The injection firewall
 // ---------------------------------------------------------------------------
 
-test("every content pattern forensics matches on is one the catalogue ships", () => {
-  const shipped = fs.readFileSync(path.join(__dirname, "..", "scripts", "catalogue.json"), "utf-8");
+test("every content pattern forensics matches on is one an edition ships", () => {
+  // Compiled against compiled, never against the file text: `RegExp.source`
+  // normalises an unescaped `/` to an escaped one, so a string comparison
+  // would fail on shipped data that is perfectly fine.
+  const shipped = new Set();
+  for (const cls of SHIPPED) {
+    for (const det of cls.detectors || []) {
+      for (const src of (det.params && det.params.patterns) || []) shipped.add(new RegExp(src).source);
+    }
+  }
   const detectors = forensics.contentDetectors();
   assert.ok(detectors.length > 0);
   for (const det of detectors) {
-    assert.ok(catalogue.classes.some((c) => c.id === det.classId), det.classId + " is not a catalogue class");
+    assert.ok(SHIPPED.some((c) => c.id === det.classId), det.classId + " is not a shipped class");
     for (const re of det.patterns) {
-      assert.ok(shipped.includes(JSON.stringify(re.source).slice(1, -1)), "pattern not from the catalogue: " + re.source);
+      assert.ok(shipped.has(re.source), "pattern not from an edition: " + re.source);
     }
   }
 });
@@ -286,7 +317,7 @@ test("nothing mined from a repository comes back out as a matcher", () => {
   assert.ok(!text.includes("OWNED-BY-THE-REPO"), "repository content reached the forensics record");
   assert.ok(!/"(patterns|regex|matcher|params)"/.test(text), "forensics emitted something matcher-shaped");
   for (const row of out.ranking) {
-    assert.deepEqual(Object.keys(row).sort(), ["actors", "basis", "classId", "examples", "hits", "installableAtV1", "severity", "title"]);
+    assert.deepEqual(Object.keys(row).sort(), ["actors", "basis", "classId", "edition", "examples", "hits", "severity", "title"]);
   }
 });
 
@@ -297,9 +328,9 @@ test("catalogue patterns found in added lines rank their own class", () => {
   commit(root, { "tests/focus.test.js": "it.only('one', () => {});\n" }, "focus one test");
   const out = forensics.runForensics(root, MINI);
   assert.equal(out.usable, true);
-  assert.deepEqual(out.cleared, ["content:focused-or-skipped-test", "content:silent-catch"]);
-  assert.ok(out.ranking.find((r) => r.classId === "silent-catch").hits >= 1);
-  assert.ok(out.ranking.find((r) => r.classId === "focused-or-skipped-test").hits >= 1);
+  assert.deepEqual(out.cleared, ["content:javascript-typescript/focused-test", "content:javascript-typescript/swallowed-exception"]);
+  assert.ok(out.ranking.find((r) => r.classId === "javascript-typescript/swallowed-exception").hits >= 1);
+  assert.ok(out.ranking.find((r) => r.classId === "javascript-typescript/focused-test").hits >= 1);
 });
 
 test("two different classes in the history are two signals, one class is not", () => {
@@ -307,7 +338,7 @@ test("two different classes in the history are two signals, one class is not", (
   filler(root, 4);
   commit(root, { "src/swallow.js": "try { risky(); } catch {}\n" }, "wrap the risky call");
   const only = forensics.runForensics(root, MINI);
-  assert.deepEqual(only.cleared, ["content:silent-catch"]);
+  assert.deepEqual(only.cleared, ["content:javascript-typescript/swallowed-exception"]);
   assert.equal(only.fallback, "below-threshold");
 
   commit(root, { "tests/focus.test.js": "it.only('one', () => {});\n" }, "focus one test");
@@ -320,12 +351,21 @@ test("two different classes in the history are two signals, one class is not", (
 // Ranking
 // ---------------------------------------------------------------------------
 
-test("the fallback ordering is the catalogue's own argument, installable first", () => {
+test("the fallback ordering is the editions' own argument, safety first", () => {
   const order = forensics.catalogueOrder();
-  assert.equal(order.length, catalogue.classes.length);
-  const lastInstallable = order.map((c) => c.installableAtV1 === true).lastIndexOf(true);
-  const firstNot = order.map((c) => c.installableAtV1 === true).indexOf(false);
-  assert.ok(firstNot === -1 || lastInstallable < firstNot, "an installable class ranked below one that is not");
+  assert.equal(order.length, SHIPPED.length);
+  const lastSafety = order.map((c) => c.severity === "safety").lastIndexOf(true);
+  const firstNot = order.map((c) => c.severity === "safety").indexOf(false);
+  assert.ok(firstNot === -1 || lastSafety < firstNot, "a safety class ranked below one that is not");
+  // Nothing installable-first survives: every class is installable now, and the
+  // fixture pair is what admits it.
+  assert.ok(order.every((c) => c.installableAtV1 === undefined), "a deleted field is still shaping the order");
+});
+
+test("every id forensics hands out is namespaced by its edition", () => {
+  for (const cls of forensics.catalogueOrder()) {
+    assert.match(cls.id, /^[a-z0-9-]+\/[a-z0-9-]+$/, cls.id + " is not namespaced");
+  }
 });
 
 test("the whole spine is always returned, ranked by hits, zero-hit classes last", () => {
@@ -337,7 +377,10 @@ test("the whole spine is always returned, ranked by hits, zero-hit classes last"
   commit(root, { "tests/gone.test.js": null }, "drop the test");
   const out = forensics.runForensics(root, MINI);
   assert.equal(out.usable, true);
-  assert.equal(out.ranking.length, catalogue.classes.length);
+  assert.equal(out.ranking.length, NODE_CLASSES.length,
+    "the spine is every class of the editions this project matched");
+  assert.ok(out.ranking.every((r) => r.edition === "javascript-typescript"),
+    "a Node repository was ranked in another language's ids");
   assert.ok(out.ranking[0].hits >= 1, "the top row has no hits");
   assert.equal(out.ranking[out.ranking.length - 1].hits, 0);
   assert.deepEqual(
@@ -565,7 +608,7 @@ test("unreadable settings are skipped rather than crashing the scan", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Governance-doc reachability (roadmap 110)
+// Governance-doc reachability
 
 test("a governance doc no loaded surface references is an orphan, and the scan says so", () => {
   const root = project({

@@ -1,6 +1,0 @@
-# Fixture: near-miss negative B for pipe-to-shell, one command per line.
-# A force-push to a scratch branch. Only the default branch is the defect, and
-# the branch test happens when the guard evaluates, never inside the pattern —
-# so this line is clean only if the runner really reads the branch out of the
-# command's own argv.
-git push --force origin scratch-branch

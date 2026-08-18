@@ -9,9 +9,10 @@
 //   1. A command is never handed to a shell. The install strings in the
 //      editions are human-readable prose-ish text; they are parsed into an argv
 //      array and spawned with shell: false. A string carrying a metacharacter
-//      jig did not put there is refused outright rather than quoted around —
-//      `rm -f "$(go env GOPATH)/bin/x"` is a real entry in the go edition, and
-//      the honest answer to it is "run this yourself", not a subshell.
+//      jig did not put there is refused outright rather than quoted around: an
+//      escape is a claim about which shell will read it, and the honest answer
+//      is "run this yourself", not a subshell. No shipped edition carries such
+//      a command, and a release gate holds that true.
 //   2. presence() and proposeInstalls() change nothing. proposeInstalls spawns
 //      nothing at all; presence spawns exactly one thing, `<tool> --version`,
 //      which is what SCOPE's "how is tool presence determined" decision asks
@@ -374,7 +375,7 @@ function proposeInstalls(projectRoot, edition, toolIds, packageManager) {
 }
 
 // ---------------------------------------------------------------------------
-// runInstall / runUninstall
+// runInstall
 // ---------------------------------------------------------------------------
 
 // The gate, in one place so both directions cannot drift apart. The record has
@@ -426,15 +427,6 @@ function runInstall(projectRoot, item, approval) {
   return runArgv(root, item, item.argv, item.command, item.timeoutMs > 0 ? item.timeoutMs : INSTALL_TIMEOUT_MS);
 }
 
-function runUninstall(projectRoot, item, approval) {
-  const root = requireRoot(projectRoot);
-  if (isObject(item) && !nonEmptyString(item.uninstallCommand)) {
-    throw refuse((item.id || "this item") + " carries no uninstall command, so there is nothing here to run");
-  }
-  requireApproval(item, approval, item && item.uninstallCommand, "Uninstall");
-  if (!Array.isArray(item.uninstallArgv) || !item.uninstallArgv.length) throw refuse(item.id + " has no parsed uninstall argv — it did not come from proposeInstalls");
-  return runArgv(root, item, item.uninstallArgv, item.uninstallCommand, item.timeoutMs > 0 ? item.timeoutMs : INSTALL_TIMEOUT_MS);
-}
 
 // ---------------------------------------------------------------------------
 // execVerify
@@ -507,6 +499,5 @@ module.exports = {
   pickPackageManager,
   proposeInstalls,
   runInstall,
-  runUninstall,
   execVerify,
 };

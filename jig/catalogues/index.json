@@ -33,8 +33,7 @@
           ".sln": "hash"
         },
         "packageManagers": [
-          "dotnet",
-          "nuget"
+          "dotnet"
         ]
       }
     },

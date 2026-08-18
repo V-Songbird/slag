@@ -15,8 +15,8 @@ description: >-
   mistakes" — or invokes /jig:jig. Do NOT use to grade or audit existing rules
   or skill descriptions — that is /assay:claude — and not to write one rule or
   one skill — those are /assay:craft-rules and /assay:craft-skill.
-argument-hint: "[--quick] [--select <classId,…>] [--no-ci]"
-allowed-tools: Bash, Read, Write, AskUserQuestion, Agent
+argument-hint: "[--quick] [--select <classId,…>] [--no-ci] [--observe]"
+allowed-tools: Bash, Read, Write, AskUserQuestion
 ---
 
 # jig:jig
@@ -40,19 +40,45 @@ something a guard graduates from.
 Flags in `$ARGUMENTS`: `--quick` (skip the rounds, take the edition's leading
 classes, plan as `assumed`), `--select <classId,…>` (the user already named the
 classes, so skip that question and treat them as elicited), `--no-ci` (pass
-through to `plan`, which then generates no CI workflow).
+through to `plan`, which then generates no CI workflow), `--observe` (every
+guard watches rather than blocks). The interview's own answers reach `plan`
+through four more flags, listed at step 6.
 
 Every command runs from the project root and every one of them is `node
-"${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" <scan|toolchain|admit|plan|apply|status|revert|selftest>`
-or `node "${CLAUDE_PLUGIN_ROOT}/scripts/forensics.js"`. There is no other entry
+"${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" <scan|toolchain|plan|apply|status|revert|selftest|migrate>`
+or `node "${CLAUDE_PLUGIN_ROOT}/scripts/forensics.js"`. (`admit` runs the
+fixture-pair test on its own; `plan` already does it, so this flow never needs
+the separate call.) There is no other entry
 point and nothing is on PATH. Flags take a space-separated value — `--select
 a,b`, never `--select=a,b`, which the parser reads as a flag named
 `select=a,b`. Every command accepts `--root <path>`; without it the working
 directory is the project.
 
-When `.jig/manifest.json` already exists, this is a re-run: the drift report,
-the retire offer and the one re-run question belong to `/jig:review`. Hand off
-there and stop, unless the user says they want a fresh pass over new material.
+When `.jig/manifest.json` already exists, this is a re-run, and there is one
+thing to do before anything else. An install made before the rework carries
+checks in the old single-function shape, which this engine does not read, so
+upgrade it in place first:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" migrate
+```
+
+`already on the pair shape` is the normal answer on a current install. It is not
+a problem and it is not worth a sentence — read it and move on. Any other
+refusal is real: `migrate` writes nothing unless the whole migration can land,
+and it refuses outright over an artifact somebody edited by hand. Name the file
+it reports and stop there.
+
+When it does run, it rewrites every installed check into the violation and
+near-miss pair shape, carries each guard's ledger history forward under its new
+name, and lands as one journaled transaction that `revert` undoes like any
+other. Every rewritten check faces the same admission test an authored one
+faces, so one whose pair does not pass is discarded and reported rather than
+quietly carried over. Say which guards were discarded and why.
+
+After that, the drift report, the retire offer and the one re-run question
+belong to `/jig:review`. Hand off there and stop, unless the user says they want
+a fresh pass over new material.
 
 ## 1. Scan
 
@@ -158,9 +184,17 @@ plan review at step 6.
 ## 3. Toolchain proposal
 
 The standard apparatus for a language — linter, formatter, type checker, test
-runner, security scan, build — is the `toolchain` array in the matched edition.
-Read it from `${CLAUDE_PLUGIN_ROOT}/catalogues/<file>`, taking `<file>` from
-`catalogues/index.json` for each id the scan reported under `editions`.
+runner, security scan, build — comes from the editions the scan matched. Ask for
+it rather than reading the catalogue files yourself:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" toolchain
+```
+
+`items` is one row per proposable tool, already resolved against this project's
+package manager and its existing install. `refused` names any tool this project
+cannot be offered and why — read it out; a tool silently missing from a
+proposal is a tool the owner never got to decline.
 
 Every row is one named item: `role` and `why`, `installKind` (`package`,
 `scaffold`, `builtin` or `audit` — a scaffold command and a package install are
@@ -188,7 +222,7 @@ For each mistake the interview surfaced — from the class list, from free text,
 or from a forensics leader the user confirmed — write one check. Read the
 matched edition for shape, naming, severity and calibration in the language at
 hand; it is reference material, and it never bounds what may be written — see
-[references/catalogue-node.md](references/catalogue-node.md). There is one
+[references/catalogues.md](references/catalogues.md). There is one
 authoring story, and session guards go down it too.
 
 Each authored check carries, in one module:
@@ -245,6 +279,17 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" plan --authored .jig/authored.json -
 ids the user ticked, and `--tools` the tools they ticked at step 3. Drop a flag
 whose list is empty. Add `--package-manager <name>` when the plan asked for it,
 and `--no-ci` when the user declined the workflow.
+
+**Four more flags carry answers the interview already collected. A round that
+asked a question and then dropped the answer is worse than a round that never
+asked, so pass every one the user said yes to:**
+
+| Pass | When the user |
+| --- | --- |
+| `--observe` | asked for guards that watch rather than block. It applies to the whole install; a single guard is moved afterwards in `/jig:review` |
+| `--weave-precommit` | agreed to let jig put its one line into the pre-commit hook their repository already commits. The scan lists the hosts under `guardrails.precommit`, and a repo with none refuses rather than creating one |
+| `--wire-governance` | agreed to wire the orphaned governance documents the scan found. It writes one computed pointer rule, `.claude/rules/jig-governance.md` |
+| `--agents-region` | said another AI tool reads this repository, so `AGENTS.md` should carry a fenced block pointing at the same checks |
 
 Provenance is the weakest thing that fed the selection, and it stays
 load-bearing: it is how the plan states which rows the owner actually chose.
@@ -362,8 +407,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" revert --all
 changed after jig wrote it rather than discarding that edit — report the refusal
 as it stands. `--force` restores the journalled pre-image anyway, and that is
 the user's call to make, never yours. Undoing a tool install restores the
-manifest and the lockfile pre-images and then offers the ecosystem's reconcile
-command as its own approved item, shown verbatim — never run silently.
+manifest and the lockfile pre-images and then prints the ecosystem's reconcile
+command verbatim for the user to run. jig never runs a package manager on the
+way out — read the command out and say plainly that the packages are still on
+disk until they run it.
 
 `.jig/off` is the kill switch: create that file and every guard exits without
 running. One pass, then done; no follow-up menus.
