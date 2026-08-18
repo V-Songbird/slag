@@ -35,3 +35,9 @@ ROADMAP.jsonl.backup-*
 # This repo's dev config ported to other agent CLIs — local-only, not published
 .agents/
 .codex/
+
+# Per-plugin internal notes — the scope contract, strategy notes, and any
+# working docs beside a plugin. Local-only, never published.
+/*/SCOPE.md
+/*/PRODUCT-STRATEGY.md
+/*/docs/

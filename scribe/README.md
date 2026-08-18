@@ -95,7 +95,7 @@ Prefer a switch? `SCRIBE_OFF=1` in the environment or an empty `.scribe/off` fil
 
 ## Under the hood
 
-The contract lives in [SCOPE.md](./SCOPE.md) — what scribe owns, what it never becomes, and the release gates every cut has to pass.
+Two small hooks and a local ledger: one hook judges your prompt on the way in, the other watches how the questions landed. It's all in the plugin's files.
 
 ## License
 
