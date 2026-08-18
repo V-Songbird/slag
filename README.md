@@ -9,7 +9,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
 
-> **TL;DR** — A sandbox marketplace of plugin experiments. Five are installable from here; two more live in the tree, local-only, until they earn their keep. Nothing has a support promise, and nothing is guaranteed to still exist tomorrow.
+> **TL;DR** — A sandbox marketplace of plugin experiments. Four are installable from here. Nothing has a support promise, and nothing is guaranteed to still exist tomorrow.
 
 ---
 
@@ -63,14 +63,6 @@ If you code in WebStorm, IntelliJ IDEA, Rider, PyCharm, or another JetBrains IDE
 /plugin install jetbrains-router@slag
 ```
 
-### [proof](./proof) — Find out if your config change actually did anything
-
-You tweaked a rule, a skill, a whole `CLAUDE.md`, and it *feels* better — but the model is different every run, so "seems better" is a vibe, not evidence. proof runs your tasks with and without the change, many times over, and hands you a verdict: it helped, it hurt, it did nothing, or there isn't enough signal yet — with the cost shown before anything runs.
-
-```
-/plugin install proof@slag
-```
-
 ### [brink](./brink) — A better summary when the context runs out
 
 Long sessions end in an automatic summary that forgets the thing you cared about. brink watches how full the context window is getting and, near the edge, surfaces a one-time nudge to run `/compact` with a ready-made instruction — so the summary keeps the task, the decisions, and the errors instead of an automatic guess.
@@ -86,15 +78,7 @@ Long sessions end in an automatic summary that forgets the thing you cared about
 | Know which of your rules actually work | **assay** |
 | Get trustworthy answers about Claude Code | **verity** |
 | Use your JetBrains IDE's brains | **jetbrains-router** |
-| Measure whether a config change moved anything | **proof** |
 | Keep a long session's summary from losing the plot | **brink** |
-
-### Also in the tree, not in the marketplace
-
-Two experiments live here without a marketplace entry — even more experimental than the rest. Each loads from a local clone (`claude --plugin-dir path/to/slag/<name>`); their READMEs have the details.
-
-- [plumb](./plumb) — won't let Claude call it done until it's actually run the code.
-- [gauge](./gauge) — measures what your project really costs Claude Code every session, then hands you the fix list.
 
 ---
 
@@ -104,10 +88,7 @@ Two experiments live here without a marketplace entry — even more experimental
 slag/
 ├── assay/
 ├── brink/
-├── gauge/
 ├── jetbrains-router/
-├── plumb/
-├── proof/
 └── verity/
 ```
 

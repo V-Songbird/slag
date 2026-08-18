@@ -119,41 +119,6 @@
       "strict": true
     },
     {
-      "name": "proof",
-      "source": "./proof",
-      "description": "Paired A/B harness that measures whether an agent-config change actually changes agent behavior — headless runs on isolated checkouts, lift with a bootstrap CI, and a four-way verdict.",
-      "version": "0.3.0-alpha",
-      "license": "MIT",
-      "author": {
-        "name": "Victor Villegas",
-        "email": "victor.villegas@tuta.com"
-      },
-      "homepage": "https://github.com/V-Songbird/slag/tree/main/proof",
-      "repository": "https://github.com/V-Songbird/slag",
-      "category": "measurement",
-      "keywords": [
-        "measurement",
-        "ab-testing",
-        "experiment",
-        "evaluation",
-        "statistics",
-        "headless",
-        "config",
-        "behavior"
-      ],
-      "tags": [
-        "measurement",
-        "ab-testing",
-        "experiment",
-        "evaluation",
-        "statistics",
-        "headless",
-        "config",
-        "behavior"
-      ],
-      "strict": true
-    },
-    {
       "name": "jig",
       "source": "./jig",
       "description": "Interviews you about the mistakes that keep landing in your repo, then installs reviewed, reversible guardrails: a committed check script any teammate or CI can run, plus session guards that observe first and can be armed to block once their clean record is in. Writes nothing into any file you own.",
@@ -260,6 +225,7 @@
     }
   ],
   "renames": {
-    "forge": null
+    "forge": null,
+    "proof": null
   }
 }

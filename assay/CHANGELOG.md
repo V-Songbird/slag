@@ -270,7 +270,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
-- A saved [proof](../proof) result can now be attached to the exact rule, skill, finding, or planned change it measured, and the report shows it beside that anchor: verdict, lift, confidence interval, how many runs, what they cost, the tasks they covered, and the date. It is evidence next to the finding — it never moves a score, a state, or a grade
+- A saved measurement result can now be attached to the exact rule, skill, finding, or planned change it measured, and the report shows it beside that anchor: verdict, lift, confidence interval, how many runs, what they cost, the tasks they covered, and the date. It is evidence next to the finding — it never moves a score, a state, or a grade
 - Each link records the conditions the measurement ran under — host, host version, model, which measurement produced it, and when — read straight out of the saved result. Whatever the result doesn't state is named as missing instead of filled in
 - Several results for the same rule are listed oldest first, so a behavior that moved over time reads as a history rather than a single number
 - A result measured against wording you have since edited still appears, labelled as having measured the earlier text
