@@ -41,6 +41,13 @@ A plugin carries only `README.md`, `CHANGELOG.md`, and `LICENSE`. It gets no
 of its own — nobody is invited to contribute to an experiment, and a per-plugin
 workflow file never runs from a subdirectory anyway.
 
+A plugin's scope contract (`SCOPE.md`) and any strategy notes are internal, not
+product: they sit beside the plugin on disk and the root `.gitignore` keeps them
+out of the repo. They carry ratification dates, owner sign-offs and migration
+work — none of which a user of the plugin can act on. No plugin ships one, and
+no public doc links to one. A plugin never carries its own `.gitignore` either;
+the root file covers every plugin, so one rule change covers all of them.
+
 Every plugin README shares one skeleton, tone, and style. Start from
 [`.github/PLUGIN_README_TEMPLATE.md`](../../.github/PLUGIN_README_TEMPLATE.md):
 copy it, fill the placeholders, and delete the guidance comments. The house
