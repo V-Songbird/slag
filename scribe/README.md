@@ -98,7 +98,7 @@ Prefer a switch? `SCRIBE_OFF=1` in the environment or an empty `.scribe/off` fil
 
 - scribe influences; it never blocks. The judgment call is Claude's, which is exactly why every judged prompt, every question round, and every wave-off is logged to `.scribe/ledger.jsonl` where you can audit it.
 - The nudge that rides your prompts is small, fixed text with a hard size cap, enforced by a test — scribe never assembles it from your repository's content.
-- The log stays in your project and never leaves your machine. It keeps the first 200 characters of each judged prompt, the questions scribe asked with the options it offered, and the answers you picked or typed — add `.scribe/` to your `.gitignore` if you don't want that history committed.
+- The log stays in your project and never leaves your machine. It keeps the first 200 characters of each judged prompt, the questions scribe asked with the options it offered, and the answers you picked or typed. It sits in one place — the folder you started Claude Code in — and git ignores it, so it never turns up in a diff. Your `config.json` stays visible, since that one is a choice worth sharing.
 
 ## License
 

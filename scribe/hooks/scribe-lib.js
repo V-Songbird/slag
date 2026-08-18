@@ -144,6 +144,38 @@ function statePath(root, ...parts) {
   return path.join(root, STATE_DIR, ...parts);
 }
 
+// One project, one `.scribe/`. The hook payload's `cwd` follows the session's
+// working directory, so anchoring state on it drops a fresh ledger into every
+// folder a session ever worked from — and the review then reads whichever
+// fragment it happens to be standing in. CLAUDE_PROJECT_DIR is the host's own
+// answer to where the session started, it does not move, and the host sets it
+// for every hook it spawns. Off that path — the CLI, a host that sets nothing —
+// the nearest `.scribe/` at or above the start directory keeps the reader
+// pointed at the ledger the hooks are already writing.
+function projectRoot(start) {
+  const declared = process.env.CLAUDE_PROJECT_DIR;
+  if (typeof declared === "string" && declared.trim()) return path.resolve(declared.trim());
+  const from = path.resolve(typeof start === "string" && start ? start : process.cwd());
+  let dir = from;
+  for (;;) {
+    if (fs.existsSync(path.join(dir, STATE_DIR))) return dir;
+    const up = path.dirname(dir);
+    if (up === dir) return from;
+    dir = up;
+  }
+}
+
+// `.scribe/` holds machine-local evidence that grows on every turn, so it
+// ignores its own moving parts and nobody has to remember to. `config.json`
+// stays visible: that one is a project decision a team can reasonably commit.
+function ensureStateDir(root) {
+  const dir = statePath(root);
+  fs.mkdirSync(dir, { recursive: true });
+  const ignore = path.join(dir, ".gitignore");
+  if (!fs.existsSync(ignore)) fs.writeFileSync(ignore, [LEDGER_FILE, OFF_FILE].join("\n") + "\n");
+  return dir;
+}
+
 // Presence is the whole contract — the file's contents are never read, so
 // `touch .scribe/off` works from anywhere. The env var is the same switch for
 // contexts that cannot touch files (CI wrappers, one-off runs).
@@ -239,7 +271,7 @@ function readConfig(root) {
 
 function appendLedger(root, row) {
   try {
-    fs.mkdirSync(statePath(root), { recursive: true });
+    ensureStateDir(root);
     fs.appendFileSync(
       statePath(root, LEDGER_FILE),
       JSON.stringify({ schemaVersion: SCHEMA_VERSION, ts: new Date().toISOString(), ...row }) + "\n",
@@ -285,6 +317,6 @@ module.exports = {
   RUBRIC_CAP, PROMPT_KEEP, QUESTION_KEEP, OPTION_KEEP, ANSWER_MAX, ANSWERS_KEEP,
   BARS, DEFAULT_FATIGUE_CAP,
   WAVE_OFF_RE, isWaveOff,
-  rubric, emission, statePath, isOff, readInput, isObject,
+  rubric, emission, statePath, projectRoot, ensureStateDir, isOff, readInput, isObject,
   readConfig, defaults, appendLedger, readLedger, askedCount,
 };

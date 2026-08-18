@@ -4,6 +4,16 @@ All notable changes to scribe are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.2.1] — 2026-08-18
+
+### Fixed
+
+- One project, one log. scribe had been starting a fresh `.scribe/` folder in whatever directory the session was working in, scattering fragments through a repository and leaving `/scribe:review` to report on whichever one it happened to be standing in.
+
+### Changed
+
+- The log now ignores itself in git, so it never turns up in your diffs. `.scribe/config.json` still does — that one is a choice worth sharing.
+
 ## [1.2.0] — 2026-08-18
 
 ### Added

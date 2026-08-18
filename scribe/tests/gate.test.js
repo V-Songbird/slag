@@ -25,7 +25,7 @@ function runGate(root, payload, env) {
   const res = spawnSync(process.execPath, [GATE], {
     cwd: root,
     input: JSON.stringify({ cwd: root, hook_event_name: "UserPromptSubmit", ...payload }),
-    env: { ...process.env, SCRIBE_OFF: "", ...env },
+    env: { ...process.env, SCRIBE_OFF: "", CLAUDE_PROJECT_DIR: root, ...env },
     encoding: "utf-8",
   });
   return { stdout: res.stdout, stderr: res.stderr, status: res.status, ledger: lib.readLedger(root) };

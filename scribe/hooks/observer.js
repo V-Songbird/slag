@@ -17,7 +17,7 @@ const lib = require("./scribe-lib");
 function main() {
   const payload = lib.readInput();
   if (payload.tool_name !== "AskUserQuestion") return;
-  const root = typeof payload.cwd === "string" && payload.cwd ? payload.cwd : process.cwd();
+  const root = lib.projectRoot(payload.cwd);
   if (lib.isOff(root)) return;
 
   const session = typeof payload.session_id === "string" ? payload.session_id : null;

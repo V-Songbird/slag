@@ -206,7 +206,7 @@ const fs = require("fs");
 const MEMORY_FILE = "memory.jsonl";
 
 function appendMemory(root, row) {
-  fs.mkdirSync(lib.statePath(root), { recursive: true });
+  lib.ensureStateDir(root);
   fs.appendFileSync(
     lib.statePath(root, MEMORY_FILE),
     JSON.stringify({ schemaVersion: lib.SCHEMA_VERSION, ts: new Date().toISOString(), ...row }) + "\n",
@@ -255,7 +255,7 @@ function memory(root, json) {
 
 function main(argv) {
   const cmd = argv[0];
-  const root = process.cwd();
+  const root = lib.projectRoot();
   if (cmd === "review") return review(root, argv.includes("--json"));
   if (cmd === "memory") return memory(root, argv.includes("--json"));
   if (cmd === "remember") {

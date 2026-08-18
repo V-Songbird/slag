@@ -24,7 +24,7 @@ function tmpRoot() {
 
 function runCli(root, args) {
   const res = spawnSync(process.execPath, [CLI, ...args], {
-    cwd: root, env: { ...process.env, SCRIBE_OFF: "" }, encoding: "utf-8",
+    cwd: root, env: { ...process.env, SCRIBE_OFF: "", CLAUDE_PROJECT_DIR: root }, encoding: "utf-8",
   });
   return { stdout: res.stdout, stderr: res.stderr, status: res.status };
 }

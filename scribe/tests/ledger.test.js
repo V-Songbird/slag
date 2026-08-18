@@ -22,7 +22,7 @@ function runObserver(root, payload, env) {
   const res = spawnSync(process.execPath, [OBSERVER], {
     cwd: root,
     input: JSON.stringify({ cwd: root, hook_event_name: "PostToolUse", ...payload }),
-    env: { ...process.env, SCRIBE_OFF: "", ...env },
+    env: { ...process.env, SCRIBE_OFF: "", CLAUDE_PROJECT_DIR: root, ...env },
     encoding: "utf-8",
   });
   return { stdout: res.stdout, stderr: res.stderr, status: res.status, ledger: lib.readLedger(root) };
@@ -186,5 +186,63 @@ describe("ledger mechanics", () => {
       assert.strictEqual(row.source, "mechanical");
       assert.ok(["judged", "asked", "waved-off"].includes(row.kind));
     }
+  });
+});
+
+// Where the state dir lands
+// ---------------------------------------------------------------------------
+//
+// The payload's `cwd` moves with the session. Anchoring `.scribe/` on it left a
+// separate ledger in every folder one session ever worked from, and the review
+// then read whichever fragment it was standing in.
+
+describe("one project, one .scribe", () => {
+  test("a hook fired from a subdirectory still writes to the project root", () => {
+    const root = tmpRoot();
+    const sub = path.join(root, "packages", "app");
+    fs.mkdirSync(sub, { recursive: true });
+    const res = spawnSync(process.execPath, [OBSERVER], {
+      cwd: sub,
+      input: JSON.stringify({ cwd: sub, hook_event_name: "PostToolUse", ...ASK }),
+      env: { ...process.env, SCRIBE_OFF: "", CLAUDE_PROJECT_DIR: root },
+      encoding: "utf-8",
+    });
+    assert.strictEqual(res.status, 0);
+    assert.strictEqual(lib.readLedger(root).length, 1);
+    assert.ok(!fs.existsSync(path.join(sub, ".scribe")), "a stray ledger was left in the subdirectory");
+  });
+
+  test("with no CLAUDE_PROJECT_DIR, the nearest .scribe above the start dir wins", () => {
+    const root = tmpRoot();
+    const sub = path.join(root, "packages", "app");
+    fs.mkdirSync(sub, { recursive: true });
+    lib.appendLedger(root, { session: "s1", kind: "judged", source: "mechanical" });
+    const saved = process.env.CLAUDE_PROJECT_DIR;
+    delete process.env.CLAUDE_PROJECT_DIR;
+    try {
+      assert.strictEqual(lib.projectRoot(sub), fs.realpathSync(root));
+    } finally {
+      if (saved !== undefined) process.env.CLAUDE_PROJECT_DIR = saved;
+    }
+  });
+
+  test("with nothing to anchor on, state stays where the caller stands", () => {
+    const root = tmpRoot();
+    const sub = path.join(root, "packages", "app");
+    fs.mkdirSync(sub, { recursive: true });
+    const saved = process.env.CLAUDE_PROJECT_DIR;
+    delete process.env.CLAUDE_PROJECT_DIR;
+    try {
+      assert.strictEqual(lib.projectRoot(sub), sub);
+    } finally {
+      if (saved !== undefined) process.env.CLAUDE_PROJECT_DIR = saved;
+    }
+  });
+
+  test("the state dir ignores its own churn, and leaves config committable", () => {
+    const root = tmpRoot();
+    lib.appendLedger(root, { session: "s1", kind: "judged", source: "mechanical" });
+    const ignore = fs.readFileSync(path.join(root, ".scribe", ".gitignore"), "utf-8").split("\n").filter(Boolean);
+    assert.deepStrictEqual(ignore, ["ledger.jsonl", "off"]);
   });
 });
