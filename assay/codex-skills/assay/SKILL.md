@@ -3,8 +3,8 @@ name: assay
 description: >-
   Audits the instruction system Codex loads for a project — the AGENTS.md chain
   it reads, the .agents/skills it lists, the hooks around them — and reports what
-  never takes effect, with reviewable fixes. A file shadowed further up the chain
-  or past the host's size limit. A path that no longer exists. Two rules that
+  never takes effect, with reviewable fixes. A file shadowed by another in its
+  own directory, or past the host's size limit. A path that no longer exists. Two rules that
   contradict each other. More skills listed than the shared budget holds.
   Use when the user wants their instruction
   files checked — "audit my AGENTS.md", "check my instruction files", "what
@@ -176,6 +176,10 @@ Then add at most 2 sentences of your own: the single most valuable fix, and
 anything project-specific the report cannot see. A finding says a file is
 configured a certain way, never that any instruction was obeyed.
 
+If this run cannot put text in front of the user ahead of a tool call, **skip
+step 4**, go to step 6, and make the report the final message. A fix menu with
+no report behind it asks the user to approve what they were never shown.
+
 ## 4. Offer fixes
 
 Skip to step 6 when the report has nothing repairable. Under `--fix`, skip the
@@ -254,11 +258,13 @@ file this flow is going to write.
   `profile.targets.skill.requires[]`, write the files named in
   `profile.targets.skill.metadata[]` as the YAML this host documents, and where
   `coverage.skillBudget` exists keep the name and description short — they are
-  spent from a shared listing budget before any skill is selected.
+  spent from a shared listing budget before any skill is selected. Do not rewrite
+  a description to the trigger recipe: this profile does not grade one, and
+  claiming a score it did not produce is the failure to avoid.
 - **Rule wording** → `rule-rewrite` only where the finding is availability or
   structure, not style. A prohibition with no alternative can stall a task, so
   restoring the escape hatch is fair game; polishing verbs against weights this
-  profile never had is not.
+  profile withdrew is not.
 - **Promotion** → `placement-promotion` carrying `mechanism` and `provenance` —
   a non-empty list of `{ "claim": "<what the page documents>", "url": "<the
   page>" }` entries. Both are required, and `plan` rejects a provenance entry

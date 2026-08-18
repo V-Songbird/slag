@@ -1478,3 +1478,89 @@ test("release gate: the engine's analyzer version matches the shipped manifest",
   const manifest = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, ".codex-plugin", "plugin.json"), "utf-8"));
   assert.equal(engine.ANALYZER_VERSION, manifest.version);
 });
+
+// [Foreman: 135] The two Codex surfaces are near-duplicate copies of one flow,
+// and between 1.11.0 and 1.15.0 they silently fell a whole release apart on
+// roughly fifteen points — found only by a manual multi-agent read. Nothing
+// asserted they stay in step, so nothing did.
+//
+// This gate compares STRUCTURE, never prose: the two files are deliberately
+// worded differently, and `codex-skills/` may not contain the other host's name
+// in any case. What must not diverge is the shape a reader navigates by and the
+// vocabulary the model acts on.
+const CODEX_TWINS = {
+  hosted: path.join(PLUGIN_ROOT, "skills", "codex", "SKILL.md"),
+  native: path.join(PLUGIN_ROOT, "codex-skills", "assay", "SKILL.md"),
+};
+
+const readTwin = (p) => fs.readFileSync(p, "utf-8");
+const stepHeadings = (text) => text.split("\n").filter((l) => /^## \d+\. /.test(l)).map((l) => l.replace(/^## /, "").trim());
+// A flag counts as named wherever it appears, because the model reads the whole
+// file — what matters is that neither surface knows a flag the other does not.
+const flagsIn = (text) => [...new Set((text.match(/--[a-z][a-z-]+/g) || []))].sort();
+
+test("release gate: the two Codex surfaces carry the same steps, in the same order", () => {
+  const a = stepHeadings(readTwin(CODEX_TWINS.hosted));
+  const b = stepHeadings(readTwin(CODEX_TWINS.native));
+  assert.ok(a.length >= 6, "the hosted surface must actually have numbered steps");
+  assert.deepEqual(b, a, "the two Codex surfaces describe different steps or a different order");
+});
+
+test("release gate: the two Codex surfaces know the same flags", () => {
+  const a = flagsIn(readTwin(CODEX_TWINS.hosted));
+  const b = flagsIn(readTwin(CODEX_TWINS.native));
+  const onlyHosted = a.filter((f) => !b.includes(f));
+  const onlyNative = b.filter((f) => !a.includes(f));
+  assert.deepEqual({ onlyHosted, onlyNative }, { onlyHosted: [], onlyNative: [] },
+    "a flag one Codex surface documents and the other does not");
+});
+
+test("release gate: the two Codex surfaces name the same draft-plan fields and change kinds", () => {
+  const fields = (text) => [...new Set((text.match(/`(kind|files|patches|rationale|limitations|mechanism|provenance|addresses|batches|old|new|path|sourceHash)`/g) || []))].sort();
+  const kinds = (text) => engine.CHANGE_KINDS.filter((k) => text.includes("`" + k + "`")).sort();
+  const A = readTwin(CODEX_TWINS.hosted), B = readTwin(CODEX_TWINS.native);
+  assert.deepEqual(fields(B), fields(A), "the draft plan is described with different fields on the two surfaces");
+  assert.deepEqual(kinds(B), kinds(A), "one surface offers a change kind the other does not");
+});
+
+test("release gate: the two Codex surfaces offer the same fix-menu options", () => {
+  // The labels are worded per surface; the OPTION SET is not allowed to differ.
+  // Anchored on the nouns the engine acts on rather than on the sentence.
+  const options = (text) => ({
+    deadReferences: /[Rr]epair .*dead reference/.test(text),
+    skillMetadata: /skill metadata/i.test(text),
+    buildMechanism: /[Bb]uild the mechanism now/.test(text),
+    writeThePlan: /write down the plan|write the plan/i.test(text),
+  });
+  assert.deepEqual(options(readTwin(CODEX_TWINS.native)), options(readTwin(CODEX_TWINS.hosted)),
+    "the two Codex surfaces offer different repairs");
+});
+
+test("release gate: every Codex surface carries the guards that keep a fix honest", () => {
+  // Each of these was missing from one surface and present on the other at some
+  // point in 1.11.0–1.15.0. They are the guards whose absence produces a WRONG
+  // change, not merely a terser one.
+  const guards = [
+    [/cannot put text in front of the user/i, "the no-report-behind-the-menu guard"],
+    [/[Dd]o not rewrite\s+a description to the trigger recipe/i, "the trigger-recipe rewrite ban"],
+    [/never a remembered\s*format|never a remembered format/i, "the live-docs requirement for a promotion"],
+    [/stays exactly where it is|rules stay active|rules stay where/i, "the source-rule-stays guarantee"],
+  ];
+  for (const [file, label] of Object.entries(CODEX_TWINS)) {
+    const text = readTwin(label);
+    for (const [re, what] of guards) {
+      assert.match(text.replace(/\s+/g, " "), re, `${file} lost ${what}`);
+    }
+  }
+});
+
+// The third surface describing the same flow. A looser check — it is a different
+// host with different steps — but the step COUNT drifting is the same class of
+// silent divergence, and it is cheap to notice.
+test("release gate: the Claude audit surface still describes a numbered flow of its own", () => {
+  const claude = stepHeadings(fs.readFileSync(path.join(PLUGIN_ROOT, "skills", "claude", "SKILL.md"), "utf-8"));
+  const codex = stepHeadings(readTwin(CODEX_TWINS.hosted));
+  assert.ok(claude.length >= 6, "the Claude audit skill must have numbered steps");
+  assert.equal(claude.length, codex.length,
+    "one audit surface grew or lost a step the others did not — deliberate is fine, silent is not");
+});

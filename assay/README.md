@@ -51,6 +51,8 @@ Every report opens by saying what it actually looked at, so a number never cover
 
 Your own files, the ones above the project, and Claude's memory for this project all load here too, so they are graded under their own headings and never inside the project's grade, its advice, or a build gate — the fix for one of those lives in your setup, not in the repo. Those memory notes are Claude's record rather than your policy, so a dated note citing a file that has since been deleted is the record working, not a defect. The wording is still graded, under **User scope** with the rest of your own files.
 
+A repository vendored inside yours — a submodule, or a clone somebody dropped into the tree — gets the same treatment. Its rules do load, so the report names the folder they came from, but nothing inside it lands in your fix list, gets offered a rewrite, or can fail a build. You didn't write those rules, and the next update would overwrite the fix anyway.
+
 The same duty stated twice gets named once, with both locations and which copy looks worth keeping. Two rules that argue get named as a pair with *no* winner — even behind a condition: "When releasing, always pin dependencies to exact versions" against "when releasing, never pin dependencies to exact versions" is a conflict the moment that condition holds, while a rule and its stated exception stay silent. A rule citing a file that isn't there is a finding too; when the file has merely moved, `--verbose` names where it went, so the fix is one edit instead of a hunt — and when several rules or hooks all lean on one path that's gone, that's reported once, as the shared dead target it is.
 
 ## Install

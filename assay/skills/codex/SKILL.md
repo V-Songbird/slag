@@ -35,6 +35,7 @@ passed again.
 
 Other flags in `$ARGUMENTS`: `--fix` (apply repairs without the menu),
 `--verbose` (the full report), `--json` (the machine-readable record),
+`--top <n>` (show more than the default 8 rows in the fix table),
 `--no-verify` (skip the subagent in step 2, which otherwise runs),
 `--deterministic` (skip every model step), `--semantic` (also propose duplicates
 and conflicts the script cannot see), `--project-only` (skip the user's own

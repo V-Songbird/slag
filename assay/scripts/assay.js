@@ -119,7 +119,7 @@ const TMP_DIR = ".assay-tmp";
 // A release cut keeps ANALYZER_VERSION in step with assay's version in
 // .claude-plugin/marketplace.json, which owns the published number.
 const SCHEMA_VERSION = 1;
-const ANALYZER_VERSION = "1.15.0";
+const ANALYZER_VERSION = "1.16.0";
 const PARSER_NAME = "assay-markdown";
 // [Foreman: 073] 2 = markdown-it 14.1.0 + js-yaml 4.1.0 behind assay's adapter.
 // 1 was the handwritten line scanner; a record naming version 1 was produced by
@@ -135,6 +135,11 @@ const PROFILE_VERSION = claudeAdapter.profileVersion;
 // references/rubrics.md, and the two move together — bump both or
 // neither. A judgments file recorded under a different one still composes; the
 // report says the judgments predate the current rubric.
+// Owed at the next substantive bump, and deliberately not done for its own
+// sake: rubrics.md gains a one-line evidence note naming the study, the model
+// tier it was measured on, and the date — the same disclosure
+// WORDING_STUDY_EVIDENCE already carries for the deterministic factors. Doing
+// it alone would invalidate every cached judgments file for a sentence.
 const RUBRIC_VERSION = "2";
 
 const RECORD_SCHEMA = {
@@ -168,9 +173,14 @@ const RECORD_SCHEMA = {
   // before 076 stays readable.
   // [Foreman: 077] `mechanisms` left it too — see the block below. Still
   // optional: an audit written before 077 loses its ladder and nothing else.
+  // [Foreman: 149] `changes` leaves as well, and it should have left with the
+  // migration transaction: `payload.plan` requires it, so a plan record has
+  // carried it since 081. Naming it on both lists said "required here, and
+  // nothing fills it" in one object, which is the kind of contradiction the
+  // record contract exists to prevent.
   reserved: [
     "instructions",
-    "evidence", "plans", "changes", "validation",
+    "evidence", "plans", "validation",
   ],
 };
 
@@ -673,7 +683,7 @@ const BURIED_F5_THRESHOLD = 0.6;
 // [Foreman: 062] A file's problem is shape, not wording, when it is mostly
 // narrative, buries most of its rules, or is simply too long to hold one topic.
 // A per-rule rewrite can't reach any of these — the report names the restructure
-// instead. See docs/foreman/062.md for the threshold choices.
+// instead. The thresholds below were chosen against labelled fixtures.
 const RESTRUCTURE_NARRATIVE_SHARE = 0.6; // 60%+ of the graded content is prose
 const RESTRUCTURE_BELOW_MIDPOINT = 0.5;  // half+ of its rules sit past the midpoint
 // [ADR 2026-08-05 D1] 200 also matches the memory docs' per-CLAUDE.md-file size
@@ -921,6 +931,58 @@ function globMatchPaths(globs, root) {
   return [...matched].sort();
 }
 
+// [Foreman: 141] A repository vendored inside this one loads like a project
+// source and reads like project policy, and the reader owns none of it: those
+// rules were written elsewhere, their paths resolve against their own root, and
+// a rewrite offered here is overwritten by the next update. Same class as the
+// host's auto-memory notes — files that load, that the reader does not own.
+//
+// Two mechanical signals, no heuristics: a `path =` entry in `.gitmodules`
+// (which catches a submodule that was never initialized and so has no `.git`),
+// or a nested `.git` between the file and the root (which catches a plain clone
+// dropped into the tree, submodule or not).
+const vendoredDeclared = new Map();
+function declaredSubmodules(root) {
+  if (vendoredDeclared.has(root)) return vendoredDeclared.get(root);
+  const roots = new Set();
+  try {
+    for (const line of fs.readFileSync(path.join(root, ".gitmodules"), "utf-8").split(/\r?\n/)) {
+      const m = line.match(/^\s*path\s*=\s*(.+?)\s*$/);
+      if (m) roots.add(m[1].split(path.sep).join("/").replace(/^\.\//, "").replace(/\/+$/, ""));
+    }
+  } catch {
+    // No `.gitmodules` is the normal case, not a failure.
+  }
+  vendoredDeclared.set(root, roots);
+  return roots;
+}
+
+// Outermost match wins by construction, so a repository inside a vendored
+// repository is attributed to the one the reader can actually see.
+function vendoredRootOf(absPath, root) {
+  const stop = path.resolve(root);
+  const rel = path.relative(stop, path.dirname(path.resolve(absPath)));
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  const declared = declaredSubmodules(stop);
+  const parts = rel.split(path.sep).filter(Boolean);
+  for (let i = 1; i <= parts.length; i++) {
+    const sub = parts.slice(0, i).join("/");
+    if (declared.has(sub)) return sub;
+    if (fs.existsSync(path.join(stop, ...parts.slice(0, i), ".git"))) return sub;
+  }
+  return null;
+}
+
+// [Foreman: 141] "Not the reader's to fix", in one place instead of six. Three
+// ways a file that loads can fail that test: it lives outside the repository,
+// the host wrote it, or it belongs to a repository vendored inside this one.
+// Every caller that used to spell out the scope test now asks this.
+function notReadersOwn(file) {
+  if (!file) return false;
+  return file.scope === "user" || file.scope === "ancestor" ||
+    Boolean(file.autoMemory) || Boolean(file.vendored);
+}
+
 // [Foreman: 074] Reading and parsing is shared; *which* files exist and how
 // they load is the adapter's answer, arriving as `sources`. This function opens
 // each one and does nothing host-specific with it except ask the adapter the one
@@ -951,6 +1013,16 @@ function readSources(sources, root, inaccessible = [], adapter = claudeAdapter, 
     f.defaultCategory = fm["default-category"] || "mandate";
     f.lineCount = content.split("\n").length;
     f.alwaysLoaded = adapter.loadsAlways(source, globs);
+    // [Foreman: 141] Only a project-scope source can be vendored: a user or
+    // ancestor file is already outside the repository by definition, and asking
+    // the filesystem about it would answer a question nobody asked.
+    if (source.scope !== "user" && source.scope !== "ancestor" && source.absPath) {
+      const from = vendoredRootOf(source.absPath, root);
+      if (from) {
+        f.vendored = true;
+        f.vendoredRoot = from;
+      }
+    }
     // [Foreman: 079] A source whose host budget runs out partway through it
     // arrives carrying the byte offset where that happens. Turning the offset
     // into a line is shared arithmetic over an adapter-declared fact: the
@@ -1095,8 +1167,8 @@ function checkSkillDescription(description) {
   // don't count toward concreteness
   const base = text.replace(SKILL_QUOTED_PHRASE, " ");
   const missing = [];
-  // The trigger clause is the requirement; the quote COUNT is not. A proof A/B
-  // (docs/research/proof/skill-trim/) measured 0, 1, 2 and 4 quoted phrasings on
+  // The trigger clause is the requirement; the quote COUNT is not. A local A/B
+  // study measured 0, 1, 2 and 4 quoted phrasings on
   // two fixtures: more quotes never improved firing, and quotes that did not
   // cover the real ask collapsed it. A floor of 2 pushed authors to invent
   // off-target quotes, so there is no floor — quotedPhrases is still reported.
@@ -1128,7 +1200,7 @@ function checkSkillDescription(description) {
 // side can invoke is dead. Defaults are on/on, so an unflagged skill is graded
 // on the recipe exactly as before. A model-invocable skill is graded on the
 // combined text but flagged if when_to_use still exists as its own field: a
-// proof A/B (docs/research/proof/skill-trim/) found no firing penalty from
+// local A/B study found no firing penalty from
 // dropping it and a measurable recall lift on sonnet over keeping it.
 function gradeSkill(router, whenToUse, modelInvocable, userInvocable) {
   if (modelInvocable) {
@@ -2868,7 +2940,10 @@ function loadJudgments(root, rules) {
 // over the factors that were measured, and every derivation that reads a model
 // judgment declines to fire. The model layer is additive on top of this, never a
 // precondition for it.
-function composeAudit(scanData, judgments) {
+// [Foreman: 140] `opts.semantic` is the only thing the third argument carries
+// today. It is opt-in because what it adds is proposals, not findings, and a
+// default run must stay identical to the byte.
+function composeAudit(scanData, judgments, opts = {}) {
   const deterministic = judgments == null;
   // [Foreman: 079] A profile that declines the wording rubric declines the score
   // it sums to. The factor VALUES are still measured and still travel in the
@@ -2996,6 +3071,31 @@ function composeAudit(scanData, judgments) {
       // and nothing below reads them back into a score or a state.
       candidates: Array.isArray(judgments._candidates) ? judgments._candidates : [],
     };
+    // [Foreman: 140] The engine's own proposals join the model's in the one
+    // array the contract already defines, each carrying which side proposed it
+    // so a reader is never told a script found a contradiction it did not.
+    if (opts.semantic) {
+      for (const p of nearMissConflictPairs(audit)) {
+        audit.semantic.candidates.push({
+          kind: "indirect-conflict",
+          // The one field the model's proposals do not carry. A reader must
+          // never be told a script found a contradiction it did not find.
+          proposedBy: "analyzer",
+          // `keys`, not ids: the renderer resolves a candidate to its rules by
+          // content hash, which is what survives a rewrite.
+          keys: [p.a.key, p.b.key],
+          sources: [
+            { path: p.a.file, lineStart: p.a.lineStart, lineEnd: p.a.lineEnd },
+            { path: p.b.file, lineStart: p.b.lineStart, lineEnd: p.b.lineEnd },
+          ],
+          summary: `both rules command \`${p.action}\` with opposite polarity, but they share too few words to call it a contradiction`,
+          reason: "a rule that explains itself dilutes the words it is compared on, so the pair falls under the threshold a reported conflict has to clear — read the two together and decide whether they are about the same thing",
+          // Unreviewed, like every proposal. The audit skills ask about each one
+          // and write the answer back here.
+          accepted: null,
+        });
+      }
+    }
   }
   // [Foreman: 077] The enforcement ladder, before the findings that read it.
   audit.mechanisms = deriveMechanisms(audit);
@@ -3234,7 +3334,7 @@ function duplicatePairs(audit) {
 // razor: `resolvesProhibition` is the token machinery behind gate 3, but it
 // cannot be called directly — it fires on plain subject overlap, which a real
 // conflict has in full, so it would veto every true pair. Gate 3 is its
-// verb-level half, which is the discriminating one. See docs/foreman/076.md.
+// verb-level half, which is the discriminating one.
 //
 // [ADR 2026-08-05 D5] Vendor corroboration of the HARM, not the detector:
 // Anthropic transcript analysis (context-engineering post, claude.com/blog,
@@ -3242,6 +3342,10 @@ function duplicatePairs(audit) {
 // deliberation on Claude 5-generation models. It strengthens why this check
 // earns its place; the rendered finding and its evidence level are unchanged.
 const CONFLICT_JACCARD = 0.6;
+// [Foreman: 140] The floor under a near-miss proposal. Below this the two rules
+// share an action verb and a polarity and nothing else, which is a coincidence
+// of grammar rather than a subject in common.
+const NEAR_MISS_FLOOR = 0.2;
 const CONFLICT_MIN_TOKENS = 4;
 // [Foreman: 097] Gate 2 compares the DIRECTIVE clause, not the whole bullet.
 // "Never validate input at the API edge; the gateway does it." says the same
@@ -3379,6 +3483,59 @@ function conditionalConflictPairs(audit) {
         a: a.rule, b: b.rule, ban: ban.rule, mandate: mandate.rule,
         action: ban.action, condition: ban.conditionText,
       });
+    }
+  }
+  return pairs.sort(byPairPosition);
+}
+
+// [Foreman: 140] The pairs that pass every conflict gate except the last one.
+//
+// Explaining a rule dilutes its content tokens below the overlap threshold:
+// "Always validate input at the API edge" against "Never validate input at the
+// API edge; the gateway does it" shares three tokens of six and reports
+// nothing. 1.11.0 widened the comparison to the directive clause, which catches
+// most of these; a pair that still misses is invisible, and silence about a
+// contradiction is the worst thing this analyzer can do.
+//
+// These are PROPOSALS and nothing more. They never enter `relationships[]`,
+// never move a state, a score or a grade, and never gate a build — the Jaccard
+// threshold is what separates "assay found a contradiction" from "these two
+// might be about the same subject, look". Emitted only under `--semantic`, so a
+// default run is unchanged to the byte.
+function nearMissConflictPairs(audit) {
+  const comparable = pairwiseRules(audit);
+  if (!comparable) return [];
+  const graded = comparable.map((r) => {
+    const text = r.contextText || r.text;
+    return {
+      rule: r, text,
+      prohibition: isProhibitionText(text),
+      positive: hasPositiveImperative(text),
+      action: commandedAction(text),
+      alternative: carriesAlternative(r),
+      tokens: contentTokens(directiveClause(text)),
+    };
+  });
+  const pairs = [];
+  for (let i = 0; i < graded.length; i++) {
+    for (let j = i + 1; j < graded.length; j++) {
+      const a = graded[i], b = graded[j];
+      // Every gate conflictPairs applies, in the same order…
+      if (a.prohibition === b.prohibition) continue;
+      const ban = a.prohibition ? a : b;
+      const mandate = a.prohibition ? b : a;
+      if (!mandate.positive) continue;
+      if (ban.alternative || mandate.alternative) continue;
+      if (ban.action === null || ban.action !== mandate.action) continue;
+      if (a.tokens.size < CONFLICT_MIN_TOKENS || b.tokens.size < CONFLICT_MIN_TOKENS) continue;
+      // …and then the opposite of its last one. A pair at or above the
+      // threshold is already a reported conflict and must not be proposed twice.
+      const overlap = jaccard(a.tokens, b.tokens);
+      if (overlap >= CONFLICT_JACCARD) continue;
+      // A pair with nothing in common is not a near miss, it is two unrelated
+      // rules. The floor keeps the proposal list about subjects that touch.
+      if (overlap < NEAR_MISS_FLOOR) continue;
+      pairs.push({ a: a.rule, b: b.rule, ban: ban.rule, mandate: mandate.rule, action: ban.action, overlap });
     }
   }
   return pairs.sort(byPairPosition);
@@ -4471,6 +4628,53 @@ function isWeakSkill(s) {
   return c.missing.length || c.overCap || c.redundant || c.hasWhenToUse;
 }
 
+// [Foreman: 106] The shapes a skill written against older guidance carries.
+// Every one of them is a check that already ships and is already evidenced —
+// this adds no detector, no threshold and no new evidence claim. What it adds
+// is the reading: several of these together are not five unrelated nits, they
+// are one skill authored before the guidance moved, and the repair is one
+// rewrite rather than five patches.
+//
+// The bar is TWO. One of these alone is an ordinary weak description, which the
+// table above already says. Two or more is a pattern.
+const PRE_GEN_SHAPES = {
+  whenToUse: "keeps `when_to_use` as its own field",
+  overSpecified: "keeps `when_to_use` as its own field",
+  enumerated: "opens by enumerating instead of naming what it is for",
+  redundant: "repeats a clause the listing budget then pays for twice",
+  overCap: "runs past the listing cap, so its tail never reaches the model",
+  exclusion: "names no case it should NOT fire on",
+};
+
+function preGenerationShapes(s) {
+  const c = s.checks || {};
+  if (c.mode === "dead" || !c.missing) return [];
+  const hits = new Set();
+  for (const k of c.missing || []) if (PRE_GEN_SHAPES[k]) hits.add(PRE_GEN_SHAPES[k]);
+  if (c.hasWhenToUse) hits.add(PRE_GEN_SHAPES.whenToUse);
+  if (c.overSpecified) hits.add(PRE_GEN_SHAPES.overSpecified);
+  if (c.redundant) hits.add(PRE_GEN_SHAPES.redundant);
+  if (c.overCap) hits.add(PRE_GEN_SHAPES.overCap);
+  return [...hits];
+}
+
+function pushPreGenerationSkills(out, skills) {
+  const stale = (skills || [])
+    .map((s) => ({ skill: s, shapes: preGenerationShapes(s) }))
+    .filter((x) => x.shapes.length >= 2);
+  if (!stale.length) return;
+  out.push("### Written against older guidance");
+  out.push("");
+  out.push("Each of these carries several shapes at once that the current guidance for routing a skill argues against. Individually they are the rows above; together they read as one description written before that guidance and never revisited, which makes them one rewrite rather than several patches. Nothing here is a new check — every shape named is read out of the frontmatter, the same way the table above reads it. [mechanical]");
+  out.push("");
+  for (const { skill, shapes } of stale) {
+    out.push(`- \`${skill.name}\` — ${mdPathLink(skill.path)} — ${shapes.join("; ")}`);
+  }
+  out.push("");
+  out.push("`/assay:craft-skill <name>` refits one against the current recipe, and shows you the old description beside the new one before anything is written.");
+  out.push("");
+}
+
 function pushWeakSkillSection(out, weakSkills) {
   out.push(`## Weak skill descriptions (${weakSkills.length} to fix)`);
   out.push("");
@@ -4603,6 +4807,66 @@ function pushProgressSection(out, audit, prev, findings) {
     }
     out.push("");
   }
+  pushRubricOnlyGains(out, audit, prev);
+}
+
+// [Foreman: 147] The corpus list this product was designed against ends with
+// "suspicious improvements caused only by rubric-oriented wording", and it is
+// the one item that never shipped. A grade can rise because a rule got better,
+// or because it acquired the words the rubric rewards. Those look identical in
+// a before/after table, and the second one is the failure mode a scoring
+// product invites.
+//
+// This is a DISCLOSURE, not a verdict, and every input to it is mechanical: a
+// grade that rose, against a rule count, a dead-reference count and a
+// disagreement count that did not. It scores nothing, penalizes nothing and
+// reverses nothing — deciding whether a rewrite is honest needs the meaning of
+// both versions, which is not a thing a script can read.
+const RUBRIC_GAIN = 0.05;
+
+function pushRubricOnlyGains(out, audit, prev) {
+  // Matched on the file and the rule's own text is impossible — a rewrite
+  // changes both the text and the content-hash key. The file's mean is the
+  // level at which a "gain with nothing behind it" is still observable without
+  // pretending to have tracked an individual rule across a rewrite.
+  const prevByPath = new Map((prev.files || []).map((f) => [f.path, f]));
+  const suspicious = [];
+  for (const f of audit.files || []) {
+    const p = prevByPath.get(f.path);
+    if (!p || p.score === null || f.score === null) continue;
+    if (f.score - p.score < RUBRIC_GAIN) continue;
+    // Nothing a reader would call an improvement changed. A per-rule finding
+    // carries a STATE, not a type, so the states are what to count: a repaired
+    // dead path drops a `blocked`, a resolved argument drops a `conflicting`,
+    // and a rule the host now reads drops one of the hard-gate states. Any of
+    // those is a real gain and the file is not listed.
+    const statesFor = (rec) => {
+      const counts = new Map();
+      for (const x of rec.findings || []) {
+        if (!x.state) continue;
+        if (!(x.sources || []).some((s) => s.path === f.path)) continue;
+        counts.set(x.state, (counts.get(x.state) || 0) + 1);
+      }
+      return counts;
+    };
+    const was = statesFor(prev), is = statesFor(audit);
+    const moved = FINDING_STATES.some((s) => s !== "healthy" && (was.get(s) || 0) !== (is.get(s) || 0));
+    if (moved) continue;
+    if ((p.ruleCount || 0) !== (f.ruleCount || 0)) continue;
+    suspicious.push({ path: f.path, from: p.score, to: f.score });
+  }
+  if (!suspicious.length) return;
+  out.push("**Grades rose with nothing else changing.** These files score higher and");
+  out.push("carry the same rules, the same dead references and the same disagreements as");
+  out.push("before. That is what a rewrite aimed at the rubric looks like from here, and");
+  out.push("it is also what a genuinely clearer rewrite looks like — only reading both");
+  out.push("versions tells them apart.");
+  out.push("");
+  for (const s of suspicious.slice(0, 6)) {
+    out.push(`- ${mdPathLink(s.path)} — ${round3(s.from)} → ${round3(s.to)}`);
+  }
+  if (suspicious.length > 6) out.push(`- …and ${suspicious.length - 6} more`);
+  out.push("");
 }
 
 // [Foreman: 062]
@@ -5185,9 +5449,10 @@ function renderBrief(audit, opts = {}) {
     return kept;
   };
 
-  // The reader can only fix what lives in this repository. A rule of their own
-  // that loads from outside it is real, and it is not this report's business.
-  const outside = new Set(files.filter((f) => f.scope === "user" || f.scope === "ancestor").map((f) => f.path));
+  // The reader can only fix what they own. A rule of their own that loads from
+  // outside the repository is real, and so is one inside a vendored repository,
+  // and neither is this report's business.
+  const outside = new Set(files.filter(notReadersOwn).map((f) => f.path));
   const mine = rules.filter((r) => !outside.has(r.file));
 
   // Bucket 1 — the host never applies it. Nothing else about the rule matters
@@ -5297,9 +5562,16 @@ function renderBrief(audit, opts = {}) {
         ? "**Nothing in this repo's rules needs fixing.**"
         : "**Nothing here needs fixing.**"));
   }
-  // The denominator is the project's own rules, so it can never disagree with
-  // the buckets underneath it.
-  const nFiles = new Set(mine.map((r) => r.file)).size;
+  // The rule count is the project's own rules, so it can never disagree with the
+  // buckets underneath it.
+  //
+  // [Foreman: 143] The file count is every file this report READ, which is the
+  // same population the provenance line names below — not the subset that
+  // happened to yield a rule. A live run said "126 rules in 12 files" over a
+  // provenance line naming 22, because one number counted files-with-rules and
+  // the other counted files-read. A read file that produced no rule was still
+  // looked at, and saying so is the honest half of "looked at".
+  const nFiles = files.filter((f) => !outside.has(f.path)).length;
   // [Foreman: 097] On a monorepo a nested `CLAUDE.md` loads only when Claude is
   // working in its folder, and flattening it into one count left the reader with
   // no way to tell a rule every session reads from one a few sessions do.
@@ -5349,6 +5621,16 @@ function renderBrief(audit, opts = {}) {
   if (elsewhere > 0) {
     provenance.push(`${elsewhere} more ${elsewhere === 1 ? "rule loads" : "rules load"} from outside this repo — \`--project-only\` leaves ${elsewhere === 1 ? "it" : "them"} out.`);
   }
+  // [Foreman: 141] Listed, never gated. A vendored repository's rules load and
+  // the reader should know they are in context — but they are somebody else's
+  // file, so naming the folder is the whole of what this report can usefully
+  // say about them.
+  const vendoredRoots = [...new Set(files.filter((f) => f.vendored && f.vendoredRoot).map((f) => f.vendoredRoot))].sort();
+  if (vendoredRoots.length) {
+    const shown = vendoredRoots.slice(0, 3).map((v) => "`" + oneLine(showPath(v)) + "`").join(", ");
+    const more = vendoredRoots.length > 3 ? `, and ${vendoredRoots.length - 3} more` : "";
+    provenance.push(`${shown}${more} ${vendoredRoots.length === 1 ? "is a repository" : "are repositories"} vendored inside this one — its rules load, and nothing here offers to rewrite a file you do not own.`);
+  }
   // Where the run decided the project was, when it was not simply told.
   const walkedFrom = (audit.context || {}).rootFoundFrom;
   if (walkedFrom) {
@@ -5362,10 +5644,20 @@ function renderBrief(audit, opts = {}) {
     out.push("");
     out.push("| Rule | Where | Problem | Fix |");
     out.push("|---|---|---|---|");
-    const rows = [];
-    // Order matches `claim()`: a rule the host never reads outranks a pair that
-    // argues, which outranks a dead path, which outranks wording. The cap below
-    // cuts from the bottom, so it can only ever drop the least urgent rows.
+    // [Foreman: 142] One list per class, not one flat list. Order still matches
+    // `claim()` — a rule the host never reads outranks a pair that argues, which
+    // outranks a dead path, which outranks wording — but a flat list plus a cap
+    // let one crowded class take every seat. A live run with 20 dead paths and
+    // 20 weak rules printed eight dead paths and then closed by telling the
+    // reader to rewrite the weak ones it had never shown them.
+    const buckets = [
+      { key: "gated", label: "the host never loads", rows: [] },
+      { key: "conflicts", label: "that disagree", rows: [] },
+      { key: "stale", label: "pointing at a file that is not there", rows: [] },
+      { key: "duplicates", label: "written twice", rows: [] },
+      { key: "weak", label: "weakly worded", rows: [] },
+    ];
+    const bucket = Object.fromEntries(buckets.map((b) => [b.key, b.rows]));
     // [Foreman: 097] Both cells are the finding's own words. A hardcoded sentence
     // here is a second opinion about a rule the analyzer already diagnosed, and
     // it was wrong on the states it had not been written for.
@@ -5373,18 +5665,18 @@ function renderBrief(audit, opts = {}) {
       const f = gateBy.get(r.id);
       const why = (f && f.summary) || "the host never loads it";
       const fix = (f && (f.safeActions || [])[0]) || "move it to a file that gets read";
-      rows.push(`| ${quote(r, 46)} | ${at(r)} | ${cell(oneLine(why))} | ${cell(upperFirst(oneLine(fix)))} |`);
+      bucket.gated.push(`| ${quote(r, 46)} | ${at(r)} | ${cell(oneLine(why))} | ${cell(upperFirst(oneLine(fix)))} |`);
     }
     for (const { spans } of conflictRows) {
       const where2 = spans.slice(0, 2).map((s) => where(s.path, s.lineStart)).join(" and ");
       const more = spans.length > 2 ? ` and ${spans.length - 2} more` : "";
-      rows.push(`| two rules disagree | ${where2}${more} | one bans what the other asks for | Decide which one you meant, then drop or narrow the other |`);
+      bucket.conflicts.push(`| two rules disagree | ${where2}${more} | one bans what the other asks for | Decide which one you meant, then drop or narrow the other |`);
     }
     for (const r of stale) {
       const missing = (r.staleness && r.staleness.missing) || [];
       const refs = missing.slice(0, 2).map((m) => cell("`" + m.ref + "`")).join(", ");
       const rest = missing.length > 2 ? ` and ${missing.length - 2} more` : "";
-      rows.push(`| ${quote(r, 46)} | ${at(r)} | points at ${refs}${rest}, which is not there | Fix the path, or drop the mention |`);
+      bucket.stale.push(`| ${quote(r, 46)} | ${at(r)} | points at ${refs}${rest}, which is not there | Fix the path, or drop the mention |`);
     }
     // [Foreman: 097] One duty, one row, every address on it — a duplicated rule
     // used to print as two unrelated wording problems.
@@ -5393,7 +5685,7 @@ function renderBrief(audit, opts = {}) {
       const more = spans.length > 2 ? ` and ${spans.length - 2} more` : "";
       const how = finding.tier === "exact" ? "the same rule is written twice" : "two rules say nearly the same thing";
       const keep = finding.keep ? `Keep ${cell(showPath(finding.keep.path))}:${finding.keep.lineStart} — ${cell(finding.keepWhy || "stated first")} — and drop the other` : "Decide which copy survives, then drop the other";
-      rows.push(`| ${how} | ${where2}${more} | one duty in two places, graded twice | ${keep} |`);
+      bucket.duplicates.push(`| ${how} | ${where2}${more} | one duty in two places, graded twice | ${keep} |`);
     }
     for (const r of weak) {
       const names = rowWeaknesses(r);
@@ -5414,12 +5706,31 @@ function renderBrief(audit, opts = {}) {
       } else {
         fixes = names.map((n) => (n === "F7" ? evidence.fix : PLAIN_FIXES[n])).filter(Boolean).join("; ");
       }
-      rows.push(`| ${quote(r, 46)} | ${at(r)} | ${cell(problems)} | ${cell(fixes)} |`);
+      bucket.weak.push(`| ${quote(r, 46)} | ${at(r)} | ${cell(problems)} | ${cell(fixes)} |`);
     }
-    for (const row of rows.slice(0, fixRows)) out.push(row);
+    // [Foreman: 142] Every class present gets one seat before any class gets a
+    // second; the seats left over then go in priority order, so the most urgent
+    // class still fills most of the table. The reader sees every kind of problem
+    // they have, and the closing line never offers a repair for something the
+    // table withheld.
+    const used = buckets.map(() => 0);
+    let seated = 0;
+    for (let i = 0; i < buckets.length && seated < fixRows; i++) {
+      if (buckets[i].rows.length) { used[i] = 1; seated++; }
+    }
+    for (let i = 0; i < buckets.length && seated < fixRows; i++) {
+      const room = Math.min(buckets[i].rows.length - used[i], fixRows - seated);
+      used[i] += room;
+      seated += room;
+    }
+    buckets.forEach((b, i) => { for (let k = 0; k < used[i]; k++) out.push(b.rows[k]); });
     out.push("");
-    if (rows.length > fixRows) {
-      out.push(`${rows.length - fixRows} more not shown here — run with \`--verbose\` for the full list.`);
+    const withheld = buckets.map((b, i) => ({ label: b.label, n: b.rows.length - used[i] })).filter((c) => c.n > 0);
+    const total = buckets.reduce((s, b) => s + b.rows.length, 0);
+    if (total > seated) {
+      // Naming the classes is the point: a bare count reads as "more of the same".
+      const what = withheld.map((c) => `${c.n} ${c.label}`).join(", ");
+      out.push(`${total - seated} more not shown here — ${what}. Run \`--top ${Math.min(total, 40)}\` for more rows, or \`--verbose\` for the full list.`);
       out.push("");
     }
   }
@@ -5437,9 +5748,24 @@ function renderBrief(audit, opts = {}) {
   // Everything that belongs here is collected before the cap is applied, so the
   // "…and N more" line counts every entry withheld and not just some of them.
   const also = [];
+  // [Foreman: 144] File-shape advice is per-SHAPE, not per-file, so three files
+  // with the same problem used to print the same sentence three times. Group by
+  // the advice: say it once as a lead, list the files under it, and keep a
+  // per-file line only where the advice actually differs. 1.14.0 did this for
+  // the full report's blanket caveats; the short report never got the same
+  // treatment, and its one list is where the repetition showed.
+  const byAdvice = new Map();
   for (const f of shapes) {
-    const p = f.sources[0].path;
-    also.push(`- ${mdPathLink(p)} — ${oneLine((f.safeActions || [])[0] || "reshape this file")}`);
+    const advice = oneLine((f.safeActions || [])[0] || "reshape this file");
+    if (!byAdvice.has(advice)) byAdvice.set(advice, []);
+    byAdvice.get(advice).push(f.sources[0].path);
+  }
+  for (const [advice, paths] of byAdvice) {
+    if (paths.length === 1) {
+      also.push(`- ${mdPathLink(paths[0])} — ${advice}`);
+    } else {
+      also.push(`- ${paths.map(mdPathLink).join(", ")} — ${advice}`);
+    }
   }
   if (covered.length) {
     // [Foreman: 097] Configured, not watched running — so the next step is to
@@ -5574,6 +5900,7 @@ function renderReport(audit, opts = {}) {
     pushCoverageSection(out, audit, rules, suppressed, findings);
     if (weakSkills.length) {
       pushWeakSkillSection(out, weakSkills);
+      pushPreGenerationSkills(out, audit.skills);
     }
     if (opts.verbose && suppressed.length) {
       out.push("");
@@ -5611,8 +5938,7 @@ function renderReport(audit, opts = {}) {
   // in a directory above the root can be gated too, and it is still real — but
   // it belongs under the section for the files it lives in, where the fix is,
   // not at the top of a report about this project.
-  const outOfRepo = new Set(files.filter((f) => f.scope === "user" || f.scope === "ancestor" || f.autoMemory)
-    .map((f) => f.path));
+  const outOfRepo = new Set(files.filter(notReadersOwn).map((f) => f.path));
   const allGates = findings.filter((f) => HARD_GATE_STATES.has(f.state));
   const gates = allGates.filter((f) => !outOfRepo.has((((f.sources || [])[0]) || {}).path));
   const gated = new Set(allGates.map((f) => f.rule));
@@ -5828,14 +6154,18 @@ function renderReport(audit, opts = {}) {
     const acceptanceOf = (c) => (c.accepted === true ? "accepted" : c.accepted === false ? "rejected" : "proposed");
     const shown = proposals.filter((c) => opts.verbose || acceptanceOf(c) !== "rejected");
     if (shown.length) {
-      out.push("### Model-proposed relationships");
+      out.push("### Proposed relationships");
       out.push("");
-      out.push("The model proposed these while judging. They are proposals, not measurements: nothing here moved a rule's state, its score, the corpus grade, or the relationships assay derived deterministically. Accept or reject each one in conversation. [model-inferred]");
+      // [Foreman: 140] Two channels now fill this section, and the difference
+      // matters to a reader deciding how much weight to give a line — so each
+      // row says which one proposed it rather than the heading claiming both.
+      out.push("Proposals, not measurements: nothing here moved a rule's state, its score, the corpus grade, or the relationships assay derived deterministically. Each line says whether the model proposed it while judging or a script proposed it as a near miss. Accept or reject each one in conversation. [model-inferred]");
       out.push("");
       for (const c of shown) {
         const sites = (c.keys || []).map((k) => byKey.get(k)).filter(Boolean).map(loc);
         const where = sites.length ? sites.join(" ↔ ") : "(no rule in this scan matches its keys)";
-        out.push(`- **${c.kind}** — ${acceptanceOf(c)} — ${where} — ${c.summary || ""}${c.reason ? " (" + c.reason + ")" : ""}`);
+        const from = c.proposedBy === "analyzer" ? "by a script" : "by the model";
+        out.push(`- **${c.kind}** — ${acceptanceOf(c)} ${from} — ${where} — ${c.summary || ""}${c.reason ? " (" + c.reason + ")" : ""}`);
       }
       out.push("");
     }
@@ -6034,6 +6364,7 @@ function renderReport(audit, opts = {}) {
   pushAncestorScopeSection(out, files, ancestorWeak, { ruleLink });
 
   if (weakSkills.length) pushWeakSkillSection(out, weakSkills);
+  pushPreGenerationSkills(out, audit.skills);
   const weakAgents = (((audit.coverage || {}).agents) || []).filter(isWeakAgent);
   if (weakAgents.length) pushWeakAgentSection(out, weakAgents);
 
@@ -6190,7 +6521,7 @@ function cmdReport(root, opts) {
     process.stderr.write(error + "\n");
     process.exit(1);
   }
-  const audit = makeRecord("audit", composeAudit(scanData, judgments), root);
+  const audit = makeRecord("audit", composeAudit(scanData, judgments, opts), root);
   fs.writeFileSync(path.join(root, TMP_DIR, "audit.json"), JSON.stringify(audit, null, 2));
   // [Foreman: 095] The default is the short report; --verbose is the full one,
   // unchanged. One line, so reverting the default is one line too.
@@ -6273,7 +6604,7 @@ function cmdRemeasure(root, opts) {
     process.stderr.write(error + "\n");
     process.exit(1);
   }
-  const audit = makeRecord("audit", composeAudit(scanData, valid), root);
+  const audit = makeRecord("audit", composeAudit(scanData, valid, opts), root);
   fs.writeFileSync(auditFile, JSON.stringify(audit, null, 2));
   if (opts.json) process.stdout.write(JSON.stringify({ ...audit, previous: prev }, null, 2) + "\n");
   else process.stdout.write(renderReport(audit, { ...opts, prev }) + "\n");
@@ -7292,9 +7623,7 @@ function ciEvaluate(audit, gates) {
   // host's own auto-memory notes all load for a session here and none of them is
   // in the checkout — so their findings are counted as advisory instead of
   // stopping a merge nobody can fix from inside the repo.
-  const elsewhere = new Set((audit.files || [])
-    .filter((f) => f.scope === "user" || f.scope === "ancestor" || f.autoMemory)
-    .map((f) => f.path));
+  const elsewhere = new Set((audit.files || []).filter(notReadersOwn).map((f) => f.path));
   const outOfRepo = (finding) => {
     const at = (finding.sources || [])[0];
     return Boolean(at && elsewhere.has(at.path));
@@ -7490,7 +7819,11 @@ const USAGE = [
   "Driven by the skill, not by hand — each one carries the approval for a write:",
   "  plan            --from <draft.json>",
   "  apply           --change <id> [--change <id> …] | --batch <id>",
-  "  validate        --change <id> [--startup <dir>] [--external \"<kind>: <result>\"]",
+  // [Foreman: 150] `validate` re-scans, so it takes a host and a startup
+  // directory like every other command that does. Both Codex surfaces have
+  // instructed passing `--host codex` since 1.9.0 and the parser has always
+  // accepted it; only this line did not say so.
+  "  validate        --change <id> [--host <" + HOSTS + ">] [--startup <dir>] [--external \"<kind>: <result>\"]",
   "  rollback        --change <id> [--change <id> …] | --transaction <id>  [--force]",
 ].join("\n");
 
@@ -7629,11 +7962,24 @@ function main() {
     usageError("--startup belongs to the commands that scan (" + SCANNING_COMMANDS.join(", ") + "); " +
       command + " works from the saved records, which already carry it.");
   }
+  // [Foreman: 150] `--project-only` decides what discovery reaches, so only a
+  // command that discovers can honour it. The audit skills forwarded it to every
+  // later call, and `report`, `plan`, `apply`, `rollback` and `clean` accepted it
+  // and did nothing — the same silent no-op `--host` and `--startup` already
+  // refuse rather than accept.
+  if (args.includes("--project-only") && !SCANNING_COMMANDS.includes(command)) {
+    usageError("--project-only belongs to the commands that scan (" + SCANNING_COMMANDS.join(", ") + "); " +
+      command + " works from the saved records, which were already scanned with it or without it.");
+  }
   const opts = {
     verbose: args.includes("--verbose"),
     json: args.includes("--json"),
     // [Foreman: 074] Keep the audit inside the repo: no user-scope discovery.
     projectOnly: args.includes("--project-only"),
+    // [Foreman: 140] Opt-in proposals: near-miss conflicts the deterministic
+    // gates drop. The skills have advertised this flag since 1.7.0; until now
+    // only the model half of the semantic pass answered to it.
+    semantic: args.includes("--semantic"),
     adapter: ADAPTERS[host],
     startup,
     // [Foreman: 097] Where the walk started, when it moved. Null when the root

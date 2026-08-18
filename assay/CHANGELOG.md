@@ -4,6 +4,30 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.16.0] — 2026-08-18
+
+### Added
+
+- A repository vendored inside yours — a submodule, or a clone dropped into the tree — is recognized as somebody else's. Its instruction files still load, so the report names the folder, but nothing inside it is counted in your fix list, offered a rewrite, or able to fail a `ci` run
+- `--semantic` now also proposes the near misses the script drops on its own: two rules that command the same thing with opposite polarity but share too few words to call it a contradiction. A proposal, never a finding — it changes no count, no grade and no build
+- A skill whose description carries several of the shapes the current routing guidance argues against is named as one written against older advice, so it is one rewrite instead of several patches
+- After a re-measure, a file whose grade rose while its rules, its dead references and its disagreements all stayed put is called out. A grade can rise because a rule got better or because it picked up the words the rubric rewards, and only reading both versions tells them apart
+- `validate` accepts `--host`, which it always did; the help text now says so
+
+### Changed
+
+- The fix table gives every kind of problem a row before any kind gets a second. A project with twenty dead paths and twenty weak rules used to get eight dead paths and a closing line offering to rewrite weak rules it never showed you
+- The line under the table says what it left out and of what kind, and names the flag that shows more
+- "Looked at N rules in M files" counts every file the report read, so it agrees with the list of files named beside it. A file that was read and held no rule is still a file that was looked at
+- Files with the same shape problem share one row in **Also worth a look** instead of repeating one identical sentence per file
+- `--project-only` is refused by the commands that do not scan, instead of being accepted and ignored
+- Every proposed relationship says whether the model proposed it or a script did
+
+### Fixed
+
+- The `$assay` skill on Codex was missing three guards its sibling had: it could offer a fix menu with no report behind it, it could rewrite a skill description against a recipe that host does not grade, and it described a file as shadowed from further up the chain when shadowing there is same-directory only
+- The changelog entry for the live Codex host check named a path that does not exist and is not part of the installed plugin
+
 ## [1.15.0] — 2026-08-13
 
 ### Added
@@ -16,6 +40,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - `scan` writes a `.gitignore` into its own temp directory, so a first run leaves nothing in your working tree
 - `scan`, `report` and `ci` now say up front when an earlier fix was left half-finished
 - The requirement is stated where you install: Node 18 or newer on your PATH, and the one line that installs assay on Codex
+- Every finding in `--verbose` now prints its own next step under it
+- Duplicated rules reach the short report. One duty written twice is one row naming every place it appears, with the copy worth keeping named
+- `report --top <n>` shows more rows without dropping into the full analysis
+- `assay.js ci` prints the repair beside each failure
+- The report now says what it read and what it did not check. One line under the headline names the files it looked at, any file it could not open, and any whole check that never ran — a run with no model behind it, a corpus too large to compare rule against rule, a host whose wording checks do not apply, or rules written in a language assay does not score
+- A rule pointing at a missing `@path` import is now a finding. The host pulls that file into the session, so a dead one is reported beside every other dead path instead of grading well
+- `assay.js ci` prints what it looked at — rules, files and skills — so a run that scanned nothing no longer reads like a clean project
+- A file assay could not read now fails a `ci` run by default
 
 ### Changed
 
@@ -33,15 +65,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - On Codex the report no longer offers a flag that host does not take
 - "Claude keeps ignoring my instructions" now routes to the audit rather than to writing a new rule
 - The audit says what it found and roughly how long the grading takes before it goes quiet, and cleans up after itself when there was nothing to grade
-
-### Fixed
-
-- Validating a rewrite finds the rewritten rule and says where it is now. It used to report that the rule "no longer exists" beside a pass
-
-## [1.14.0] — 2026-08-13
-
-### Changed
-
 - `--verbose` is roughly half the length it was. Limits true of every wired mechanism are stated once per section, the enforcement ladder is one line per mechanism carrying what it reaches, and mechanisms inherited from your settings and installed plugins are summarized by source; the rest is still in `--json`
 - The full report opens with a one-line contents list
 - "All rules" covers this project's rules; everything else is still in `--json`
@@ -51,16 +74,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - Lists of rules from outside the repository are capped, with the count and a pointer at `--json`
 - Notes about a surface your project does not have — auto memory, saved workflows — no longer open the report
 - "3 could be handled by a script instead" says what it is counting
-
-### Fixed
-
-- The weak-rules table no longer prints a per-rule state beside the grade — a rule with nothing else wrong read as "healthy" in a table headed "Weak rules"
-- Paths render the same way everywhere: no raw backslashes in a link, no full home directory in a shareable report
-
-## [1.13.0] — 2026-08-13
-
-### Changed
-
 - Claude's own memory notes for a project are no longer graded as project rules. They are read and listed, so you can see what is in your context, and they stay out of the fix list, out of the counts the grade averages, and out of the restructure advice
 - A dated note citing a file that has since been deleted is no longer reported as a rule the host cannot apply. That is the note working
 - Nothing outside the repository can fail a `ci` run any more — not your own instruction files, not the ones above the project root, not the memory notes. They are still reported, and `ci` says how many files it saw that the checkout does not contain
@@ -69,36 +82,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - The full report's hard gates are the project's own. A gated rule in a file outside the repo is still reported, under the section for the files it lives in
 - A file that declares its own kind in its frontmatter is read instead of being reported as something the parser could not handle
 - The list of rules sent for judging now carries which file each one came from, so notes can be set aside by where they live instead of guessed at from their text
-
-## [1.12.0] — 2026-08-13
-
-### Added
-
-- Every finding in `--verbose` now prints its own next step under it
-- Duplicated rules reach the short report. One duty written twice is one row naming every place it appears, with the copy worth keeping named
-- `report --top <n>` shows more rows without dropping into the full analysis
-- `assay.js ci` prints the repair beside each failure
-
-### Changed
-
 - "Too vague to act on" now quotes the words that made it vague, and asks for what passes instead of a path the rule may not have
 - A rule a script could own gets that as its fix, instead of a wording lecture
 - A rule a wired hook already covers is no longer proposed for automation. It gets its own line saying to check the hook first
 - The closing line follows the table above it: a rewrite offer when something is weak, the manual decisions when there are dead paths or disagreements, `/assay:craft-skill` when a description never fires
 - "4 rules sit near the bottom of a long file" now names the file and links it
 - The fix for a rule with no clear action asks for the action, not for four specific opening words
-
-## [1.11.0] — 2026-08-13
-
-### Added
-
-- The report now says what it read and what it did not check. One line under the headline names the files it looked at, any file it could not open, and any whole check that never ran — a run with no model behind it, a corpus too large to compare rule against rule, a host whose wording checks do not apply, or rules written in a language assay does not score
-- A rule pointing at a missing `@path` import is now a finding. The host pulls that file into the session, so a dead one is reported beside every other dead path instead of grading well
-- `assay.js ci` prints what it looked at — rules, files and skills — so a run that scanned nothing no longer reads like a clean project
-- A file assay could not read now fails a `ci` run by default
-
-### Changed
-
 - A rule that cites a missing file is no longer reported as one the host never loads. It loads fine; the path is what is gone, and the report now says that and offers the fix that repairs it
 - Every "the host never loads this" row now carries the analyzer's own reason and its own next step, instead of one sentence written for every case
 - Missing paths get their own line in the headline, apart from rules that need rewording
@@ -109,6 +98,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Fixed
 
+- Validating a rewrite finds the rewritten rule and says where it is now. It used to report that the rule "no longer exists" beside a pass
+- The weak-rules table no longer prints a per-rule state beside the grade — a rule with nothing else wrong read as "healthy" in a table headed "Weak rules"
+- Paths render the same way everywhere: no raw backslashes in a link, no full home directory in a shareable report
 - `--root` at a path that does not exist is refused instead of silently creating the directory and reporting it clean; `--root` at a file says so instead of throwing
 - `report` refuses a `.assay-tmp/scan.json` taken from another project instead of rendering a full report about files that are not here
 - `report`, `plan`, `apply`, `clean` and `rollback` refuse `--host` instead of accepting it and quietly ignoring it — the flag belongs to the commands that scan
@@ -165,7 +157,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Removed
 
-- No command takes `--host` or `--startup` any more. Each audit command already knows its host, and `/assay:craft-rules` and `/assay:craft-skill` write for Claude Code only — authoring for Codex is no longer offered
+- You no longer pass `--host` or `--startup` to a command yourself. Each audit command already knows its host and supplies both for you; `/assay:codex` still takes `--startup <path>` when the session begins in a subdirectory. `/assay:craft-rules` and `/assay:craft-skill` write for Claude Code only — authoring for Codex is no longer offered
 - The Codex plugin manifest no longer advertises a skills directory. Those skills are written for Claude Code's tooling and could not run there; on Codex, assay is the engine CLI
 
 ### Fixed
@@ -202,7 +194,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - One missing path that several rules or hooks still point at is reported once as a stale shared target, naming every dependent — restoring the one file fixes the whole set. Mechanical, and part of the CI `stale-targets` gate
 - Personal rules in `~/.claude/rules/` are discovered and graded under **User scope**, scoped `paths` frontmatter respected, without moving the project grade
 - `CLAUDE.md` and `CLAUDE.local.md` files in directories above the project root are discovered and graded under a new **Above the project root** section — the host loads them in full at launch, outermost first. `--project-only` leaves them out, and they never move the project grade
-- A live Codex host check: `node assay/scripts/live-host-codex.js` starts real Codex sessions over a sentinel-token `AGENTS.md` chain and verifies the installed host loads it the way assay models it — chain order, delivery at session start, and `AGENTS.override.md` selection. Manual, like the doc-drift check, because each run spends two live sessions
+- A live Codex host check starts real Codex sessions over a sentinel-token `AGENTS.md` chain and verifies the installed host loads it the way assay models it — chain order, delivery at session start, and `AGENTS.override.md` selection. Manual, like the doc-drift check, because each run spends two live sessions. It is a maintainer's script in this repository and is not part of the installed plugin
 
 ### Changed
 

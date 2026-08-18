@@ -32,7 +32,9 @@ paraphrased duplicates and indirect conflicts the script cannot see),
 ## 1. Scan
 
 From the project root — pass `--project-only` through if `$ARGUMENTS` has it, to
-this step and to every later `assay.js` call:
+this step and to every later call that re-scans: `remeasure` and `ci`. The rest
+work from the saved scan and refuse the flag, because they have nothing left to
+discover:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" scan

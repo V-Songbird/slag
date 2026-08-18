@@ -2036,13 +2036,16 @@ test("model-proposed relationships render, labelled, and change nothing", () => 
   assert.equal((proposed.relationships || []).some((r) => r.kind === "paraphrase-duplicate"), false);
 
   const report = engine.renderReport(proposed);
-  assert.match(report, /### Model-proposed relationships/);
+  assert.match(report, /### Proposed relationships/);
   assert.match(report, /\[model-inferred\]/);
-  assert.match(report, /\*\*paraphrase-duplicate\*\* — proposed — \[CLAUDE\.md:3\]\(CLAUDE\.md:3\) ↔ \[\.claude\/rules\/api\.md:3\]\(\.claude\/rules\/api\.md:3\)/);
-  assert.match(report, /\*\*ambiguous-meaning\*\* — accepted —/);
+  // [Foreman: 140] Two channels fill this section now, so every row says which
+  // one it came from — a script's near miss carries less weight than the
+  // model's read of two rules, and the reader has to be able to tell.
+  assert.match(report, /\*\*paraphrase-duplicate\*\* — proposed by the model — \[CLAUDE\.md:3\]\(CLAUDE\.md:3\) ↔ \[\.claude\/rules\/api\.md:3\]\(\.claude\/rules\/api\.md:3\)/);
+  assert.match(report, /\*\*ambiguous-meaning\*\* — accepted by the model —/);
   // a rejected proposal is verbose-only
   assert.doesNotMatch(report, /Reads against the payload rule/);
-  assert.match(engine.renderReport(proposed, { verbose: true }), /\*\*indirect-conflict\*\* — rejected —/);
+  assert.match(engine.renderReport(proposed, { verbose: true }), /\*\*indirect-conflict\*\* — rejected by the model —/);
 });
 
 test("a candidate naming an unknown kind is a malformed judgments file", () => {
@@ -6345,13 +6348,36 @@ test("a rule pointing at a file that is not there says so", () => {
   assert.match(out, /docs\/handbook\.md/);
 });
 
-test("a long fix list is capped and says how many it left out", () => {
+test("a long fix list is capped and says how many it left out, and of what", () => {
   const rules = [];
   for (let i = 0; i < 14; i++) rules.push("- Keep thing " + i + " tidy.");
   const out = brief({ "CLAUDE.md": "# Rules\n\n" + rules.join("\n") + "\n" });
   const rows = out.split("\n").filter((l) => l.startsWith("| \""));
   assert.equal(rows.length, 8, "the table is capped at 8 rows");
-  assert.match(out, /more not shown here — run with `--verbose`/);
+  // [Foreman: 142] A bare count reads as "more of the same". The line names the
+  // class of every row it withheld, and the flag that would show them.
+  assert.match(out, /6 more not shown here — 6 weakly worded\./);
+  assert.match(out, /Run `--top 14` for more rows/);
+});
+
+// [Foreman: 142] The defect this pins: `rows.slice(0, 8)` over rows pushed in
+// bucket order gave the first crowded class every seat. A live run printed eight
+// dead paths and then closed by offering `--fix` for 20 weak rules the reader
+// had never been shown.
+test("a crowded class cannot take every seat in the fix table", () => {
+  const dead = [];
+  for (let i = 0; i < 12; i++) dead.push("- Read `docs/missing-" + i + ".md` before you edit anything.");
+  const vague = [];
+  for (let i = 0; i < 12; i++) vague.push("- Keep thing " + i + " tidy.");
+  const out = brief({ "CLAUDE.md": "# Rules\n\n" + dead.concat(vague).join("\n") + "\n" });
+  const table = out.split("## Fix these first")[1].split("\n").filter((l) => l.startsWith("| \""));
+  assert.equal(table.length, 8, "still capped at 8 rows");
+  const stale = table.filter((l) => l.includes("which is not there")).length;
+  const weak = table.length - stale;
+  assert.ok(stale > 0, "the more urgent class still leads");
+  assert.ok(weak > 0, "and the other class is not starved out of the table");
+  // Both classes are named in the overflow line, not just the one that overflowed most.
+  assert.match(out, /more not shown here — .*pointing at a file that is not there.*weakly worded/);
 });
 
 test("the brief report never carries a factor code, an evidence tag or a grade", () => {
@@ -6542,4 +6568,242 @@ test("a rule the host never loads is listed above a pair that argues", () => {
   const rows = out.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Rule") && !l.startsWith("|---"));
   assert.match(rows[0], /the host never loads it/, "a rule that cannot load must come first:\n" + out);
   assert.match(rows[1], /two rules disagree/, "a conflicting pair comes after the hard gates:\n" + out);
+});
+
+// [Foreman: 141] A repository vendored inside this one loads like project
+// policy and the reader owns none of it. The live 1.15.0 run that produced this
+// entry put all 40 fix rows inside two vendored folders, every one of them a
+// dead path relative to that folder's own root.
+
+test("a rule inside a vendored repository is listed, never counted as the reader's to fix", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n- Always run `npm test` before you open a pull request.\n",
+    "knowledge/kotlin/CLAUDE.md": "# Vendored\n\n- Keep it tidy.\n- Read `does-not-exist.md` before editing.\n",
+    "knowledge/kotlin/.git": "gitdir: ../../.git/modules/knowledge/kotlin\n",
+  });
+  const scanData = engine.scan(root);
+  const vendored = scanData.files.filter((f) => f.vendored);
+  assert.equal(vendored.length, 1, "the nested `.git` marks exactly the vendored file");
+  assert.equal(vendored[0].vendoredRoot, "knowledge/kotlin");
+  assert.ok(!scanData.files.find((f) => f.path === "CLAUDE.md").vendored, "the reader's own file is untouched");
+
+  const out = engine.renderBrief(engine.composeAudit(scanData, null));
+  // Its rules still load, so the report names the folder rather than hiding it.
+  assert.match(out, /knowledge\/kotlin.*vendored inside this one/);
+  // But nothing inside it reaches a fix table the reader is asked to act on.
+  const fixSection = out.split("## Fix these first")[1] || "";
+  assert.ok(!fixSection.includes("knowledge/kotlin"), "no vendored row is offered as a fix");
+});
+
+test("a submodule declared in .gitmodules counts as vendored even before it is initialized", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n- Always run `npm test` before you open a pull request.\n",
+    ".gitmodules": '[submodule "vendor/guide"]\n\tpath = vendor/guide\n\turl = https://example.invalid/guide.git\n',
+    "vendor/guide/AGENTS.md": "# Vendored\n\n- Never use `var`.\n",
+    "vendor/guide/CLAUDE.md": "# Vendored\n\n- Never use `var`.\n",
+  });
+  const scanData = engine.scan(root);
+  const vendored = scanData.files.filter((f) => f.vendored);
+  assert.ok(vendored.length >= 1, "the .gitmodules path marks the directory with no .git present");
+  assert.ok(vendored.every((f) => f.vendoredRoot === "vendor/guide"));
+});
+
+test("a vendored finding cannot fail a ci run", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n- Always run `npm test` before you open a pull request.\n",
+    "vendor/lib/CLAUDE.md": "# Vendored\n\n- Read `gone.md` before editing anything.\n",
+    "vendor/lib/.git": "gitdir: ../../.git/modules/vendor/lib\n",
+  });
+  const audit = engine.composeAudit(engine.scan(root), null);
+  const stale = (audit.findings || []).filter((f) => (f.sources || []).some((s) => s.path.startsWith("vendor/lib/")));
+  assert.ok(stale.length > 0, "the vendored dead reference is still found and reported");
+  const result = engine.ciEvaluate(audit, ["stale-targets"]);
+  assert.equal(result.failed.length, 0, "but it never stops a build the reader cannot fix from here");
+});
+
+// [Foreman: 143] Two numbers for one run. The headline counted files that
+// produced a rule; the provenance line named every file read. A live run said
+// "126 rules in 12 files" over a line naming 22 of them.
+test("the headline file count is the same population the provenance line names", () => {
+  const out = brief({
+    "CLAUDE.md": "# Rules\n\n- Always run `npm test` before you open a pull request.\n",
+    ".claude/rules/empty.md": "# Notes\n\nThis file is prose and carries no rule at all.\n",
+  });
+  const headline = out.split("\n").find((l) => l.startsWith("Looked at "));
+  const named = (out.split("\n").find((l) => l.startsWith("Read ")) || "").match(/`[^`]+`/g) || [];
+  const claimed = Number(headline.match(/in (\d+) files?\./)[1]);
+  assert.equal(claimed, named.length, `headline says ${claimed} files, provenance names ${named.length}`);
+  assert.equal(claimed, 2, "a file that yielded no rule was still read, and is still counted");
+});
+
+
+// [Foreman: 144] Three of four rows in "Also worth a look" carried one identical
+// sentence on a live run. The advice is per-shape, not per-file, so the files
+// that share a shape share a row.
+function shapeFile() {
+  const prose = [];
+  for (let i = 0; i < 60; i++) prose.push("Background on how this project came to be, paragraph " + i + ".");
+  return "# Notes\n\n" + prose.join("\n\n") +
+    "\n\n- Always run `npm test` before you open a pull request.\n" +
+    "- Never merge without a review from the owner of the touched module.\n" +
+    "- Always update `docs/CHANGELOG.md` in the same commit as a behaviour change.\n";
+}
+
+test("files that share one shape problem share one line, not one line each", () => {
+  const body = shapeFile();
+  const out = brief({
+    "CLAUDE.md": "# Rules\n\n- Always run `npm test` before you open a pull request.\n",
+    ".claude/rules/one.md": body,
+    ".claude/rules/two.md": body,
+    ".claude/rules/three.md": body,
+  });
+  const section = out.split("## Also worth a look")[1];
+  assert.ok(section, "the fixture must actually produce a shape finding");
+  const lines = section.split("\n").filter((l) => l.startsWith("- "));
+  const advice = lines.map((l) => l.slice(l.indexOf(" — ") + 3)).filter(Boolean);
+  assert.equal(new Set(advice).size, advice.length, "no two rows repeat one identical sentence");
+  const shared = lines.find((l) => l.includes("one.md"));
+  assert.ok(shared, "the shape row names the files it is about");
+  assert.ok(shared.includes("two.md") && shared.includes("three.md"), "all three files sit on the one row");
+});
+
+// [Foreman: 140] The last unbuilt half of the blind-pass plan. A pair sharing an
+// action verb and opposite polarity but diluted below the overlap threshold was
+// dropped in silence — the one thing a conflict analyzer must never do. These
+// two rules command `pin` with opposite polarity and share two content tokens
+// of nine, which is under CONFLICT_JACCARD and over the near-miss floor.
+const NEAR_MISS = {
+  "CLAUDE.md": [
+    "# Project rules",
+    "",
+    "- Always pin dependencies to exact versions in the release manifest.",
+    "- Never pin dependencies to a floating major range.",
+    "",
+  ].join("\n"),
+};
+
+test("a near-miss conflict is silent by default", () => {
+  const audit = engine.composeAudit(engine.scan(tmpProject(NEAR_MISS)), {});
+  const conflicts = (audit.findings || []).filter((f) => f.type === "conflict" || f.type === "conditional-conflict");
+  assert.equal(conflicts.length, 0, "the pair is below the threshold, so it is not a reported conflict");
+  assert.deepEqual((audit.semantic || {}).candidates, [], "and nothing is proposed unless it was asked for");
+});
+
+test("under --semantic the same pair comes back as a proposal, never as a finding", () => {
+  const root = tmpProject(NEAR_MISS);
+  const audit = engine.composeAudit(engine.scan(root), {}, { semantic: true });
+  const candidates = (audit.semantic || {}).candidates || [];
+  assert.equal(candidates.length, 1, "the near miss is proposed once");
+  const c = candidates[0];
+  assert.equal(c.kind, "indirect-conflict");
+  assert.equal(c.proposedBy, "analyzer", "a reader must be able to tell a script proposed this, not the model");
+  assert.equal(c.keys.length, 2, "keyed by content hash, the way the renderer resolves a candidate");
+  assert.equal(c.accepted, null, "unreviewed, so the accept/reject surface picks it up");
+  assert.match(c.summary, /opposite polarity/);
+  // It renders, keyed to both rules, rather than falling through as unmatched.
+  const shown = engine.renderReport(audit, { verbose: true });
+  assert.doesNotMatch(shown, /no rule in this scan matches its keys/);
+  // The additivity invariant: a proposal moves nothing.
+  const plain = engine.composeAudit(engine.scan(root), {});
+  assert.deepEqual(audit.findings, plain.findings, "findings are identical with and without the proposals");
+  assert.deepEqual(audit.relationships, plain.relationships, "no proposal reaches the relationship graph");
+});
+
+test("a pair that already reports as a conflict is never proposed a second time", () => {
+  const files = { "CLAUDE.md": "# Project rules\n\n- Always use tabs for indentation in this repository.\n- Never use tabs for indentation in this repository.\n" };
+  const audit = engine.composeAudit(engine.scan(tmpProject(files)), {}, { semantic: true });
+  const conflicts = (audit.findings || []).filter((f) => f.type === "conflict");
+  assert.ok(conflicts.length >= 1, "this pair is a real conflict");
+  assert.deepEqual((audit.semantic || {}).candidates, [], "so it is a finding, not a proposal");
+});
+
+test("two rules sharing only a verb are not proposed as a near miss", () => {
+  const files = {
+    "CLAUDE.md": [
+      "# Project rules",
+      "",
+      "- Always use the shared logger for anything a support engineer might read later.",
+      "- Never use a bare relative import inside the generated protobuf packages.",
+      "",
+    ].join("\n"),
+  };
+  const audit = engine.composeAudit(engine.scan(tmpProject(files)), {}, { semantic: true });
+  assert.deepEqual((audit.semantic || {}).candidates, [], "no subject in common, so no proposal");
+});
+
+// [Foreman: 147] The last item on the product strategy's corpus list:
+// "suspicious improvements caused only by rubric-oriented wording". A grade can
+// rise because a rule got better, or because it acquired the words the rubric
+// rewards, and a before/after table cannot tell those apart. The report says so
+// rather than pretending to know which one happened.
+test("a grade that rose with nothing else changing is disclosed, never scored", () => {
+  const before = { "CLAUDE.md": "# Rules\n\n- Keep things tidy.\n- Handle errors well.\n" };
+  // Deliberately no new path anchor: introducing one would repair or create a
+  // real finding, and this fixture has to move the grade and nothing else.
+  const after = { "CLAUDE.md": "# Rules\n\n- Always run `npm test` before you open a pull request.\n- Always return a typed error from every request handler.\n" };
+  const prev = engine.composeAudit(engine.scan(tmpProject(before)), null);
+  const now = engine.composeAudit(engine.scan(tmpProject(after)), null);
+  const out = engine.renderReport(now, { verbose: true, prev });
+  assert.match(out, /Grades rose with nothing else changing/);
+  assert.match(out, /only reading both/);
+  // It is a disclosure: no finding, no state, no gate.
+  assert.ok(!(now.findings || []).some((f) => f.type === "rubric-only-gain"), "it never becomes a finding");
+});
+
+test("a grade that rose because a dead reference was repaired is not called suspicious", () => {
+  const before = { "CLAUDE.md": "# Rules\n\n- Always read `docs/missing-guide.md` before editing the parser.\n- Always run `npm test` before you open a pull request.\n" };
+  const after = {
+    "CLAUDE.md": "# Rules\n\n- Always read `docs/guide.md` before editing the parser.\n- Always run `npm test` before you open a pull request.\n",
+    "docs/guide.md": "# Guide\n",
+  };
+  const prev = engine.composeAudit(engine.scan(tmpProject(before)), null);
+  const now = engine.composeAudit(engine.scan(tmpProject(after)), null);
+  const out = engine.renderReport(now, { verbose: true, prev });
+  assert.doesNotMatch(out, /Grades rose with nothing else changing/);
+});
+
+// [Foreman: 106] A skill written before the current routing guidance carries
+// several of these shapes at once. Individually each is a row in the weak-skill
+// table; together they are one description authored against older advice, and
+// the repair is one rewrite. The ADR this entry cites admits no new check and
+// no new evidence tier, so this reads only signals that already ship.
+test("a skill carrying several older-guidance shapes is named as one rewrite", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n- Always run `npm test` before you open a pull request.\n",
+    ".claude/skills/legacy/SKILL.md": [
+      "---",
+      "name: legacy",
+      "description: Reads, parses, converts, validates, normalizes and exports spreadsheet data, plus charts, pivots and formulas.",
+      "when_to_use: When the user mentions a spreadsheet.",
+      "---",
+      "",
+      "# legacy",
+      "",
+      "Do the thing.",
+    ].join("\n"),
+  });
+  const audit = engine.composeAudit(engine.scan(root), null);
+  const out = engine.renderReport(audit, { verbose: true });
+  assert.match(out, /### Written against older guidance/);
+  assert.match(out, /`legacy`/);
+  assert.match(out, /keeps `when_to_use` as its own field/);
+  assert.match(out, /craft-skill/);
+});
+
+test("a skill with one weak point is not called older guidance", () => {
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n- Always run `npm test` before you open a pull request.\n",
+    ".claude/skills/nearly/SKILL.md": [
+      "---",
+      "name: nearly",
+      'description: Converts a .csv file into a formatted .xlsx workbook. Use when the user asks to turn a CSV into a spreadsheet — e.g. "make this csv an excel file", "convert data.csv to xlsx".',
+      "---",
+      "",
+      "# nearly",
+      "",
+      "Convert the file.",
+    ].join("\n"),
+  });
+  const out = engine.renderReport(engine.composeAudit(engine.scan(root), null), { verbose: true });
+  assert.doesNotMatch(out, /### Written against older guidance/);
 });
