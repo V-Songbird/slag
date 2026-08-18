@@ -31,6 +31,7 @@ ROADMAP.jsonl.backup-*
 .assay/
 .jig/
 .scribe/
+jig/scripts/probes/results.json
 
 # This repo's dev config ported to other agent CLIs — local-only, not published
 .agents/

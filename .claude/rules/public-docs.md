@@ -8,7 +8,8 @@ paths:
 
 These files are read by end users of the plugins. Every line must help a user decide or act — nothing else earns a place.
 
-- Describe what the plugin does and what a release changes **for the user**. Never document internal process: no benchmark methodology, run tags, sample sizes, per-rep numbers, A/B setups, transcript quotes, or investigation narratives. That detail lives in private memory only.
+- Describe what the plugin does and what a release changes **for the user**. Never document internal process: no benchmark methodology, run tags, per-rep numbers, A/B wiring, transcript quotes, investigation narratives, or pointers into `docs/research/`. That detail lives in private notes only.
+- One exception, and only in a README's own **Benchmarks** section: the honest table in `.github/PLUGIN_README_TEMPLATE.md` is canonical there, so a plugin may publish the counts behind its own results ("7 of 8", "115 of 115") plus a plain one-line "how we tested". A number the reader cannot check is worse than no number. Everything else about how it was measured still stays out, and a CHANGELOG never carries counts at all — it states the effect.
 - CHANGELOG entries are short and user-facing — "Fixed an issue where…", "Added…" — a few lines at most. State the effect, not the journey. No design rationale, no lessons learned, no wording-choice commentary.
 - READMEs describe **current** behavior only. Never narrate history ("used to X, now closed") and never keep a caveat for an issue that is already resolved — the CHANGELOG is the record of the past.
 - A known limitation belongs in the README only while it is real, current, and user-relevant. When it's fixed, delete the caveat entirely; don't soften it to "mostly closed".
