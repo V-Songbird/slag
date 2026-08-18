@@ -12,7 +12,9 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const lib = require("../hooks/scribe-lib.js");
-const { analyze, STREAK_WAVES, QUIET_JUDGED } = require("../scripts/cli.js");
+const {
+  analyze, STREAK_WINDOW, STREAK_WAVES, QUIET_JUDGED, OFFMENU_WINDOW, OFFMENU_ROUNDS,
+} = require("../scripts/cli.js");
 
 const CLI = path.join(__dirname, "..", "scripts", "cli.js");
 
@@ -30,6 +32,12 @@ function runCli(root, args) {
 const judged = (session, extra) => ({ session, kind: "judged", source: "mechanical", bar: "conservative", ...extra });
 const asked = (session) => ({ session, kind: "asked", source: "mechanical", count: 1, questions: [{ header: "Meaning", question: "Which?" }], answers: ["Speed (Recommended)"] });
 const waved = (session) => ({ session, kind: "waved-off", source: "mechanical", via: "prompt" });
+// A round that recorded what it offered, and what the user settled on.
+const round = (session, answers, options) => ({
+  session, kind: "asked", source: "mechanical", count: 1,
+  questions: [{ header: "Meaning", question: "Which?", options: options || ["Speed", "Readability"] }],
+  answers,
+});
 
 describe("analyze", () => {
   const cfg = lib.defaults();
@@ -66,6 +74,9 @@ describe("analyze", () => {
     const hit = r.suggestions.find((s) => /wave-off streak/.test(s));
     assert.ok(hit, "expected the streak suggestion");
     assert.match(hit, new RegExp("rule: " + STREAK_WAVES + "\\+"));
+    // Every suggestion quotes the rule that produced it, so the quoted window
+    // has to be the window the rule actually used.
+    assert.match(hit, new RegExp("last " + STREAK_WINDOW + "\\)"));
   });
 
   test("no streak suggestion below the threshold", () => {
@@ -73,13 +84,68 @@ describe("analyze", () => {
     assert.ok(!r.suggestions.some((s) => /wave-off streak/.test(s)));
   });
 
-  test("a quiet gate on the conservative bar earns the standard-bar note", () => {
+  test("a quiet gate is reported on either bar, with the remedy that fits it", () => {
     const rows = [];
     for (let i = 0; i < QUIET_JUDGED; i++) rows.push(judged("s" + i));
-    const con = analyze(rows, { ...cfg, bar: "conservative" });
-    assert.ok(con.suggestions.some((s) => /quiet gate/.test(s)));
-    const std = analyze(rows, cfg);
-    assert.ok(!std.suggestions.some((s) => /quiet gate/.test(s)), "the default bar already asks more");
+
+    const con = analyze(rows, { ...cfg, bar: "conservative" }).suggestions.find((s) => /quiet gate/.test(s));
+    assert.ok(con, "the conservative bar earns the quiet-gate note");
+    assert.match(con, /"bar": "standard"/, "and its remedy is the eager bar");
+
+    // The default bar is the eager one, so there is no bar left to raise — but
+    // silence still has to be reported, or the tuning story is one-directional.
+    const std = analyze(rows, cfg).suggestions.find((s) => /quiet gate/.test(s));
+    assert.ok(std, "the default bar earns it too");
+    assert.doesNotMatch(std, /"bar": "standard"/, "it must not suggest the bar already in force");
+    assert.match(std, /not landing/, "its remedy points at the install, not the bar");
+  });
+
+  test("no quiet-gate note once a round has been asked", () => {
+    const rows = [];
+    for (let i = 0; i < QUIET_JUDGED; i++) rows.push(judged("s" + i));
+    rows.push(asked("s0"));
+    assert.ok(!analyze(rows, cfg).suggestions.some((s) => /quiet gate/.test(s)));
+  });
+
+  test("answers nobody offered earn the option-quality note, and it never blames the bar", () => {
+    const rows = [];
+    for (let i = 0; i < OFFMENU_ROUNDS; i++) rows.push(round("s", ["something else entirely " + i]));
+    const hit = analyze(rows, cfg).suggestions.find((s) => /off-menu answers/.test(s));
+    assert.ok(hit, "expected the off-menu suggestion");
+    assert.match(hit, new RegExp("rule: " + OFFMENU_ROUNDS + "\\+ in the last " + OFFMENU_WINDOW));
+    assert.match(hit, /option-crafting/, "the remedy is the options");
+    assert.doesNotMatch(hit, /"bar"/, "it must never propose a bar change");
+  });
+
+  test("a picked option is on the menu, however it was truncated", () => {
+    const rows = [];
+    for (let i = 0; i < OFFMENU_ROUNDS + 2; i++) {
+      rows.push(round("s", ["Speed (Recommended)"], ["Speed (Recommended) — it is called in a hot loop", "Readability"]));
+    }
+    assert.ok(!analyze(rows, cfg).suggestions.some((s) => /off-menu/.test(s)));
+  });
+
+  test("rounds recorded before option labels existed are not evidence", () => {
+    const rows = [];
+    for (let i = 0; i < OFFMENU_ROUNDS + 3; i++) rows.push(asked("s"));
+    assert.ok(!analyze(rows, cfg).suggestions.some((s) => /off-menu/.test(s)));
+  });
+
+  test("below the threshold the note stays quiet", () => {
+    const rows = [round("s", ["typed my own"]), round("s", ["Speed"])];
+    assert.ok(!analyze(rows, cfg).suggestions.some((s) => /off-menu/.test(s)));
+  });
+
+  test("the fatigue note never names a cap that is not set", () => {
+    const capped = [judged("a", { capped: true })];
+
+    const off = analyze(capped, { ...cfg, fatigueCap: 0 }).suggestions.find((s) => /fatigue cap/.test(s));
+    assert.ok(off);
+    assert.doesNotMatch(off, /after 0 rounds/, "the 1.1.0 default must not print a cap of 0");
+    assert.match(off, /historical rows/, "with the cap off, the rows are history");
+
+    const on = analyze(capped, { ...cfg, fatigueCap: 3 }).suggestions.find((s) => /fatigue cap/.test(s));
+    assert.match(on, /Raise "fatigueCap"/, "with a cap set, raising it is the live advice");
   });
 });
 
@@ -160,6 +226,16 @@ describe("memory", () => {
   test("a meaning is an answer, not a rulebook — length is capped", () => {
     const root = tmpRoot();
     const r = runCli(root, ["remember", "improve", "x".repeat(200)]);
+    assert.strictEqual(r.status, 2);
+    assert.match(r.stderr, /keep it short/);
+    assert.deepStrictEqual(JSON.parse(runCli(root, ["memory", "--json"]).stdout), {});
+  });
+
+  test("a term is a term, not a rulebook either — its length is capped too", () => {
+    // Both halves are capped in the same guard; only the meaning half was
+    // covered, which left the term as an open door to the same abuse.
+    const root = tmpRoot();
+    const r = runCli(root, ["remember", "y".repeat(100), "speed"]);
     assert.strictEqual(r.status, 2);
     assert.match(r.stderr, /keep it short/);
     assert.deepStrictEqual(JSON.parse(runCli(root, ["memory", "--json"]).stdout), {});

@@ -26,7 +26,7 @@
     { "label": "near-miss", "text": "make this faster",
       "why": "reads ambiguous, but with a single hot loop in view every reading lands the same edit" },
     { "label": "near-miss", "text": "just do it",
-      "why": "a wave-off, not a request — honored and logged, never judged" },
+      "why": "a wave-off, not a request — stands the gate down and is logged as one, but only once the session has an ask to wave off" },
     { "label": "near-miss", "text": "/compact",
       "why": "slash command — precise by construction, mechanically stood down" },
     { "label": "near-miss", "text": "yes, option 2 — but only for the staging config",

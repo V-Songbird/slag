@@ -25,14 +25,24 @@ const CONFIG_FILE = "config.json";
 const LEDGER_FILE = "ledger.jsonl";
 const OFF_FILE = "off";
 
-// The public honesty number (SCOPE.md, sign-off S2): the additionalContext the
-// gate emits — rubric plus JSON envelope — stays under this many bytes.
+// The public honesty number, stated in SCOPE.md's release gates: the
+// additionalContext the gate emits — rubric plus JSON envelope — stays under
+// this many bytes.
 const RUBRIC_CAP = 1400;
 
 // How much of the prompt a judged line keeps. Enough to evaluate ask quality
 // at review time, small enough that the ledger never becomes a transcript.
 const PROMPT_KEEP = 200;
 const QUESTION_KEEP = 120;
+// Option labels are short by construction (the method caps them at five
+// words), and the review only needs them to tell a picked label from an
+// answer nobody offered.
+const OPTION_KEEP = 60;
+// A harvested answer longer than this is not an answer; it is dropped whole
+// rather than clipped, so nothing long enough to carry an instruction lands
+// in the ledger. ANSWER_KEEP is the count, not a length.
+const ANSWER_MAX = 80;
+const ANSWERS_KEEP = 8;
 
 const BARS = ["conservative", "standard"];
 // Asking is the product. The default bar asks whenever readings genuinely
@@ -44,9 +54,38 @@ const DEFAULT_BAR = "standard";
 // and a user who disagrees has the wave-off, the cap, and the kill switch.
 const DEFAULT_FATIGUE_CAP = 0;
 
-// Wave-off phrases. Matched against the user's next prompt (only when this
-// session already saw an ask) and against answers typed into a question round.
-const WAVE_OFF_RE = /\b(just do it|stop asking|no (?:more )?questions|don'?t ask|whatever you think|you decide|surprise me)\b/i;
+// Wave-off phrases, in two forms.
+//
+// WAVE_OFF_RE is the loose one: it finds a phrase anywhere. That is right for
+// scanning the short strings a user types into a question round, where the
+// whole payload is their answer.
+//
+// isWaveOff() is the strict one, for a whole prompt. A wave-off is something
+// the user LEADS with, so the phrase has to open the prompt after at most a
+// short agreement lead-in — and then still look like an aside rather than a
+// sentence about one. Matching anywhere turned ordinary requests into
+// wave-offs ("add a Surprise me button to the UI", "the spec says you decide
+// the retry count"), which cost the prompt its rubric AND fed the review's
+// streak rule evidence the user never gave.
+const WAVE_OFF_PHRASES =
+  "just do it|stop asking|no (?:more )?questions|don['’]?t ask|whatever you think|you decide|surprise me";
+const WAVE_OFF_RE = new RegExp("\\b(" + WAVE_OFF_PHRASES + ")\\b", "i");
+const WAVE_OFF_OPENS = new RegExp(
+  "^\\s*(?:(?:ok|okay|yes|yeah|fine|sure|please)\\b[\\s,.:;!-]*){0,2}(?:" + WAVE_OFF_PHRASES + ")\\b",
+  "i",
+);
+// Past this length a prompt that merely starts with a phrase is a request, not
+// an aside — "stop asking me for the token every time, cache it" is work.
+const WAVE_OFF_SHORT = 40;
+
+function isWaveOff(prompt) {
+  const text = typeof prompt === "string" ? prompt.trim() : "";
+  const opener = WAVE_OFF_OPENS.exec(text);
+  if (!opener) return false;
+  // Either nothing follows the phrase but punctuation, or the whole prompt is
+  // short enough that the trailing words are a rider on the wave-off.
+  return !/^\s+\S/.test(text.slice(opener[0].length)) || text.length <= WAVE_OFF_SHORT;
+}
 
 // ---------------------------------------------------------------------------
 // The rubric
@@ -54,8 +93,8 @@ const WAVE_OFF_RE = /\b(just do it|stop asking|no (?:more )?questions|don'?t ask
 //
 // One compact judgment that rides every judged prompt. The full questioning
 // method lives in the clarify skill, loaded only when the judgment here says
-// "ambiguous" — that split is what keeps the standing cost pinned (mechanism
-// ADR, decision 1).
+// "ambiguous" — that split is what keeps the standing cost pinned: the method
+// can grow without a byte of it riding every prompt in every repo.
 
 const RUBRIC_CORE = [
   "[scribe] Judge this request before acting on it.",
@@ -191,9 +230,9 @@ function readConfig(root) {
 // The ledger
 // ---------------------------------------------------------------------------
 //
-// Every line carries schemaVersion, ts, session, kind, and source from day one
-// (jig's arming lesson: the bar-tuning that reads this data cannot exist
-// without it). `source` is always "mechanical" — every line is written by a
+// Every line carries schemaVersion, ts, session, kind, and source from day one,
+// because bar-tuning reads this data later and cannot invent fields the rows
+// never had. `source` is always "mechanical" — every line is written by a
 // hook that saw the event, never by the model reporting on itself. A judged
 // line with no asked line in the same turn IS the pass-through record; the
 // review derives it by subtraction instead of trusting a self-report.
@@ -240,10 +279,12 @@ function askedCount(root, session) {
   return n;
 }
 
+// Only what another file actually reaches for. Everything else stays internal.
 module.exports = {
-  SCHEMA_VERSION, STATE_DIR, CONFIG_FILE, LEDGER_FILE, OFF_FILE,
-  RUBRIC_CAP, PROMPT_KEEP, QUESTION_KEEP, BARS, DEFAULT_BAR, DEFAULT_FATIGUE_CAP,
-  WAVE_OFF_RE, BAR_LINES,
-  rubric, emission, statePath, isOff, stripBom, readInput, isObject,
+  SCHEMA_VERSION, LEDGER_FILE,
+  RUBRIC_CAP, PROMPT_KEEP, QUESTION_KEEP, OPTION_KEEP, ANSWER_MAX, ANSWERS_KEEP,
+  BARS, DEFAULT_FATIGUE_CAP,
+  WAVE_OFF_RE, isWaveOff,
+  rubric, emission, statePath, isOff, readInput, isObject,
   readConfig, defaults, appendLedger, readLedger, askedCount,
 };

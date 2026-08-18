@@ -62,6 +62,60 @@ describe("observer", () => {
     assert.ok(row.ts);
   });
 
+  test("the offered option labels are recorded with their question", () => {
+    // Without them an answer cannot be told from an answer nobody offered,
+    // which is the one thing the review has no other way to see.
+    const root = tmpRoot();
+    const row = runObserver(root, ASK).ledger[0];
+    assert.deepStrictEqual(row.questions[0].options, ["Speed (Recommended)", "Readability"]);
+  });
+
+  test("option labels are truncated and junk entries dropped", () => {
+    const root = tmpRoot();
+    const messy = {
+      ...ASK,
+      tool_input: {
+        questions: [{
+          header: "H", question: "Q",
+          options: [{ label: "x".repeat(200) }, { label: "  " }, { notALabel: 1 }, "a string"],
+        }],
+      },
+    };
+    const row = runObserver(root, messy).ledger[0];
+    assert.strictEqual(row.questions[0].options.length, 1);
+    assert.strictEqual(row.questions[0].options[0].length, lib.OPTION_KEEP);
+  });
+
+  test("a question with no options records an empty list, never undefined", () => {
+    const root = tmpRoot();
+    const bare = { ...ASK, tool_input: { questions: [{ header: "H", question: "Q" }] } };
+    assert.deepStrictEqual(runObserver(root, bare).ledger[0].questions[0].options, []);
+  });
+
+  test("the round's own questions never land in the answers", () => {
+    // The host echoes each question and header back inside the response. Those
+    // would fill every answer slot before a real pick arrived, which is what
+    // the review readout and the remembered-answer match both read.
+    const root = tmpRoot();
+    const echoed = {
+      ...ASK,
+      tool_input: {
+        questions: [
+          { header: "Meaning", question: "Which did you mean?", options: [{ label: "Speed (Recommended)" }] },
+          { header: "Scope", question: "How far should this go?", options: [{ label: "This call site" }] },
+        ],
+      },
+      tool_response: {
+        answers: [
+          { question: "Which did you mean?", header: "Meaning", answer: "Speed (Recommended)" },
+          { question: "How far should this go?", header: "Scope", answer: "This call site" },
+        ],
+      },
+    };
+    const row = runObserver(root, echoed).ledger[0];
+    assert.deepStrictEqual(row.answers, ["Speed (Recommended)", "This call site"]);
+  });
+
   test("question text is truncated to the keep limit", () => {
     const root = tmpRoot();
     const long = { ...ASK, tool_input: { questions: [{ question: "x".repeat(500), header: "H" }] } };

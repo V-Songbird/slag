@@ -164,6 +164,59 @@ describe("fail-open config", () => {
     assert.strictEqual(r.ledger[0].bar, "standard");
   });
 
+  test("a config that is not an object warns and is ignored whole", () => {
+    const root = tmpRoot();
+    fs.mkdirSync(path.join(root, ".scribe"));
+    fs.writeFileSync(path.join(root, ".scribe", "config.json"), JSON.stringify(["bar", "conservative"]));
+    const r = runGate(root, AMBIGUOUS);
+    assert.match(r.stderr, /not a JSON object/);
+    assert.strictEqual(r.ledger[0].bar, "standard");
+    assert.ok(r.stdout.length > 0);
+  });
+
+  test("an unknown key warns but the rest of the config still applies", () => {
+    const root = tmpRoot();
+    fs.mkdirSync(path.join(root, ".scribe"));
+    fs.writeFileSync(path.join(root, ".scribe", "config.json"),
+      JSON.stringify({ schemaVersion: 1, bar: "conservative", nope: true }));
+    const r = runGate(root, AMBIGUOUS);
+    assert.match(r.stderr, /ignoring unknown key `nope`/);
+    assert.strictEqual(r.ledger[0].bar, "conservative", "the known keys still take effect");
+  });
+
+  test("a non-boolean off is ignored rather than treated as truthy", () => {
+    const root = tmpRoot();
+    fs.mkdirSync(path.join(root, ".scribe"));
+    fs.writeFileSync(path.join(root, ".scribe", "config.json"),
+      JSON.stringify({ schemaVersion: 1, off: "yes" }));
+    const r = runGate(root, AMBIGUOUS);
+    assert.match(r.stderr, /`off` must be true or false/);
+    assert.ok(r.stdout.length > 0, "a malformed off must never silence the gate");
+  });
+
+  test("a non-integer fatigueCap is ignored rather than coerced", () => {
+    const root = tmpRoot();
+    fs.mkdirSync(path.join(root, ".scribe"));
+    fs.writeFileSync(path.join(root, ".scribe", "config.json"),
+      JSON.stringify({ schemaVersion: 1, fatigueCap: 2.5 }));
+    for (let i = 0; i < 3; i++) {
+      lib.appendLedger(root, { session: "s1", kind: "asked", source: "mechanical", count: 1, questions: [] });
+    }
+    const r = runGate(root, AMBIGUOUS);
+    assert.match(r.stderr, /`fatigueCap` must be a whole number/);
+    assert.ok(r.stdout.length > 0, "a malformed cap must not start capping");
+  });
+
+  test("a BOM-prefixed config still parses", () => {
+    const root = tmpRoot();
+    fs.mkdirSync(path.join(root, ".scribe"));
+    fs.writeFileSync(path.join(root, ".scribe", "config.json"),
+      "﻿" + JSON.stringify({ schemaVersion: 1, bar: "conservative" }), "utf-8");
+    const r = runGate(root, AMBIGUOUS);
+    assert.strictEqual(r.stderr, "", "a byte-order mark is not a config error");
+    assert.strictEqual(r.ledger[0].bar, "conservative");
+  });
+
   test("a future schemaVersion is refused into defaults, not half-read", () => {
     const root = tmpRoot();
     fs.mkdirSync(path.join(root, ".scribe"));
@@ -192,6 +245,38 @@ describe("wave-off and fatigue", () => {
     assert.strictEqual(last.kind, "waved-off");
     assert.strictEqual(last.via, "prompt");
     assert.strictEqual(last.source, "mechanical");
+  });
+
+  test("every shipped phrase is recognised, in both apostrophe forms", () => {
+    for (const p of [
+      "just do it", "ok just do it", "just do it already", "just do it: rename the module",
+      "stop asking", "no questions", "no more questions", "don't ask", "don’t ask",
+      "whatever you think", "you decide", "surprise me", "Fine, whatever you think.",
+    ]) {
+      assert.ok(lib.isWaveOff(p), "should wave off: " + p);
+    }
+  });
+
+  test("a phrase buried in a real request is work, not a wave-off", () => {
+    // A false wave-off costs the prompt its rubric AND feeds the review's
+    // streak rule evidence the user never gave — so these must all be work.
+    for (const p of [
+      "add a Surprise me button to the UI",
+      "the spec says you decide the retry count, implement it",
+      "document why we don't ask for confirmation here",
+      "stop asking me for the token every time, cache it in the session",
+      "wire up the whatever you think handler",
+    ]) {
+      assert.ok(!lib.isWaveOff(p), "should be work: " + p);
+    }
+  });
+
+  test("a buried phrase does not stand the gate down", () => {
+    const root = tmpRoot();
+    seedAsks(root, "s1", 1);
+    const r = runGate(root, { session_id: "s1", prompt: "add a Surprise me button to the UI" });
+    assert.ok(r.stdout.length > 0, "the rubric must still ride");
+    assert.strictEqual(r.ledger[r.ledger.length - 1].kind, "judged");
   });
 
   test("a wave-off phrase with no prior ask is judged normally", () => {

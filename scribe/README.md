@@ -9,7 +9,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
 
-> **TL;DR** — You say "improve the function." Claude picks one of five possible meanings and sprints. scribe makes it stop and ask first — one short round of options, its best guess marked — until the task is defined well enough to cut once.
+> **TL;DR** — You say "improve the function." Claude picks one of five possible meanings and sprints. scribe makes it stop and ask first — short rounds of options with its best guess marked, and it keeps asking until the task is defined well enough to cut once.
 
 ---
 
@@ -28,6 +28,7 @@ scribe is the measuring. When your request could honestly go several ways, Claud
 - **Recommended answers keep it fast.** Every question leads with scribe's best guess — agreeing is one click.
 - **"Just do it" always works.** Say so and scribe stands down, that turn, no lecture.
 - **It keeps receipts.** Every judged prompt, every question round, and every wave-off lands in a local log — so "does it ask too much?" gets answered from your own evidence, not vibes.
+- **It grades its own questions.** If you keep ignoring the options and typing your own answer, scribe notices and says the options were the problem.
 
 ## How it works
 
@@ -58,22 +59,28 @@ Works immediately — nothing to configure, nothing to initialize.
 | --- | --- |
 | See what scribe has asked, passed, been waved off on, and remembers | `/scribe:review` |
 | Change how eagerly it asks | `/scribe:review` — it suggests the change and applies it if you agree |
+| Find out whether its questions were any good | `/scribe:review` — it flags when the options keep missing |
+| Make it forget something it remembered | `/scribe:review`, then "forget that" |
 | Run a clarify round on demand | `/scribe:clarify` |
 
 ## Benchmarks
 
-Does it actually work, or is this vibes? Same tasks, live sessions, with and without scribe:
+Does it actually work, or is this vibes? Same tasks, same model, with and without scribe:
 
 | What we measured | With scribe | Without |
 | --- | --- | --- |
 | Asked before acting on a genuinely forkable request | **7 of 8** | 0 of 8 |
 | Precise requests interrupted | 0 of 6 | 0 of 6 |
-| Unattended runs stalled by a question | 0 of 12 | — |
+| Runs stalled waiting for an answer | 0 of 12 | — |
 
 The middle row is the contract: clarity costs you nothing. The last row is the promise that scribe knows when nobody's there to answer and stays out of the way.
 
 > [!NOTE]
-> Small runs, real sessions, honest caveat: the ask numbers come from streaming test sessions against seeded fixture tasks, and numbers like these wobble between runs. The full record stays local to this repo's research notes.
+> Small runs on a fixed set of tasks, not a benchmark suite. Numbers like these move a few percent between runs.
+
+## Under the hood
+
+Two small hooks and a local ledger: one hook judges your prompt on the way in, the other watches how the questions landed. It's all in the plugin's files.
 
 ## Settings
 
@@ -89,13 +96,9 @@ Prefer a switch? `SCRIBE_OFF=1` in the environment or an empty `.scribe/off` fil
 
 ## Good to know
 
-- scribe influences; it never blocks. The judgment call is Claude's, which is exactly why every decision is logged to `.scribe/ledger.jsonl` where you can audit it.
+- scribe influences; it never blocks. The judgment call is Claude's, which is exactly why every judged prompt, every question round, and every wave-off is logged to `.scribe/ledger.jsonl` where you can audit it.
 - The nudge that rides your prompts is small, fixed text with a hard size cap, enforced by a test — scribe never assembles it from your repository's content.
-- The log stays in your project and never leaves your machine. It keeps the first 200 characters of judged prompts so you can audit the asking bar later — add `.scribe/` to your `.gitignore` if you don't want that history committed.
-
-## Under the hood
-
-Two small hooks and a local ledger: one hook judges your prompt on the way in, the other watches how the questions landed. It's all in the plugin's files.
+- The log stays in your project and never leaves your machine. It keeps the first 200 characters of each judged prompt, the questions scribe asked with the options it offered, and the answers you picked or typed — add `.scribe/` to your `.gitignore` if you don't want that history committed.
 
 ## License
 

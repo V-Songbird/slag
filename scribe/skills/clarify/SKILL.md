@@ -24,18 +24,21 @@ permitted case: you are blocked on input only the user can provide.
 
 ## The rounds
 
-0. **Check the project's remembered answers.** If `.scribe/memory.jsonl`
-   exists, read it (latest line per term wins; a `forgotten` line removes the
-   term). A remembered term is a stated assumption, never a question: fold it
-   into the close line ("Assuming improve = speed here, as remembered") and
+0. **Check the project's remembered answers.** Run
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/cli.js" memory --json` from the project
+   root — it returns the folded map, so never read `.scribe/memory.jsonl`
+   yourself. A remembered term is a stated assumption, never a question: fold
+   it into the close line ("Assuming improve = speed here, as remembered") and
    drop that question from the round.
-1. **Blind-spot pass first.** Before asking anything, name to yourself what
-   the request never mentions but the work will hit: neighboring code, tests,
-   callers, docs, error paths. A finding becomes a question only if it changes
-   what you would build.
+1. **Blind-spot pass first.** Name to yourself the one reading you would act on
+   if nobody were there to ask, then look for what does not fit it: neighboring
+   code, tests, callers, docs, error paths — and at each, whether the thing is
+   wrong, missing, unexplained, or fits so perfectly it deserves a second look.
+   A finding becomes a question only if it changes what you would build.
 2. **Ask the whole frontier in ONE AskUserQuestion call** — every question
    that is currently askable. The tool holds 4, so a wider frontier spills
-   into the next round. Do not drip questions one at a time.
+   into the next round; lead with the questions whose answers unlock others,
+   then by materiality. Do not drip questions one at a time.
 3. **Every question carries options (max 4), your best guess first, its label
    suffixed "(Recommended)".** Ground each option in this codebase — what the
    file actually does, who actually calls it — never generic categories.

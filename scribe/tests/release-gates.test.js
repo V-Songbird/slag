@@ -76,7 +76,7 @@ describe("gate: the standing tax", () => {
   });
 
   test("the rubric is static plugin text — no repo content can reach it", () => {
-    // The whole injection posture (unknowns finding 11) rests on rubric() being
+    // The whole injection posture rests on rubric() being
     // a pure function of the shipped constants: same input, same bytes, no
     // reads. Byte-compare two calls and the source's import list.
     for (const bar of lib.BARS) assert.strictEqual(lib.rubric(bar), lib.rubric(bar));

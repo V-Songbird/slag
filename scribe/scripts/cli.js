@@ -20,17 +20,45 @@ const STREAK_WAVES = 2;
 // How many judged-and-never-asked prompts it takes before "the gate never
 // asks" is worth a line. Below this, silence is just a quiet week.
 const QUIET_JUDGED = 20;
+// Ask quality. When a round settles on an answer none of the options offered,
+// the options missed the real reading — the cleanest signal there is that the
+// questions were badly shaped rather than too frequent. No data exists to
+// derive these from yet, so they are deliberately conservative and, like the
+// others, quoted verbatim in the suggestion they produce.
+const OFFMENU_WINDOW = 10;
+const OFFMENU_ROUNDS = 3;
+
+// An answer is on the menu when some offered label matches it. Either side may
+// have been truncated on the way into the ledger, so a prefix match on the
+// longer of the two counts.
+function onMenu(answer, labels) {
+  return labels.some((label) => {
+    const a = answer.toLowerCase();
+    const l = label.toLowerCase();
+    return a === l || a.startsWith(l) || l.startsWith(a);
+  });
+}
+
+// A round settled off-menu when at least one recorded answer matches nothing
+// it offered. Rounds recorded before option labels were logged carry none, so
+// they are not evidence either way and never count.
+function settledOffMenu(row) {
+  const labels = (row.questions || []).flatMap((q) => (Array.isArray(q.options) ? q.options : []));
+  if (!labels.length) return null;
+  const answers = Array.isArray(row.answers) ? row.answers : [];
+  if (!answers.length) return null;
+  return answers.some((a) => !onMenu(a, labels));
+}
 
 function analyze(rows, cfg) {
   const t = { judged: 0, capped: 0, rounds: 0, wavedOff: 0, passed: 0 };
-  const sessions = new Map();
+  const sessions = new Set();
   const recentRounds = [];
   const recentEvents = [];
   const pending = new Map(); // session -> its latest judged row is still unanswered
 
   for (const row of rows) {
-    const s = sessions.get(row.session) || { judged: 0, rounds: 0, wavedOff: 0 };
-    sessions.set(row.session, s);
+    sessions.add(row.session);
     if (row.kind === "judged") {
       if (row.capped) {
         t.capped++;
@@ -39,16 +67,13 @@ function analyze(rows, cfg) {
       if (pending.get(row.session)) t.passed++;
       pending.set(row.session, true);
       t.judged++;
-      s.judged++;
     } else if (row.kind === "asked") {
       pending.set(row.session, false);
       t.rounds++;
-      s.rounds++;
       recentRounds.push(row);
       recentEvents.push("asked");
     } else if (row.kind === "waved-off") {
       t.wavedOff++;
-      s.wavedOff++;
       recentEvents.push("waved-off");
     }
   }
@@ -67,18 +92,43 @@ function analyze(rows, cfg) {
         : 'consider "off": true in .scribe/config.json, or touch .scribe/off.'),
     );
   }
-  if (t.rounds === 0 && t.judged >= QUIET_JUDGED && cfg.bar === "conservative") {
+  // The one under-ask rule. It fires on either bar: a silent gate means the
+  // prompts are precise or the nudge is not landing, and which of those it is
+  // depends on the bar, not on whether the question is worth asking.
+  if (t.rounds === 0 && t.judged >= QUIET_JUDGED) {
     suggestions.push(
       "quiet gate: " + t.judged + " prompts judged, zero questions asked (rule: " +
-      QUIET_JUDGED + "+ judged, none asked, conservative bar). Either your prompts " +
-      'are precise — good — or the bar is high; "bar": "standard" asks more.',
+      QUIET_JUDGED + "+ judged, none asked). Either your prompts are precise — good — or " +
+      (cfg.bar === "conservative"
+        ? 'the bar is high; "bar": "standard" asks whenever readings genuinely fork.'
+        : "the nudge is not landing; the bar is already the eager one, so check scribe is " +
+          "installed here and not switched off."),
     );
   }
+  // The cap that produced a capped row is not on the row, so the sentence must
+  // not name a number: config can have changed since, and at the 1.1.0 default
+  // of 0 it would name a cap that is not set.
   if (t.capped > 0) {
     suggestions.push(
-      "fatigue cap engaged " + t.capped + " time(s): scribe stopped asking after " +
-      cfg.fatigueCap + " rounds in a session. Raise \"fatigueCap\" only if the " +
-      "rounds were genuinely earning their answers.",
+      "fatigue cap engaged " + t.capped + " time(s): scribe stopped asking for the rest of " +
+      "those sessions once the configured round cap was reached (rule: a cap is set and a " +
+      "session reached it). " +
+      (cfg.fatigueCap > 0
+        ? 'Raise "fatigueCap" only if those rounds were genuinely earning their answers.'
+        : "The cap is off now, so those are historical rows — nothing to change."),
+    );
+  }
+  // Ask quality, not ask frequency: the remedy is better options, never a
+  // quieter bar.
+  const judgedRounds = recentRounds.map(settledOffMenu).filter((v) => v !== null).slice(-OFFMENU_WINDOW);
+  const offMenu = judgedRounds.filter(Boolean).length;
+  if (offMenu >= OFFMENU_ROUNDS) {
+    suggestions.push(
+      "off-menu answers: " + offMenu + " of your last " + judgedRounds.length +
+      " rounds settled on an answer none of the options offered (rule: " +
+      OFFMENU_ROUNDS + "+ in the last " + OFFMENU_WINDOW + " rounds carrying options). " +
+      "That is the options missing the real reading, not scribe asking too often — " +
+      "the fix is the option-crafting rules in the clarify method, not the bar.",
     );
   }
 
@@ -199,7 +249,7 @@ function memory(root, json) {
   for (const [term, v] of m) {
     out.push("  " + term + " = " + v.meaning + "   (since " + (v.ts || "").slice(0, 10) + ")");
   }
-  out.push("Forget one with: node <scribe>/scripts/cli.js forget <term>");
+  out.push('Forget one with: node "${CLAUDE_PLUGIN_ROOT}/scripts/cli.js" forget <term>');
   process.stdout.write(out.join("\n") + "\n");
 }
 
@@ -250,4 +300,8 @@ function main(argv) {
 
 if (require.main === module) main(process.argv.slice(2));
 
-module.exports = { analyze, readMemory, STREAK_WINDOW, STREAK_WAVES, QUIET_JUDGED, MEMORY_FILE };
+// The three thresholds are exported because the suggestion text quotes them
+// verbatim, and the tests pin the quote to the constant.
+module.exports = {
+  analyze, STREAK_WINDOW, STREAK_WAVES, QUIET_JUDGED, OFFMENU_WINDOW, OFFMENU_ROUNDS,
+};

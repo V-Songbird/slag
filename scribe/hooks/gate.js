@@ -5,7 +5,7 @@
 //
 // Judges nothing itself: it decides WHETHER the judgment rubric rides this
 // prompt, then emits the static, byte-capped rubric as additionalContext. The
-// ambiguity call is the model's (mechanism ADR, decision 1); everything this
+// ambiguity call is the model's; everything this
 // file does is mechanical and stands in the way of exactly one thing — paying
 // the rubric's tax on a prompt that should never be judged.
 //
@@ -41,7 +41,7 @@ function main() {
   const session = typeof payload.session_id === "string" ? payload.session_id : null;
   const rounds = lib.askedCount(root, session);
 
-  if (lib.WAVE_OFF_RE.test(prompt) && rounds > 0) {
+  if (lib.isWaveOff(prompt) && rounds > 0) {
     lib.appendLedger(root, { session, kind: "waved-off", source: "mechanical", via: "prompt" });
     return;
   }

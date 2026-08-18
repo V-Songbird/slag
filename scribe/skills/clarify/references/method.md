@@ -33,13 +33,36 @@ the row answerable in ten seconds.
 
 ## The blind-spot pass
 
-Before the round, spend a moment on what the request never mentions:
+**Start by naming the reading you would act on if nobody were there to ask.**
+One sentence, to yourself, before you look at anything. You cannot see where a
+request and the code diverge until you have said what you expect to find — and
+saying it early makes the rule below checkable at the start of the round
+instead of at option-crafting time: if you cannot state the reading, the
+question is not ready.
+
+Then sweep two axes. First the places the work will touch:
 
 - neighboring code that shares the shape being changed;
 - tests that encode the current behavior as intended;
 - callers whose expectations the change could break;
 - docs, comments, or examples that would go stale;
 - error paths and empty inputs.
+
+Then, at each place, which kind of mismatch you are looking at:
+
+1. **Present but wrong** — it is there, and it behaves differently from what
+   the request assumes.
+2. **Absent but expected** — the thing that should be there is not. Conspicuous
+   absence is the kind most often missed, and it is exactly the shape of what a
+   request never mentions but the work will hit.
+3. **Present but unexplained** — it is there, and it sits outside the request's
+   model entirely. Often the most important of the four.
+4. **Too consistent** — everything fits, with no remainder. A request that
+   reads as flawlessly clear is where a second look pays best, because that is
+   precisely how a wrong "precise" verdict feels from the inside.
+
+A place tells you where to point the flashlight; a kind tells you what you are
+looking for once you get there.
 
 Most findings resolve by reading — then they are facts, not questions. A
 finding earns a question slot only when it changes the cut and the code
@@ -66,10 +89,16 @@ wider than that spills into the next round. Holding a question back for any
 other reason is dripping; inventing follow-ups to feel thorough is padding.
 Both erode consent.
 
+Which four go first is a real decision, and materiality alone is the wrong
+tiebreak: a small question whose answer unlocks three others is worth more than
+a large leaf. **Lead with the questions that unlock other questions**, and break
+the remaining ties by materiality. The worked dialogue does exactly this —
+"speed" is what makes the `normalize()` fork exist at all.
+
 A follow-up is legitimate on either of two grounds:
 
 1. **Spillover** — the question was on the frontier already and did not fit in
-   the last call. Ask it plainly, highest materiality first.
+   the last call. Ask it plainly, unlocking questions first, then materiality.
 2. **Unlocked** — the fork did not exist until the user picked a branch. State
    what unlocked it in the question text ("Speed means the hot path matters —
    it is inside `normalize()`, which has three other callers…").
@@ -87,6 +116,22 @@ When the frontier is empty or the user waves off:
   request the user would have written with ten more minutes.
 - Then execute without further ceremony. The one-liner is the veto window;
   do not wait for approval.
+
+## The round failed when
+
+Ask quality is not ask frequency, and a bad round has signatures of its own:
+
+- the user reached for **Other** and typed an answer — the options missed the
+  real reading. This one is counted for you: `/scribe:review` reports it when
+  it keeps happening, and its remedy points back at this page;
+- an option was a generic category ("performance", "cleanup") instead of
+  something the code makes true;
+- you asked what the prompt, the repository, or the configuration already
+  answered;
+- the answer changed nothing about what you then built.
+
+Every one of them is fixed by better questions. None of them is fixed by
+asking less often.
 
 ## Memory
 

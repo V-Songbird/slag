@@ -4,7 +4,7 @@
 // scribe — PostToolUse observer on AskUserQuestion.
 //
 // Asks are tool calls a hook can see, which makes the "asked" half of the
-// ledger hard evidence rather than a self-report (unknowns pass, finding 6).
+// ledger hard evidence rather than a self-report.
 // One line per question round: the headers and truncated question texts —
 // enough to evaluate ask quality at review time, never the full transcript.
 //
@@ -22,22 +22,44 @@ function main() {
 
   const session = typeof payload.session_id === "string" ? payload.session_id : null;
   const input = lib.isObject(payload.tool_input) ? payload.tool_input : {};
+  // The offered option labels ride along with the question. Without them an
+  // answer can never be matched against what was on the menu, and the one
+  // thing the method calls load-bearing — whether the options were any good —
+  // stays invisible to the review.
   const questions = Array.isArray(input.questions)
     ? input.questions.filter(lib.isObject).map((q) => ({
         header: typeof q.header === "string" ? q.header : null,
         question: typeof q.question === "string" ? q.question.slice(0, lib.QUESTION_KEEP) : null,
+        options: Array.isArray(q.options)
+          ? q.options
+              .filter(lib.isObject)
+              .map((o) => (typeof o.label === "string" ? o.label.trim().slice(0, lib.OPTION_KEEP) : ""))
+              .filter(Boolean)
+          : [],
       }))
     : [];
 
-  // The response's shape varies by host version; harvest the short strings
-  // wherever they sit — those are the picked labels and typed answers — so the
-  // review can show what a round actually settled (additive field, schema v1).
+  // The response's shape varies by host version, so the harvest walks it for
+  // short strings — those are the picked labels and typed answers. But the
+  // response also echoes the round's own questions and headers, and those
+  // would fill the eight slots before a single answer landed, leaving the
+  // review (and the remembered-answer match, which reads this field) with a
+  // record of what scribe asked instead of what the user chose. So anything
+  // the round already said is skipped on the way in.
+  const asked = new Set();
+  if (Array.isArray(input.questions)) {
+    for (const q of input.questions.filter(lib.isObject)) {
+      for (const s of [q.header, q.question]) {
+        if (typeof s === "string" && s.trim()) asked.add(s.trim());
+      }
+    }
+  }
   const answers = [];
   (function harvest(v, depth) {
-    if (answers.length >= 8 || depth > 4) return;
+    if (answers.length >= lib.ANSWERS_KEEP || depth > 4) return;
     if (typeof v === "string") {
       const s = v.trim();
-      if (s && s.length <= 80) answers.push(s);
+      if (s && s.length <= lib.ANSWER_MAX && !asked.has(s)) answers.push(s);
     } else if (Array.isArray(v)) {
       for (const x of v) harvest(x, depth + 1);
     } else if (lib.isObject(v)) {
