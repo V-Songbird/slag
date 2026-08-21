@@ -4,6 +4,16 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.3.0] — 2026-08-21
+
+### Added
+
+- Point jig at an empty folder and say Gradle, Maven or .NET, and it now writes the starter project file and carries straight on — the same as it already did for Node, Python and Rust. It used to stop and ask you to run `gradle init` or `dotnet new` first. The starter is the smallest file that makes the folder a project, with a placeholder name and a comment saying to rename it; picking an application template is still yours.
+- A Gradle run and a Maven run get the right file for the build system you named — `settings.gradle.kts` for one, `pom.xml` for the other.
+- Go still asks you to run `go mod init` yourself. A module path is a name only you can choose.
+- Two .NET tools sharing `Directory.Build.props`, and two Gradle tools sharing `build.gradle.kts`, now come out as one file with both tools' settings in it. jig used to write none of it and hand you two snippets to paste. For Gradle that advice could not be followed: a build script may hold only one `plugins { }` block, so pasting both gave you a script that would not compile.
+- Any setting two tools disagree on in those files is named, the same way it already was for `pyproject.toml` — the first tool's value is what gets written, and you are told whose was dropped.
+
 ## [2.2.0] — 2026-08-21
 
 ### Added

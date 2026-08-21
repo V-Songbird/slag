@@ -160,11 +160,17 @@ user — that question is not jig's to ask, and asking it is a defect in the run
 no project file on disk, and each row is one of two shapes:
 
 - `canWrite: true` — jig writes the starter project file (`package.json`,
-  `pyproject.toml`, `Cargo.toml`) before anything installs into it. Nothing to
-  ask; it is a change on the plan like any other, approved by name.
+  `pyproject.toml`, `Cargo.toml`, `settings.gradle.kts`, `pom.xml`,
+  `App.csproj`) before anything installs into it. Nothing to ask; it is a
+  change on the plan like any other, approved by name. Which file a jvm run
+  gets depends on `--package-manager`, so ask that before you read the row.
 - `canWrite: false` — only the owner can create this one, and `hint` is the
-  exact sentence to give them (`go mod init <module path>`, `gradle init`,
-  `dotnet new console`). Print the hint, let them run it, then re-run jig.
+  exact sentence to give them (`go mod init <module path>`). Print the hint,
+  let them run it, then re-run jig.
+
+A starter carries a placeholder name and a comment saying to rename it. It is
+not an application template and must never be described as one — say what it
+is, and leave choosing a template to the owner.
 
 On a truly empty folder nothing detects, so **the interview supplies what the
 scan could not** and its answers ride two flags on every later command:
@@ -371,8 +377,8 @@ tools want to share. Neither is an error and neither may be swallowed:
 
 - `configNotes` — configuration jig will **not** write, because the file
   belongs to the project rather than to one tool: several tools share it and it
-  has a real grammar (`go.mod`, `build.gradle.kts`, `Directory.Build.props`),
-  or the project already owns it. Each note carries `snippet` and `wiring`.
+  has a grammar jig does not compose (`go.mod`), or the project already owns it.
+  Each note carries `snippet` and `wiring`.
   Print them. A tool whose config lands in a note is still installed — the
   install is real and only the config is the owner's to place.
 - `configConflicts` — a key two tools set differently in a file jig **did**

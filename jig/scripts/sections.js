@@ -27,14 +27,22 @@
 //      merge that silently picked a winner would be the same bug in a new
 //      place.
 //
+// Three families of file follow those rules, not one. A section file is the
+// original. An MSBuild property file (`Directory.Build.props`) is the same
+// shape wearing angle brackets: a `<PropertyGroup>` is a block and each child
+// element is a key. A Gradle build script (`build.gradle.kts`) is the same
+// shape again: `plugins { … }` is a block and each statement inside it is an
+// entry, with assignments keyed and everything else deduplicated by its text.
+// Each family gets a reader and a renderer; `merge` itself is one function and
+// rule 3 is enforced in one place for all three.
+//
+// Composition never touches a file the project already owns — the caller hands
+// those back as snippets before it gets here — so every body merged below is
+// one jig shipped, and release gate G5 composes every shipped combination.
+//
 // Anything this cannot merge is not merged. `mergeable()` is the whole list of
-// formats, and a caller holding a `go.mod` or a `build.gradle.kts` is expected
-// to report the snippet to the owner rather than compose one.
-
-// Section files jig composes. Everything else — XML project files, Kotlin build
-// scripts, `go.mod` — has a real grammar and would need a real parser, and a
-// half-parser writing somebody's build file is worse than no feature.
-const MERGEABLE = new Set([".toml", ".editorconfig", ".ini", ".cfg"]);
+// formats, and a caller holding a `go.mod` is expected to report the snippet to
+// the owner rather than compose one.
 
 function expected(message) {
   const err = new Error(message);
@@ -42,33 +50,13 @@ function expected(message) {
   return err;
 }
 
-// The basename is what decides, not the extension alone: `.editorconfig` has no
-// extension at all, and `pyproject.toml` is decided by `.toml`.
-function mergeable(configPath) {
-  if (typeof configPath !== "string" || configPath === "") return false;
-  const base = configPath.replace(/\\/g, "/").split("/").pop();
-  if (MERGEABLE.has(base)) return true;
-  const dot = base.lastIndexOf(".");
-  return dot > 0 && MERGEABLE.has(base.slice(dot).toLowerCase());
-}
-
-// A header at depth zero only. `select = [` opens a value that runs over
-// several lines and whose closing `]` would otherwise read as a header, so the
-// depth counter is what separates a section from an array element.
-function isHeader(line) {
-  const t = line.trim();
-  return t.startsWith("[") && t.endsWith("]");
-}
-
-function keyOf(line) {
-  const m = line.match(/^\s*((?:"[^"]*"|'[^']*'|[A-Za-z0-9_.\-*]+)(?:\s*\.\s*(?:"[^"]*"|'[^']*'|[A-Za-z0-9_.\-*]+))*)\s*=/);
-  return m ? m[1].trim() : null;
-}
+// ---------------------------------------------------------------------------
+// Shared machinery
 
 // Brackets and braces opened by a value and not yet closed. Quoted text is
 // skipped, so a `"]"` inside a string never closes an array — that is the one
 // place a line-based reader would otherwise get a real file wrong.
-function depthDelta(line) {
+function depthDelta(line, comment) {
   let delta = 0;
   let quote = null;
   for (let i = 0; i < line.length; i++) {
@@ -79,50 +67,37 @@ function depthDelta(line) {
       continue;
     }
     if (ch === '"' || ch === "'") { quote = ch; continue; }
-    if (ch === "#") break;
+    if (comment === "//" ? ch === "/" && line[i + 1] === "/" : ch === "#") break;
     if (ch === "[" || ch === "{") delta++;
     else if (ch === "]" || ch === "}") delta--;
   }
   return delta;
 }
 
-// One entry per logical line: a key and every continuation line its value runs
-// over, kept together so a multi-line array moves as one unit.
-function readEntries(text) {
-  const lines = String(text || "").split(/\r?\n/);
-  const preamble = [];
-  const blocks = [];
-  let current = null;
-  let depth = 0;
-  let pending = null;
+function keyOf(line) {
+  const m = line.match(/^\s*((?:"[^"]*"|'[^']*'|[A-Za-z0-9_.\-*]+)(?:\s*\.\s*(?:"[^"]*"|'[^']*'|[A-Za-z0-9_.\-*]+))*)\s*=/);
+  return m ? m[1].trim() : null;
+}
 
-  const sink = () => (current ? current.entries : preamble);
+function indentOf(line) {
+  return line.match(/^\s*/)[0];
+}
 
-  for (const line of lines) {
-    if (pending) {
-      pending.lines.push(line);
-      depth += depthDelta(line);
-      if (depth <= 0) { depth = 0; pending = null; }
-      continue;
-    }
-    if (depth === 0 && isHeader(line)) {
-      current = { header: line.trim(), entries: [] };
-      blocks.push(current);
-      continue;
-    }
-    const entry = { key: keyOf(line), lines: [line] };
-    sink().push(entry);
-    const delta = depthDelta(line);
-    if (entry.key !== null && delta > 0) { depth = delta; pending = entry; }
-  }
-  return { preamble, blocks };
+// Find-or-create, so two blocks with one header inside a single body land in
+// one block exactly as they do across two bodies.
+function blockIn(blocks, block) {
+  const held = blocks.find((b) => b.header === block.header);
+  if (held) return held;
+  blocks.push(block);
+  return block;
 }
 
 function addEntries(target, incoming, where, source, conflicts) {
   for (const entry of incoming) {
     if (entry.key === null) {
-      // Comments and blank lines. A repeat of something already here is noise
-      // the reader did not ask for, so only new prose is carried over.
+      // Comments, blank lines, and statements with no name to key them by. A
+      // repeat of something already here is noise the reader did not ask for,
+      // so only new text is carried over.
       const text = entry.lines.join("\n").trim();
       if (text === "") continue;
       if (target.some((e) => e.key === null && e.lines.join("\n").trim() === text)) continue;
@@ -144,7 +119,49 @@ function addEntries(target, incoming, where, source, conflicts) {
   }
 }
 
-function render(preamble, blocks) {
+// ---------------------------------------------------------------------------
+// Section files — `pyproject.toml`, `.editorconfig`, `.ini`, `.cfg`
+
+// A header at depth zero only. `select = [` opens a value that runs over
+// several lines and whose closing `]` would otherwise read as a header, so the
+// depth counter is what separates a section from an array element.
+function isHeader(line) {
+  const t = line.trim();
+  return t.startsWith("[") && t.endsWith("]");
+}
+
+// One entry per logical line: a key and every continuation line its value runs
+// over, kept together so a multi-line array moves as one unit.
+function readSections(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  const preamble = [];
+  const blocks = [];
+  let current = null;
+  let depth = 0;
+  let pending = null;
+
+  const sink = () => (current ? current.entries : preamble);
+
+  for (const line of lines) {
+    if (pending) {
+      pending.lines.push(line);
+      depth += depthDelta(line, "#");
+      if (depth <= 0) { depth = 0; pending = null; }
+      continue;
+    }
+    if (depth === 0 && isHeader(line)) {
+      current = blockIn(blocks, { header: line.trim(), entries: [] });
+      continue;
+    }
+    const entry = { key: keyOf(line), lines: [line] };
+    sink().push(entry);
+    const delta = depthDelta(line, "#");
+    if (entry.key !== null && delta > 0) { depth = delta; pending = entry; }
+  }
+  return { preamble, blocks };
+}
+
+function renderSections(preamble, blocks) {
   const out = [];
   for (const entry of preamble) out.push(...entry.lines);
   for (const block of blocks) {
@@ -152,9 +169,181 @@ function render(preamble, blocks) {
     out.push(block.header);
     for (const entry of block.entries) out.push(...entry.lines);
   }
-  while (out.length && out[out.length - 1].trim() === "") out.pop();
-  return out.join("\n") + "\n";
+  return out;
 }
+
+// ---------------------------------------------------------------------------
+// MSBuild property files — `Directory.Build.props`, `.targets`
+
+const XML_OPEN = /^<([A-Za-z_][\w.\-]*)(\s[^>]*?)?>$/;
+const XML_ELEMENT = /^<([A-Za-z_][\w.\-]*)[\s>/]/;
+
+// `<Project>` wraps everything, a `<PropertyGroup>` is a block, and a child of
+// one is a key: `<Nullable>` set twice is exactly the dispute rule 3 exists
+// for. In any other group — an `<ItemGroup>` of package references — an entry
+// is keyed by its whole text, so two different items both survive and two
+// identical ones collapse.
+function readMsbuild(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  const preamble = [];
+  const blocks = [];
+  let root = null;
+  let current = null;
+  let pending = null;
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (pending) {
+      pending.lines.push(line);
+      if (t === "</" + pending.tag + ">" || t.endsWith("</" + pending.tag + ">")) pending = null;
+      continue;
+    }
+    if (t === "") continue;
+    if (!root) {
+      if (/^<Project(\s|>)/.test(t)) { root = line; continue; }
+      preamble.push({ key: null, lines: [line] });
+      continue;
+    }
+    if (current) {
+      if (t === "</" + current.tag + ">") { current = null; continue; }
+      const tag = (t.match(XML_ELEMENT) || [])[1] || null;
+      const entry = {
+        key: current.tag === "PropertyGroup" && tag ? tag : t,
+        tag,
+        lines: [line],
+      };
+      current.entries.push(entry);
+      if (tag && !t.endsWith("/>") && !t.endsWith("</" + tag + ">")) pending = entry;
+      continue;
+    }
+    if (t === "</Project>") continue;
+    const open = t.match(XML_OPEN);
+    if (open && !t.endsWith("/>")) {
+      current = blockIn(blocks, { header: t, tag: open[1], open: line, entries: [] });
+      continue;
+    }
+    preamble.push({ key: null, lines: [line] });
+  }
+  return { preamble, blocks, root };
+}
+
+function renderMsbuild(preamble, blocks, root) {
+  const out = [];
+  for (const entry of preamble) out.push(...entry.lines);
+  out.push(root || "<Project>");
+  for (const block of blocks) {
+    out.push(block.open);
+    for (const entry of block.entries) out.push(...entry.lines);
+    out.push(indentOf(block.open) + "</" + block.tag + ">");
+  }
+  out.push("</Project>");
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Gradle build scripts — `build.gradle.kts`, `build.gradle`
+
+const KOTLIN_INDENT = "    ";
+
+// The reason this one is worth having rather than reporting: Gradle allows a
+// script exactly ONE `plugins { }` block, and it must come first. Handing the
+// owner two snippets to paste hands them a build file that cannot compile, so
+// "jig writes none of it" is not the safe answer here — it is the wrong one.
+//
+// A block is a top-level `header {` … `}`. Inside it, an assignment is keyed
+// and everything else — a plugin id, a dependency, a nested `options.x { }` —
+// is an entry deduplicated by its text, which is what collapses the `java`
+// plugin both samples ask for into one line.
+function readKotlin(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  const preamble = [];
+  const blocks = [];
+  let current = null;
+  let depth = 0;
+  let pending = null;
+
+  for (const line of lines) {
+    const t = line.trim();
+    const delta = depthDelta(line, "//");
+    if (current === null) {
+      if (t === "") continue;
+      if (t.endsWith("{") && delta === 1) {
+        current = blockIn(blocks, { header: t.slice(0, -1).trim(), entries: [] });
+        depth = 1;
+        continue;
+      }
+      // A block written on one line: `repositories { mavenCentral() }`.
+      const one = delta === 0 ? t.match(/^([^{}]+)\{(.+)\}$/) : null;
+      if (one && one[2].trim() !== "") {
+        const block = blockIn(blocks, { header: one[1].trim(), entries: [] });
+        block.entries.push({ key: null, lines: [KOTLIN_INDENT + one[2].trim()] });
+        continue;
+      }
+      preamble.push({ key: keyOf(line), lines: [line] });
+      continue;
+    }
+    if (pending) {
+      pending.lines.push(line);
+      depth += delta;
+      if (depth <= 1) { depth = 1; pending = null; }
+      continue;
+    }
+    if (depth === 1 && t === "}") { current = null; depth = 0; continue; }
+    const entry = { key: keyOf(line), lines: [line] };
+    current.entries.push(entry);
+    if (delta > 0) { depth += delta; pending = entry; }
+  }
+  return { preamble, blocks };
+}
+
+function renderKotlin(preamble, blocks) {
+  const out = [];
+  for (const entry of preamble) out.push(...entry.lines);
+  for (const block of blocks) {
+    if (out.length && out[out.length - 1].trim() !== "") out.push("");
+    out.push(block.header + " {");
+    for (const entry of block.entries) out.push(...entry.lines);
+    out.push("}");
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Which reader a path gets
+
+const MERGEABLE = new Set([".toml", ".editorconfig", ".ini", ".cfg"]);
+
+function isSectionFile(base) {
+  if (MERGEABLE.has(base)) return true;
+  const dot = base.lastIndexOf(".");
+  return dot > 0 && MERGEABLE.has(base.slice(dot).toLowerCase());
+}
+
+// Everything with a real grammar and no fixed shape — `go.mod`, `package.json`
+// — is absent on purpose. A half-parser writing somebody's build file is worse
+// than no feature; the three below earn their place by being declarative, and
+// by every body they see being one jig itself shipped.
+const FORMATS = [
+  { claims: isSectionFile, read: readSections, render: renderSections },
+  { claims: (base) => /\.(props|targets)$/i.test(base), read: readMsbuild, render: renderMsbuild },
+  { claims: (base) => /\.gradle(\.kts)?$/i.test(base), read: readKotlin, render: renderKotlin },
+];
+
+// The basename is what decides, not the extension alone: `.editorconfig` has no
+// extension at all, `pyproject.toml` is decided by `.toml`, and
+// `build.gradle.kts` by an extension two dots deep.
+function formatFor(configPath) {
+  if (typeof configPath !== "string" || configPath === "") return null;
+  const base = configPath.replace(/\\/g, "/").split("/").pop();
+  return FORMATS.find((f) => f.claims(base)) || null;
+}
+
+function mergeable(configPath) {
+  return formatFor(configPath) !== null;
+}
+
+// ---------------------------------------------------------------------------
+// The merge
 
 // `parts` is [{ source, body }] in the order they should win. Returns the one
 // body to write and every key two sources disagreed about. The caller decides
@@ -163,24 +352,29 @@ function merge(parts, configPath) {
   if (!Array.isArray(parts) || parts.length === 0) {
     throw expected("sections.merge needs at least one body to compose, and got " + JSON.stringify(parts));
   }
+  const format = formatFor(configPath) || FORMATS[0];
   const preamble = [];
   const blocks = [];
   const conflicts = [];
+  let root = null;
 
   for (const part of parts) {
     if (!part || typeof part.body !== "string") {
       throw expected("sections.merge was handed a part with no body: " + JSON.stringify(part));
     }
-    const read = readEntries(part.body);
+    const read = format.read(part.body);
+    if (read.root && !root) root = read.root;
     addEntries(preamble, read.preamble, "the file's own preamble", part.source, conflicts);
     for (const block of read.blocks) {
-      let held = blocks.find((b) => b.header === block.header);
-      if (!held) { held = { header: block.header, entries: [] }; blocks.push(held); }
+      const held = blockIn(blocks, { ...block, entries: [] });
       addEntries(held.entries, block.entries, block.header, part.source, conflicts);
     }
   }
   for (const c of conflicts) c.path = configPath || null;
-  return { body: render(preamble, blocks), conflicts };
+
+  const out = format.render(preamble, blocks, root);
+  while (out.length && out[out.length - 1].trim() === "") out.pop();
+  return { body: out.join("\n") + "\n", conflicts };
 }
 
 module.exports = { mergeable, merge, MERGEABLE };

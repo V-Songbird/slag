@@ -11,11 +11,25 @@ others do not.
 
 v4 adds one field: `detect.manifest`, the project file an ecosystem cannot install anything without.
 It carries `path`, `sample` and `hint`, and exactly one of `sample` and `hint` is filled. A `sample`
-is a starter file jig writes when the project does not exist yet — javascript-typescript, python and
-rust have one. A `hint` is the sentence to give the owner instead, for the ecosystems whose project
-file only they can name: go needs a module path, jvm and dotnet are generated from a template. The
-loader refuses an edition that offers both or neither, because "there is no project here and jig has
-nothing to say about it" is not an answer anybody can act on.
+is a starter file jig writes when the project does not exist yet — every edition but go has one. A
+`hint` is the sentence to give the owner instead, and go is the one ecosystem that needs it: a
+`go.mod` names a module path, which is an identity only the owner can choose. The loader refuses an
+edition that offers both or neither, because "there is no project here and jig has nothing to say
+about it" is not an answer anybody can act on.
+
+Each of the three may be one string for the whole edition, or a map keyed by package manager in the
+same shape `install` already uses. One edition needs the map: `jvm` covers Gradle and Maven, and a
+`settings.gradle.kts` is not a project file a Maven build can do anything with, so gradle gets the
+settings file and maven gets a `pom.xml`. The loader checks every manager the edition claims, so a
+manager with no answer is refused at load rather than discovered by an owner in an empty folder.
+
+A starter is the smallest file that makes the directory a project, and it is deliberately not a
+template: it carries a placeholder name and a comment saying to rename it. The jvm and dotnet
+starters build with no source files in them at all — the .NET one is a library rather than an
+executable for exactly that reason — because the first thing jig does after writing one is run the
+checks against it, and a starter that fails its own first check would be a harness that cries wolf.
+Choosing an application template is the owner's job and always was; getting to a green check without
+one is jig's.
 
 v3 adds four fields to v2. `detect.commentSyntax` says how to read a comment in each extension the
 edition claims. `toolchain[].installKind` says what an `install` command actually does, so a
@@ -57,11 +71,20 @@ tool installable under four managers states four ways out. `uninstall` is presen
 
 `configPath` and `configSample` are a tool's configuration and where it belongs — but the path is
 not always a file that tool owns alone. Five python tools name `pyproject.toml`, four dotnet tools
-name `.editorconfig`, two rust tools name `Cargo.toml`, and five go tools name `go.mod` where the
-sample is a picture of a module file rather than a fragment to graft on. The engine composes the
-section files (`scripts/sections.js`) and writes none of the rest, handing the owner each snippet
-instead. An edition author does not have to mark any of this: what matters is that `configSample`
-is the tool's own part of that file and nothing else's.
+name `.editorconfig`, two rust tools name `Cargo.toml`, two dotnet tools name
+`Directory.Build.props`, two jvm tools name `build.gradle.kts`, and five go tools name `go.mod`
+where the sample is a picture of a module file rather than a fragment to graft on. The engine
+composes the first five (`scripts/sections.js`) and writes none of the rest, handing the owner each
+snippet instead. An edition author does not have to mark any of this: what matters is that
+`configSample` is the tool's own part of that file and nothing else's.
+
+Composition covers three declarative families and stops there: section files, MSBuild property
+files, and Gradle build scripts. `go.mod` is deliberately outside it, and so is any format whose
+grammar lets a sample mean different things in different places — a half-parser writing somebody's
+build file is worse than no feature. Two things keep the three honest. Composition is never reached
+for a file the project already owns, so every body merged is one this catalogue shipped; and release
+gate G5 composes every shared path in every edition and fails if a single line of any sample is
+lost or if two tools dispute one key.
 
 `seed` is one file: `path` is where it goes, `sample` is what it contains. It is a violation the
 tool is expected to catch, so it belongs to the tool rather than to a class, and it is written

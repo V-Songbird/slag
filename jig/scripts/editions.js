@@ -254,40 +254,67 @@ function loadEdition(pluginRoot, id) {
 // the tree and lands in whatever project happens to be above this one. So the
 // edition states the file, and states either the starter jig may write or the
 // reason only the owner can create it.
+//
+// `path`, `sample` and `hint` are each either one string for the whole edition
+// or a map keyed by package manager, exactly the way `install` already is on a
+// toolchain row. One edition needs it: `jvm` covers Gradle and Maven, and a
+// `settings.gradle.kts` is not a project file a Maven build can use. Every
+// other edition names one manager's worth of the same thing and stays a string.
+function forManager(value, manager) {
+  if (typeof value === "string") return value !== "" ? value : null;
+  if (!isObject(value)) return null;
+  const held = value[manager];
+  return typeof held === "string" && held !== "" ? held : null;
+}
+
 function validateManifest(record, file) {
   const manifest = record.detect && record.detect.manifest;
   if (!isObject(manifest)) {
     throw expected("the " + record.edition + " edition at " + file + " declares no detect.manifest," +
       " so nothing can say what this ecosystem's project file is. A v" + EDITION_SCHEMA + " edition carries one.");
   }
-  const hasPath = typeof manifest.path === "string" && manifest.path !== "";
-  const hasSample = typeof manifest.sample === "string" && manifest.sample !== "";
-  const hasHint = typeof manifest.hint === "string" && manifest.hint !== "";
-  if (hasSample && !hasPath) {
-    throw expected("the " + record.edition + " edition offers a manifest sample with no path to write it to");
-  }
-  // Exactly one of the two has to be true, and the reason is the honest half:
-  // an edition that can neither write the project file nor say who does would
-  // leave a greenfield run stuck with no next step to take.
-  if (hasSample === hasHint) {
-    throw expected("the " + record.edition + " edition's detect.manifest must carry either a `sample` jig can" +
-      " write or a `hint` naming what the owner runs instead — it carries " +
-      (hasSample ? "both" : "neither"));
+  // Every manager this edition claims, because a greenfield run resolves one
+  // before it needs a project file and an unanswered manager is a run with
+  // nothing to write and nothing to say.
+  const managers = Array.isArray(record.detect.packageManagers) && record.detect.packageManagers.length
+    ? record.detect.packageManagers
+    : [null];
+  for (const manager of managers) {
+    const where = managers.length > 1 ? " under " + manager : "";
+    const hasPath = forManager(manifest.path, manager) !== null;
+    const hasSample = forManager(manifest.sample, manager) !== null;
+    const hasHint = forManager(manifest.hint, manager) !== null;
+    if (hasSample && !hasPath) {
+      throw expected("the " + record.edition + " edition offers a manifest sample" + where + " with no path to write it to");
+    }
+    // Exactly one of the two has to be true, and the reason is the honest half:
+    // an edition that can neither write the project file nor say who does would
+    // leave a greenfield run stuck with no next step to take.
+    if (hasSample === hasHint) {
+      throw expected("the " + record.edition + " edition's detect.manifest" + where + " must carry either a `sample`" +
+        " jig can write or a `hint` naming what the owner runs instead — it carries " +
+        (hasSample ? "both" : "neither"));
+    }
   }
 }
 
-// The manifest as the engine wants it: never throws for a missing one, because
-// `validateManifest` already refused that at load.
-function manifestFor(edition) {
+// The manifest as the engine wants it, resolved for the package manager this
+// run settled on. Never throws for a missing one, because `validateManifest`
+// already refused that at load. A caller with no manager yet gets the edition's
+// first, which is the one a single-manager edition has anyway.
+function manifestFor(edition, manager) {
   if (!isObject(edition) || !isObject(edition.detect) || !isObject(edition.detect.manifest)) {
     throw expected("editions.manifestFor needs a loaded edition, and got " + JSON.stringify(edition));
   }
   const m = edition.detect.manifest;
+  const managers = Array.isArray(edition.detect.packageManagers) ? edition.detect.packageManagers : [];
+  const key = manager && managers.includes(manager) ? manager : managers[0] || null;
   return {
     edition: edition.edition,
-    path: typeof m.path === "string" && m.path !== "" ? m.path : null,
-    sample: typeof m.sample === "string" && m.sample !== "" ? m.sample : null,
-    hint: typeof m.hint === "string" && m.hint !== "" ? m.hint : null,
+    packageManager: key,
+    path: forManager(m.path, key),
+    sample: forManager(m.sample, key),
+    hint: forManager(m.hint, key),
   };
 }
 

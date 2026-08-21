@@ -1406,10 +1406,10 @@ function toolchainProposal(root, loaded, opts, states) {
 // Which of the resolved editions have no project on disk yet. `greenfield` is
 // not a mode and nothing branches on it twice — it is one fact, read once here,
 // so the plan, the toolchain command and the skill all say the same thing.
-function greenfieldEditions(root, loaded) {
+function greenfieldEditions(root, loaded, manager) {
   return loaded
     .filter((edition) => !editionsLib.projectExists(root, edition))
-    .map((edition) => editionsLib.manifestFor(edition));
+    .map((edition) => editionsLib.manifestFor(edition, manager));
 }
 
 // Several tools, one file. Five python tools configure `pyproject.toml`, four
@@ -1419,14 +1419,14 @@ function greenfieldEditions(root, loaded) {
 // told. This decides, per path, which of three things happens:
 //
 //   - one tool owns the file       → it is written as it always was
-//   - several tools, section file  → one composed body, conflicts reported
+//   - several tools, composable    → one composed body, conflicts reported
 //   - several tools, anything else → NOTHING is written; the owner is handed
 //                                    each snippet and told where it goes
 //
-// The third case is the honest one. A `go.mod`, a `build.gradle.kts` and a
-// `Directory.Build.props` have real grammars, and the samples the editions
-// carry for them are illustrations of a project file rather than a file to lay
-// down — writing one over somebody's build would be the same bug wearing a fix.
+// The third case is the honest one. A `go.mod` sample is an illustration of a
+// module file rather than a file to lay down, and the module path is the
+// owner's to choose — writing one over somebody's module would be the same bug
+// wearing a fix. `sections.mergeable` is the whole list of what composes.
 function composeConfigs(items, manifests) {
   const byPath = new Map();
   for (const row of items) {
@@ -1630,7 +1630,7 @@ function draftFromTemplates(root, opts, checks) {
   // continues; where only the owner can name the thing — a Go module path, a
   // Gradle template — the edition says so and every install for it is refused
   // with that sentence rather than run into a folder with no project in it.
-  const greenfield = greenfieldEditions(root, loaded);
+  const greenfield = greenfieldEditions(root, loaded, toolchain.packageManager);
   const blocked = new Set();
   for (const m of greenfield) {
     if (m.sample) continue;
@@ -1661,7 +1661,7 @@ function draftFromTemplates(root, opts, checks) {
   }
   const starting = new Set(greenfield.filter((m) => m.sample && named.has(m.edition)).map((m) => m.edition));
   const manifests = loaded
-    .map((e) => editionsLib.manifestFor(e))
+    .map((e) => editionsLib.manifestFor(e, toolchain.packageManager))
     .map((m) => (starting.has(m.edition) ? m : { ...m, sample: null }));
 
   const configs = composeConfigs(usable, manifests);
@@ -2368,7 +2368,7 @@ function cmdToolchain(root, opts) {
     // Named here as well as on the plan, because this is the command the skill
     // runs BEFORE it asks anybody to tick a tool — and on a folder with no
     // project in it, half these installs have nowhere to record themselves.
-    greenfield: greenfieldEditions(root, loaded),
+    greenfield: greenfieldEditions(root, loaded, proposal.packageManager),
   };
 }
 
@@ -3313,7 +3313,7 @@ function cmdScan(root, opts) {
   // readily as what already is — that is the whole point of running it
   // first — but a package manager still needs a project file to record an
   // install in, so the scan says plainly which editions have none.
-  const greenfield = greenfieldEditions(root, resolved).map((m) => ({
+  const greenfield = greenfieldEditions(root, resolved, (opts || {})["package-manager"]).map((m) => ({
     edition: m.edition,
     path: m.path,
     canWrite: m.sample !== null,

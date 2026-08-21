@@ -5,9 +5,15 @@
   "researchedOn": "2026-08-13",
   "detect": {
     "manifest": {
-      "path": "build.gradle.kts",
-      "sample": null,
-      "hint": "A Gradle or Maven project is generated, not hand-written. Run `gradle init` (or `mvn archetype:generate`) here, then re-run jig."
+      "path": {
+        "gradle": "settings.gradle.kts",
+        "maven": "pom.xml"
+      },
+      "sample": {
+        "gradle": "// Starter settings file. Rename the project before you publish it.\n// This is what makes the directory a Gradle build root; the build script\n// beside it carries the plugins and tasks.\nrootProject.name = \"app\"\n",
+        "maven": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!-- Starter project file. Rename the group and artifact before you publish it. -->\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\"\n         xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n         xsi:schemaLocation=\"http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd\">\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>com.example</groupId>\n  <artifactId>app</artifactId>\n  <version>0.1.0-SNAPSHOT</version>\n  <packaging>jar</packaging>\n\n  <properties>\n    <maven.compiler.release>21</maven.compiler.release>\n    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>\n  </properties>\n</project>\n"
+      },
+      "hint": null
     },
     "files": [
       "build.gradle.kts",

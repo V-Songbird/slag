@@ -61,11 +61,14 @@ function bodyOf(root, plan, rel) {
 // ---------------------------------------------------------------------------
 // mergeable
 
-test("mergeable names section files and nothing with a real grammar", () => {
-  for (const yes of ["pyproject.toml", "Cargo.toml", ".editorconfig", "a/b/setup.cfg", "tox.ini"]) {
-    assert.equal(sections.mergeable(yes), true, yes + " is a section file");
-  }
-  for (const no of ["go.mod", "build.gradle.kts", "Directory.Build.props", "package.json", "", null]) {
+test("mergeable names the three declarative families and nothing with a free grammar", () => {
+  const yes = [
+    "pyproject.toml", "Cargo.toml", ".editorconfig", "a/b/setup.cfg", "tox.ini",
+    "Directory.Build.props", "a/b/Directory.Build.targets",
+    "build.gradle.kts", "app/build.gradle",
+  ];
+  for (const rel of yes) assert.equal(sections.mergeable(rel), true, rel + " is one jig composes");
+  for (const no of ["go.mod", "package.json", "Main.kt", "", null]) {
     assert.equal(sections.mergeable(no), false, String(no) + " is not one jig composes");
   }
 });
@@ -131,6 +134,89 @@ test("merge keeps a preamble key once and refuses a part with no body", () => {
 });
 
 // ---------------------------------------------------------------------------
+// merge — MSBuild property files
+
+const PROPS_CSC = '<Project>\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n  </PropertyGroup>\n</Project>\n';
+const PROPS_AUDIT = '<Project>\n  <PropertyGroup>\n    <NuGetAudit>true</NuGetAudit>\n  </PropertyGroup>\n</Project>\n';
+
+test("merge folds two property groups into one Project and one PropertyGroup", () => {
+  const { body, conflicts } = sections.merge([
+    { source: "csc", body: PROPS_CSC },
+    { source: "nuget-audit", body: PROPS_AUDIT },
+  ], "Directory.Build.props");
+  assert.deepEqual(conflicts, []);
+  assert.equal(body.match(/<Project>/g).length, 1, "one root element");
+  assert.equal(body.match(/<PropertyGroup>/g).length, 1, "one property group");
+  assert.match(body, /<Nullable>enable<\/Nullable>\n\s*<NuGetAudit>true<\/NuGetAudit>/);
+  assert.ok(body.trimEnd().endsWith("</Project>"), body);
+});
+
+test("merge reports two tools setting one MSBuild property differently", () => {
+  const { body, conflicts } = sections.merge([
+    { source: "csc", body: '<Project>\n  <PropertyGroup>\n    <LangVersion>latest</LangVersion>\n  </PropertyGroup>\n</Project>\n' },
+    { source: "other", body: '<Project>\n  <PropertyGroup>\n    <LangVersion>9.0</LangVersion>\n  </PropertyGroup>\n</Project>\n' },
+  ], "Directory.Build.props");
+  assert.match(body, /<LangVersion>latest<\/LangVersion>/);
+  assert.doesNotMatch(body, /9\.0/);
+  assert.equal(conflicts.length, 1);
+  assert.deepEqual(
+    { key: conflicts[0].key, keptFrom: conflicts[0].keptFrom, droppedFrom: conflicts[0].droppedFrom },
+    { key: "LangVersion", keptFrom: "csc", droppedFrom: "other" },
+  );
+});
+
+test("merge keeps two different items in a group, and a condition apart from an unconditional group", () => {
+  const { body, conflicts } = sections.merge([
+    { source: "one", body: '<Project>\n  <ItemGroup>\n    <PackageReference Include="A" />\n  </ItemGroup>\n</Project>\n' },
+    {
+      source: "two",
+      body: '<Project>\n  <ItemGroup>\n    <PackageReference Include="B" />\n  </ItemGroup>\n' +
+        '  <PropertyGroup Condition="\'$(CI)\' == \'true\'">\n    <Nullable>enable</Nullable>\n  </PropertyGroup>\n</Project>\n',
+    },
+  ], "Directory.Build.props");
+  assert.deepEqual(conflicts, [], "two package references are not a dispute");
+  assert.match(body, /Include="A"/);
+  assert.match(body, /Include="B"/);
+  assert.match(body, /<PropertyGroup Condition="'\$\(CI\)' == 'true'">/);
+});
+
+// ---------------------------------------------------------------------------
+// merge — Gradle build scripts
+
+test("merge gives a Gradle script one plugins block with the shared plugin named once", () => {
+  const { body, conflicts } = sections.merge([
+    { source: "gradle", body: 'plugins {\n    java\n    checkstyle\n}\n\nrepositories { mavenCentral() }\n' },
+    { source: "errorprone", body: 'plugins {\n    java\n    id("net.ltgt.errorprone") version "4.3.0"\n}\n' },
+  ], "build.gradle.kts");
+  assert.deepEqual(conflicts, []);
+  assert.equal(body.match(/^plugins \{$/gm).length, 1, "Gradle allows exactly one plugins block: " + body);
+  assert.equal(body.match(/^ *java$/gm).length, 1, "the plugin both tools ask for is named once");
+  assert.match(body, /id\("net\.ltgt\.errorprone"\) version "4\.3\.0"/);
+  assert.match(body, /repositories \{\n {4}mavenCentral\(\)\n\}/, "a one-line block still composes: " + body);
+  assert.equal(body.indexOf("plugins {"), 0, "and it is still the first statement");
+});
+
+test("merge carries a nested Gradle block whole and keys the assignments inside one", () => {
+  const { body, conflicts } = sections.merge([
+    { source: "gradle", body: 'tasks.withType<Test>().configureEach {\n    useJUnitPlatform()\n    ignoreFailures = false\n}\n' },
+    {
+      source: "errorprone",
+      body: 'tasks.withType<Test>().configureEach {\n    ignoreFailures = true\n' +
+        '    options.errorprone {\n        error(\n            "EmptyCatch"\n        )\n    }\n}\n',
+    },
+  ], "build.gradle.kts");
+  assert.equal(body.match(/configureEach \{/g).length, 1, "one block, not two");
+  assert.match(body, /options\.errorprone \{\n {8}error\(\n {12}"EmptyCatch"\n {8}\)\n {4}\}/, body);
+  assert.match(body, /ignoreFailures = false/);
+  assert.doesNotMatch(body, /ignoreFailures = true/);
+  assert.equal(conflicts.length, 1);
+  assert.deepEqual(
+    { key: conflicts[0].key, keptFrom: conflicts[0].keptFrom, droppedFrom: conflicts[0].droppedFrom },
+    { key: "ignoreFailures", keptFrom: "gradle", droppedFrom: "errorprone" },
+  );
+});
+
+// ---------------------------------------------------------------------------
 // The shipped shelf
 
 test("release gate G5: every shared config file in every edition is composed or reported, never overwritten", () => {
@@ -155,12 +241,20 @@ test("release gate G5: every shared config file in every edition is composed or 
       assert.deepEqual(merged.conflicts, [],
         row.id + " tools disagree inside " + configPath + ": " +
           merged.conflicts.map((c) => c.key).join(", "));
+      // Not the keys alone. An XML element and a Gradle statement have no `=`
+      // in them, so the claim the new formats have to answer is the stronger
+      // one: every line of every sample is somewhere in the composed body.
+      const kept = new Set(merged.body.split("\n").map((l) => l.trim()));
       for (const tool of tools) {
-        for (const line of tool.configSample.split("\n")) {
-          const key = line.match(/^\s*[^\s#[][^=]*=/);
-          if (!key) continue;
-          assert.ok(merged.body.includes(line.trim()),
-            row.id + " " + configPath + " lost " + tool.id + "'s line: " + line.trim());
+        for (const raw of tool.configSample.split("\n")) {
+          const line = raw.trim();
+          if (line === "" || line === "<Project>" || line === "</Project>") continue;
+          if (kept.has(line)) continue;
+          // A block written on one line is composed onto two, and both halves
+          // have to be there: `repositories { mavenCentral() }`.
+          const one = line.match(/^([^{}]+)\{(.+)\}$/);
+          assert.ok(one && kept.has(one[1].trim() + " {") && kept.has(one[2].trim()),
+            row.id + " " + configPath + " lost " + tool.id + "'s line: " + line);
         }
       }
     }
@@ -168,13 +262,31 @@ test("release gate G5: every shared config file in every edition is composed or 
   assert.ok(sharedPaths >= 5, "the shelf still has the shared paths this gate exists for: " + sharedPaths);
 });
 
-test("every shipped edition declares a project file jig can either write or explain", () => {
+test("every shipped edition declares a project file jig can either write or explain, per package manager", () => {
   for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
-    const manifest = editions.manifestFor(editions.loadEdition(PLUGIN_ROOT, row.id));
-    assert.equal(manifest.edition, row.id);
-    assert.equal(Boolean(manifest.sample) !== Boolean(manifest.hint), true,
-      row.id + " must offer a starter or a reason, not both and not neither");
-    if (manifest.sample) assert.ok(manifest.path, row.id + " offers a sample with nowhere to write it");
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    // Per manager, not per edition. `jvm` covers Gradle and Maven, and a
+    // settings file is not a project file a Maven build can do anything with.
+    for (const manager of edition.detect.packageManagers) {
+      const manifest = editions.manifestFor(edition, manager);
+      const where = row.id + " under " + manager;
+      assert.equal(manifest.edition, row.id);
+      assert.equal(manifest.packageManager, manager);
+      assert.equal(Boolean(manifest.sample) !== Boolean(manifest.hint), true,
+        where + " must offer a starter or a reason, not both and not neither");
+      if (manifest.sample) assert.ok(manifest.path, where + " offers a sample with nowhere to write it");
+    }
+  }
+});
+
+test("a manager the edition does not claim falls back to its first, and never to nothing", () => {
+  const jvm = editions.loadEdition(PLUGIN_ROOT, "jvm");
+  assert.equal(editions.manifestFor(jvm, "gradle").path, "settings.gradle.kts");
+  assert.equal(editions.manifestFor(jvm, "maven").path, "pom.xml");
+  for (const nonsense of [undefined, null, "npm"]) {
+    const fallback = editions.manifestFor(jvm, nonsense);
+    assert.equal(fallback.packageManager, "gradle", "the edition's first manager answers for " + String(nonsense));
+    assert.ok(fallback.sample, "and it still carries a starter");
   }
 });
 
@@ -216,18 +328,117 @@ test("four python tools sharing pyproject.toml produce one composed file, not fo
   }
 });
 
-test("a shared file jig cannot compose is written by nobody and handed back as snippets", () => {
+test("two dotnet tools sharing Directory.Build.props produce one composed property file", () => {
   const root = project({ "App.csproj": "<Project></Project>\n" });
   const plan = planOf(root, {
     edition: "dotnet", "package-manager": "dotnet",
     tools: "csc,nuget-audit", select: "dotnet/swallowed-exception",
   });
-  assert.equal(pathsOf(plan).includes("Directory.Build.props"), false, "jig writes none of it");
-  assert.deepEqual(plan.configNotes.map((n) => n.tool).sort(), ["csc", "nuget-audit"]);
-  for (const note of plan.configNotes) {
-    assert.equal(note.path, "Directory.Build.props");
-    assert.ok(note.snippet.includes("<Project>"), "the note carries the snippet to put in yourself");
+  const writes = plan.changes.filter((c) => c.path === "Directory.Build.props" && c.kind === "write-side-file");
+  assert.equal(writes.length, 1, "one write for the shared file");
+  assert.deepEqual(plan.configConflicts, []);
+  assert.deepEqual(plan.configNotes.map((n) => n.path), [], "nothing is handed back to paste");
+
+  const body = bodyOf(root, plan, "Directory.Build.props");
+  assert.equal(body.match(/<Project>/g).length, 1, "one root element, not two files fighting");
+  for (const property of ["<TreatWarningsAsErrors>", "<Nullable>", "<NuGetAudit>", "<WarningsAsErrors>"]) {
+    assert.ok(body.includes(property), "the composed file kept " + property);
   }
+});
+
+test("two jvm tools sharing build.gradle.kts produce one script Gradle would accept", () => {
+  // A Gradle project whose root build script has not been written yet — the
+  // settings file and the wrapper are what make it a jvm project.
+  const root = project({
+    "settings.gradle.kts": 'rootProject.name = "demo"\n',
+    "app/src/main/java/A.java": "class A {}\n",
+  });
+  const plan = planOf(root, {
+    edition: "jvm", "package-manager": "gradle",
+    tools: "gradle,errorprone", select: "jvm/swallowed-exception",
+  });
+  const writes = plan.changes.filter((c) => c.path === "build.gradle.kts" && c.kind === "write-side-file");
+  assert.equal(writes.length, 1, "one write for the shared file: " + pathsOf(plan).join(", "));
+  assert.deepEqual(plan.configConflicts, []);
+
+  // The reason composing this one beats reporting it: two `plugins` blocks is
+  // not a merge that lost something, it is a build script that cannot compile.
+  const body = bodyOf(root, plan, "build.gradle.kts");
+  assert.equal(body.match(/^plugins \{$/gm).length, 1, body);
+  assert.equal(body.indexOf("plugins {"), 0, "and Gradle wants it first");
+  assert.equal(body.match(/^ *java$/gm).length, 1, "the plugin both tools ask for is applied once");
+  assert.ok(body.includes('errorprone("com.google.errorprone:error_prone_core:2.42.0")'), body);
+  assert.ok(body.includes("options.errorprone {"), body);
+});
+
+test("a shared file jig cannot compose is written by nobody and handed back as snippets", () => {
+  // `go.mod` stays out: its samples are pictures of a module file rather than
+  // fragments, and a module path is the owner's to choose.
+  assert.equal(sections.mergeable("go.mod"), false);
+  const root = project({ "go.mod": "module demo\n\ngo 1.23\n", "main.go": "package main\n" });
+  const plan = planOf(root, {
+    edition: "go", "package-manager": "go", tools: "go-vet,go-test", select: "go/skipped-test",
+  });
+  assert.equal(pathsOf(plan).includes("go.mod"), false, "jig writes none of it");
+  assert.deepEqual(plan.configNotes.map((n) => n.tool).sort(), ["go-test", "go-vet"]);
+  for (const note of plan.configNotes) {
+    assert.equal(note.path, "go.mod");
+    assert.ok(note.snippet.includes("go "), "the note carries the snippet to put in yourself");
+  }
+});
+
+test("a greenfield Gradle project gets the settings file and the composed build script", () => {
+  const root = project({});
+  const plan = planOf(root, {
+    edition: "jvm", "package-manager": "gradle",
+    tools: "gradle,errorprone", select: "jvm/swallowed-exception",
+  });
+  assert.deepEqual(plan.refused, [], "nothing is refused for want of a project");
+  const starter = plan.changes.find((c) => c.path === "settings.gradle.kts" && c.kind === "write-side-file");
+  assert.ok(starter, "the settings file is what makes the directory a Gradle build root: " + pathsOf(plan).join(", "));
+  assert.match(bodyOf(root, plan, "settings.gradle.kts"), /rootProject\.name = "app"/);
+
+  // The build script is not the starter — it is composed from the tools, and
+  // that is what 158 made possible.
+  const body = bodyOf(root, plan, "build.gradle.kts");
+  assert.equal(body.match(/^plugins \{$/gm).length, 1, body);
+  assert.ok(body.includes("options.errorprone {"), body);
+
+  const at = plan.changes.indexOf(starter);
+  for (const [i, change] of plan.changes.entries()) {
+    if (change.kind === "run-install") assert.ok(at < i, "the project file is written before install " + i);
+  }
+});
+
+test("the same edition under Maven gets a pom, not a Gradle settings file", () => {
+  const root = project({});
+  const plan = planOf(root, {
+    edition: "jvm", "package-manager": "maven",
+    tools: "checkstyle,pmd", select: "jvm/swallowed-exception",
+  });
+  assert.deepEqual(plan.refused, []);
+  assert.equal(pathsOf(plan).includes("settings.gradle.kts"), false, "a Maven build cannot use one");
+  assert.ok(pathsOf(plan).includes("pom.xml"), pathsOf(plan).join(", "));
+  const body = bodyOf(root, plan, "pom.xml");
+  assert.match(body, /<modelVersion>4\.0\.0<\/modelVersion>/);
+  assert.match(body, /<artifactId>app<\/artifactId>/);
+});
+
+test("a greenfield .NET project gets a project file that compiles with nothing in it", () => {
+  const root = project({});
+  const plan = planOf(root, {
+    edition: "dotnet", "package-manager": "dotnet",
+    tools: "csc,nuget-audit", select: "dotnet/swallowed-exception",
+  });
+  assert.deepEqual(plan.refused, []);
+  const starter = plan.changes.find((c) => c.path === "App.csproj" && c.kind === "write-side-file");
+  assert.ok(starter, pathsOf(plan).join(", "));
+  const body = bodyOf(root, plan, "App.csproj");
+  assert.match(body, /<Project Sdk="Microsoft\.NET\.Sdk">/);
+  // No entry point is written, so an executable would fail to build on the
+  // first check jig runs. A library compiles with no source files at all.
+  assert.doesNotMatch(body, /^\s*<OutputType>/m, "the comment may name it; the project may not set it");
+  assert.ok(pathsOf(plan).includes("Directory.Build.props"), "and the shared config still composes");
 });
 
 test("an edition that cannot be scaffolded refuses its installs once, with the sentence to act on", () => {
