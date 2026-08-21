@@ -121,8 +121,8 @@
     {
       "name": "jig",
       "source": "./jig",
-      "description": "Interviews you about the mistakes that keep landing in your repo, then sets up what catches them: your linter, type checker, test runner, CI, and checks written for your codebase. Every check must catch a planted violation before it counts as coverage, and nothing lands you did not approve.",
-      "version": "2.1.0",
+      "description": "Interviews you about the mistakes that keep landing in your repo, then sets up what catches them: your linter, type checker, test runner, CI, and checks written for your codebase. Runs on an empty folder too, scaffolding the project and its harness before the first line is written. Every check must catch a planted violation before it counts as coverage, and nothing lands you did not approve.",
+      "version": "2.2.0",
       "license": "MIT",
       "author": {
         "name": "Victor Villegas",

@@ -1,9 +1,14 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "edition": "rust",
   "displayName": "Rust (cargo / Cargo.toml / workspaces)",
   "researchedOn": "2026-08-13",
   "detect": {
+    "manifest": {
+      "path": "Cargo.toml",
+      "sample": "# Starter crate file. Rename the package before you publish it.\n[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\nrust-version = \"1.85\"\n\n[dependencies]\n",
+      "hint": null
+    },
     "files": [
       "Cargo.toml",
       "Cargo.lock",

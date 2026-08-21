@@ -1,9 +1,14 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "edition": "go",
   "displayName": "Go (go modules, go toolchain)",
   "researchedOn": "2026-08-13",
   "detect": {
+    "manifest": {
+      "path": "go.mod",
+      "sample": null,
+      "hint": "A go.mod names the module, and only you can choose that name. Run `go mod init <module path>` here, then re-run jig."
+    },
     "files": [
       "go.mod",
       "go.sum",

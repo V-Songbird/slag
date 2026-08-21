@@ -631,12 +631,12 @@ test("release gate G3: revert undoes a tool install, manifest and lockfile pre-i
 // G4 — the shelf itself
 // ---------------------------------------------------------------------------
 
-test("release gate G4: every shipped edition parses, is at schemaVersion 3, and covers its own extensions", () => {
+test("release gate G4: every shipped edition parses, is at schemaVersion 4, and covers its own extensions", () => {
   const index = editions.loadIndex(PLUGIN_ROOT);
   assert.equal(index.editions.length, 6, "the release ships all six editions");
   for (const row of index.editions) {
     const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
-    assert.equal(edition.schemaVersion, 3, row.id + " is not at schemaVersion 3");
+    assert.equal(edition.schemaVersion, 4, row.id + " is not at schemaVersion 4");
     assert.equal(edition.edition, row.id);
     assert.ok(Array.isArray(edition.classes) && edition.classes.length > 0, row.id + " ships no classes");
     assert.ok(row.detect.extensions.length > 0, row.id + " detects on no extension at all");

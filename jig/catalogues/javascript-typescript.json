@@ -1,9 +1,14 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "edition": "javascript-typescript",
   "displayName": "JavaScript & TypeScript",
   "researchedOn": "2026-08-13",
   "detect": {
+    "manifest": {
+      "path": "package.json",
+      "sample": "{\n  \"name\": \"example-app\",\n  \"version\": \"0.1.0\",\n  \"private\": true,\n  \"type\": \"module\"\n}\n",
+      "hint": null
+    },
     "files": [
       "package.json",
       "tsconfig.json",

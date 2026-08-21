@@ -5,17 +5,23 @@ description: >-
   apparatus that catches bad work before it lands — the linter and its config,
   the type checker, the test runner, a CI workflow, and project-specific checks
   written for this codebase and proven against their own fixtures before they
-  are ever offered as coverage. Reads the repository and its git history first,
-  so it never asks for a fact it can already see. Every file it writes and every
-  tool it installs is named and approved first, and every byte is reversible:
-  nothing unapproved. Use when the user wants guardrails set up, or a repeat
-  mistake caught before it lands — e.g. "set up guardrails", "stop the AI
-  deleting my tests", "add checks to this repo", "what keeps breaking here",
-  "catch skipped tests before they merge", "guard this project against agent
-  mistakes" — or invokes /jig:jig. Do NOT use to grade or audit existing rules
-  or skill descriptions — that is /assay:claude — and not to write one rule or
-  one skill — those are /assay:craft-rules and /assay:craft-skill.
-argument-hint: "[--quick] [--select <classId,…>] [--no-ci] [--observe]"
+  are ever offered as coverage. Works on a project that does not exist yet as
+  readily as on one that does: pointed at an empty folder it writes the starter
+  project file, installs the toolchain and lands the checks first, so the
+  session that writes the code has a working harness from its first edit. Reads
+  the repository and its git history when there is one, so it never asks for a
+  fact it can already see. Every file it writes and every tool it installs is
+  named and approved first, and every byte is reversible: nothing unapproved.
+  Use when the user wants guardrails set up, wants a new project scaffolded so
+  the code written into it is checked from the start, or wants a repeat mistake
+  caught before it lands — e.g. "set up guardrails", "scaffold this project",
+  "set this up before I write any code", "stop the AI deleting my tests", "add
+  checks to this repo", "what keeps breaking here", "catch skipped tests before
+  they merge", "guard this project against agent mistakes" — or invokes
+  /jig:jig. Do NOT use to grade or audit existing rules or skill descriptions —
+  that is /assay:claude — and not to write one rule or one skill — those are
+  /assay:craft-rules and /assay:craft-skill.
+argument-hint: "[--quick] [--edition <id>] [--select <classId,…>] [--no-ci] [--observe]"
 allowed-tools: Bash, Read, Write, AskUserQuestion
 ---
 
@@ -38,7 +44,9 @@ make per guard, not a probation every guard serves — never describe it as
 something a guard graduates from.
 
 Flags in `$ARGUMENTS`: `--quick` (skip the rounds, take the edition's leading
-classes, plan as `assumed`), `--select <classId,…>` (the user already named the
+classes, plan as `assumed`), `--edition <id>` (the user named the language, so
+work against that edition rather than detection — the flag a project that does
+not exist yet runs on), `--select <classId,…>` (the user already named the
 classes, so skip that question and treat them as elicited), `--no-ci` (pass
 through to `plan`, which then generates no CI workflow), `--observe` (every
 guard watches rather than blocks). The interview's own answers reach `plan`
@@ -103,6 +111,8 @@ column-one list you print at step 2:
   `coreHooksPath`, and the size of the rule corpus under `rules`.
 - `slots` and `occupied` — every slot jig would take, and the ids of the ones
   already held by something else.
+- `greenfield` — every matched edition with no project file on disk yet. Empty
+  on a project that exists; on one that does not, it drives step 1a below.
 - `governance` — the ADRs, scopes, roadmaps and north-stars the repo carries,
   each with the loaded surfaces that reference it. `orphans` lists the ones
   nothing references — vital documents every session is blind to.
@@ -137,10 +147,40 @@ and `attribution`.
   lines and `Co-Authored-By` trailers are all git carries, so never present a
   human-versus-agent split as settled.
 
-**On a project that does not exist yet** there is nothing to scan. Say so once,
-skip forensics, and let step 2 carry the whole load: the interview is then the
-only input and has to ask enough to stand in for a scan — language, package
-manager, test runner, where the code will live.
+## 1a. When there is no project here yet
+
+**An empty folder is a normal jig run, and going first is the point.** jig
+hardens what is about to be written as readily as what already is: the linter,
+the type checker, the test runner, the CI and the checks all land before the
+first line of real code, so the session that writes that code has a working
+harness from its first edit. Never put "should I build the thing first?" to the
+user — that question is not jig's to ask, and asking it is a defect in the run.
+
+`scan` says so itself. Its `greenfield` array carries one row per edition with
+no project file on disk, and each row is one of two shapes:
+
+- `canWrite: true` — jig writes the starter project file (`package.json`,
+  `pyproject.toml`, `Cargo.toml`) before anything installs into it. Nothing to
+  ask; it is a change on the plan like any other, approved by name.
+- `canWrite: false` — only the owner can create this one, and `hint` is the
+  exact sentence to give them (`go mod init <module path>`, `gradle init`,
+  `dotnet new console`). Print the hint, let them run it, then re-run jig.
+
+On a truly empty folder nothing detects, so **the interview supplies what the
+scan could not** and its answers ride two flags on every later command:
+
+| Answer | Flag | Reaches |
+| --- | --- | --- |
+| which language | `--edition <id>` | `toolchain`, `plan` |
+| which package manager | `--package-manager <name>` | `toolchain`, `plan` |
+
+Edition ids are `javascript-typescript`, `python`, `go`, `rust`, `jvm`,
+`dotnet`. **`--edition` is also what permits the starter file**: jig writes a
+project file only for an edition the owner named, never for one detection
+merely matched, because a `pyproject.toml` makes a Python repository match the
+rust edition too and no lucky extension match may conjure a `Cargo.toml`.
+
+Skip forensics here — an empty folder has no history — and say that once.
 
 ## 2. Interview
 
@@ -191,10 +231,21 @@ it rather than reading the catalogue files yourself:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" toolchain
 ```
 
+Add `--edition <id> --package-manager <name>` when the interview supplied them
+(step 1a). Without an edition on a folder with no code in it, this returns
+nothing at all and there is no toolchain to put to anybody.
+
 `items` is one row per proposable tool, already resolved against this project's
 package manager and its existing install. `refused` names any tool this project
 cannot be offered and why — read it out; a tool silently missing from a
-proposal is a tool the owner never got to decline.
+proposal is a tool the owner never got to decline. `greenfield` repeats the
+step-1a rows, because this is the command that runs *before* anybody ticks a
+tool, and half these installs have nowhere to record themselves until the
+project file exists.
+
+A row carrying `occupied` is a tool whose config file this project already has
+and jig did not write. **The tool is still installable** — only its config is
+not jig's to lay down, and step 6 hands that config back as a snippet.
 
 Every row is one named item: `role` and `why`, `installKind` (`package`,
 `scaffold`, `builtin` or `audit` — a scaffold command and a package install are
@@ -280,6 +331,11 @@ ids the user ticked, and `--tools` the tools they ticked at step 3. Drop a flag
 whose list is empty. Add `--package-manager <name>` when the plan asked for it,
 and `--no-ci` when the user declined the workflow.
 
+**Carry `--edition <id>` through from step 1a on a project that does not exist
+yet.** It is the flag that names the language when nothing on disk can, and it
+is also the permission to write the starter project file — without it the plan
+scaffolds nothing and says so in `refused`.
+
 **Four more flags carry answers the interview already collected. A round that
 asked a question and then dropped the answer is worse than a round that never
 asked, so pass every one the user said yes to:**
@@ -309,6 +365,25 @@ through it:
 - the **toolchain section**: every tool the user ticked at step 3, with its
   command and its config path. An install must be approved from a surface the
   owner actually read, which is why it appears here as well.
+
+Two more lists come back on the result, and both are about the files several
+tools want to share. Neither is an error and neither may be swallowed:
+
+- `configNotes` — configuration jig will **not** write, because the file
+  belongs to the project rather than to one tool: several tools share it and it
+  has a real grammar (`go.mod`, `build.gradle.kts`, `Directory.Build.props`),
+  or the project already owns it. Each note carries `snippet` and `wiring`.
+  Print them. A tool whose config lands in a note is still installed — the
+  install is real and only the config is the owner's to place.
+- `configConflicts` — a key two tools set differently in a file jig **did**
+  compose. The first tool's value is what got written; the note says whose
+  value was dropped. Read each one out; it is the one place composition made a
+  choice on somebody's behalf.
+
+Where several tools do share a section file jig can compose — `pyproject.toml`,
+`Cargo.toml`, `.editorconfig` — the plan carries **one** write for that path
+holding every tool's section, not one write per tool. Say it that way: the
+owner is approving one file, and it is the whole file.
 
 Then take consent in two tiers, read off `consent` on the result:
 

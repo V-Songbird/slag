@@ -1,9 +1,14 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "edition": "dotnet",
   "displayName": "C# / .NET (dotnet CLI, csproj, NuGet)",
   "researchedOn": "2026-08-13",
   "detect": {
+    "manifest": {
+      "path": null,
+      "sample": null,
+      "hint": "A .NET project file is generated, and its template is yours to choose. Run `dotnet new console` (or another template) here, then re-run jig."
+    },
     "files": [
       "*.csproj",
       "*.sln",

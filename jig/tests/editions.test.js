@@ -167,7 +167,7 @@ test("detectEditions refuses an unreadable project root and a non-index", () => 
 
 test("loadEdition loads one edition and caches it", () => {
   const python = editions.loadEdition(PLUGIN_ROOT, "python");
-  assert.equal(python.schemaVersion, 3);
+  assert.equal(python.schemaVersion, 4);
   assert.equal(python.edition, "python");
   assert.equal(python.classes.length, 25);
   assert.equal(editions.loadEdition(PLUGIN_ROOT, "python"), python);
@@ -188,15 +188,15 @@ test("loadEdition refuses an unknown id and lists what it has", () => {
 test("loadEdition refuses an edition whose schemaVersion it does not know", () => {
   const root = shelf(
     { schemaVersion: 3, editions: [{ id: "x", file: "x.json", detect: {} }] },
-    { "x.json": { schemaVersion: 4, edition: "x", classes: [] } },
+    { "x.json": { schemaVersion: 3, edition: "x", classes: [] } },
   );
-  assert.throws(() => editions.loadEdition(root, "x"), /schemaVersion 4 and this loader reads 3/);
+  assert.throws(() => editions.loadEdition(root, "x"), /schemaVersion 3 and this loader reads 4/);
 });
 
 test("loadEdition refuses a file that disagrees with the index about its own id", () => {
   const root = shelf(
     { schemaVersion: 3, editions: [{ id: "x", file: "x.json", detect: {} }] },
-    { "x.json": { schemaVersion: 3, edition: "y", classes: [] } },
+    { "x.json": { schemaVersion: 4, edition: "y", classes: [] } },
   );
   assert.throws(() => editions.loadEdition(root, "x"), /calls itself `y`/);
 });

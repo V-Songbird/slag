@@ -39,9 +39,27 @@ Then print every line of `disclosures` verbatim, one per line, under the two
 columns. Those are the engine's own words about what it cannot promise.
 
 **On a project that does not exist yet**, column one is empty and says so. The
-interview then has to stand in for the scan, and round one gains the questions
-it would otherwise never ask: which language, which package manager, which test
-runner, and where the code will live. Nothing else in this file changes.
+interview stands in for the scan, and round one gains a question it would
+otherwise never ask. Nothing else in this file changes.
+
+**Question zero**, header `"Language"`, asked only when `greenfield` on the
+scan is non-empty or nothing detected at all: "Which language is this project
+going to be in?" One option per edition — `javascript-typescript`, `python`,
+`go`, `rust`, `jvm`, `dotnet` — plus a free-text option for anything else,
+which is not a refusal: the model authors every check from scratch and the
+fixture pair still admits them.
+
+Its answer becomes `--edition <id>` on every later command, and a second
+question follows in the same call when the edition offers more than one package
+manager: "Which package manager?", options from that edition's own
+`detect.packageManagers`, answer becoming `--package-manager <name>`.
+
+**Never ask what to build, or whether to build it first.** jig going first is
+what jig is; a question offering to write the application before the harness is
+a defect in the run, not a courtesy. The one thing that can stop a greenfield
+run is an ecosystem whose project file only the owner can name — go, gradle,
+dotnet — and there the scan's own `hint` is the sentence to give them, not a
+question to put to them.
 
 ## The blind-spot pass
 
@@ -98,7 +116,8 @@ continuously across rounds. The recommended answer is always the FIRST option
 and carries `(Recommended)` in its label. The interview closes exactly when
 the frontier is empty; nothing is left silently assumed.
 
-- **Round one** — no prerequisites: persona, phase, the mistake list, the
+- **Round one** — no prerequisites: the language and package manager when there
+  is no project here yet, then persona, phase, the mistake list, the
   agent-damage anchor.
 - **Round two** — unlocked by round one: the worst-bug free text; the toolchain
   multi-select; the CI workflow decision; the hook-weave offer when the scan
@@ -110,7 +129,10 @@ the frontier is empty; nothing is left silently assumed.
 
 ## Round one — persona, posture, mistakes, anchor
 
-One `AskUserQuestion` call, four questions. The first two are single-select.
+One `AskUserQuestion` call, four questions. The first two are single-select. On
+a project that does not exist yet, question zero and its package-manager
+follow-up lead this round, so the toolchain proposal has an edition to resolve
+against.
 
 **Question one**, header `"Protecting"`: "Who are these guardrails protecting
 this project against?"

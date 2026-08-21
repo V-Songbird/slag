@@ -396,6 +396,23 @@ function requireApproval(item, approval, command, phase) {
   }
 }
 
+// Where an executable name resolves to a `.cmd` or `.bat` on this machine.
+// Returns the resolved path, or null on any platform and for any name where
+// that is not the story — including when the tool is genuinely absent.
+function windowsShim(name) {
+  if (process.platform !== "win32") return null;
+  if (/\.(cmd|bat)$/i.test(name)) return name;
+  for (const dir of String(process.env.PATH || "").split(path.delimiter).filter(Boolean)) {
+    for (const ext of [".cmd", ".bat"]) {
+      const full = path.join(dir, name + ext);
+      try {
+        if (fs.statSync(full).isFile()) return full;
+      } catch { /* a PATH entry that is not there is not this function's problem */ }
+    }
+  }
+  return null;
+}
+
 function runArgv(root, item, argv, command, timeoutMs) {
   const run = spawnSync(argv[0], argv.slice(1), {
     cwd: root, shell: false, windowsHide: true, encoding: "utf8", timeout: timeoutMs, maxBuffer: MAX_OUTPUT_BYTES,
@@ -408,9 +425,20 @@ function runArgv(root, item, argv, command, timeoutMs) {
   }
   if (run.error) {
     // No error channel exists in the return shape, and a silent { ran: false }
-    // would leave the caller guessing at a failure it has to act on. On Windows
-    // this is also where a .cmd shim lands: Node refuses to spawn one without a
-    // shell, and jig will not open one.
+    // would leave the caller guessing at a failure it has to act on.
+    const shim = windowsShim(argv[0]);
+    if (shim) {
+      // The Windows case, and the old message got it wrong: it told somebody to
+      // install a tool that is already installed. `npm`, `pnpm` and `yarn` are
+      // `.cmd` batch shims there, and since the 2024 argument-injection fix
+      // Node refuses to start one without a shell. jig does not open a shell,
+      // so this is a real limit — stated as one rather than dressed up as a
+      // missing tool.
+      throw refuse(argv[0] + " is a Windows batch shim (" + shim + ") and jig runs every command without a" +
+        " shell, so it cannot start this one:\n  " + command +
+        "\nRun that line yourself in this folder and re-run jig: it probes for the tool and will find it" +
+        " installed. Every other change in the plan applies normally.");
+    }
     throw refuse("could not run " + JSON.stringify(argv[0]) + " for " + item.id + " (" + run.error.code + ": " + run.error.message + ").\n  command: " + command +
       "\nInstall " + argv[0] + " and re-run, or run the command yourself.");
   }

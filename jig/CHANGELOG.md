@@ -4,6 +4,21 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.2.0] — 2026-08-21
+
+### Added
+
+- Point jig at an empty folder and it goes first. It asks which language, writes the starter project file, installs the toolchain and lands the checks — so the first line of code anybody writes is already being checked. It never offers to build the application instead.
+- Ecosystems whose project file only you can name — Go, Gradle and Maven, .NET — say so plainly and hand you the one command to run (`go mod init`, `gradle init`, `dotnet new`). jig picks up from there.
+- Every edition now names its project file, so jig knows the difference between a file a tool owns and a file your project owns.
+
+### Fixed
+
+- Several tools sharing one config file no longer overwrite each other. Five Python tools configure `pyproject.toml`, four .NET tools configure `.editorconfig`, and two Rust tools configure `Cargo.toml`; each was written as its own whole-file change, so the last one applied was the only configuration left. jig now writes one file holding every tool's settings, and names any setting two tools disagreed about.
+- A shared config file jig cannot safely compose — `go.mod`, `build.gradle.kts`, `Directory.Build.props` — is now written by nobody. You get each tool's snippet and where it goes, instead of one tool's sample landing on top of your build file.
+- A config file your project already owns no longer costs you the tool. A repo with its own `pyproject.toml` was offered no linter, no type checker and no test runner at all; the tools install now, and their configuration comes back as a snippet jig will not place for you.
+- On Windows, an install that cannot start because the package manager is a `.cmd` shim now says exactly that, and what to do about it. It used to tell you to install a tool you already had.
+
 ## [2.1.0] — 2026-08-18
 
 ### Added

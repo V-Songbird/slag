@@ -4,12 +4,12 @@
     <img src="assets/logo.svg" alt="jig" width="240" />
   </picture>
   <h1>jig</h1>
-  <p><strong>Your repo keeps collecting the same mistakes. jig installs the guardrails that catch them — and shows each one working before it claims anything.</strong></p>
+  <p><strong>Your repo keeps collecting the same mistakes. jig installs the guardrails that catch them — and shows each one working before it claims anything. Point it at an empty folder and it goes first, so the code written next lands into a harness that already works.</strong></p>
 </div>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
 
-> **TL;DR** — The focused test that mutes the suite, the swallowed error, the AI session that deletes a test to make CI green. jig interviews you, sets up your linter, type checker, test runner and CI, writes checks for the mistakes you actually hit, and proves every one of them against a planted violation before calling anything covered. Nothing is written or installed that you did not approve by name, and one command undoes all of it.
+> **TL;DR** — The focused test that mutes the suite, the swallowed error, the AI session that deletes a test to make CI green. jig interviews you, sets up your linter, type checker, test runner and CI, writes checks for the mistakes you actually hit, and proves every one of them against a planted violation before calling anything covered. It works on a project that does not exist yet as readily as on one that does. Nothing is written or installed that you did not approve by name, and one command undoes all of it.
 
 ---
 
@@ -22,9 +22,12 @@ Every repo has a greatest-hits album of mistakes. Somebody pins the test suite t
 
 jig reads your repo and its git history, asks which of these you actually want guarded, and then sets the whole thing up — the tools, their configs, the CI, and checks written for your codebase. Reviewed by you first, reversible to the byte, and demonstrated catching a planted violation before the word "covered" is used.
 
+Starting something new? Run it on the empty folder. jig writes the project file, installs the toolchain and lands the checks before there is a single line to guard — which is the cheapest moment to get all of it right, and the one where an AI session has the most to gain from a harness that already works.
+
 ## Why you'd want it
 
 - **It reads before it asks.** The scan and the history mining run first, so the interview never asks a question your repo already answers.
+- **It goes first on a new project.** No code yet is the normal case, not an edge case. jig writes the starter project file, sets up the toolchain and installs the checks, so the first thing anybody writes is already being checked. Where only you can name the project — a Go module path, a Gradle template — it hands you the one command and picks up from there.
 - **It sets up your real tooling.** Linter, formatter, type checker, test runner, CI. jig shows you the exact install command and the exact config it would write, then runs it once you say yes. A tool it cannot uninstall is a tool it refuses to install.
 - **It speaks your language.** Editions ship for JavaScript and TypeScript, Python, Go, Rust, the JVM and .NET, each researched against that ecosystem's own tools and conventions.
 - **Checks that outlive the plugin.** The main guardrail is a small script committed to your repo. Any teammate, any CI, any machine with node runs it — no plugin, no account, no jig.
@@ -38,6 +41,7 @@ jig reads your repo and its git history, asks which of these you actually want g
 | Moment | What happens |
 | --- | --- |
 | You run `/jig:jig` | It scans the repo, mines the git history, and shows what it found — then asks the things it can't read |
+| The folder is empty | It asks which language, writes the starter project file, and carries on. Nothing about the run changes |
 | You pick what to guard | Describe a mistake in your own words. jig writes a check for it, plus the two samples that prove the check works |
 | jig proposes your toolchain | Each tool is one item carrying the exact install command, the config it would write, and the command that removes it again |
 | You approve, item by item | Every path is named before it is written, and every write is journaled with the bytes that were there before |
@@ -65,6 +69,7 @@ Takes effect next session. Nothing to configure — the interview is the configu
 | --- | --- |
 | Set up guardrails, interview included | `/jig:jig` |
 | Set them up with one review and no questions | `/jig:jig --quick` |
+| Scaffold a new project and guard it from line one | `/jig:jig` in the empty folder |
 | See what the guards caught | `/jig:review` |
 | Put a noisy guard back to watching | `/jig:review` |
 | Call out a false alarm | `/jig:review` — "that warning was wrong" |
@@ -94,6 +99,7 @@ One engine that journals every write, a committed check script that owes jig not
 - jig names every path before it writes it, and journals the bytes that were there first. That includes your manifest and lockfile when it installs a tool. Revert puts both back and shows you the uninstall command — it never runs a package manager behind your back.
 - If your repo commits its own pre-commit hook, jig can weave its one check line into it — approved by name, and reverted like anything else. Otherwise the line is printed for you to add. jig never touches `.git/hooks/`.
 - If something else already watches the same events in your repo, jig says so and leaves that slot alone. The committed checks and the CI workflow cover you regardless.
+- Several tools often share one config file — `pyproject.toml`, `.editorconfig`, `Cargo.toml`. jig writes that file once with every tool's settings in it, and tells you about any setting two tools disagreed on. Where the shared file is one it can't safely compose, or one you already own, it writes none of it and hands you the exact snippet instead.
 - Rules are the exception, not the habit. The one jig writes points your sessions at the governance docs nothing referenced, under its own `jig-` name and a small hard byte cap — because every session pays to carry prose.
 - Working with another AI tool too? On request jig keeps one clearly-fenced block in `AGENTS.md` pointing it at the same checks. Your own text in that file is never touched.
 - Kill switch: create a file named `.jig/off` and every guard goes silent.

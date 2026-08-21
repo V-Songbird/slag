@@ -1,9 +1,14 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "edition": "python",
   "displayName": "Python",
   "researchedOn": "2026-08-13",
   "detect": {
+    "manifest": {
+      "path": "pyproject.toml",
+      "sample": "# Starter project file. Rename the project before you publish it.\n[project]\nname = \"example-app\"\nversion = \"0.1.0\"\nrequires-python = \">=3.11\"\n\n[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n",
+      "hint": null
+    },
     "files": [
       "pyproject.toml",
       "requirements.txt",

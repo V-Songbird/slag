@@ -1,9 +1,14 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "edition": "jvm",
   "displayName": "Java & Kotlin (Gradle / Maven)",
   "researchedOn": "2026-08-13",
   "detect": {
+    "manifest": {
+      "path": "build.gradle.kts",
+      "sample": null,
+      "hint": "A Gradle or Maven project is generated, not hand-written. Run `gradle init` (or `mvn archetype:generate`) here, then re-run jig."
+    },
     "files": [
       "build.gradle.kts",
       "build.gradle",

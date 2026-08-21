@@ -3,10 +3,19 @@
 Six machine-readable editions live beside this file, one per language ecosystem, plus
 [`index.json`](index.json). This file explains what the data means and what it does not claim.
 
-**Written 2026-08-13.** Every edition carries `"schemaVersion": 3`, and [`index.json`](index.json)
-carries it too. Every edition uses the schema the same way: one field is conditional — `uninstall`,
+**Written 2026-08-13, extended 2026-08-21.** Every edition carries `"schemaVersion": 4`;
+[`index.json`](index.json) is still at 3, because v4 added a field the editions carry and the index
+never did. Every edition uses the schema the same way: one field is conditional — `uninstall`,
 which is present on exactly the entries that install a package — and no edition carries a key the
 others do not.
+
+v4 adds one field: `detect.manifest`, the project file an ecosystem cannot install anything without.
+It carries `path`, `sample` and `hint`, and exactly one of `sample` and `hint` is filled. A `sample`
+is a starter file jig writes when the project does not exist yet — javascript-typescript, python and
+rust have one. A `hint` is the sentence to give the owner instead, for the ecosystems whose project
+file only they can name: go needs a module path, jvm and dotnet are generated from a template. The
+loader refuses an edition that offers both or neither, because "there is no project here and jig has
+nothing to say about it" is not an answer anybody can act on.
 
 v3 adds four fields to v2. `detect.commentSyntax` says how to read a comment in each extension the
 edition claims. `toolchain[].installKind` says what an `install` command actually does, so a
@@ -30,8 +39,8 @@ driver and the runner. Nothing in an edition gates an install — catalogues inf
 ## The file shape
 
 ```
-{ schemaVersion: 3, edition, displayName, researchedOn,
-  detect:    { files, extensions, commentSyntax, packageManagers },
+{ schemaVersion: 4, edition, displayName, researchedOn,
+  detect:    { manifest: { path, sample, hint }, files, extensions, commentSyntax, packageManagers },
   toolchain: [{ id, role, why, installKind, install, uninstall, configPath, configSample,
                 wiring, ciStep, seed: { path, sample },
                 verify: { argv, expected, expectedExit } }],
@@ -45,6 +54,14 @@ edition claims has no style, and a reader that finds none blanks nothing.
 `install` and `uninstall` are keyed by package manager, and by the same managers on both sides: a
 tool installable under four managers states four ways out. `uninstall` is present on every
 `package` entry — 20 of the 37 — and on none of the other 17, which install nothing to undo.
+
+`configPath` and `configSample` are a tool's configuration and where it belongs — but the path is
+not always a file that tool owns alone. Five python tools name `pyproject.toml`, four dotnet tools
+name `.editorconfig`, two rust tools name `Cargo.toml`, and five go tools name `go.mod` where the
+sample is a picture of a module file rather than a fragment to graft on. The engine composes the
+section files (`scripts/sections.js`) and writes none of the rest, handing the owner each snippet
+instead. An edition author does not have to mark any of this: what matters is that `configSample`
+is the tool's own part of that file and nothing else's.
 
 `seed` is one file: `path` is where it goes, `sample` is what it contains. It is a violation the
 tool is expected to catch, so it belongs to the tool rather than to a class, and it is written

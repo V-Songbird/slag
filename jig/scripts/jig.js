@@ -39,6 +39,14 @@
 //                                            shape this engine reads, as one
 //                                            journalled transaction
 //
+// Two flags matter on a project that does not exist yet, where detection has
+// nothing on disk to read: `--edition <id>` names the language, and
+// `--package-manager <name>` names the manager. Both are accepted by `scan`,
+// `toolchain` and `plan`. `--edition` is also the permission to write the
+// starter project file — jig scaffolds one only for an edition somebody NAMED,
+// never for one detection merely matched, because a `pyproject.toml` makes a
+// Python repository match the rust edition too.
+//
 // Every command prints one JSON object to stdout and exits 0 on success, 1 on
 // an expected refusal (with the reason on stderr).
 //
@@ -61,6 +69,10 @@ const { spawnSync } = require("child_process");
 const editionsLib = require("./editions.js");
 const admission = require("./admission.js");
 const toolchainLib = require("./toolchain.js");
+// `sectionsLib` composes several tools' configuration into the one file they
+// share, which is the only reason jig can harden a Python or a .NET project
+// without the last tool applied erasing every earlier one.
+const sectionsLib = require("./sections.js");
 
 const PLUGIN_ROOT = path.dirname(__dirname);
 
@@ -629,7 +641,13 @@ function planFromDraft(draft, root) {
   }
   if (problems.length) return { problems };
 
-  changes.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // Files first, installs after, and id order inside each group so the same
+  // draft always plans to the same list. The rank is not cosmetic: a package
+  // manager needs the project file to exist before it has anywhere to record a
+  // dependency, and on a project jig is scaffolding that file is one of these
+  // changes rather than something that was already on disk.
+  const rank = (c) => (c.kind === "run-install" ? 1 : 0);
+  changes.sort((a, b) => rank(a) - rank(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   // A content hash, not a clock: the same draft over the same tree plans to the
   // same id, so a re-run is recognisable as the same plan.
   const planId = hashBytes(Buffer.from(JSON.stringify(changes), "utf8")).slice(0, 12);
@@ -1372,12 +1390,126 @@ function toolchainProposal(root, loaded, opts, states) {
         refused.push(err.message);
         continue;
       }
+      // An existing config file is NOT a reason to throw the tool away. Until
+      // 2.2.0 it was, so a Python project that already had a `pyproject.toml`
+      // — which is every Python project — got no linter, no type checker
+      // and no test runner at all, and the only trace was one refusal line per
+      // tool. jig still writes nothing it does not own; the config becomes a
+      // note the owner can act on, and the install goes ahead.
       const occupied = occupancyProblem(root, toPosix(proposed.configPath), states);
-      if (occupied) { refused.push(occupied); continue; }
-      items.push({ item: proposed, ...toolchainLib.presence(root, tool) });
+      items.push({ item: proposed, occupied: occupied || null, ...toolchainLib.presence(root, tool) });
     }
   }
   return { packageManager, items, refused };
+}
+
+// Which of the resolved editions have no project on disk yet. `greenfield` is
+// not a mode and nothing branches on it twice — it is one fact, read once here,
+// so the plan, the toolchain command and the skill all say the same thing.
+function greenfieldEditions(root, loaded) {
+  return loaded
+    .filter((edition) => !editionsLib.projectExists(root, edition))
+    .map((edition) => editionsLib.manifestFor(edition));
+}
+
+// Several tools, one file. Five python tools configure `pyproject.toml`, four
+// dotnet tools configure `.editorconfig`, two rust tools configure
+// `Cargo.toml` — and until 2.2.0 each of them was written as its own whole-file
+// change, so the last one applied replaced every earlier one and nobody was
+// told. This decides, per path, which of three things happens:
+//
+//   - one tool owns the file       → it is written as it always was
+//   - several tools, section file  → one composed body, conflicts reported
+//   - several tools, anything else → NOTHING is written; the owner is handed
+//                                    each snippet and told where it goes
+//
+// The third case is the honest one. A `go.mod`, a `build.gradle.kts` and a
+// `Directory.Build.props` have real grammars, and the samples the editions
+// carry for them are illustrations of a project file rather than a file to lay
+// down — writing one over somebody's build would be the same bug wearing a fix.
+function composeConfigs(items, manifests) {
+  const byPath = new Map();
+  for (const row of items) {
+    const rel = toPosix(row.item.configPath);
+    if (!byPath.has(rel)) byPath.set(rel, []);
+    byPath.get(rel).push(row);
+  }
+
+  const writes = [];
+  const notes = [];
+  const conflicts = [];
+  const composed = new Set();
+  const manifestPaths = new Set(manifests.filter((m) => m.path).map((m) => toPosix(m.path)));
+
+  for (const [rel, rows] of byPath) {
+    // Somebody else's file. jig does not write it, and each tool's section
+    // becomes something the owner can paste rather than a tool jig drops.
+    const held = rows.find((r) => r.occupied);
+    if (held) {
+      for (const row of rows) {
+        composed.add(row.item.id);
+        notes.push({
+          path: rel,
+          tool: row.item.id,
+          why: held.occupied + ". Here is what " + row.item.id + " needs in it:",
+          snippet: row.item.configBody,
+          wiring: row.item.wiring || null,
+        });
+      }
+      continue;
+    }
+
+    // A manifest jig may write is the first part of its own file, so the
+    // starter and the tool sections land composed rather than fighting.
+    const starter = manifests.find((m) => m.path && toPosix(m.path) === rel && m.sample);
+    const shared = rows.length > 1 || Boolean(starter);
+    // A project file jig cannot compose is a project file jig does not touch,
+    // even for one tool. The `go.mod` samples in the go edition are pictures of
+    // what a module file looks like for that tool, not a fragment to graft on,
+    // and laying one down over somebody's module would be the loudest possible
+    // way to get this wrong.
+    if (!shared && !manifestPaths.has(rel)) continue;
+
+    if (!sectionsLib.mergeable(rel)) {
+      const names = rows.map((r) => r.item.id);
+      const owners = names.length === 1
+        ? names[0] + "'s"
+        : names.slice(0, -1).join(", ") + " and " + names[names.length - 1] + "'s";
+      for (const row of rows) {
+        composed.add(row.item.id);
+        notes.push({
+          path: rel,
+          tool: row.item.id,
+          why: rel + " is " + owners + " and jig cannot compose that file, so it writes none of it." +
+            " Here is what " + row.item.id + " needs in it:",
+          snippet: row.item.configBody,
+          wiring: row.item.wiring || null,
+        });
+      }
+      continue;
+    }
+    if (!shared) continue;
+
+    const parts = [];
+    if (starter) parts.push({ source: "the starter " + rel + " jig writes", body: starter.sample });
+    for (const row of rows) {
+      composed.add(row.item.id);
+      parts.push({ source: row.item.id, body: row.item.configBody });
+    }
+    const merged = sectionsLib.merge(parts, rel);
+    conflicts.push(...merged.conflicts);
+    writes.push({ path: rel, body: merged.body, sources: parts.map((p) => p.source) });
+  }
+
+  // A starter manifest nothing else configures is still a file jig has to
+  // write — `uv add` has nowhere to record a dependency without it.
+  for (const m of manifests) {
+    if (!m.path || !m.sample) continue;
+    const rel = toPosix(m.path);
+    if (writes.some((w) => w.path === rel) || byPath.has(rel)) continue;
+    writes.push({ path: rel, body: m.sample, sources: ["the starter " + rel + " jig writes"] });
+  }
+  return { writes, notes, conflicts, composed };
 }
 
 function draftFromTemplates(root, opts, checks) {
@@ -1492,9 +1624,73 @@ function draftFromTemplates(root, opts, checks) {
   // undoes the tool whole.
   const toolchain = toolchainProposal(root, loaded, opts, states);
   refused.push(...toolchain.refused);
-  for (const row of toolchain.items) {
-    const item = row.item;
+
+  // A project that does not exist yet cannot be installed into. Where the
+  // edition can hand over a starter project file, jig writes it and the run
+  // continues; where only the owner can name the thing — a Go module path, a
+  // Gradle template — the edition says so and every install for it is refused
+  // with that sentence rather than run into a folder with no project in it.
+  const greenfield = greenfieldEditions(root, loaded);
+  const blocked = new Set();
+  for (const m of greenfield) {
+    if (m.sample) continue;
+    blocked.add(m.edition);
+    // Once per edition, not once per tool. The owner has one thing to do and
+    // reading it six times would not make it any clearer.
+    refused.push("there is no " + m.edition + " project here yet, so nothing can install into it. " + m.hint);
+  }
+  const usable = toolchain.items.filter((row) => !blocked.has(row.item.edition));
+
+  // Every edition's project file, so composition knows which paths belong to
+  // the project rather than to a tool — but the starter text only where there
+  // is no project yet, because jig never re-writes one somebody already has.
+  //
+  // And only for an edition the owner NAMED. Detection is a heuristic over file
+  // names: a `pyproject.toml` makes a Python repository match the rust edition
+  // too, because `.toml` is one of rust's extensions. Creating a project file
+  // is a stated intent, never an inference — so `--edition rust` writes a
+  // `Cargo.toml` and a lucky extension match never does.
+  const named = typeof opts.edition === "string" && opts.edition.trim()
+    ? new Set(opts.edition.split(",").map((s) => s.trim()).filter(Boolean))
+    : new Set();
+  for (const m of greenfield) {
+    if (!m.sample || named.has(m.edition)) continue;
+    refused.push("there is no " + m.path + " here, so nothing was scaffolded for the " + m.edition +
+      " edition. If this is a " + m.edition + " project, re-run with --edition " + m.edition +
+      " and jig writes the starter first.");
+  }
+  const starting = new Set(greenfield.filter((m) => m.sample && named.has(m.edition)).map((m) => m.edition));
+  const manifests = loaded
+    .map((e) => editionsLib.manifestFor(e))
+    .map((m) => (starting.has(m.edition) ? m : { ...m, sample: null }));
+
+  const configs = composeConfigs(usable, manifests);
+  for (const write of configs.writes) {
+    const problem = occupancyProblem(root, write.path, states);
+    if (problem) { refused.push(problem); continue; }
+    changes.push({
+      id: changeId("toolchain-config-" + write.path, write.body),
+      kind: "write-side-file",
+      path: write.path,
+      content: write.body,
+      classIds: selection,
+      ownership: "file",
+      provenance,
+      template: { name: "toolchain-config-" + write.path, version: "composed" },
+      rationale: write.sources.length === 1
+        ? write.sources[0]
+        : write.path + ", composed from " + write.sources.join(", "),
+    });
+  }
+
+  for (const row of usable) {
+    // A tool whose config was composed above has already had its say in that
+    // one file, so the install itself must not write a second copy over it.
+    const item = configs.composed.has(row.item.id)
+      ? { ...row.item, configBody: null, configPath: row.item.configPath }
+      : row.item;
     if (row.present) {
+      if (configs.composed.has(item.id)) continue;
       changes.push({
         id: changeId("toolchain-" + item.id, item.configBody),
         kind: "write-side-file",
@@ -1620,6 +1816,13 @@ function draftFromTemplates(root, opts, checks) {
     mode,
     editions: loaded.map((e) => e.edition),
     toolchain,
+    // Three things the owner has to be shown rather than have decided for
+    // them: which editions had no project here yet, which tool configs jig
+    // refuses to compose and handed back as snippets, and every key two tools
+    // disagreed about in a file jig did compose.
+    greenfield,
+    configNotes: configs.notes,
+    configConflicts: configs.conflicts,
     discarded: admissionResult.discarded,
     discardedFile,
   };
@@ -1942,6 +2145,10 @@ function toolchainRow(row) {
     uninstall: item.uninstallCommand,
     configPath: item.configPath,
     wiring: item.wiring,
+    // Set when this project already carries the tool's config file and jig did
+    // not write it. The tool is still installable; its config is not jig's to
+    // lay down.
+    occupied: row.occupied || null,
   };
 }
 
@@ -2158,6 +2365,10 @@ function cmdToolchain(root, opts) {
     packageManager: proposal.packageManager,
     items: proposal.items.map(toolchainRow),
     refused: proposal.refused,
+    // Named here as well as on the plan, because this is the command the skill
+    // runs BEFORE it asks anybody to tick a tool — and on a folder with no
+    // project in it, half these installs have nowhere to record themselves.
+    greenfield: greenfieldEditions(root, loaded),
   };
 }
 
@@ -2258,6 +2469,16 @@ function cmdPlan(root, opts) {
     floorGaps: built ? built.review.floorGaps : [],
     // The installs and configs waiting on approval, with the exact command.
     toolchain: built ? built.review.toolchain : null,
+    // Editions with no project on disk yet. A row carrying `sample` is one jig
+    // writes a starter for; a row carrying `hint` is one only the owner can
+    // create, and the hint is the sentence to put to them.
+    greenfield: generated ? generated.greenfield : [],
+    // Tool configuration jig will NOT write, because several tools share a
+    // file it cannot compose. Each note carries the snippet and where it goes.
+    configNotes: generated ? generated.configNotes : [],
+    // Keys two tools set differently in a file jig did compose. The first
+    // writer's value is in the file; this is what was dropped to get there.
+    configConflicts: generated ? generated.configConflicts : [],
   };
 }
 
@@ -2713,7 +2934,7 @@ function cmdSelftest(root, opts) {
 const PROFILE_FILE = "profile.json";
 
 const PROFILE_KEYS = ["schemaVersion", "scannedAt", "stack", "languages", "edition", "editions", "node",
-  "guardrails", "governance", "slots", "occupied", "disclosures"];
+  "guardrails", "governance", "slots", "occupied", "greenfield", "disclosures"];
 
 // The files jig writes at v1 — the same targets the engine's per-kind
 // allowlist permits, named here as slots a human can be shown.
@@ -3022,7 +3243,7 @@ function governanceFacts(root, rules, hooks) {
   return { docs: found, orphans: found.filter((d) => !d.referencedBy.length).map((d) => d.path) };
 }
 
-function cmdScan(root) {
+function cmdScan(root, opts) {
   const hooks = collectHooks(root);
   const slots = conflictPreflight(root, hooks);
   const occupied = slots.filter((s) => !s.free);
@@ -3073,10 +3294,39 @@ function cmdScan(root) {
   }
 
   const stack = stackFacts(root);
-  if (!stack.editions.length) {
+  // What jig will work against, which is not always what detection read: on a
+  // folder with no code in it the owner names the edition and that answer is
+  // recorded here, so every later command inherits it from the profile instead
+  // of depending on the flag being passed again.
+  const resolved = resolveEditions(root, opts || {});
+  const working = resolved.map((e) => e.edition);
+  if (!stack.editions.length && working.length) {
+    disclosures.push("Nothing on disk names a language, so jig is working against the " + working.join(", ") +
+      " edition because you said so. Detection had nothing to read here.");
+  } else if (!stack.editions.length) {
     disclosures.push("No shipped edition matched this project, so nothing here is calibrated to a language." +
       " Every check will be authored from scratch and admitted on its own fixture pair — which is the same test," +
       " just without the research behind it.");
+  }
+
+  // Is there a project here yet? jig hardens what is about to be written as
+  // readily as what already is — that is the whole point of running it
+  // first — but a package manager still needs a project file to record an
+  // install in, so the scan says plainly which editions have none.
+  const greenfield = greenfieldEditions(root, resolved).map((m) => ({
+    edition: m.edition,
+    path: m.path,
+    canWrite: m.sample !== null,
+    hint: m.hint,
+  }));
+  for (const row of greenfield) {
+    disclosures.push(row.canWrite
+      ? "There is no " + row.path + " here yet, so this is a project jig writes the starter for before anything installs into it."
+      : row.hint);
+  }
+  if (!stack.editions.length && !greenfield.length) {
+    disclosures.push("Nothing here names a language yet. Say which one with --edition <id> and jig will" +
+      " scaffold against that edition instead of guessing from an empty folder.");
   }
 
   const profile = {
@@ -3087,13 +3337,14 @@ function cmdScan(root) {
     // this project is, and none of them should have to know where the census
     // happened to be written down.
     languages: stack.languages,
-    edition: stack.edition,
-    editions: stack.editions,
+    edition: working[0] || stack.edition,
+    editions: working,
     node,
     guardrails: { hooks, coreHooksPath: gitConfig(root, "core.hooksPath"), rules, precommit },
     governance,
     slots,
     occupied: occupied.map((s) => s.slot),
+    greenfield,
     disclosures,
   };
 

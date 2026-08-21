@@ -14,10 +14,12 @@ const fs = require("fs");
 const path = require("path");
 
 // The index and the edition files version independently: the index describes
-// the shelf, an edition describes a language. Both are at 3 today, and a future
-// edition bump must not have to rewrite the index.
+// the shelf, an edition describes a language, and a bump on one side must not
+// force a rewrite of the other. v4 added `detect.manifest` to the editions —
+// the project file an ecosystem cannot install anything without — and the index
+// never carried it, so the index is still at 3.
 const INDEX_SCHEMA = 3;
-const EDITION_SCHEMA = 3;
+const EDITION_SCHEMA = 4;
 
 const CATALOGUE_DIR = "catalogues";
 const INDEX_FILE = "index.json";
@@ -241,8 +243,77 @@ function loadEdition(pluginRoot, id) {
   if (!Array.isArray(record.classes)) {
     throw expected("the " + id + " edition at " + file + " has no classes array");
   }
+  validateManifest(record, file);
   editionCache.set(key, record);
   return record;
+}
+
+// v4's one new field. An ecosystem's project file is the thing every install in
+// it needs and no tool can create — `uv add` has nowhere to record a dependency
+// without a `pyproject.toml`, and `npm install` with no `package.json` walks up
+// the tree and lands in whatever project happens to be above this one. So the
+// edition states the file, and states either the starter jig may write or the
+// reason only the owner can create it.
+function validateManifest(record, file) {
+  const manifest = record.detect && record.detect.manifest;
+  if (!isObject(manifest)) {
+    throw expected("the " + record.edition + " edition at " + file + " declares no detect.manifest," +
+      " so nothing can say what this ecosystem's project file is. A v" + EDITION_SCHEMA + " edition carries one.");
+  }
+  const hasPath = typeof manifest.path === "string" && manifest.path !== "";
+  const hasSample = typeof manifest.sample === "string" && manifest.sample !== "";
+  const hasHint = typeof manifest.hint === "string" && manifest.hint !== "";
+  if (hasSample && !hasPath) {
+    throw expected("the " + record.edition + " edition offers a manifest sample with no path to write it to");
+  }
+  // Exactly one of the two has to be true, and the reason is the honest half:
+  // an edition that can neither write the project file nor say who does would
+  // leave a greenfield run stuck with no next step to take.
+  if (hasSample === hasHint) {
+    throw expected("the " + record.edition + " edition's detect.manifest must carry either a `sample` jig can" +
+      " write or a `hint` naming what the owner runs instead — it carries " +
+      (hasSample ? "both" : "neither"));
+  }
+}
+
+// The manifest as the engine wants it: never throws for a missing one, because
+// `validateManifest` already refused that at load.
+function manifestFor(edition) {
+  if (!isObject(edition) || !isObject(edition.detect) || !isObject(edition.detect.manifest)) {
+    throw expected("editions.manifestFor needs a loaded edition, and got " + JSON.stringify(edition));
+  }
+  const m = edition.detect.manifest;
+  return {
+    edition: edition.edition,
+    path: typeof m.path === "string" && m.path !== "" ? m.path : null,
+    sample: typeof m.sample === "string" && m.sample !== "" ? m.sample : null,
+    hint: typeof m.hint === "string" && m.hint !== "" ? m.hint : null,
+  };
+}
+
+// Whether this project has been created yet, judged the same way detection
+// judges anything: the edition's own marker files. None of them present means
+// there is no project here for a package manager to install into.
+function projectExists(projectRoot, edition, exists) {
+  requireRoot(projectRoot, "projectExists");
+  if (!isObject(edition) || !isObject(edition.detect) || !Array.isArray(edition.detect.files)) {
+    throw expected("editions.projectExists needs a loaded edition with detect.files, and got " + JSON.stringify(edition));
+  }
+  const seen = typeof exists === "function" ? exists : (rel) => fs.existsSync(path.join(projectRoot, rel));
+  for (const pattern of edition.detect.files) {
+    if (pattern.includes("*")) {
+      let entries;
+      try {
+        entries = fs.readdirSync(projectRoot, { withFileTypes: true });
+      } catch {
+        return false;
+      }
+      if (entries.some((e) => e.isFile() && fileMatches(pattern, e.name))) return true;
+      continue;
+    }
+    if (seen(pattern)) return true;
+  }
+  return false;
 }
 
 function editionClass(edition, classId) {
@@ -346,4 +417,6 @@ module.exports = {
   adaptDetector,
   namespacedId,
   commentSyntaxFor,
+  manifestFor,
+  projectExists,
 };
