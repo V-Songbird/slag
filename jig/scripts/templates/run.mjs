@@ -383,14 +383,44 @@ function scanWith(ctx, mod, det) {
   return ctx.scan(mod.id, p.paths || [], p.patterns, p);
 }
 
-// The fixture pair is stored inline, so the driver has to invent the filename it
-// would have lived under. It takes the extension from the detector's own first
-// path glob, which is the same derivation admission used when it admitted the
-// check — a different one here would prove a different thing.
-function fixtureName(det) {
+// The fixture pair is stored inline, so the driver has to invent the path it
+// would have lived under. That path has to satisfy the detector's own globs, or
+// ctx.scan filters the fixture straight back out and every precise check reports
+// a miss it never had. So the first glob is walked segment by segment and each
+// wildcard is replaced with a literal: `**` between directories collapses to
+// nothing, a `*` directory becomes one named directory, a `{a,b}` alternation
+// takes its first branch, and the final segment's `*` becomes `fixture`. A glob
+// ending `*.js` therefore still yields `fixture.js`, the same name and so the
+// same language admission read it as.
+function concreteSegment(glob, star) {
+  let out = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*") {
+      out += star;
+      while (glob[i + 1] === "*") i++;
+    } else if (c === "?") {
+      out += "x";
+    } else if (c === "{") {
+      const end = glob.indexOf("}", i);
+      const body = end === -1 ? glob.slice(i + 1) : glob.slice(i + 1, end);
+      out += body.split(",")[0];
+      i = end === -1 ? glob.length : end;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+function fixturePath(det) {
   const glob = (det.params.paths || [])[0] || "fixture.txt";
-  const ext = (glob.match(/\.[A-Za-z0-9]+$/) || [".txt"])[0];
-  return "fixture" + ext;
+  const segments = glob.split("/");
+  const base = concreteSegment(segments.pop(), "fixture");
+  const dirs = segments
+    .filter((seg) => seg !== "**" && seg !== "")
+    .map((seg) => concreteSegment(seg, "fx"));
+  return [...dirs, base].join("/");
 }
 
 // ---------------------------------------------------------------------------
@@ -439,10 +469,13 @@ async function runSelftest() {
       let hits = 0;
       let nearMissHits = 0;
       let failed = null;
+      let seeded = null;
       for (const det of mine) {
-        const name = fixtureName(det);
-        const full = path.join(dir, name);
+        const name = fixturePath(det);
+        if (!seeded) seeded = name;
+        const full = path.join(dir, ...name.split("/"));
         try {
+          fs.mkdirSync(path.dirname(full), { recursive: true });
           fs.writeFileSync(full, pair.violation);
           hits += scanWith(makeContext(dir, [name]), mod, det).length;
           fs.writeFileSync(full, pair.nearMiss);
@@ -457,7 +490,7 @@ async function runSelftest() {
       if (failed) { results.push({ id: mod.id, caught: false, why: failed }); continue; }
       const why = hits === 0 ? "the seeded violation did not fire the check"
         : nearMissHits > 0 ? "the check also fired on its own near miss" : null;
-      results.push({ id: mod.id, caught: hits > 0 && nearMissHits === 0, hits, nearMissHits, why });
+      results.push({ id: mod.id, caught: hits > 0 && nearMissHits === 0, seeded, hits, nearMissHits, why });
     }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

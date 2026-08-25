@@ -539,6 +539,32 @@ test("the driver's selftest runs each check against the fixture pair that admitt
   for (const r of results) assert.equal(r.caught, true, r.id + " did not catch its own violation fixture");
 });
 
+// A check whose globs are directory-scoped — the normal way to keep a guard off
+// a deliberate violation fixture or an ignored tree. The selftest seeds the
+// fixture on disk and then filters it through those same globs, so a fixture
+// dropped at the root of the throwaway directory is filtered straight back out
+// and every precise check reports a miss it never had.
+test("the selftest witnesses a check whose globs carry a directory prefix", () => {
+  const scoped = A.authored({
+    id: "scoped-empty-catch",
+    title: "A swallowed error under src/lib only",
+    detectors: [
+      { lever: "check-driver", actor: "human-editor", confidence: "deterministic",
+        params: { patterns: [A.CATCH_PATTERN], paths: ["*/lib/*.test.js", "src/**/*.js"] } },
+    ],
+    fixtures: A.EMPTY_CATCH.fixtures,
+    deny: A.DENY_CATCH,
+  });
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [scoped]);
+  const run = driver(root, ["--selftest", "--json"]);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  const result = JSON.parse(run.stdout).selftest.find((r) => r.id === "scoped-empty-catch");
+  assert.equal(result.caught, true, result && result.why);
+  assert.equal(result.seeded, "fx/lib/fixture.test.js",
+    "the fixture was not seeded at a path the check's own first glob matches");
+});
+
 test("a check module that will not load is reported and the others still run", () => {
   const root = nodeProject();
   install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
