@@ -29,8 +29,13 @@ ROADMAP.jsonl.backup-*
 
 # Machine-local plugin state from running the plugins on this repo
 .assay/
-.jig/
 .scribe/
+
+# jig's state is machine-local, except the check driver and the check modules:
+# those are project artifacts, and CI checks them out to run them. A trailing
+# slash would stop git descending, so the negation needs `.jig/*` above it.
+.jig/*
+!.jig/checks/
 jig/scripts/probes/results.json
 
 # This repo's dev config ported to other agent CLIs — local-only, not published
