@@ -85,6 +85,11 @@ const yaml = require("./vendor/js-yaml.js");
 // profile costs.
 const claudeAdapter = require("./adapters/claude.js");
 
+// [Foreman: 160] The model-profile seam: every scoring weight and threshold
+// below is read from a resolved profile, never written at module level. The
+// default reproduces the shipped numbers exactly.
+const { resolveProfile } = require("./models/index.js");
+
 // [Foreman: 079] The second host profile, and with it the registry `--host`
 // selects from. Adding one is adding a line here plus an adapter file; nothing
 // in the analyzers below branches on which one is active. A profile's own
@@ -670,16 +675,20 @@ const CONCRETE_TERMS = [
   "type narrowing",
 ];
 
-// Composite weights and floors — the quality-heuristic contract.
-const WEIGHTS = { F1: 1.5, F2: 1.0, F3: 1.3, F4: 1.0, F5: 1.5, F7: 2.0 };
-const SOFT_FLOOR_THRESHOLD = 0.2; // applied to F4 and F7
+// [Foreman: 160] Composite weights and floors — the quality-heuristic contract,
+// read from the resolved model profile rather than written here. The default
+// profile is haiku45, which holds exactly the numbers this file used to carry;
+// see scripts/models/haiku45.js for why that is the shipped column and not a
+// coincidence. Nothing selects a different profile yet.
+const MODEL_PROFILE = resolveProfile();
+const WEIGHTS = MODEL_PROFILE.weights;
+const THRESHOLDS = MODEL_PROFILE.thresholds;
 const STALENESS_MULTIPLIER = 0.05;
 // A bare prohibition can stall a headless run outright when the task needs the
 // banned action — capped to grade F regardless of the other factors.
 const STALL_RISK_CAP = 0.3;
 // Position only starts to bite in files long enough to bury their bottom rules.
 const LONG_FILE_LINES = 50;
-const BURIED_F5_THRESHOLD = 0.6;
 // [Foreman: 062] A file's problem is shape, not wording, when it is mostly
 // narrative, buries most of its rules, or is simply too long to hold one topic.
 // A per-rule rewrite can't reach any of these — the report names the restructure
@@ -691,7 +700,6 @@ const RESTRUCTURE_BELOW_MIDPOINT = 0.5;  // half+ of its rules sit past the midp
 // URL here). The docs state no line target for `.claude/rules/` files, so the
 // finding's limits clause naming that guidance only fires on a memory-kind file.
 const RESTRUCTURE_LONG_FILE_LINES = 200; // long enough that one file should be several
-const F8_HOOK_THRESHOLD = 0.4;
 const F4_NO_OVERLAP_SCORE = 0.85;
 const F4_AMBIGUOUS_SCORE = 0.65;
 const CATEGORY_FLOORS = { mandate: 0.5, override: 0.25, preference: 0.25 };
@@ -710,12 +718,10 @@ const FACTOR_COLUMNS = [
 ];
 
 // Placement detection signals (hook / skill / subagent / compound).
-const PLACEMENT_CANDIDATE_THRESHOLD = 0.6;
-const PLACEMENT_COMPOUND_THRESHOLD = 0.35;
 
 const PLACEMENT_SIGNALS = {
   hook: [
-    { name: "f8-low", weight: 0.4, f8Below: F8_HOOK_THRESHOLD },
+    { name: "f8-low", weight: 0.4, f8Below: THRESHOLDS.f8Hook },
     { name: "tool-invocation-match", weight: 0.3, pattern: /\b(git\s+(commit|push|tag|reset|rebase|checkout|merge|force-push)|npm\s+(publish|version|install)|yarn\s+(publish|version)|pnpm\s+(publish|version)|pip\s+install|docker\s+push)\b/i },
     { name: "mechanical-verb", weight: 0.2, pattern: /^\s*(never|always|do not|don't)\s+\w+/i },
     { name: "lifecycle-trigger-keyword", weight: 0.25, pattern: /\b(before\s+(committing|pushing|merging|releasing|publishing)|after\s+(tests?\s+pass|the?\s*build|each\s+(edit|write|save))|on\s+save|pre[-\s]commit|post[-\s]commit|session\s+start)\b/i },
@@ -2306,7 +2312,7 @@ function scoreF7(text) {
 // ---------------------------------------------------------------------------
 
 function softFloor(x) {
-  return Math.min(1, x / SOFT_FLOOR_THRESHOLD);
+  return Math.min(1, x / THRESHOLDS.softFloor);
 }
 
 function composeScore(factors, stale) {
@@ -2379,8 +2385,8 @@ function detectPlacement(ruleText, f8) {
     if (evidence.length) detections[primitive] = { confidence, evidence };
   }
 
-  const candidates = Object.entries(detections).filter(([, d]) => d.confidence >= PLACEMENT_CANDIDATE_THRESHOLD);
-  const firing = Object.entries(detections).filter(([, d]) => d.confidence >= PLACEMENT_COMPOUND_THRESHOLD);
+  const candidates = Object.entries(detections).filter(([, d]) => d.confidence >= THRESHOLDS.placementCandidate);
+  const firing = Object.entries(detections).filter(([, d]) => d.confidence >= THRESHOLDS.placementCompound);
   const compound = firing.length >= 2 && COMPOUND_CONJUNCTION.test(ruleText);
 
   if (!candidates.length && !compound) return null;
@@ -2994,7 +3000,7 @@ function composeAudit(scanData, judgments, opts = {}) {
       score: graded && english ? score : null,
       grade: graded && english ? grade(score) : null,
       stallRisk: english && stallRisk,
-      hookOpportunity: f8 != null && f8 < F8_HOOK_THRESHOLD,
+      hookOpportunity: f8 != null && f8 < THRESHOLDS.f8Hook,
       placement: english ? placement : null,
       weak: graded && english && score < (CATEGORY_FLOORS[r.category] ?? CATEGORY_FLOORS.mandate),
       suppressed: notRule !== null,
@@ -3126,11 +3132,6 @@ const FINDING_STATES = [
 ];
 const HARD_GATE_STATES = new Set(["inactive", "shadowed", "blocked"]);
 const OPERATIONAL_STATES = new Set(["ambiguous", "conflicting", "at-risk"]);
-// F3 at or below this: the moment the rule fires has more than one reading.
-const AMBIGUOUS_F3_THRESHOLD = 0.35;
-// F8 at or above this is the rubric's judgment-only ceiling — prose is the
-// right home for the policy, not a weaker place to have left it.
-const ADVISORY_F8_THRESHOLD = 0.9;
 
 // An experiment-supported finding must disclose the tier it was measured on and
 // what that does not cover: a Claude-profile signal, never a cross-agent law.
@@ -3720,7 +3721,7 @@ function deriveRuleState(rule, file, conflicted = new Map(), policy = DEFAULT_PO
     };
   }
   // Rubric row: the explicit-trigger requirement.
-  if (rubric && values.F3 != null && values.F3 <= AMBIGUOUS_F3_THRESHOLD) {
+  if (rubric && values.F3 != null && values.F3 <= THRESHOLDS.ambiguousF3) {
     return {
       state: "ambiguous", severity: "medium", analyzer: "trigger-distance",
       summary: "the moment it fires has more than one reading",
@@ -3777,7 +3778,7 @@ function deriveRuleState(rule, file, conflicted = new Map(), policy = DEFAULT_PO
     };
   }
   // Rubric row: the line-position lever.
-  if (rubric && values.F5 != null && values.F5 <= BURIED_F5_THRESHOLD) {
+  if (rubric && values.F5 != null && values.F5 <= THRESHOLDS.buriedF5) {
     return {
       state: "at-risk", severity: "low", analyzer: "position",
       summary: "buried in the bottom half of a long file, where rules lose force",
@@ -3813,7 +3814,7 @@ function deriveRuleState(rule, file, conflicted = new Map(), policy = DEFAULT_PO
       safeActions: [],
     };
   }
-  if (rule.f8 != null && rule.f8 >= ADVISORY_F8_THRESHOLD) {
+  if (rule.f8 != null && rule.f8 >= THRESHOLDS.advisoryF8) {
     return {
       state: "advisory", severity: "info", analyzer: "enforceability",
       summary: "needs judgment no mechanism can supply — it appropriately stays prose",
@@ -4726,14 +4727,13 @@ function isWeakAgent(a) {
 // razor: two factors per row. The table is a diagnosis, not a rewrite plan, and
 // a third fix makes the cell unreadable — raise MAX_ROW_FACTORS if the report
 // ever moves somewhere wider than a terminal.
-const WEAK_FACTOR_THRESHOLD = 0.6;
 const MAX_ROW_FACTORS = 2;
 
 function rowWeaknesses(rule) {
   const values = rule.factorValues || {};
   const gap = (name) => WEIGHTS[name] * (1 - values[name]);
   const weak = Object.keys(WEIGHTS)
-    .filter((name) => values[name] != null && values[name] < WEAK_FACTOR_THRESHOLD)
+    .filter((name) => values[name] != null && values[name] < THRESHOLDS.weakFactor)
     .sort((a, b) => gap(b) - gap(a));
   return weak.length ? weak.slice(0, MAX_ROW_FACTORS) : [rule.dominantWeakness];
 }
@@ -4887,7 +4887,7 @@ function restructureCandidates(audit) {
   const scopedRules = profileNouns(audit).scopedRules;
   audit.files.forEach((f, i) => {
     const own = audit.rules.filter((r) => !r.suppressed && r.fileIndex === i);
-    const belowMid = own.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD);
+    const belowMid = own.filter((r) => r.factorValues.F5 <= THRESHOLDS.buriedF5);
     const belowShare = own.length ? belowMid.length / own.length : 0;
     const reasons = [];
     const restructures = [];
@@ -5515,7 +5515,7 @@ function renderBrief(audit, opts = {}) {
   const covered = mine.filter((r) => alreadyWired.has(r.id));
 
   // Bucket 7 — sound, but sitting where it gets skimmed.
-  const buried = claim(mine.filter((r) => (r.factorValues || {}).F5 <= BURIED_F5_THRESHOLD));
+  const buried = claim(mine.filter((r) => (r.factorValues || {}).F5 <= THRESHOLDS.buriedF5));
 
   // [Foreman: 097] Filtered by the same `outside` set the fix buckets use. This
   // list is the FIRST advice in the report, and it was telling the reader to
@@ -5981,7 +5981,7 @@ function renderReport(audit, opts = {}) {
   const userWeak = rubric ? rules.filter((r) => userFilePaths.has(r.file) && r.weak && !gated.has(r.id)).sort((a, b) => a.score - b.score) : [];
   const ancestorWeak = rubric ? rules.filter((r) => ancestorFilePaths.has(r.file) && r.weak && !gated.has(r.id)).sort((a, b) => a.score - b.score) : [];
   const stalls = projectRules.filter((r) => r.stallRisk);
-  const buried = rubric ? projectRules.filter((r) => r.factorValues.F5 <= BURIED_F5_THRESHOLD) : [];
+  const buried = rubric ? projectRules.filter((r) => r.factorValues.F5 <= THRESHOLDS.buriedF5) : [];
   const stale = projectRules.filter((r) => r.staleness && r.staleness.missing.length);
   const badCategories = projectRules.filter((r) => r.invalidCategory);
   // [Foreman: 076] Corpus findings the renderer lists rather than re-derives.
