@@ -4,6 +4,12 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.3.1] — 2026-08-25
+
+### Fixed
+
+- A check whose file patterns name a folder now proves itself again. jig plants a violation for every check and requires the check to catch it, but it was planting the file at the top of a scratch folder instead of inside the folder the check watches. The check never saw its own violation, and the run reported it as not catching what it does catch. The report now also names the exact file that was planted.
+
 ## [2.3.0] — 2026-08-21
 
 ### Added
