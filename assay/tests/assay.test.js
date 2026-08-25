@@ -5146,8 +5146,125 @@ test("clean keeps a journal with an open change and removes a closed one, keepin
   assert.match(closed.out, /Removed \.assay-tmp\/ and the change journal — the undo history is gone/);
   assert.match(closed.out, /Kept the parked plan\(s\): \.assay\/plan-[0-9a-f]+\.json\./);
   assert.equal(fs.existsSync(path.join(root, ".assay", "journal.jsonl")), false);
-  // the plan artifact is the park record, so cleaning never takes it
-  assert.equal(fs.readdirSync(path.join(root, ".assay")).length, 1);
+  // [Foreman: 162] The plan artifact is the park record, so cleaning never
+  // takes it — and neither the transaction log nor the no-repo backup goes
+  // either. Those three ARE the undo once the journal is gone.
+  const survived = fs.readdirSync(path.join(root, ".assay")).sort();
+  assert.equal(survived.filter((f) => /^plan-[0-9a-f]+\.json$/.test(f)).length, 1);
+  assert.ok(survived.includes("transactions.jsonl"), "the transaction log survives clean");
+  assert.equal(survived.filter((f) => f.startsWith("backup-")).length, 1, "the backup survives clean");
+});
+
+// ---------------------------------------------------------------------------
+// Durable state, git preflight, transaction rows — [Foreman: 162]
+// ---------------------------------------------------------------------------
+
+const safety = require("../scripts/safety.js");
+
+// A project that IS a repository, with one commit, so HEAD exists and the tree
+// starts clean. Everything about the preflight is a property of git's answer,
+// so nothing here can be faked with a fixture directory.
+function gitProject(extra) {
+  const root = txProject(extra);
+  const run = (...args) => {
+    const r = spawnSync("git", args, { cwd: root, encoding: "utf-8" });
+    assert.equal(r.status, 0, "git " + args.join(" ") + ": " + (r.stderr || r.error));
+    return r.stdout;
+  };
+  run("init", "-q");
+  run("config", "user.email", "test@example.invalid");
+  run("config", "user.name", "assay test");
+  run("config", "commit.gpgsign", "false");
+  run("add", "-A");
+  run("commit", "-q", "-m", "fixture");
+  // the real flow writes its draft into the disposable directory, which the
+  // preflight excludes as assay's own state rather than the owner's work
+  fs.mkdirSync(path.join(root, ".assay-tmp"), { recursive: true });
+  return { root, run };
+}
+
+function transactionRows(root) {
+  return safety.readTransactions(root);
+}
+
+test("apply outside a repository copies every file it will touch, with a sha256 manifest", () => {
+  const root = txProject();
+  planDraft(root, { changes: [REWRITE_CHANGE, PROMOTE_CHANGE] });
+  const before = fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8");
+
+  const applied = cli(root, "apply", "--change", "c-rewrite", "--change", "c-skill");
+  assert.equal(applied.code, 0, applied.err);
+  const summary = JSON.parse(applied.out);
+  const backupDir = path.join(root, summary.backupDir);
+  assert.match(summary.backupDir, /^\.assay\/backup-t[0-9a-f]{10}$/);
+
+  // the copy is the pre-image, byte for byte
+  assert.equal(fs.readFileSync(path.join(backupDir, "CLAUDE.md"), "utf-8"), before);
+  const manifest = JSON.parse(fs.readFileSync(path.join(backupDir, "manifest.json"), "utf-8"));
+  const byPath = Object.fromEntries(manifest.files.map((f) => [f.path, f]));
+  assert.deepEqual(Object.keys(byPath).sort(), [".claude/skills/changelog/SKILL.md", "CLAUDE.md"]);
+  assert.equal(byPath["CLAUDE.md"].sha256, crypto.createHash("sha256").update(before).digest("hex"));
+  assert.equal(byPath["CLAUDE.md"].bytes, Buffer.byteLength(before));
+  // the promotion CREATES its file, so there is nothing to copy — and the null
+  // digest is what tells a revert to delete it again rather than restore it
+  assert.equal(byPath[".claude/skills/changelog/SKILL.md"].sha256, null);
+  assert.equal(fs.existsSync(path.join(backupDir, ".claude", "skills", "changelog", "SKILL.md")), false);
+});
+
+test("every run appends exactly one transaction row naming its id, model, files and kinds", () => {
+  const root = txProject();
+  planDraft(root, { changes: [REWRITE_CHANGE, PROMOTE_CHANGE] });
+  assert.equal(cli(root, "apply", "--change", "c-rewrite").code, 0);
+  assert.equal(cli(root, "apply", "--change", "c-skill").code, 0);
+
+  const rows = transactionRows(root);
+  assert.equal(rows.length, 2, "one row per run, not one per change");
+  assert.deepEqual(rows.map((r) => r.files), [["CLAUDE.md"], [".claude/skills/changelog/SKILL.md"]]);
+  assert.deepEqual(rows.map((r) => r.changes.map((c) => c.kind)), [["rule-rewrite"], ["placement-promotion"]]);
+  assert.notEqual(rows[0].txId, rows[1].txId);
+  for (const row of rows) {
+    assert.match(row.txId, /^t[0-9a-f]{10}$/);
+    assert.equal(row.model, "haiku45", "the row records which model the run optimized for");
+    assert.equal(row.assayVersion, engine.ANALYZER_VERSION);
+    assert.equal(row.gitHead, null, "no repository, so there is no commit to point at");
+    assert.match(row.startedAt, /^\d{4}-\d\d-\d\dT/);
+  }
+});
+
+test("in a clean repository the row carries gitHead and no files are copied", () => {
+  const { root } = gitProject();
+  planDraft(root, { changes: [REWRITE_CHANGE] }, ".assay-tmp/draft.json");
+  // assay's own state is not the owner's uncommitted work, so the plan
+  // artifact and the draft written before the apply leave the tree clean
+  assert.deepEqual(safety.preflight(root).dirty, []);
+
+  const applied = cli(root, "apply", "--change", "c-rewrite");
+  assert.equal(applied.code, 0, applied.err);
+
+  const [row] = transactionRows(root);
+  assert.match(row.gitHead, /^[0-9a-f]{40}$/);
+  assert.equal(row.backupDir, null, "git IS the backup — the row is a pointer, not a copy");
+  assert.equal(JSON.parse(applied.out).backupDir, null);
+  assert.deepEqual(fs.readdirSync(path.join(root, ".assay")).filter((f) => f.startsWith("backup-")), []);
+});
+
+test("a dirty repository stops apply before any write, names the paths, and never stashes", () => {
+  const { root } = gitProject();
+  planDraft(root, { changes: [REWRITE_CHANGE] }, ".assay-tmp/draft.json");
+  const before = fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8");
+  fs.writeFileSync(path.join(root, "notes.md"), "the owner's own uncommitted work\n");
+
+  const refused = cli(root, "apply", "--change", "c-rewrite");
+  assert.equal(refused.code, 1);
+  assert.match(refused.err, /uncommitted changes/);
+  assert.match(refused.err, /notes\.md/, "the refusal names the work it is refusing over");
+  assert.doesNotMatch(refused.err, /git stash/, "assay never offers to move the owner's work");
+
+  // nothing was written, journalled or recorded
+  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), before);
+  assert.equal(fs.readFileSync(path.join(root, "notes.md"), "utf-8"), "the owner's own uncommitted work\n");
+  assert.equal(fs.existsSync(path.join(root, ".assay", "journal.jsonl")), false);
+  assert.deepEqual(transactionRows(root), []);
 });
 
 test("a park is recorded in the plan and refused by apply", () => {

@@ -90,6 +90,14 @@ const claudeAdapter = require("./adapters/claude.js");
 // default reproduces the shipped numbers exactly.
 const { resolveProfile } = require("./models/index.js");
 
+// [Foreman: 162] The durability seam. `.assay/` is where a run records what it
+// is about to change, so the record outlives the `clean` that removes
+// `.assay-tmp/`. STATE_DIR and statePath are defined there rather than here
+// because that file is the one that must never be told to write elsewhere.
+const {
+  STATE_DIR, TRANSACTIONS_FILE, statePath, preflight, backupFiles, appendTransaction,
+} = require("./safety.js");
+
 // [Foreman: 079] The second host profile, and with it the registry `--host`
 // selects from. Adding one is adding a line here plus an adapter file; nothing
 // in the analyzers below branches on which one is active. A profile's own
@@ -6632,8 +6640,13 @@ function cmdRemeasure(root, opts) {
 // an unrolled-back write. `clean` still removes a CLOSED journal (said out loud
 // when it does) and refuses an open one; plan artifacts are kept, because a
 // parked plan is a record the user meant to keep.
-const STATE_DIR = ".assay";
+// STATE_DIR and statePath come from safety.js — see the require above.
 const JOURNAL_FILE = "journal.jsonl";
+
+// [Foreman: 162] How many dirty paths the refusal lists before it counts the
+// rest. A refusal has to name the work it is refusing over; it does not have to
+// print an entire unstaged rebase.
+const DIRTY_PATHS_SHOWN = 10;
 
 // The kinds of change a plan may carry. `park` is the deferral: recorded, never
 // applied — the plan artifact itself is the park record.
@@ -6651,10 +6664,6 @@ const VALIDATION_STEPS = {
 const VALIDATION_STEP_NAMES = ["reparse", "host-discovery", "static-reanalysis"];
 
 const MECHANISM_TYPES = ["hook", "skill", "subagent"];
-
-function statePath(root, ...parts) {
-  return path.join(root, STATE_DIR, ...parts);
-}
 
 // A path a plan is allowed to write: project-relative, inside the root. The
 // trust boundary — a draft plan is JSON the skill assembled, and an absolute or
@@ -7210,6 +7219,22 @@ function transactionId(planId, ids) {
 }
 
 function cmdApply(root, opts) {
+  // [Foreman: 162] Before anything is written, the undo story has to exist.
+  // A dirty tree is a hard stop and never a stash: `git stash -u` moves the
+  // owner's work somewhere they have to remember to look, which is a worse
+  // trade than one refusal. The paths are named, because "commit first" is not
+  // actionable unless it says what.
+  const pre = preflight(root);
+  if (pre.dirty.length) {
+    const shown = pre.dirty.slice(0, DIRTY_PATHS_SHOWN);
+    fail("The git tree has uncommitted changes, so apply stopped before writing anything." +
+      "\n  " + shown.join("\n  ") +
+      (pre.dirty.length > shown.length ? "\n  ...and " + (pre.dirty.length - shown.length) + " more" : "") +
+      "\n  Undo for a git project is putting the files back the way the last commit had them, and that " +
+      "only means something from a clean tree. Commit or stash this work yourself first — assay will not " +
+      "move it for you.");
+  }
+
   let ids = opts.changes;
   if (opts.batch) {
     // A batch is an approval too — an explicitly named one, defined in the plan.
@@ -7253,6 +7278,26 @@ function cmdApply(root, opts) {
     selected.push({ change, ctx });
   }
 
+  // [Foreman: 162] One row per run, written BEFORE the writes rather than after
+  // them, so a batch that half-applies is still a run a revert can find. With a
+  // repository the row is a pointer and `gitHead` localizes the commit; without
+  // one there is nothing to point at, so the files are copied first and the row
+  // names the copy.
+  const txId = selected[0].ctx.transaction;
+  const files = [...new Set(selected.flatMap(({ change }) => change.patches.map((p) => p.path)))].sort();
+  const backupDir = pre.repo ? null : backupFiles(root, txId, files);
+  appendTransaction(root, {
+    txId,
+    startedAt: new Date().toISOString(),
+    model: MODEL_PROFILE.id,
+    assayVersion: ANALYZER_VERSION,
+    gitHead: pre.head,
+    backupDir,
+    files,
+    changes: selected.flatMap(({ change }) =>
+      change.patches.map((p) => ({ id: change.id, kind: change.kind, path: p.path }))),
+  });
+
   const applied = [];
   for (const { change, ctx } of selected) {
     for (const patch of change.patches) journalledWrite(root, ctx, patch, "apply");
@@ -7281,6 +7326,9 @@ function cmdApply(root, opts) {
   process.stdout.write(JSON.stringify({
     applied,
     journal: STATE_DIR + "/" + JOURNAL_FILE,
+    // [Foreman: 162] Where the undo lives once `clean` has taken the journal.
+    transactions: STATE_DIR + "/" + TRANSACTIONS_FILE,
+    backupDir,
     // No apply kind deletes or deactivates prose. A promotion adds the mechanism
     // beside the rule; a rewrite replaces rule text and leaves the rule in place.
     // Deactivating a rule is the author's own edit, outside this transaction:
@@ -7538,7 +7586,11 @@ function cmdClean(root) {
   }
   fs.rmSync(journal, { force: true });
   const kept = planFiles(root).map((f) => path.relative(root, f).split(path.sep).join("/"));
-  if (!kept.length) fs.rmSync(statePath(root), { recursive: true, force: true });
+  // [Foreman: 162] The directory goes only when it is empty. `.assay/` now also
+  // holds the transaction log and the no-repo backups, and those are the record
+  // that makes a run revertible after the journal is gone — `clean` removes the
+  // journal it was asked to remove and nothing beside it.
+  if (!fs.readdirSync(statePath(root)).length) fs.rmdirSync(statePath(root));
   // [Foreman: 097] What was destroyed, and what the undo is from here. The
   // journal holds the only pre-image of every file assay wrote; removing it is
   // the point of this command and it used to be reported as tidying up. And the
