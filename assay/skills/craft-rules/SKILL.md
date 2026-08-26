@@ -60,7 +60,7 @@ Ask in this order, and say in one short clause WHY each answer matters — a
 question with no stated reason reads as a form to fill in. The order is by what a
 wrong answer costs: 1-3 decide where the rule lives and whether it should be a
 rule at all; 4 and 5 decide whether there is a rule to write at all — with
-neither, you refuse below; 6 and 7 only sharpen it.
+neither, you refuse below; 6, 7 and 8 only sharpen it.
 
 1. **Scope** — the whole project, or bound to file types, paths, or one
    subdirectory? *This picks the file it goes in, and a rule in the wrong file
@@ -79,6 +79,10 @@ neither, you refuse below; 6 and 7 only sharpen it.
    instead of stopping. *A ban with no alternative can stall a run outright.*
 7. **The specifics** — exact paths, identifiers, thresholds. *These are what make
    "done properly" mean one thing.*
+8. **One line of what right looks like** — the command, the call, the sentence
+   they would want back. *An example carries what a description of the example
+   cannot; it is also the concrete specific question 7 is asking for. Optional:
+   this lever is unmeasured, so never hold a rule back for it.*
 
 **"I don't know" is a real answer, and it never ends the interview.** Offer the
 fallback that fits:

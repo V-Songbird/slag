@@ -25,7 +25,7 @@ For prohibitions:
 Never <X> — <do Y> instead.
 ```
 
-Four load-bearing parts:
+Four load-bearing parts, each measured:
 
 1. **Trigger.** Name the firing moment: "When editing X…", "Before
    committing…", "After adding a migration…". Duties on distant files
@@ -49,6 +49,41 @@ Four load-bearing parts:
    skill (redirect table below).
 
 Ceiling: one bullet, under ~30 words, one duty. Two duties are two rules.
+
+## Two more levers, and what is known about them
+
+These two are **not measured**. They come from a mechanism account of why
+instructions are followed, and that account's own caveat travels with it: it is
+a plausible model of the machinery, not testimony about it. The engine grades
+neither, so neither can raise a score — use them where they cost nothing, and
+never present them to an author as a measured result.
+
+5. **One example of correct output.** Show one, in the rule or beside it:
+
+   ```
+   - Before committing, run `npx prettier --write .` over every staged file —
+     e.g. `npx prettier --write src/app.ts`.
+   ```
+
+   An example is claimed to work on the same machinery
+   that produces the answer, where a description of the answer does not. It is
+   also the cheapest way to satisfy part 4: an example IS a concrete specific,
+   and one line often carries what three sentences of qualification cannot.
+   One example, not three — a list of examples reads as a list of cases, and
+   case logic belongs in a skill.
+
+6. **Restate what matters most at the end of a long instruction.** This is
+   about the whole instruction, not the bullet: a long rule FILE, or a skill
+   body, or a task prompt. Close it by restating the two or three constraints
+   that would hurt most to lose. Two or three, never a summary of everything —
+   restating all of it restates nothing, and a closing block that repeats the
+   file is a second copy to keep in sync.
+
+   Watch what this costs elsewhere. A restated rule is a real rule to the
+   engine: it is graded, counted, and can come back as a duplicate of the one
+   it restates. Write the closing block as prose that names the constraints
+   rather than as fresh mandate bullets, or fence it with `<!-- assay-ignore
+   -->` so the audit reads it as the reminder it is.
 
 ## Placement
 
