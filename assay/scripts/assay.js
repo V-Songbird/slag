@@ -88,7 +88,7 @@ const claudeAdapter = require("./adapters/claude.js");
 // [Foreman: 160] The model-profile seam: every scoring weight and threshold
 // below is read from a resolved profile, never written at module level. The
 // default reproduces the shipped numbers exactly.
-const { resolveProfile } = require("./models/index.js");
+const { PROFILES, resolveProfile } = require("./models/index.js");
 
 // [Foreman: 162] The durability seam. `.assay/` is where a run records what it
 // is about to change, so the record outlives the `clean` that removes
@@ -389,7 +389,7 @@ function validateRecord(record, kind) {
 }
 
 function makeRecord(kind, payload, root) {
-  const { coverage = null, context = null, profile = null, ...rest } = payload;
+  const { coverage = null, context = null, profile = null, model = null, ...rest } = payload;
   const projectRoot = path.resolve(root);
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -400,6 +400,10 @@ function makeRecord(kind, payload, root) {
     // shape is unchanged — host and version, plus whatever policy that profile
     // declares. The consts remain the fallback for a hand-built payload.
     profile: profile || { host: PROFILE_HOST, version: PROFILE_VERSION },
+    // [Foreman: 175] The model column the numbers in this record were produced
+    // under - a sibling of the host profile above, and read back by every
+    // command that renders a record it did not compute.
+    model: model || MODEL_PROFILE.id,
     // [Foreman: 074] The context the adapter fixed for this analysis, carried
     // through unchanged. `userDir` null means user scope was off; `hostVersion`
     // null means the host was not probed or did not answer. Both are additive:
@@ -437,7 +441,11 @@ function readRecord(file, kind) {
     return { problem: "not valid JSON: " + err.message };
   }
   const problem = validateRecord(record, kind);
-  return problem ? { problem } : { record };
+  if (problem) return { problem };
+  // [Foreman: 175] One adoption point for every reader, so no command can
+  // render a record's numbers through a different column than produced them.
+  adoptRecordModel(record);
+  return { record };
 }
 
 // One provenance line for every renderer: who analyzed this, under which host
@@ -688,9 +696,34 @@ const CONCRETE_TERMS = [
 // profile is haiku45, which holds exactly the numbers this file used to carry;
 // see scripts/models/haiku45.js for why that is the shipped column and not a
 // coincidence. Nothing selects a different profile yet.
-const MODEL_PROFILE = resolveProfile();
-const WEIGHTS = MODEL_PROFILE.weights;
-const THRESHOLDS = MODEL_PROFILE.thresholds;
+// [Foreman: 175] Reassignable, and reassigned exactly twice: once by `--model`
+// during argument parsing, and once when a command reads a record that names
+// the column its numbers were produced under. Both happen before any scoring
+// runs. Nothing below reads a weight or a threshold at module load - see
+// PLACEMENT_SIGNALS, which names its threshold instead of copying its value.
+let MODEL_PROFILE = resolveProfile();
+let WEIGHTS = MODEL_PROFILE.weights;
+let THRESHOLDS = MODEL_PROFILE.thresholds;
+
+// Set from the flag, this pins the column: a record read later may not quietly
+// move the numbers out from under an id the caller typed.
+let modelPinnedByFlag = false;
+
+function useModelProfile(id, fromFlag) {
+  MODEL_PROFILE = resolveProfile(id);
+  WEIGHTS = MODEL_PROFILE.weights;
+  THRESHOLDS = MODEL_PROFILE.thresholds;
+  if (fromFlag) modelPinnedByFlag = true;
+}
+
+// A record carries the column it was produced under. `report` re-renders a scan
+// this process did not run, so adopting that column is what keeps a reported
+// number the number that was measured, rather than the default one.
+function adoptRecordModel(record) {
+  if (modelPinnedByFlag) return;
+  const id = record && record.model;
+  if (typeof id === "string" && PROFILES[id]) useModelProfile(id, false);
+}
 const STALENESS_MULTIPLIER = 0.05;
 // A bare prohibition can stall a headless run outright when the task needs the
 // banned action — capped to grade F regardless of the other factors.
@@ -729,7 +762,9 @@ const FACTOR_COLUMNS = [
 
 const PLACEMENT_SIGNALS = {
   hook: [
-    { name: "f8-low", weight: 0.4, f8Below: THRESHOLDS.f8Hook },
+    // [Foreman: 175] The threshold is NAMED here, not copied: this table is
+    // built at module load, before `--model` has chosen a column.
+    { name: "f8-low", weight: 0.4, f8BelowThreshold: "f8Hook" },
     { name: "tool-invocation-match", weight: 0.3, pattern: /\b(git\s+(commit|push|tag|reset|rebase|checkout|merge|force-push)|npm\s+(publish|version|install)|yarn\s+(publish|version)|pnpm\s+(publish|version)|pip\s+install|docker\s+push)\b/i },
     { name: "mechanical-verb", weight: 0.2, pattern: /^\s*(never|always|do not|don't)\s+\w+/i },
     { name: "lifecycle-trigger-keyword", weight: 0.25, pattern: /\b(before\s+(committing|pushing|merging|releasing|publishing)|after\s+(tests?\s+pass|the?\s*build|each\s+(edit|write|save))|on\s+save|pre[-\s]commit|post[-\s]commit|session\s+start)\b/i },
@@ -2383,7 +2418,7 @@ function detectPlacement(ruleText, f8) {
     const evidence = [];
     for (const s of signals) {
       let hit = false;
-      if (s.f8Below !== undefined) hit = f8 != null && f8 < s.f8Below;
+      if (s.f8BelowThreshold !== undefined) hit = f8 != null && f8 < THRESHOLDS[s.f8BelowThreshold];
       else if (s.anyPattern) hit = s.anyPattern.some((p) => p.test(ruleText));
       else if (s.pointerShape) hit = countActionVerbs(ruleText) <= 1 && (/\.md\b/.test(ruleText) || /`[^`]*\/[^`]*`/.test(ruleText));
       else hit = s.pattern.test(ruleText);
@@ -7954,6 +7989,9 @@ const FLAGS = new Set(["--verbose", "--json", "--project-only", "--force", "--pl
 // error says what was missing.
 const VALUE_FLAGS = new Map([
   ["--root", "path"], ["--host", "profile name"],
+  // [Foreman: 175] Which model column the scoring runs under. The four audit
+  // commands each name one; the flag is how that name reaches the engine.
+  ["--model", "model profile id (" + Object.keys(PROFILES).join(", ") + ")"],
   // The startup directory a session is modeled as beginning in. Only a profile
   // whose host reads a root-to-startup chain consumes it; the engine refuses it
   // for any profile that ignores it, and for any command that would not read
@@ -7974,6 +8012,9 @@ const VALUE_FLAGS = new Map([
 // person is meant to type — and the four that carry a write are exactly the ones
 // nobody should be running by hand.
 const HOSTS = Object.keys(ADAPTERS).join("|");
+// [Foreman: 175] The model column the scoring runs under, offered wherever a
+// host is: both name which profile the numbers come from.
+const MODELS = Object.keys(PROFILES).join("|");
 const USAGE = [
   "assay — reads the instruction files an agent loads for a project and reports what is",
   "vague, stale, buried, or better done by a script.",
@@ -7984,13 +8025,13 @@ const USAGE = [
   "Usage: assay.js <command> [--root <path>]",
   "",
   "Commands to run yourself:",
-  "  scan            [--host <" + HOSTS + ">] [--startup <dir>] [--project-only]",
+  "  scan            [--host <" + HOSTS + ">] [--model <" + MODELS + ">] [--startup <dir>] [--project-only]",
   "                  read the project and write " + TMP_DIR + "/scan.json",
   "  report          [--plain] [--verbose] [--json] [--top <n>]",
-  "                  print the report from that scan",
-  "  remeasure       [--host <" + HOSTS + ">] [--startup <dir>] [--project-only] [--verbose] [--json]",
+  "                  print the report from that scan, under the model that scan named",
+  "  remeasure       [--host <" + HOSTS + ">] [--model <" + MODELS + ">] [--startup <dir>] [--project-only] [--verbose] [--json]",
   "                  re-scan after fixes and print the before/after",
-  "  ci              [--host <" + HOSTS + ">] [--startup <dir>] [--project-only] [--fail-on <gate>[,<gate>…]] [--json]",
+  "  ci              [--host <" + HOSTS + ">] [--model <" + MODELS + ">] [--startup <dir>] [--project-only] [--fail-on <gate>[,<gate>…]] [--json]",
   "                  deterministic, writes nothing; exit 0 clean, 2 a gate failed, 1 usage error",
   "                  gates (closed set): " + CI_GATE_NAMES.join(", "),
   "                  default: " + CI_DEFAULT_GATES.join(", "),
@@ -8004,7 +8045,7 @@ const USAGE = [
   // directory like every other command that does. Both Codex surfaces have
   // instructed passing `--host codex` since 1.9.0 and the parser has always
   // accepted it; only this line did not say so.
-  "  validate        --change <id> [--host <" + HOSTS + ">] [--startup <dir>] [--external \"<kind>: <result>\"]",
+  "  validate        --change <id> [--host <" + HOSTS + ">] [--model <" + MODELS + ">] [--startup <dir>] [--external \"<kind>: <result>\"]",
   "  rollback        --change <id> [--change <id> …] | --transaction <id>  [--force]",
 ].join("\n");
 
@@ -8106,6 +8147,23 @@ function main() {
   if (!ADAPTERS[host]) {
     usageError("Unknown host: " + host + " — valid hosts are " + Object.keys(ADAPTERS).join(", ") + ".");
   }
+  // [Foreman: 175] Which model column the scoring runs under. Same shape as
+  // `--host` above, and for the same reason: a name assay does not know is a
+  // refusal naming the ones it does, never a silent fall back to the default.
+  const modelIdx = args.indexOf("--model");
+  if (modelIdx !== -1) {
+    const id = args[modelIdx + 1];
+    if (!PROFILES[id]) {
+      usageError("Unknown model: " + id + " - valid models are " + Object.keys(PROFILES).join(", ") + ".");
+    }
+    // A record already names its column, so only a command that computes one
+    // takes the flag; every other reads it back off the record it renders.
+    if (!SCANNING_COMMANDS.includes(command)) {
+      usageError("--model belongs to the commands that scan (" + SCANNING_COMMANDS.join(", ") + "); " +
+        command + " reads the model profile off the saved records.");
+    }
+    useModelProfile(id, true);
+  }
   // [Foreman: 097] The same honesty rule `--startup` has had: a flag a command
   // would silently ignore is refused instead of accepted. Only discovery reads a
   // host profile; every other command works from a record that already names one.
@@ -8198,6 +8256,9 @@ function main() {
 
 module.exports = {
   parseFrontmatter, parseFrontmatterBlock, lineOffsets, sourceRange,
+  // [Foreman: 175] which commands compute a record, and therefore the only
+  // ones --host, --startup, --project-only and --model mean anything to
+  SCANNING_COMMANDS,
   // [Foreman: 074] discovery lives in the adapter; re-exported so callers and
   // tests keep one import
   adapter: claudeAdapter, findRuleMarkdownFiles: claudeAdapter.findRuleMarkdownFiles,

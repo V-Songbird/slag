@@ -145,7 +145,8 @@ plan stale and the journal blind.
    name is not applied even though the plan carries it. A stale file exits 1
    naming both fingerprints and writes nothing; re-plan rather than forcing it. A
    write whose result does not parse is restored and exits 1.
-4. `validate --change <id>` per applied change. It re-parses what was written,
+4. `validate --change <id> --model <id>` per applied change — it re-scans, so it
+   takes the model target the audit ran under. It re-parses what was written,
    re-runs the static analysis and records the corpus state that results, and for a promotion checks
    that the host actually discovers the new mechanism. It reports `configured`
    and nothing above: a file on disk is not evidence that anything ran. assay

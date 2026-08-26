@@ -1776,9 +1776,16 @@ test("release gate G9: the audit procedure is stated once, and only there", () =
 });
 
 test("release gate G9: the four commands know exactly the flags the procedure documents", () => {
-  const shared = fs.readFileSync(SHARED_AUDIT, "utf-8");
+  // [Foreman: 175] Newlines are normalized before the paragraph is cut out.
+  // The file ships with CRLF endings, so the blank-line search found nothing
+  // and this gate read the WHOLE remainder of the procedure as its flag
+  // paragraph — every engine flag mentioned anywhere below counted as one the
+  // four commands had to offer.
+  const shared = fs.readFileSync(SHARED_AUDIT, "utf-8").replace(/\r\n/g, "\n");
   const para = shared.slice(shared.indexOf("Flags in `$ARGUMENTS`"));
-  const documented = flagSet(para.slice(0, para.indexOf("\n\n")));
+  const end = para.indexOf("\n\n");
+  assert.notEqual(end, -1, "the flags paragraph is not followed by a blank line");
+  const documented = flagSet(para.slice(0, end));
   assert.ok(documented.length >= 6, "the shared procedure no longer lists its flags in one paragraph");
   assert.ok(!documented.includes("--fix"), "the shared procedure still documents the retired --fix");
   assert.ok(documented.includes("--dry-run"), "the shared procedure never documents --dry-run");
@@ -1809,6 +1816,68 @@ test("release gate G9: each command names one model target, and the four are the
   }
   assert.deepEqual([...targets.keys()].sort(), Object.keys(MODEL_PROFILES).sort(),
     "the commands and the shipped model profiles are not the same set");
+});
+
+test("release gate G9: the model target reaches the engine, not just the closing sentence", () => {
+  // [Foreman: 175] The four commands used to differ in prose alone: the engine
+  // took no model argument, so every door scored identically and the target
+  // named an audience rather than a measurement. The flag exists now, and this
+  // gate is what keeps the procedure passing it.
+  const shared = fs.readFileSync(SHARED_AUDIT, "utf-8").replace(/\r\n/g, "\n");
+  const calls = [...shared.matchAll(/assay\.js" (\w+)([^\n`]*)/g)].map((m) => ({ command: m[1], rest: m[2] }));
+  assert.ok(calls.length, "the shared procedure runs no engine command at all");
+  for (const { command, rest } of calls) {
+    const scans = engine.SCANNING_COMMANDS.includes(command);
+    assert.equal(/--model/.test(rest), scans,
+      "the shared procedure gets --model wrong on `" + command + "`: " + JSON.stringify(rest) +
+      (scans ? " — a command that scans must carry the target" : " — a command that reads a record must not"));
+  }
+  // The id the procedure tells the model to substitute is the command's own
+  // name, so each door has one and the engine knows all four.
+  for (const name of MODEL_COMMANDS) {
+    assert.ok(shared.includes("`" + name + "`"),
+      "the shared procedure never names `" + name + "` as a --model id");
+    assert.ok(MODEL_PROFILES[name], name + " is not a profile the engine ships");
+  }
+  // And it stays an engine argument: a hint offering it would put a choice in
+  // front of a user whose command already made it, exactly as --host would.
+  for (const name of MODEL_COMMANDS) {
+    const hint = String(engine.parseFrontmatter(modelSkill(name))["argument-hint"] || "");
+    assert.doesNotMatch(hint, /--model/, name + " offers --model, which its own name already decided");
+  }
+});
+
+test("release gate G9: each model id the engine ships actually moves the score", () => {
+  // A flag that parses but changes nothing would pass every gate above. This
+  // one measures: the same corpus, scanned under each column, must not produce
+  // one shared set of numbers.
+  const project = tmpProject({
+    "CLAUDE.md": [
+      "# Rules",
+      "",
+      "- Run prettier before committing.",
+      "- Always update the changelog when you touch a public API.",
+      "- Write clean, maintainable code.",
+      "",
+    ].join("\n"),
+  });
+  const scores = new Map();
+  for (const id of Object.keys(MODEL_PROFILES)) {
+    const scanned = cli(project, ["scan", "--root", project, "--model", id, "--project-only"]);
+    assert.equal(scanned.code, 0, scanned.err);
+    const record = JSON.parse(fs.readFileSync(path.join(project, ".assay-tmp", "scan.json"), "utf-8"));
+    assert.equal(record.model, id, "the scan record does not name the column it was produced under");
+    // and `report` re-resolves that column in a process that was never given
+    // the flag, rather than falling back to the default one
+    const reported = cli(project, ["report", "--root", project, "--json"]);
+    assert.equal(reported.code, 0, reported.err);
+    const audit = JSON.parse(reported.out);
+    assert.equal(audit.model, id, "report rendered a scan under a different model than produced it");
+    scores.set(id, audit.rules.map((r) => r.score).join(","));
+  }
+  assert.equal(new Set(scores.values()).size, scores.size,
+    "two model columns score the same corpus identically, so the target is still a label: " +
+    [...scores].map((p) => p.join("=")).join(" | "));
 });
 
 test("release gate G9: no surface still offers the retired --fix", () => {

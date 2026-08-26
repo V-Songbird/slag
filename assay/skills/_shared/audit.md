@@ -5,10 +5,18 @@ The one statement of how a Claude Code audit runs. Every model command under
 What differs between them is the **model target** — the model the findings are
 written for — which the command that sent you here names in its own `SKILL.md`.
 
-Carry that target into your closing sentences and nowhere else. The engine
-scores one way today and takes no model argument, so the target says who the
-advice is for. It is never a claim that anything here was measured on that
-model.
+The target is a **measurement**, not a label. Its id is the name of the command
+that sent you here — `opus5`, `sonnet5`, `haiku45` or `fable5` — and every call
+below that scans takes it as `--model <id>`: `scan`, `remeasure`, `validate` and
+`ci`. Pass it on every one of them, or the run scores under a different model
+than the one the user asked about. `report` takes no `--model`: it reads the
+column back off the scan it renders.
+
+Carry the target into your closing sentences too, so the reader knows who the
+advice was written for. One honesty limit stands: only the `haiku45` column was
+measured against live runs. The other three declare `profile-inferred` evidence
+on every constant they ship, and the report says so itself — do not upgrade that
+wording.
 
 The script measures everything mechanical; you judge two factors and present the
 result. Never re-derive by hand what the script already computed.
@@ -30,7 +38,7 @@ work from the saved scan and refuse the flag, because they have nothing left to
 discover:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" scan
+node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" scan --model <id>
 ```
 
 assay needs Node 18 or newer. If `node` is not on PATH (fnm/nvm setups),
@@ -309,7 +317,7 @@ Only when something was applied, and before step 6, because it reads the journal
 and the judgment cache:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" remeasure
+node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" remeasure --model <id>
 ```
 
 It re-scans, reuses every cached judgment whose rule is unchanged, and prints the
