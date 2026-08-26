@@ -4,6 +4,12 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.3.2] — 2026-08-26
+
+### Changed
+
+- Both skills describe themselves in their own terms and no longer point at another plugin's commands to say what they are not for. The descriptions are also shorter and lead with what jig does, so the right one is picked more reliably.
+
 ## [2.3.1] — 2026-08-25
 
 ### Fixed

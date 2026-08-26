@@ -1,11 +1,10 @@
 ---
 name: review
 description: >-
-  Reads jig's ledger and shows what every installed guard has done — fired,
-  never fired, or waved off as a false alarm — then acts on it: mark a report
-  as a false alarm, step a guard down to observe or back to blocking, retire a
-  guard that never earned its keep, and report any installed file that has
-  drifted since jig wrote it. Use when the user asks what jig has caught,
+  Reads jig's ledger and reports what every installed guard has done. Then acts
+  on it: mark a report as a false alarm. Step a guard down to observe or back to
+  blocking. Retire one that never earned its keep. List installed files that
+  drifted since jig wrote them. Use when the user asks what jig has caught,
   whether a guard is worth keeping, to change what a guard does on a match, to
   mark a report as wrong, or to see what has changed since the install — e.g.
   "what did jig catch", "that jig warning was wrong", "stop the force-push

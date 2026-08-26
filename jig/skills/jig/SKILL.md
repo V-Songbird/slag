@@ -1,26 +1,18 @@
 ---
 name: jig
 description: >-
-  Interviews the owner of a project, then installs a reviewed, reversible
-  apparatus that catches bad work before it lands — the linter and its config,
-  the type checker, the test runner, a CI workflow, and project-specific checks
-  written for this codebase and proven against their own fixtures before they
-  are ever offered as coverage. Works on a project that does not exist yet as
-  readily as on one that does: pointed at an empty folder it writes the starter
-  project file, installs the toolchain and lands the checks first, so the
-  session that writes the code has a working harness from its first edit. Reads
-  the repository and its git history when there is one, so it never asks for a
-  fact it can already see. Every file it writes and every tool it installs is
-  named and approved first, and every byte is reversible: nothing unapproved.
-  Use when the user wants guardrails set up, wants a new project scaffolded so
-  the code written into it is checked from the start, or wants a repeat mistake
-  caught before it lands — e.g. "set up guardrails", "scaffold this project",
-  "set this up before I write any code", "stop the AI deleting my tests", "add
-  checks to this repo", "what keeps breaking here", "catch skipped tests before
-  they merge", "guard this project against agent mistakes" — or invokes
-  /jig:jig. Do NOT use to grade or audit existing rules or skill descriptions —
-  that is /assay:opus5 — and not to write one rule or one skill — those are
-  /assay:craft-rules and /assay:craft-skill.
+  Interviews a project's owner then installs reviewed and reversible checks that
+  catch bad work before it lands — linter, type checker, tests, CI and
+  project-specific guards proven against their own fixtures before they are
+  offered as coverage. Nothing is written or installed without being named and
+  approved first. Works on an empty folder as readily as an existing repo. Use
+  when the user wants guardrails set up, a new project scaffolded so its code is
+  checked from the first edit, or a repeat mistake caught before it lands — e.g.
+  "set up guardrails", "scaffold this project", "stop the AI deleting my tests",
+  "add checks to this repo", "what keeps breaking here", "catch skipped tests
+  before they merge" — or invokes /jig:jig. Do NOT use to grade, audit or author
+  prompt text — rules, skill descriptions or agent instructions: this installs
+  checks that run against a codebase.
 argument-hint: "[--quick] [--edition <id>] [--select <classId,…>] [--no-ci] [--observe]"
 allowed-tools: Bash, Read, Write, AskUserQuestion
 ---
