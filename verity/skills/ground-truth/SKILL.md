@@ -2,23 +2,15 @@
 name: ground-truth
 description: >-
   Fetches the current official Claude Code documentation on demand from
-  code.claude.com/docs/en/ and returns raw Markdown from primary sources.
-  Also reads a bundled canonical reference for undocumented host MCP tools
-  (spawn_task, dismiss_task, mark_chapter, read_widget_context, show_widget,
-  and the ccd_session and visualize families). Provides live truth-grounding
-  instead of relying on Claude's training memory.
-when_to_use: >-
-  Trigger when: (1) Claude is uncertain about a Claude Code feature, setting,
-  hook event name, CLI flag, settings.json key, permission model, or any
-  behavioral detail and is about to answer from training memory; (2) the user
-  asks a factual question about how Claude Code works — "does Claude Code
-  support X?", "what are the valid hook events?", "what does this setting do?",
-  "how do I configure Y?"; (3) the user or Claude asks about undocumented
-  host/session MCP tools by name — spawn_task, dismiss_task, mark_chapter,
-  read_widget_context, show_widget, visualize, ccd_session, scheduled-tasks.
-  Do NOT trigger for general coding questions unrelated to Claude Code, questions
-  about other AI tools or APIs, or when performing a Claude Code task rather
-  than describing how one works.
+  code.claude.com/docs/en/ and returns raw Markdown from the primary source.
+  Also reads a bundled canonical reference for undocumented host MCP tools. Use
+  when the user asks a factual question about how Claude Code works — hook event
+  names, CLI flags, settings.json keys, the permission model, "does Claude Code
+  support X?", "how do I configure Y?" — when they name a host tool such as
+  spawn_task, mark_chapter or show_widget, or whenever you are about to answer
+  such a question from training memory. Do NOT use for general coding questions,
+  for questions about other AI tools or APIs, or when performing a Claude Code
+  task rather than describing how one works.
 allowed-tools: WebFetch, Read
 ---
 

@@ -6,6 +6,12 @@ monorepo-folder plugin — its version is owned by
 `verity/.claude-plugin/plugin.json` (which carries no version field by
 convention).
 
+## [0.1.4-alpha] — 2026-08-26
+
+### Changed
+
+- The skill's trigger conditions moved into its description, so it is offered more reliably when you ask how Claude Code actually works.
+
 ## [0.1.3-alpha] — 2026-07-13
 
 Doc-only: removed a redundant "Under the hood" section that repeated earlier parts of the README. No behavior change.
