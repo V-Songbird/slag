@@ -313,8 +313,22 @@ name them in the final message so the user can find them.
 
 ## 7. Say what the fixes did
 
-Only when something was applied, and before step 6, because it reads the journal
-and the judgment cache:
+Only when something was applied, and before step 6, because both commands here
+read the journal and the judgment cache.
+
+First, what actually landed:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" applied
+```
+
+It prints the last run out of its own records — every file written, the kind of
+each change, the rule it addressed, and the one command that undoes the whole
+run. Print what it says. Do not rewrite it from what you believe you did: an
+apply that died mid-write leaves a journal and a transaction row, and this is
+the only thing that reads them. Pass `--transaction <id>` to name an earlier run.
+
+Then the before and after:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/assay.js" remeasure --model <id>
@@ -326,4 +340,5 @@ report — judge only those, **merge** them into `.assay-tmp/judgments.json`
 without disturbing the rest, and run it once more. At most twice.
 
 Then write the final message: whatever step 3 did not already show, your two
-sentences, what step 5 changed, and the before/after this step measured.
+sentences, what `applied` reported landing, the before/after this step measured,
+and the undo command, verbatim, so the way back is on screen beside the change.

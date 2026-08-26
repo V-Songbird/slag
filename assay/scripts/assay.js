@@ -99,6 +99,8 @@ const { PROFILES, resolveProfile } = require("./models/index.js");
 // because that file is the one that must never be told to write elsewhere.
 const {
   STATE_DIR, TRANSACTIONS_FILE, statePath, preflight, backupFiles, appendTransaction,
+  // [Foreman: 170] the after-report reads the run back out of the same records
+  readTransactions, revertPlan,
 } = require("./safety.js");
 
 // [Foreman: 079] The second host profile, and with it the registry `--host`
@@ -7929,6 +7931,114 @@ function cmdRollback(root, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// applied - [Foreman: 170]
+// ---------------------------------------------------------------------------
+//
+// The report a run ends on. Every other view in this engine is about the corpus
+// BEFORE the fix: the plain report is printed before anything is written, and
+// remeasure compares scores. Neither says what actually landed, so an auto-fix
+// run finished with the owner never seeing the work assay did on their behalf.
+//
+// It is read out of the journal and the transaction log, never out of what the
+// model believes it did. That matters most in exactly the case the owner most
+// needs it: an apply interrupted mid-write leaves a journal and a transaction
+// row, and nothing else.
+function appliedReport(root, txId) {
+  const rows = readTransactions(root);
+  if (!rows.length) {
+    return { problem: "No run has been applied in this project yet - " + STATE_DIR + "/" +
+      TRANSACTIONS_FILE + " is not there." };
+  }
+  const row = txId ? rows.find((r) => r.txId === txId) : rows[rows.length - 1];
+  if (!row) {
+    return { problem: "No run with id " + txId + ". Ids in this project: " +
+      rows.map((r) => r.txId).join(", ") + "." };
+  }
+  // The journal is the truth about what was WRITTEN; the row is the truth about
+  // what was meant to be. A change in the row with nothing in the journal was
+  // planned by this run and never landed - which is the interrupted-apply case
+  // and the one thing an after-report must not report as done.
+  const replayed = replayJournal(readJournal(root));
+  const changes = [];
+  for (const id of [...new Set((row.changes || []).map((c) => c.id))]) {
+    const kind = (row.changes.find((c) => c.id === id) || {}).kind || "?";
+    const state = replayed.get(id);
+    const writes = state ? changeWrites(state, "apply") : [];
+    const found = findChange(root, id);
+    const change = found.problem ? null : found.change;
+    changes.push({
+      id,
+      kind,
+      // What the change was for, in the author's own words, so the line is
+      // readable without the plan open beside it.
+      addresses: change && change.addresses ? change.addresses : null,
+      rationale: change && change.rationale ? change.rationale : null,
+      written: writes.filter((w) => w.written).map((w) => ({
+        path: w.path, created: w.preImage === null,
+      })).sort((a, b) => (a.path < b.path ? -1 : 1)),
+      restored: writes.filter((w) => w.restored).map((w) => w.path).sort(),
+    });
+  }
+  const plan = revertPlan(root, row.txId);
+  return {
+    // A journal that is GONE and a journal that is SILENT about a change are
+    // different facts and get different sentences: `clean` removed the record,
+    // versus the write never completed. Reporting either as the other would
+    // make an interrupted apply look tidy.
+    journalGone: !fs.existsSync(statePath(root, JOURNAL_FILE)),
+    transaction: row.txId,
+    startedAt: row.startedAt,
+    model: row.model,
+    assayVersion: row.assayVersion,
+    revertedAt: row.revertedAt || null,
+    changes,
+    files: row.files || [],
+    undo: {
+      command: "/assay:revert " + row.txId,
+      routes: plan.problem ? [] : plan.ready,
+      problem: plan.problem || null,
+    },
+  };
+}
+
+function renderApplied(report) {
+  const out = [];
+  const wrote = report.changes.flatMap((c) => c.written);
+  out.push("Run " + report.transaction + " - " + report.changes.length + " change(s), " +
+    wrote.length + " file(s) written, started " + report.startedAt);
+  if (report.revertedAt) out.push("Already reverted at " + report.revertedAt + ". Nothing below is still in place.");
+  for (const c of report.changes) {
+    out.push("");
+    out.push("  " + c.id + "  " + c.kind + (c.addresses ? "  - addresses rule " + c.addresses : ""));
+    if (c.rationale) out.push("    " + c.rationale);
+    for (const w of c.written) out.push("    wrote   " + w.path + (w.created ? "  (created)" : ""));
+    for (const path0 of c.restored) out.push("    put back " + path0 + "  (assay undid this one itself)");
+    if (!c.written.length && !c.restored.length) {
+      out.push(report.journalGone
+        ? "    the journal is gone - `clean` removed it, so this run's files are recorded only as: " +
+          report.files.join(", ")
+        : "    nothing landed: this change is in the run's record but no write completed");
+    }
+  }
+  out.push("");
+  // The single command, and only the routes a revert can actually run today.
+  if (report.undo.problem) {
+    out.push("Undo: not available - " + report.undo.problem);
+  } else {
+    out.push("Undo the whole run: " + report.undo.command +
+      (report.undo.routes.length ? "  (routes ready: " + report.undo.routes.join(", ") + ")" : ""));
+  }
+  return out.join("\n");
+}
+
+function cmdApplied(root, opts) {
+  const report = appliedReport(root, opts.transaction);
+  if (report.problem) fail(report.problem);
+  if (opts.json) process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+  else process.stdout.write(renderApplied(report) + "\n");
+}
+
+// ---------------------------------------------------------------------------
 // clean
 // ---------------------------------------------------------------------------
 
@@ -8173,6 +8283,9 @@ function cmdCi(root, opts) {
 // tell a finding from a broken invocation. A `--fail-on` naming a gate outside
 // the closed set is still 1 — that is a usage error, not a finding.
 const COMMANDS = ["scan", "report", "remeasure", "clean",
+  // [Foreman: 170] `applied` is the after-report: what a run actually wrote,
+  // read back out of the journal and the transaction log.
+  "applied",
   "plan", "apply", "validate", "rollback", "ci"];
 // [Foreman: 096, 097] The commands that run discovery, and therefore the only
 // ones a host profile or a startup directory means anything to. Both flags are
@@ -8230,6 +8343,8 @@ const USAGE = [
   "                  deterministic, writes nothing; exit 0 clean, 2 a gate failed, 1 usage error",
   "                  gates (closed set): " + CI_GATE_NAMES.join(", "),
   "                  default: " + CI_DEFAULT_GATES.join(", "),
+  "  applied         [--transaction <id>] [--json]",
+  "                  what the last run actually wrote, and the one command that undoes it",
   "  clean           remove " + TMP_DIR + "/ and the change journal once nothing is open",
   "  --help          print this and exit 0",
   "",
@@ -8446,6 +8561,7 @@ function main() {
   else if (command === "validate") cmdValidate(root, opts);
   else if (command === "rollback") cmdRollback(root, opts);
   else if (command === "ci") cmdCi(root, opts); // [Foreman: 084]
+  else if (command === "applied") cmdApplied(root, opts); // [Foreman: 170]
   else cmdClean(root);
 }
 
@@ -8456,6 +8572,8 @@ module.exports = {
   SCANNING_COMMANDS,
   // [Foreman: 167] the fixture-pair admission a promoted hook has to pass
   admitDraftHooks, admitHookPromotion, wiredHooks, hookRefused,
+  // [Foreman: 170] the after-report: what a run wrote, out of its own records
+  appliedReport, renderApplied,
   // [Foreman: 074] discovery lives in the adapter; re-exported so callers and
   // tests keep one import
   adapter: claudeAdapter, findRuleMarkdownFiles: claudeAdapter.findRuleMarkdownFiles,

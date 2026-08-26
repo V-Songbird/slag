@@ -5330,6 +5330,84 @@ function transactionRows(root) {
   return safety.readTransactions(root);
 }
 
+// ---------------------------------------------------------------------------
+// [Foreman: 170] The after-report: what a run actually wrote
+// ---------------------------------------------------------------------------
+
+test("applied reports every file the last run wrote, the kind, the rule and the undo", () => {
+  const root = txProject();
+  planDraft(root, { changes: [{ ...REWRITE_CHANGE, addresses: "r-prettier" }, PROMOTE_CHANGE] });
+  assert.equal(cli(root, "apply", "--change", "c-rewrite", "--change", "c-skill").code, 0);
+
+  const printed = cli(root, "applied");
+  assert.equal(printed.code, 0, printed.err);
+  assert.match(printed.out, /CLAUDE\.md/);
+  assert.match(printed.out, /\.claude\/skills\/changelog\/SKILL\.md {2}\(created\)/);
+  assert.match(printed.out, /rule-rewrite/);
+  assert.match(printed.out, /placement-promotion/);
+  assert.match(printed.out, /addresses rule r-prettier/);
+  // the single command that undoes the whole run, not a per-file recipe
+  assert.match(printed.out, /Undo the whole run: \/assay:revert t[0-9a-f]{10}/);
+  assert.match(printed.out, /routes ready: backup/);
+});
+
+test("applied is read out of the journal, so a change that wrote nothing is not reported as done", () => {
+  const root = txProject();
+  planDraft(root, { changes: [REWRITE_CHANGE] });
+  assert.equal(cli(root, "apply", "--change", "c-rewrite").code, 0);
+  // the transaction row still names the change; the journal is what says
+  // whether a write completed, so emptying it is the interrupted-apply case
+  const [row] = transactionRows(root);
+  fs.writeFileSync(path.join(root, ".assay", "journal.jsonl"), "");
+
+  const report = JSON.parse(cli(root, "applied", "--json").out);
+  assert.equal(report.transaction, row.txId);
+  assert.deepEqual(report.changes.map((c) => c.written), [[]]);
+  assert.match(cli(root, "applied").out, /nothing landed/);
+});
+
+test("applied names the run it was asked for, and refuses an id no run carries", () => {
+  const root = txProject();
+  planDraft(root, { changes: [REWRITE_CHANGE, PROMOTE_CHANGE] });
+  assert.equal(cli(root, "apply", "--change", "c-rewrite").code, 0);
+  assert.equal(cli(root, "apply", "--change", "c-skill").code, 0);
+  const rows = transactionRows(root);
+
+  // no argument is the LAST run, which is what the audit skill prints
+  assert.equal(JSON.parse(cli(root, "applied", "--json").out).transaction, rows[1].txId);
+  const first = JSON.parse(cli(root, "applied", "--json", "--transaction", rows[0].txId).out);
+  assert.equal(first.transaction, rows[0].txId);
+  assert.deepEqual(first.changes.map((c) => c.id), ["c-rewrite"]);
+
+  const missing = cli(root, "applied", "--transaction", "tdeadbeef00");
+  assert.equal(missing.code, 1);
+  assert.match(missing.err, /No run with id tdeadbeef00/);
+  assert.match(missing.err, new RegExp(rows[0].txId), "the refusal names the ids that do exist");
+});
+
+test("applied refuses on a project where nothing has been applied", () => {
+  const root = txProject();
+  const nothing = cli(root, "applied");
+  assert.equal(nothing.code, 1);
+  assert.match(nothing.err, /No run has been applied/);
+});
+
+test("applied says the journal is gone rather than saying nothing was written", () => {
+  const root = txProject();
+  planDraft(root, { changes: [REWRITE_CHANGE] });
+  assert.equal(cli(root, "apply", "--change", "c-rewrite").code, 0);
+  assert.equal(cli(root, "validate", "--change", "c-rewrite").code, 0);
+  assert.equal(cli(root, "clean").code, 0);
+
+  const printed = cli(root, "applied");
+  assert.equal(printed.code, 0, printed.err);
+  assert.match(printed.out, /the journal is gone/);
+  assert.match(printed.out, /recorded only as: CLAUDE\.md/);
+  // and the run is still nameable and still undoable, which is why `clean`
+  // keeps the transaction log
+  assert.match(printed.out, /Undo the whole run/);
+});
+
 test("apply outside a repository copies every file it will touch, with a sha256 manifest", () => {
   const root = txProject();
   planDraft(root, { changes: [REWRITE_CHANGE, PROMOTE_CHANGE] });
