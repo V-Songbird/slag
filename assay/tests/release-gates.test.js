@@ -1564,3 +1564,74 @@ test("release gate: the Claude audit surface still describes a numbered flow of 
   assert.equal(claude.length, codex.length,
     "one audit surface grew or lost a step the others did not — deliberate is fine, silent is not");
 });
+
+// [Foreman: 161] G8. Only one model tier has ever been measured — haiku 4.5,
+// rule-lab 2026-07. The other three profiles are extrapolations, and the whole
+// reason they are allowed to ship as written is that every constant in them
+// says so. A profile that claimed `mechanical`, `documented` or
+// `experiment-supported` for a Claude-5 tier would be a compliance claim assay
+// has no evidence for.
+//
+// The rule already exists as a jig guard at commit time. This gate is the CI
+// half of the SAME guard, not a second definition of it: the forbidden
+// vocabulary is read out of the check file, so the two cannot drift apart.
+const EVIDENCE_CHECK = path.join(__dirname, "..", "..", ".jig", "checks",
+  "assay-profile-evidence-tier.check.mjs");
+
+const forbiddenEvidenceLevels = () => {
+  const src = fs.readFileSync(EVIDENCE_CHECK, "utf-8");
+  // The pattern lives in the check as a JSON-escaped string, so match its
+  // alternation group rather than trying to re-escape the whole thing here.
+  const m = src.match(/level:.*?\(\?:([a-z|-]+)\)/);
+  assert.ok(m, "the jig evidence check no longer states its forbidden levels in a shape this gate can read");
+  return m[1].split("|");
+};
+
+const MODEL_PROFILES = require("../scripts/models/index.js").PROFILES;
+// The measured tier is haiku 4.5; every profile whose display name ends in a
+// bare "5" is a Claude-5 tier and has no measurement behind it.
+const isClaude5 = (p) => /^Claude \w+ 5$/.test(p.displayName);
+
+test("release gate G8: no Claude-5 profile claims evidence nothing measured", () => {
+  const forbidden = forbiddenEvidenceLevels();
+  assert.deepEqual(forbidden, ["mechanical", "documented", "experiment-supported"],
+    "the forbidden evidence vocabulary changed — confirm this gate and the jig check still mean the same thing");
+
+  const claude5 = Object.values(MODEL_PROFILES).filter(isClaude5);
+  assert.ok(claude5.length >= 3, "the Claude-5 profiles are missing from the profile registry");
+
+  for (const profile of claude5) {
+    assert.ok(profile.evidence, `${profile.id} ships no evidence record at all`);
+    assert.ok(!forbidden.includes(profile.evidence.level),
+      `${profile.id} claims ${profile.evidence.level} evidence for an unmeasured tier`);
+    assert.equal(profile.evidence.level, "profile-inferred",
+      `${profile.id} must declare profile-inferred evidence`);
+    assert.ok(profile.evidence.basis && profile.evidence.limits,
+      `${profile.id} must say what argued for its numbers and what they do not cover`);
+
+    // Every constant the profile ships, marked one by one.
+    const shipped = [
+      ...Object.keys(profile.weights).map((k) => `weights.${k}`),
+      ...Object.keys(profile.thresholds).map((k) => `thresholds.${k}`),
+    ].sort();
+    const marked = Object.keys(profile.evidence.constants).sort();
+    assert.deepEqual(marked, shipped,
+      `${profile.id} ships a constant with no evidence tier, or marks one it does not ship`);
+    for (const [name, level] of Object.entries(profile.evidence.constants)) {
+      assert.ok(!forbidden.includes(level),
+        `${profile.id}'s ${name} claims ${level} evidence for an unmeasured tier`);
+    }
+  }
+});
+
+test("release gate G8: no profile source file writes a forbidden evidence level", () => {
+  // The literal-text half, mirroring what the jig guard greps for, so a claim
+  // written into a comment or a field this gate does not read is still caught.
+  const forbidden = forbiddenEvidenceLevels();
+  const dir = path.join(PLUGIN_ROOT, "scripts", "models");
+  const re = new RegExp(`level:\s*["'](?:${forbidden.join("|")})["']`);
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".js"))) {
+    const text = fs.readFileSync(path.join(dir, file), "utf-8");
+    assert.ok(!re.test(text), `${file} writes an evidence level nothing has measured`);
+  }
+});
