@@ -1,6 +1,14 @@
 ---
 name: router
-description: Reference for routing Claude Code file-ops through a JetBrains IDE MCP server (mcp__webstorm__*, mcp__rider__*, mcp__idea__*, mcp__pycharm__*, etc.). Load when a jetbrains-router redirect fires on a native Read/Grep/Glob/Edit/Write/Bash call, or before the first file operation in a session where JetBrains MCP tools are registered. Covers the native-to-IDE tool mapping, required parameter names, path translation, and when to stay on native tools. Do NOT load for sessions without JetBrains MCP tools, or for work limited to dotfiles, markdown, JSON, or config files — the hook passes those through automatically.
+description: >-
+  Routes Claude Code file operations through a JetBrains IDE MCP server
+  (mcp__webstorm__*, mcp__rider__*, mcp__idea__*, mcp__pycharm__*). Covers the
+  native-to-IDE tool map, required parameter names and path translation. Use
+  when a redirect fires on a native Read/Grep/Glob/Edit/Write/Bash call, or
+  before the first file operation in a session where JetBrains MCP tools are
+  registered. Do NOT use in a session without JetBrains MCP tools, or for work
+  limited to dotfiles, markdown, JSON or config files — the hook passes those
+  through automatically.
 user-invocable: true
 ---
 

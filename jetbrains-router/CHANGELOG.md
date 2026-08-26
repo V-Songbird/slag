@@ -6,6 +6,12 @@ is a monorepo-folder plugin — its version is owned by
 `jetbrains-router/.claude-plugin/plugin.json` (which carries no version field
 by convention).
 
+## 2.0.4-alpha — 2026-08-26
+
+### Changed
+
+- Both skills now state plainly when to use them and when not to, so routing help is offered on the calls that need it and stays quiet on the ones that do not.
+
 ## 2.0.3-alpha — 2026-07-13
 
 Doc-only: removed a redundant "Under the hood" section that repeated earlier parts of the README. No behavior change.

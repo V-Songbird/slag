@@ -1,6 +1,12 @@
 ---
 name: status
-description: Probe whether a JetBrains IDE MCP server is connected to this session, which IDE prefix is live, and whether the jetbrains-router hook will enforce routing. Trigger on "jetbrains status", "is routing active", "check the IDE connection", or /jetbrains-router:status.
+description: >-
+  Probes whether a JetBrains IDE MCP server is connected to this session, which
+  IDE prefix is live and whether the routing hook will enforce redirects. Use
+  when the user asks about IDE routing status — e.g. "jetbrains status", "is
+  routing active", "check the IDE connection" — or invokes
+  /jetbrains-router:status. Do NOT use to perform a file operation; this only
+  reports connection state.
 user-invocable: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/hooks/jb-lib.js" --probe*)
 ---
