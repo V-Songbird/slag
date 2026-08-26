@@ -2695,6 +2695,12 @@ function scan(root, options = {}) {
   // ladder". Nothing changes for an adapter that returns the bare array.
   const hooksFound = adapter.discoverHooks(context);
   const hookInventory = Array.isArray(hooksFound) ? hooksFound : hooksFound.hooks || [];
+  // [Foreman: 169] Every output style on disk, and which one the settings chain
+  // selects. The ACTIVE one is already a graded source - the adapter put it in
+  // `sources` - so this is the inventory around it: the styles one `/config`
+  // away, and the case where the setting names a style nothing answers to. A
+  // profile that has no such surface returns nothing and nothing prints.
+  const outputStyles = adapter.discoverOutputStyles ? adapter.discoverOutputStyles(context) : null;
   const hookIssues = Array.isArray(hooksFound) ? [] : hooksFound.inaccessible || [];
   const repoChecks = adapter.discoverRepoChecks ? adapter.discoverRepoChecks(context) : { checks: [], inaccessible: [] };
   if (hookIssues.length) {
@@ -2738,6 +2744,7 @@ function scan(root, options = {}) {
     rules,
     skills: readSkills(skillsFound.project || [], policy),
     hookInventory,
+    ...(outputStyles ? { outputStyles } : {}),
     // [Foreman: 077] Levels 4 and 5 of the ladder, as the adapter found them.
     // Raw discovery, like hookInventory: `mechanisms` is derived from it.
     repoChecks,
@@ -2854,6 +2861,7 @@ function cmdScan(root, opts = {}) {
     scanFile: TMP_DIR + "/scan.json",
     judgmentsFile: TMP_DIR + "/judgments.json",
     hookInventory: result.hookInventory,
+    ...(result.outputStyles ? { outputStyles: result.outputStyles } : {}),
     judge: result.rules.map((r) => ({
       id: r.id,
       key: r.key,
@@ -3093,6 +3101,8 @@ function composeAudit(scanData, judgments, opts = {}) {
     profile: scanData.profile || null,
     files, rules, skills: scanData.skills || [],
     hookInventory: scanData.hookInventory || [],
+    // [Foreman: 169] carried through untouched, like hookInventory
+    ...(scanData.outputStyles ? { outputStyles: scanData.outputStyles } : {}),
     // [Foreman: 077] raw level-4/5 discovery, carried so the derivation below
     // stays a pure function of the audit
     repoChecks: scanData.repoChecks || null,
@@ -5095,6 +5105,25 @@ function chainStatus(file) {
   return "read in full";
 }
 
+// [Foreman: 169] The ACTIVE style is a graded source and appears with the rest
+// of the corpus. What no table above can show is the styles sitting beside it:
+// each is one `/config` away from replacing the system prompt, and a rule that
+// survives this audit can be overridden by any of them in the next session.
+function pushOutputStyleSection(out, audit) {
+  const inventory = ((audit.outputStyles || {}).styles || []).filter((st) => !st.active);
+  if (!inventory.length) return;
+  out.push("### Output styles on disk but not loaded");
+  out.push("");
+  out.push("Selecting one of these replaces the system prompt for every turn of the next session. They are not graded here — they are not loaded. [mechanical]");
+  out.push("");
+  for (const st of inventory) {
+    out.push("- " + mdPathLink(st.path) + " — `" + st.name + "`" +
+      (st.description ? ": " + escapeTableCell(st.description) : "") +
+      (st.keepCodingInstructions ? "" : " (drops the built-in engineering instructions)"));
+  }
+  out.push("");
+}
+
 function pushChainSection(out, files, budget) {
   const rows = chainRows(files);
   if (!rows.length) return;
@@ -6134,6 +6163,7 @@ function renderReport(audit, opts = {}) {
   // reader who has just been told a file is never read needs the order and the
   // arithmetic that made it so.
   pushChainSection(out, files, (audit.coverage || {}).budget);
+  pushOutputStyleSection(out, audit);
 
   // 4. Operational findings — loaded, but risky.
   // A hard-gated rule is named above with its state, never here with a grade:

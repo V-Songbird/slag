@@ -68,6 +68,21 @@ const PROBES = [
     ],
   },
   {
+    // [Foreman: 169] The source that outranks every rule assay grades.
+    profile: "claude-code",
+    url: "https://code.claude.com/docs/en/output-styles.md",
+    expect: [
+      { claim: "custom output styles live under .claude/output-styles/ and ~/.claude/output-styles", any: [".claude/output-styles"] },
+      { claim: "the active style is the outputStyle settings field", any: ["outputStyle"] },
+      { claim: "the terminal writes the selection to .claude/settings.local.json", any: ["settings.local.json"] },
+      { claim: "a custom style drops the built-in engineering instructions unless keep-coding-instructions is true", any: ["keep-coding-instructions"] },
+      { claim: "the style name comes from the name frontmatter field or the file name", any: ["Name of the output style", "file name"] },
+      { claim: "output styles modify the system prompt", any: ["system prompt"] },
+      { claim: "the built-in styles are Default, Proactive, Concise, Explanatory and Learning", any: ["Explanatory"] },
+      { claim: "a plugin style can force itself on with force-for-plugin", any: ["force-for-plugin"] },
+    ],
+  },
+  {
     profile: "claude-code",
     url: "https://code.claude.com/docs/en/commands.md",
     expect: [

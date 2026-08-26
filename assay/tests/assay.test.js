@@ -2462,6 +2462,108 @@ const FIXTURE_CLAUDE = [
   "",
 ].join("\n");
 
+// ---------------------------------------------------------------------------
+// [Foreman: 169] Output styles
+// ---------------------------------------------------------------------------
+
+const adapterForStyles = require("../scripts/adapters/claude.js");
+
+function styleProject(files, outputStyle) {
+  return tmpProject({
+    "CLAUDE.md": "# Rules\n\n- Never push to `origin` without review.\n",
+    ...(outputStyle ? { ".claude/settings.local.json": JSON.stringify({ outputStyle }) } : {}),
+    ...files,
+  });
+}
+
+const TERSE_STYLE = [
+  "---",
+  "name: Terse",
+  "description: Answer in three lines or fewer",
+  "---",
+  "",
+  "- Always push to `origin` without review.",
+  "",
+].join("\n");
+
+test("the active output style is discovered as an always-loaded source, ahead of every rule file", () => {
+  const root = styleProject({ ".claude/output-styles/terse.md": TERSE_STYLE }, "Terse");
+  const found = adapterForStyles.discoverSources({ projectRoot: root, userDir: null, startupDirectory: root });
+  const sources = Array.isArray(found) ? found : found.sources;
+  const style = sources.find((s) => s.kind === "output-style");
+  assert.ok(style, "the active style is not a source at all");
+  assert.equal(style.path, ".claude/output-styles/terse.md");
+  assert.equal(style.alwaysLoaded, true);
+  assert.equal(style.precedence, 0, "the system prompt precedes every instruction file");
+  assert.match(style.selectionReason, /settings\.local\.json/);
+  // documented default: a custom style REPLACES the built-in engineering
+  // instructions, and a reader has to be told that
+  assert.match(style.selectionReason, /drops the host's built-in software-engineering instructions/);
+});
+
+test("only the ACTIVE style is a loaded source — the rest are inventory", () => {
+  const root = styleProject({
+    ".claude/output-styles/terse.md": TERSE_STYLE,
+    ".claude/output-styles/chatty.md": "---\nname: Chatty\n---\n\n- Say more.\n",
+  }, "Terse");
+  const styles = adapterForStyles.discoverOutputStyles({ projectRoot: root, userDir: null });
+  assert.deepEqual(styles.styles.map((s) => [s.name, s.active]).sort(), [["Chatty", false], ["Terse", true]]);
+  assert.equal(styles.active.resolved, "file");
+  const found = adapterForStyles.discoverSources({ projectRoot: root, userDir: null, startupDirectory: root });
+  const sources = Array.isArray(found) ? found : found.sources;
+  assert.deepEqual(sources.filter((s) => s.kind === "output-style").map((s) => s.path),
+    [".claude/output-styles/terse.md"]);
+});
+
+test("a style that contradicts a graded rule comes back as a conflict", () => {
+  const root = styleProject({ ".claude/output-styles/terse.md": TERSE_STYLE }, "Terse");
+  assert.equal(cli(root, "scan", "--project-only").code, 0);
+  const printed = cli(root, "report", "--json");
+  assert.equal(printed.code, 0, printed.err);
+  const audit = JSON.parse(printed.out);
+  const conflicting = audit.rules.filter((r) => r.file === ".claude/output-styles/terse.md");
+  assert.equal(conflicting.length, 1, "the style's own rule was never graded");
+  assert.ok(audit.findings.some((f) => f.type === "conflict" || f.state === "conflicting"),
+    "a style telling the agent the opposite of a rule is not surfaced as a conflict");
+});
+
+test("a built-in style name resolves without a file, and never reads as missing", () => {
+  const root = styleProject({}, "Explanatory");
+  const styles = adapterForStyles.discoverOutputStyles({ projectRoot: root, userDir: null });
+  assert.equal(styles.active.name, "Explanatory");
+  assert.equal(styles.active.resolved, "built-in");
+  assert.equal(styles.active.path, null);
+  const found = adapterForStyles.discoverSources({ projectRoot: root, userDir: null, startupDirectory: root });
+  const sources = Array.isArray(found) ? found : found.sources;
+  assert.deepEqual(sources.filter((s) => s.kind === "output-style"), [],
+    "a built-in style has no file to grade");
+});
+
+test("an outputStyle naming nothing on disk is disclosed, not ignored", () => {
+  const root = styleProject({}, "SomethingElse");
+  const styles = adapterForStyles.discoverOutputStyles({ projectRoot: root, userDir: null });
+  assert.equal(styles.active.resolved, "missing");
+  const notes = adapterForStyles.coverageNotes({ sources: [], projectRoot: root, userDir: null });
+  assert.ok(notes.some((n) => n.includes("SomethingElse") && n.includes("cannot say")),
+    "the report never says the active style could not be found:\n" + notes.join("\n"));
+});
+
+test("no outputStyle set anywhere is the host's Default, and nothing is graded for it", () => {
+  const root = styleProject({ ".claude/output-styles/terse.md": TERSE_STYLE }, null);
+  const styles = adapterForStyles.discoverOutputStyles({ projectRoot: root, userDir: null });
+  assert.equal(styles.active.name, "Default");
+  assert.equal(styles.active.setIn, null);
+  assert.equal(styles.active.resolved, "built-in");
+  assert.deepEqual(styles.styles.map((s) => s.active), [false], "an unselected style is not loaded");
+});
+
+test("the Claude profile version says a record has seen output styles", () => {
+  // A record written at 3 came from an assay that could not read the one source
+  // that overrides every rule it grades.
+  assert.ok(adapterForStyles.profileVersion >= 4,
+    "the profile version did not move when discovery grew");
+});
+
 function cliFixture(extra) {
   return tmpProject({ "CLAUDE.md": FIXTURE_CLAUDE, ...(extra || {}) });
 }
@@ -4205,7 +4307,8 @@ test("no --host is the Claude profile, and the record it writes is the one it al
   // context, same coverage as before the registry existed. [Foreman: 082]
   // `targets` is declared by every profile and is checked separately.
   const { targets, ...profile } = implicit.profile;
-  assert.deepEqual(profile, { host: "claude-code", version: 3 });
+  // [Foreman: 169] 4 since output styles are discovered.
+  assert.deepEqual(profile, { host: "claude-code", version: adapter.profileVersion });
   assert.equal(targets.rule.places[0].path, "CLAUDE.md");
   assert.deepEqual(Object.keys(implicit.context), ["projectRoot", "startupDirectory", "userDir", "projectOnly", "ancestorStop", "hostVersion", "analysisTime"]);
   assert.equal("budget" in implicit.coverage, false);
