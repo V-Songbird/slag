@@ -1599,7 +1599,12 @@ test("the experiment-supported finding discloses its tier and its limits", () =>
   assert.equal(finding.evidence.level, "experiment-supported");
   assert.equal(finding.evidence.tier, "small-model tier (haiku 4.5)");
   assert.match(finding.evidence.limits, /does not carry to other agents/);
-  assert.match(finding.evidence.limits, /pre-Claude-5 model tiers/);
+  // [Foreman: 172] The Claude-5 gap is measured now, on one tier, so the
+  // disclosure names what that measurement found instead of saying the
+  // generation is unmeasured. The other tiers still are, and it says so.
+  assert.match(finding.evidence.limits, /2026-07 haiku 4\.5 measurements/);
+  assert.match(finding.evidence.limits, /sonnet 5, 2026-08-25/);
+  assert.match(finding.evidence.limits, /other Claude-5 tiers are still unmeasured/);
   assert.equal(engine.evidenceTag(finding.evidence), "[experiment-supported: small-model tier (haiku 4.5)]");
   assert.equal(engine.evidenceTag({ level: "heuristic" }), "[heuristic]");
 });

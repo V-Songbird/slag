@@ -158,7 +158,8 @@ const PROFILE_VERSION = claudeAdapter.profileVersion;
 // tier it was measured on, and the date — the same disclosure
 // WORDING_STUDY_EVIDENCE already carries for the deterministic factors. Doing
 // it alone would invalidate every cached judgments file for a sentence.
-const RUBRIC_VERSION = "2";
+// [Foreman: 172] 3: the sonnet5 column moved when rule-lab measured the tier.
+const RUBRIC_VERSION = "3";
 
 const RECORD_SCHEMA = {
   version: SCHEMA_VERSION,
@@ -3196,8 +3197,15 @@ const OPERATIONAL_STATES = new Set(["ambiguous", "conflicting", "at-risk"]);
 const WORDING_STUDY_EVIDENCE = {
   level: "experiment-supported",
   tier: "small-model tier (haiku 4.5)",
-  basis: "local wording studies, rule-lab 2026-07 (haiku 4.5 n=20/arm, sonnet 4.x n=5 spot checks, anti-default fixtures)",
-  limits: "measured on one host profile against fixtures built to defeat the model's defaults; it does not carry to other agents; measured 2026-07 on pre-Claude-5 model tiers under the host as it then shipped — Claude 5-generation hosts and their revised system prompt are unmeasured",
+  basis: "local wording studies, rule-lab 2026-07 (haiku 4.5 n=20/arm, sonnet 4.x n=5 spot checks, anti-default fixtures) and rule-lab exp-010-claude5, 2026-08-25 (sonnet 5, 440 cells at n=20/arm)",
+  // [Foreman: 172] The 5-generation gap is measured now, on one tier, and the
+  // answer changed the sentence rather than extending it: on sonnet 5 position
+  // and verb strength showed NO effect across two intents each, and the
+  // bare-prohibition penalty held in one intent of two. Every arm sat at a
+  // ceiling — once a rule was present at all it was followed — so what is
+  // measured there is that these levers stop separating outcomes, not that a
+  // buried rule became a good one.
+  limits: "measured on one host profile against fixtures built to defeat the model's defaults; it does not carry to other agents. The wording effects above are the 2026-07 haiku 4.5 measurements. On a Claude-5 tier (sonnet 5, 2026-08-25) rule position and verb strength measured NULL in two rule intents each, and the bare-prohibition penalty replicated in one of two, all against a ceiling; the other Claude-5 tiers are still unmeasured",
 };
 // [Foreman: 079] The same finding, for a profile the study never covered. A
 // prohibition with nothing named to do instead is a structural fact about the

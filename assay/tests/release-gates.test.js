@@ -1711,7 +1711,19 @@ test("release gate G8: no Claude-5 profile claims evidence nothing measured", ()
     const marked = Object.keys(profile.evidence.constants).sort();
     assert.deepEqual(marked, shipped,
       `${profile.id} ships a constant with no evidence tier, or marks one it does not ship`);
+    // [Foreman: 172] A constant MAY claim `experiment-supported` once rule-lab
+    // has actually measured that constant on that tier — that was the whole
+    // point of the seam. The claim has to be paid for: the profile's `basis`
+    // names the experiment, and `limits` says what the measurement does not
+    // cover. `mechanical` and `documented` stay impossible here whatever was
+    // measured: neither describes a behavioural study.
+    const cites = /\bexp-\d+[a-z0-9-]*/.test(profile.evidence.basis || "");
     for (const [name, level] of Object.entries(profile.evidence.constants)) {
+      if (level === "experiment-supported") {
+        assert.ok(cites,
+          `${profile.id}'s ${name} claims a measurement, but its basis names no rule-lab experiment`);
+        continue;
+      }
       assert.ok(!forbidden.includes(level),
         `${profile.id}'s ${name} claims ${level} evidence for an unmeasured tier`);
     }

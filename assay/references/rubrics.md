@@ -1,4 +1,4 @@
-Rubric version: 2
+Rubric version: 3
 
 # Judgment rubrics — F3 and F8
 

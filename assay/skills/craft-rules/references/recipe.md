@@ -13,6 +13,15 @@ small-model tiers of a pre-Claude-5 generation (haiku 4.5, 2026-07; sonnet-tier
 checks mostly saturated) — treat the anatomy as reliability engineering for the
 smallest model that will read the rule, not as a law of every model.
 
+One tier of the current generation has since been measured (Claude Sonnet 5,
+2026-08-25). Two of these levers showed **no effect** there: where the rule sits
+in its file, and whether it says "always" or "prefer". The bare prohibition
+still cost something, in one rule intent of two. Every arm was at a ceiling —
+once a rule was present at all it was followed — so the honest reading is that
+these levers stop separating outcomes on a big model, not that a buried or
+softly worded rule became a good one. Write to the anatomy anyway: it is free,
+it is what the smallest tier needs, and it is what a human reader needs.
+
 ## Anatomy
 
 ```

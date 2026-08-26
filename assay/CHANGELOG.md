@@ -17,6 +17,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 ### Changed
 
 - Applying a fix inside a Git repository now also copies the files aside. A run used to record only the commit it started from, which is gone the moment that commit is rewritten; both ways back are recorded on every run
+- `/assay:sonnet5` scores differently, and for the first time from a measurement. Where a rule sits in its file, and whether it says "always" or "prefer", both turned out to make no difference on that model — so neither leads its report any more. Three of that column's numbers now say they were measured; the rest still say they were not, and the other model columns are unchanged
 
 ## [2.0.0] — 2026-08-25
 
