@@ -32,6 +32,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 
 const engine = require("../scripts/jig.js");
@@ -44,7 +45,6 @@ const authored = require("./authored.js");
 const PLUGIN_ROOT = path.join(__dirname, "..");
 const REPO_ROOT = path.join(PLUGIN_ROOT, "..");
 const RUNNER = path.join(PLUGIN_ROOT, "hooks", "runner.js");
-const ASSAY_CLI = path.join(REPO_ROOT, "assay", "scripts", "assay.js");
 const CHECKS = [authored.PIPED_INSTALLER, authored.EMPTY_CATCH];
 
 const DISCLOSED_GAPS = [];
@@ -182,33 +182,38 @@ test("release gate: every write outside .jig/ carries a per-item approval and a 
   }
 });
 
-// The dev-time QA gate. assay is the analyzer that measures what loads before
-// every session; running it either side of an install turns "this install adds
-// no always-loaded prose" from a promise into a delta.
-test("release gate: assay measures a delta of zero always-loaded findings across an install", () => {
-  if (!fs.existsSync(ASSAY_CLI)) {
-    disclose("assay dev-time QA gate", "assay/scripts/assay.js is not on disk in this checkout");
-    return;
-  }
+// The dev-time QA gate. Measuring the always-loaded instruction prose either
+// side of an install turns "this install adds no always-loaded prose" from a
+// promise into a delta. The census is this file's own so a jig checkout proves
+// it alone, with no sibling folder on disk.
+const ALWAYS_LOADED = /^(CLAUDE(\.local)?\.md|AGENTS(\.override)?\.md|\.cursorrules|\.github\/copilot-instructions\.md|\.claude\/rules\/[^/]+\.md)$/;
+
+// A rules file that declares `paths:` is scoped to a glob, so the host loads it
+// only where that glob matches — it is not always-loaded.
+function scoped(text) {
+  const fm = /^---\n([\s\S]*?)\n---/.exec(text);
+  return Boolean(fm && /^paths:/m.test(fm[1]));
+}
+
+function alwaysLoadedCensus(root) {
+  return listFiles(root, [".git", "node_modules"])
+    .filter((rel) => ALWAYS_LOADED.test(rel))
+    .map((rel) => {
+      const buf = fs.readFileSync(path.join(root, rel));
+      if (scoped(buf.toString("utf-8"))) return null;
+      return rel + " " + buf.length + " " + crypto.createHash("sha256").update(buf).digest("hex");
+    })
+    .filter(Boolean)
+    .sort();
+}
+
+test("release gate: an install leaves a delta of zero always-loaded instruction bytes", () => {
   const root = instructionProject();
-  const userDir = fs.mkdtempSync(path.join(os.tmpdir(), "jig-gate-assay-user-"));
-  roots.push(userDir);
 
-  const scan = () => {
-    const run = spawnSync(process.execPath, [ASSAY_CLI, "scan"], {
-      cwd: root, encoding: "utf-8", windowsHide: true,
-      env: { ...process.env, ASSAY_USER_DIR: userDir, CODEX_HOME: userDir, ASSAY_ANCESTOR_STOP: os.tmpdir() },
-    });
-    assert.equal(run.status, 0, "assay scan failed: " + run.stderr);
-    const record = JSON.parse(fs.readFileSync(path.join(root, ".assay-tmp", "scan.json"), "utf-8"));
-    return record.sources.filter((s) => s.alwaysLoaded)
-      .map((s) => s.path + " " + s.bytes + " " + s.sourceHash).sort();
-  };
-
-  const before = scan();
+  const before = alwaysLoadedCensus(root);
   assert.ok(before.length > 0, "the gate measured a project with nothing always-loaded");
   install(root);
-  const after = scan();
+  const after = alwaysLoadedCensus(root);
 
   assert.deepEqual(after, before, "installing jig changed what loads before every session");
   const bytes = (rows) => rows.reduce((sum, row) => sum + Number(row.split(" ")[1]), 0);
