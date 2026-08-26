@@ -11,7 +11,7 @@
       "name": "assay",
       "source": "./assay",
       "description": "Analyzes the instruction files an agent loads — CLAUDE.md, .claude/rules/, AGENTS.md, skills and hooks — flagging what is vague, stale, buried, or better served by a mechanism, and rewriting the weak ones. /assay:opus5, /assay:sonnet5, /assay:haiku45 and /assay:fable5 audit this host, one per model; /assay:codex audits the other; craft-rules and craft-skill write new ones.",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "license": "MIT",
       "author": {
         "name": "Victor Villegas",

@@ -4,6 +4,20 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.1.0] — 2026-08-25
+
+### Added
+
+- A hook assay proposes has to prove itself before it is offered. It runs against a violation it must catch and a near-miss it must let through, and a hook that fails either is discarded with the reason printed. Nothing is written during the test and nothing is installed that has not passed it
+- The four model commands now actually score for their model. Each one runs the audit under its own column, and the report you get back is the one that column produced
+- `assay.js applied` says what a run wrote — every file, what kind of change it was, the rule it addressed, and the one command that undoes the whole run. The audit prints it after a fix
+- Output styles are read. The style your session is set to loads on every turn and can quietly contradict a rule in your CLAUDE.md, so it is now graded alongside your rules and a contradiction comes back as a conflict. Styles sitting on disk unselected are listed, never graded
+- On Codex, the whole-run undo and the after-report are written down beside the per-change rollback that was already there
+
+### Changed
+
+- Applying a fix inside a Git repository now also copies the files aside. A run used to record only the commit it started from, which is gone the moment that commit is rewritten; both ways back are recorded on every run
+
 ## [2.0.0] — 2026-08-25
 
 ### Removed
