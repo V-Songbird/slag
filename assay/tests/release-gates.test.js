@@ -1888,6 +1888,103 @@ test("release gate G9: no surface still offers the retired --fix", () => {
 });
 
 // ---------------------------------------------------------------------------
+// [Foreman: 171] G11. A second run is quiet.
+// ---------------------------------------------------------------------------
+//
+// An optimizer that churns is one the owner stops trusting: run it twice and it
+// proposes a second round of edits to the rules the first round just repaired,
+// and now nothing it says can be taken at face value. Three separate ways that
+// can happen, and one gate over all three.
+//
+// It also holds the re-target rule. The naive reading of the weight columns is
+// that moving a project from haiku45 to opus5 means putting a hedge back or
+// stripping a trigger, because those factors carry less weight there. That
+// reading is wrong: a rule naming its firing moment is better on every profile,
+// and the weight only says how urgently its ABSENCE is reported. So a rule one
+// column calls repaired must be repaired under all four.
+
+const IDEMPOTENT_CLAUDE = [
+  "# Rules",
+  "",
+  "- Before committing, run `npx prettier --write .` over every staged file.",
+  "- Write clean code.",
+  "",
+].join("\n");
+
+function scanUnder(root, model) {
+  const scanned = cli(root, ["scan", "--root", root, "--project-only", ...(model ? ["--model", model] : [])]);
+  assert.equal(scanned.code, 0, scanned.err);
+  const reported = cli(root, ["report", "--root", root, "--json"]);
+  assert.equal(reported.code, 0, reported.err);
+  return JSON.parse(reported.out);
+}
+
+test("release gate G11: a repaired rule stays repaired under every model column", () => {
+  const root = tmpProject({ "CLAUDE.md": IDEMPOTENT_CLAUDE });
+  for (const model of Object.keys(MODEL_PROFILES)) {
+    const audit = scanUnder(root, model);
+    const repaired = audit.rules.find((r) => r.text.startsWith("Before committing"));
+    const weak = audit.rules.find((r) => r.text.startsWith("Write clean"));
+    assert.ok(repaired && weak, model + ": the fixture did not parse into the two rules it states");
+    assert.equal(repaired.weak, false,
+      model + " asks for another pass over a rule that already names its trigger, its command and its scope " +
+      "(score " + repaired.score + " against floor " + repaired.floor + ")");
+    // and the fixture is sensitive rather than inert: the weak rule beside it
+    // is still called weak in the same column
+    assert.equal(weak.weak, true, model + " calls `Write clean code.` fine, so this gate proves nothing");
+  }
+});
+
+test("release gate G11: scanning an unchanged corpus twice produces the same numbers", () => {
+  const root = tmpProject({ "CLAUDE.md": IDEMPOTENT_CLAUDE });
+  const strip = (audit) => audit.rules.map((r) => [r.key, r.score, r.grade, r.weak, r.factorValues]);
+  const first = scanUnder(root, "haiku45");
+  const second = scanUnder(root, "haiku45");
+  assert.deepEqual(strip(second), strip(first), "the second scan of an untouched project disagrees with the first");
+  assert.equal(second.corpusScore, first.corpusScore);
+});
+
+test("release gate G11: re-applying a change that already landed writes nothing", () => {
+  const root = tmpProject({ "CLAUDE.md": IDEMPOTENT_CLAUDE });
+  fs.mkdirSync(path.join(root, ".assay-tmp"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".assay-tmp", "draft.json"), JSON.stringify({
+    changes: [{
+      id: "c-repair",
+      kind: "rule-rewrite",
+      rationale: "The rule names nothing checkable.",
+      addresses: "r-clean",
+      patches: [{
+        path: "CLAUDE.md",
+        old: "- Write clean code.",
+        new: "- When adding a module, keep every file under 300 lines.",
+      }],
+    }],
+  }, null, 2));
+  assert.equal(cli(root, ["plan", "--root", root, "--from", ".assay-tmp/draft.json"]).code, 0);
+  const applied = cli(root, ["apply", "--root", root, "--change", "c-repair"]);
+  assert.equal(applied.code, 0, applied.err);
+  const after = fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8");
+
+  // The second run of the same approved change: the plan is stale against the
+  // file its own first run rewrote, so it refuses instead of writing again.
+  const again = cli(root, ["apply", "--root", root, "--change", "c-repair"]);
+  assert.equal(again.code, 1);
+  assert.match(again.err, /Stale plan/);
+  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf-8"), after,
+    "the second apply changed the file");
+  assert.equal(SAFETY.readTransactions(root).length, 1,
+    "a refused apply still opened a transaction, so the run was not quiet");
+
+  // And the repair holds in every column: no target asks for it back.
+  for (const model of Object.keys(MODEL_PROFILES)) {
+    const audit = scanUnder(root, model);
+    const repaired = audit.rules.find((r) => r.text.startsWith("When adding a module"));
+    assert.ok(repaired, model + ": the repaired rule is not in the corpus");
+    assert.equal(repaired.weak, false, model + " asks for a second pass over the rule the first run repaired");
+  }
+});
+
+// ---------------------------------------------------------------------------
 // [Foreman: 163] G10. Two routes out of a run, one result.
 // ---------------------------------------------------------------------------
 
