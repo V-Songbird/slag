@@ -1610,7 +1610,7 @@ test("release gate: the two Codex surfaces know the same flags", () => {
 });
 
 test("release gate: the two Codex surfaces name the same draft-plan fields and change kinds", () => {
-  const fields = (text) => [...new Set((text.match(/`(kind|files|patches|rationale|limitations|mechanism|provenance|addresses|batches|old|new|path|sourceHash)`/g) || []))].sort();
+  const fields = (text) => [...new Set((text.match(/`(kind|files|patches|rationale|limitations|mechanism|provenance|fixtures|addresses|batches|old|new|path|sourceHash)`/g) || []))].sort();
   const kinds = (text) => engine.CHANGE_KINDS.filter((k) => text.includes("`" + k + "`")).sort();
   const A = readTwin(CODEX_TWINS.hosted), B = readTwin(CODEX_TWINS.native);
   assert.deepEqual(fields(B), fields(A), "the draft plan is described with different fields on the two surfaces");

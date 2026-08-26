@@ -277,6 +277,17 @@ file this flow is going to write.
   primitive's `docs` page live — never a remembered format — and park the
   candidate instead if the page cannot be reached. **The source rule stays
   exactly where it is**: no kind deletes or deactivates prose.
+
+  A hook promotion also carries `fixtures` — `{ "violation": …, "nearMiss": … }`,
+  each the JSON a hook of that event receives: one the hook must refuse, one it
+  must let through. `plan` writes the change's own files into a scratch
+  directory, runs the wired command against both, and **discards the promotion**
+  unless it refuses the violation and stays silent on the near miss. A hook that
+  blocks everything passes the violation test and then blocks work nobody asked
+  it to stop, which is why the near miss is the half that matters. Every discard
+  is printed and journalled and the change is simply not in the plan; say so
+  rather than drafting the same hook again. This is the one place assay runs a
+  command it wrote: before any approval, against copies, project untouched.
 - **Park** → `park` with `"patches": []` and nothing written. The promotion
   note goes in `rationale` and the doc URL in `limitations`. `apply` refuses a
   park by design and `clean` never deletes a plan artifact: the plan file
@@ -321,10 +332,24 @@ plan and the journal.
    anything ran. assay never runs the project's own tests, lint, or a fresh
    session — those are external evidence, recorded with
    `--external "repo tests: pass"` when the user reports one.
-5. **Say what is now true**, and that `git diff` shows every change. Rollback
-   stays available for as long as the journal exists:
-   `rollback --change <id>`. Offer it whenever a validation fails or the user
-   dislikes the result.
+5. **Say what is now true**, and that `git diff` shows every change. Two undos
+   stay available, and they are not the same size. `rollback --change <id>`
+   puts back one change while its journal exists. The whole run goes back
+   through the transaction log, which outlives `clean`:
+
+   ```
+   node <safety> list
+   node <safety> revert --tx <txId> --via <git|backup>
+   ```
+
+   `list` prints each run with the routes it can be restored by, and `revert`
+   refuses whole rather than half-restoring: every reason it could fail is
+   found before a byte moves. Where both routes are ready, ask which — `git`
+   puts the files back to the commit the run started from, the backup puts back
+   the copies assay made itself, and they restore the same bytes. Offer either
+   undo whenever a validation fails or the user dislikes the result.
+
+   `<safety>` is `scripts/safety.js` beside the engine, resolved the same way.
 
 ## 6. Clean up
 
@@ -350,8 +375,22 @@ final message so the user can find them.
 
 ## 7. Say what the fixes did
 
-Only when something was applied, and before step 6, because it reads the journal
-and the judgment cache:
+Only when something was applied, and before step 6, because both commands here
+read the journal and the judgment cache.
+
+First, what actually landed:
+
+```
+node <engine> applied
+```
+
+It prints the last run out of its own records — every file written, the kind of
+each change, the rule it addressed, and the one command that undoes the whole
+run. Print what it says rather than restating it from memory: a run that died
+mid-write leaves a journal and a transaction row, and this is the only thing
+that reads them. `--transaction <id>` names an earlier run.
+
+Then the before and after:
 
 ```
 node <engine> remeasure --host codex --startup <the same directory passed to scan, when one was passed>
