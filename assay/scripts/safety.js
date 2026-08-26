@@ -75,10 +75,12 @@ function sha256(buf) {
   return crypto.createHash("sha256").update(buf).digest("hex");
 }
 
-// The no-repo half of the undo story. Every file the run is about to touch is
-// copied under `.assay/backup-<txId>/` at its project-relative path, beside a
-// manifest naming each one's digest — so a later revert can tell a file it
-// restored from a file the owner has edited since.
+// The copies half of the undo story, taken on every run — [Foreman: 176] in a
+// repository too, because a commit can be rebased or garbage-collected away and
+// a copy cannot. Every file the run is about to touch is copied under
+// `.assay/backup-<txId>/` at its project-relative path, beside a manifest
+// naming each one's digest — so a later revert can tell a file it restored
+// from a file the owner has edited since.
 //
 // A patch that CREATES a file has nothing to copy. It is still in the manifest,
 // with a null digest, because "this file did not exist before the run" is
@@ -103,9 +105,9 @@ function backupFiles(root, txId, relPaths) {
   return STATE_DIR + "/backup-" + txId;
 }
 
-// One row per run, appended and never rewritten. Written in the git case too:
-// there it is a pointer rather than a copy, and `gitHead` is the only thing
-// that lets a revert localize the commit the run started from.
+// One row per run, appended and never rewritten. In a repository it carries
+// both routes: `gitHead` localizes the commit the run started from, and the
+// backup directory holds copies that survive a rewritten history.
 function appendTransaction(root, row) {
   fs.mkdirSync(statePath(root), { recursive: true });
   fs.appendFileSync(statePath(root, TRANSACTIONS_FILE), JSON.stringify(row) + "\n");

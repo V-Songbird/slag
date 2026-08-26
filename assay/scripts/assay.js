@@ -7404,13 +7404,16 @@ function cmdApply(root, opts) {
   }
 
   // [Foreman: 162] One row per run, written BEFORE the writes rather than after
-  // them, so a batch that half-applies is still a run a revert can find. With a
-  // repository the row is a pointer and `gitHead` localizes the commit; without
-  // one there is nothing to point at, so the files are copied first and the row
-  // names the copy.
+  // them, so a batch that half-applies is still a run a revert can find.
+  //
+  // [Foreman: 176] The copies are made in a repository too. `gitHead` alone is
+  // a pointer into a history that can be rebased, amended or garbage-collected
+  // out from under the row, and then the only recorded route is dead. Copying
+  // costs one pass over the files the run already opens, and it is what makes
+  // the two-route choice /assay:revert offers a real one on every row.
   const txId = selected[0].ctx.transaction;
   const files = [...new Set(selected.flatMap(({ change }) => change.patches.map((p) => p.path)))].sort();
-  const backupDir = pre.repo ? null : backupFiles(root, txId, files);
+  const backupDir = backupFiles(root, txId, files);
   appendTransaction(root, {
     txId,
     startedAt: new Date().toISOString(),

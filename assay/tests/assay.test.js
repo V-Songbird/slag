@@ -5231,7 +5231,7 @@ test("every run appends exactly one transaction row naming its id, model, files 
   }
 });
 
-test("in a clean repository the row carries gitHead and no files are copied", () => {
+test("in a clean repository the row carries gitHead AND a backup, so revert has both routes", () => {
   const { root } = gitProject();
   planDraft(root, { changes: [REWRITE_CHANGE] }, ".assay-tmp/draft.json");
   // assay's own state is not the owner's uncommitted work, so the plan
@@ -5243,9 +5243,15 @@ test("in a clean repository the row carries gitHead and no files are copied", ()
 
   const [row] = transactionRows(root);
   assert.match(row.gitHead, /^[0-9a-f]{40}$/);
-  assert.equal(row.backupDir, null, "git IS the backup — the row is a pointer, not a copy");
-  assert.equal(JSON.parse(applied.out).backupDir, null);
-  assert.deepEqual(fs.readdirSync(path.join(root, ".assay")).filter((f) => f.startsWith("backup-")), []);
+  // [Foreman: 176] Both routes on every row: the commit can be rebased away,
+  // the copies cannot, and /assay:revert only offers a choice a row can honour.
+  assert.match(row.backupDir, /^\.assay\/backup-t[0-9a-f]{10}$/);
+  assert.equal(JSON.parse(applied.out).backupDir, row.backupDir);
+  assert.deepEqual(fs.readdirSync(path.join(root, ".assay")).filter((f) => f.startsWith("backup-")),
+    [path.basename(row.backupDir)]);
+
+  const plan = safety.revertPlan(root, row.txId);
+  assert.deepEqual(plan.ready.slice().sort(), ["backup", "git"], "both routes are ready, not just the pointer");
 });
 
 test("a dirty repository stops apply before any write, names the paths, and never stashes", () => {
