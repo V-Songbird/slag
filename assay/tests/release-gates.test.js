@@ -1446,7 +1446,7 @@ test("release gate: DISCLOSED GAPS", () => {
 const RETIRED_COMMANDS = ["/assay:assay", "/assay:audit", "/assay:claude"];
 // [Foreman: 165] The four model commands replaced the single audit door.
 const MODEL_COMMANDS = ["opus5", "sonnet5", "haiku45", "fable5"];
-const COMMANDS = [...MODEL_COMMANDS, "codex", "craft-rules", "craft-skill"];
+const COMMANDS = [...MODEL_COMMANDS, "codex", "craft-rules", "craft-skill", "revert"];
 // Not a command: the one file the four model commands defer to.
 const SHARED_DIR = "_shared";
 const SHARED_AUDIT = path.join(PLUGIN_ROOT, "skills", SHARED_DIR, "audit.md");
@@ -1816,4 +1816,147 @@ test("release gate G9: no surface still offers the retired --fix", () => {
     .filter((f) => /--fix\b/.test(fs.readFileSync(f, "utf-8")))
     .map((f) => path.relative(PLUGIN_ROOT, f));
   assert.deepEqual(offenders, [], "--fix was retired but still ships:\n" + offenders.join("\n"));
+});
+
+// ---------------------------------------------------------------------------
+// [Foreman: 163] G10. Two routes out of a run, one result.
+// ---------------------------------------------------------------------------
+
+// `/assay:revert` offers the owner a choice between restoring from the commit
+// the run started at and restoring from the copies assay made itself. A choice
+// is only safe to offer if it is not a choice about the OUTCOME — so this gate
+// runs one identical fixture down each route and compares the trees byte for
+// byte, files the run created included. If the two ever diverge, the skill is
+// asking the owner a question they have no way to answer.
+const SAFETY = require("../scripts/safety.js");
+
+function tgit(root, args) {
+  return spawnSync("git", args, { cwd: root, encoding: "utf-8" });
+}
+
+const GIT_MISSING = tgit(os.tmpdir(), ["--version"]).status !== 0;
+
+// Content of every file outside `.git` and the two directories assay owns.
+// Mtime is deliberately absent: a restore that rewrites identical bytes is a
+// correct restore, and a clock is not part of what was undone.
+function contentTree(root) {
+  const out = {};
+  const walk = (rel) => {
+    for (const e of fs.readdirSync(path.join(root, rel || "."), { withFileTypes: true })) {
+      const next = rel ? rel + "/" + e.name : e.name;
+      if (e.name === ".git" || e.name === ".assay" || e.name === ".assay-tmp") continue;
+      if (e.isDirectory()) walk(next);
+      else out[next] = crypto.createHash("sha256").update(fs.readFileSync(path.join(root, next))).digest("hex");
+    }
+  };
+  walk("");
+  return out;
+}
+
+// A committed project, a transaction row carrying BOTH routes, then the writes
+// that row describes: one file edited, one file created. This is the shape
+// `apply` produces, with the backup taken before the first write exactly as
+// `cmdApply` takes it.
+function revertFixture() {
+  const root = tmpProject({
+    "CLAUDE.md": "# Rules\n\n- Always read the plan before applying it.\n",
+    "docs/keep.md": "untouched\n",
+  });
+  tgit(root, ["init", "-q"]);
+  tgit(root, ["config", "user.email", "gate@example.invalid"]);
+  tgit(root, ["config", "user.name", "gate"]);
+  tgit(root, ["add", "-A"]);
+  tgit(root, ["commit", "-qm", "base"]);
+  const head = tgit(root, ["rev-parse", "HEAD"]).stdout.trim();
+  const pre = contentTree(root);
+
+  const txId = "t0123456789";
+  const files = [".claude/skills/made/SKILL.md", "CLAUDE.md"];
+  const backupDir = SAFETY.backupFiles(root, txId, files);
+  SAFETY.appendTransaction(root, {
+    txId, startedAt: "2026-08-25T00:00:00.000Z", gitHead: head, backupDir, files, changes: [],
+  });
+
+  fs.writeFileSync(path.join(root, "CLAUDE.md"), "# Rules\n\n- Rewritten by the run.\n");
+  fs.mkdirSync(path.join(root, ".claude", "skills", "made"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".claude", "skills", "made", "SKILL.md"), "---\nname: made\n---\n");
+  return { root, txId, head, pre };
+}
+
+test("release gate G10: both restore routes put the tree back byte for byte", {
+  skip: GIT_MISSING ? disclose("revert route equivalence",
+    "git is not on PATH in this environment, so neither restore route can be exercised end to end") : false,
+}, () => {
+  const viaGit = revertFixture();
+  const viaBackup = revertFixture();
+  const before = viaGit.pre;
+  // the fixture is the same project twice, or the comparison below proves nothing
+  assert.deepEqual(contentTree(viaGit.root), contentTree(viaBackup.root));
+  assert.notDeepEqual(contentTree(viaGit.root), before, "the fixture never simulated the run's writes");
+
+  const g = SAFETY.revertTransaction(viaGit.root, viaGit.txId, "git");
+  const b = SAFETY.revertTransaction(viaBackup.root, viaBackup.txId, "backup");
+  assert.equal(g.ok, true, "git route refused: " + g.problem);
+  assert.equal(b.ok, true, "backup route refused: " + b.problem);
+
+  assert.deepEqual(contentTree(viaGit.root), before, "the git route did not restore the pre-run tree");
+  assert.deepEqual(contentTree(viaBackup.root), contentTree(viaGit.root),
+    "the two routes disagree, so the skill's choice changes the outcome");
+  // the created file is gone by both routes, and the directory with it
+  assert.equal(fs.existsSync(path.join(viaGit.root, ".claude", "skills", "made")), false);
+  assert.equal(fs.existsSync(path.join(viaBackup.root, ".claude", "skills", "made")), false);
+  assert.deepEqual(g.removed, [".claude/skills/made/SKILL.md"]);
+  assert.deepEqual(b.removed, [".claude/skills/made/SKILL.md"]);
+});
+
+test("release gate G10: a revert marks its row and refuses to run twice", {
+  skip: GIT_MISSING ? disclose("revert row marking",
+    "git is not on PATH in this environment, so a transaction row with a live commit cannot be built") : false,
+}, () => {
+  const { root, txId } = revertFixture();
+  const first = SAFETY.revertTransaction(root, txId, "git");
+  assert.equal(first.ok, true, first.problem);
+  const row = SAFETY.readTransactions(root).find((r) => r.txId === txId);
+  assert.equal(row.revertedAt, first.revertedAt);
+  assert.match(String(row.revertedAt), /^\d{4}-\d{2}-\d{2}T/);
+
+  const second = SAFETY.revertTransaction(root, txId, "git");
+  assert.equal(second.ok, false);
+  assert.match(second.problem, /already reverted/);
+});
+
+test("release gate G10: a broken route is refused whole, never in part", {
+  skip: GIT_MISSING ? disclose("revert whole-or-nothing refusal",
+    "git is not on PATH in this environment, so the git route cannot be put into a broken state") : false,
+}, () => {
+  // a corrupted backup copy
+  const corrupt = revertFixture();
+  const manifest = path.join(corrupt.root, ".assay", "backup-" + corrupt.txId, "CLAUDE.md");
+  fs.writeFileSync(manifest, "tampered\n");
+  const tree = contentTree(corrupt.root);
+  const r1 = SAFETY.revertTransaction(corrupt.root, corrupt.txId, "backup");
+  assert.equal(r1.ok, false);
+  assert.match(r1.problem, /no longer matches its recorded digest/);
+  assert.deepEqual(contentTree(corrupt.root), tree, "a refused revert still wrote to the tree");
+  assert.equal(SAFETY.readTransactions(corrupt.root)[0].revertedAt, undefined);
+
+  // a recorded commit that is not in this repository
+  const gone = revertFixture();
+  const rows = SAFETY.readTransactions(gone.root)
+    .map((r) => ({ ...r, gitHead: "0".repeat(40) }));
+  fs.writeFileSync(path.join(gone.root, ".assay", "transactions.jsonl"),
+    rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  const r2 = SAFETY.revertTransaction(gone.root, gone.txId, "git");
+  assert.equal(r2.ok, false);
+  assert.match(r2.problem, /not in this repository any more/);
+
+  // a staged change on a named file blocks the whole transaction
+  const staged = revertFixture();
+  tgit(staged.root, ["add", "--", "CLAUDE.md"]);
+  const stagedTree = contentTree(staged.root);
+  const r3 = SAFETY.revertTransaction(staged.root, staged.txId, "git");
+  assert.equal(r3.ok, false);
+  assert.match(r3.problem, /staged or unmerged/);
+  assert.match(r3.problem, /CLAUDE\.md/);
+  assert.deepEqual(contentTree(staged.root), stagedTree, "a blocked revert still wrote to the tree");
 });
