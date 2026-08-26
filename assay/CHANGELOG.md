@@ -4,6 +4,26 @@ All notable changes to assay are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.0.0] — 2026-08-25
+
+### Removed
+
+- **Breaking.** `/assay:claude` is gone. Four commands replace it, one per model: `/assay:opus5`, `/assay:sonnet5`, `/assay:haiku45` and `/assay:fable5`. They run the same audit and differ only in who the advice is written for
+- **Breaking.** `--fix` is retired everywhere it shipped, on both hosts. `--dry-run` is the flag now: the audit runs and the report prints, but nothing is offered to write and nothing is written
+
+### Added
+
+- `/assay:revert` takes back a whole run in one command, by Git or by the copies assay kept. Files the run created are deleted again, and a run that cannot be undone completely is refused whole rather than half-applied
+- Every run records itself before it writes anything, so a batch interrupted halfway is still a run that revert can find. A run already taken back refuses to be taken back twice
+- Without a repository, every file a run will touch is copied aside first, so the undo works with no version control at all
+- Applying a fix now stops on a dirty working tree and names the paths, rather than mixing its writes into changes you have not committed
+- `assay.js report --plain` is a third report beside the short one and `--verbose`: simple English, worst finding first, no grades or codes, ending with every hook it would install named by event and matcher
+- The scoring weights and thresholds are a named model profile now, and four ship — one per command. Only the Haiku 4.5 column has ever been measured; the other three say so on every constant they carry
+
+### Changed
+
+- `clean` no longer removes assay's own directory wholesale. The undo history and the copies it holds outlive it; only the temporary working files go
+
 ## [1.16.0] — 2026-08-18
 
 ### Added

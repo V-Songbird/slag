@@ -76,6 +76,7 @@ On Codex, point its plugin install at this repository's `assay/` directory. Ther
 | See the full analysis behind the short report | Claude Code | `/assay:opus5 --verbose` |
 | Audit what Codex loads instead | Claude Code | `/assay:codex` |
 | The same audit, from inside Codex | Codex | `$assay` |
+| Undo a whole set of fixes | Claude Code | `/assay:revert` |
 | Write a new rule that sticks | Claude Code | `/assay:craft-rules` |
 | Build a skill that reliably triggers | Claude Code | `/assay:craft-skill` |
 | Fix a skill Claude keeps ignoring | Claude Code | `/assay:craft-skill <skill name>` |
@@ -91,6 +92,7 @@ On Codex, point its plugin install at this repository's `assay/` directory. Ther
 | Skip the "is this a rule at all" check | `/assay:opus5 --no-verify` |
 | Get the whole record as JSON instead of a report | `/assay:opus5 --json` |
 | Show more than the first eight rows | `assay.js report --top 20` |
+| Read the findings in the plainest words there are | `assay.js report --plain` |
 | Audit a Codex session started in a subdirectory | `/assay:codex --startup <path>` |
 | Enforce the findings in a build instead of reading them | `assay.js ci` |
 | See every command the engine takes | `assay.js --help` |
