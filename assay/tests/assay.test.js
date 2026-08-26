@@ -2669,7 +2669,7 @@ test("report before scan exits 1 and says to run scan first", () => {
   assert.equal(code, 1);
   assert.match(err, /No \.assay-tmp\/scan\.json to report from — run `assay\.js scan` here first/);
   // [Foreman: 097] and it names the door a person actually goes through
-  assert.match(err, /\/assay:claude/);
+  assert.match(err, /\/assay:opus5/);
 });
 
 test("remeasure lists reworded rules first, then composes a before/after report", () => {
@@ -6372,7 +6372,10 @@ test("the brief report says what it looked at and what needs doing, in plain wor
   assert.match(out, /too vague to act on/);
   assert.match(out, /Name a file, a command, or show an example/);
   // the reader is told where to go next, never left with a bare table
-  assert.match(out, /--fix/);
+  // [Foreman: 165] `--fix` is retired; the line names the offer instead, because
+  // four model commands share this report and the engine cannot know which one
+  // the reader typed.
+  assert.match(out, /offers to rewrite the weak ones/);
   assert.match(out, /--verbose/);
 });
 

@@ -539,10 +539,14 @@ const COMPLIANCE_PROMISES = [
 const NEGATION = /\b(never|not|no|without|isn't|won't|cannot|can't|rather than)\b/i;
 
 test("release gate: public language does not imply static compliance prediction", () => {
+  // [Foreman: 165] `_shared` holds no SKILL.md — it holds the procedure the
+  // model commands read, which is public text by the same argument.
   const skills = fs.readdirSync(path.join(PLUGIN_ROOT, "skills"))
+    .filter((name) => name !== "_shared")
     .map((name) => path.join("skills", name, "SKILL.md"));
   const files = ["README.md", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json",
-    "codex-skills/assay/SKILL.md", ...skills];
+    "codex-skills/assay/SKILL.md", "skills/_shared/audit.md", "skills/_shared/fixes.md",
+    ...skills];
 
   const offenders = [];
   for (const rel of files) {
@@ -755,7 +759,7 @@ test("release gate G2: the default report names a rule once", () => {
 // the sentences the user is asked to choose between, so they are held to the
 // same bar as the page above them.
 test("release gate G3': the fix menu uses no word that needs host internals", () => {
-  const skill = fs.readFileSync(path.join(PLUGIN_ROOT, "skills", "claude", "SKILL.md"), "utf-8");
+  const skill = fs.readFileSync(SHARED_AUDIT, "utf-8");
   const menu = skill.split("## 4. Offer fixes")[1].split("\n## ")[0];
   assert.ok(menu, "the audit skill no longer has a fix menu — this gate is checking nothing");
   // The option labels and the sentence the user reads beside each one.
@@ -1439,8 +1443,13 @@ test("release gate: DISCLOSED GAPS", () => {
 //
 // CHANGELOG.md is excluded on purpose. It is the record of what the plugin used
 // to be called, and rewriting history there would be the actual defect.
-const RETIRED_COMMANDS = ["/assay:assay", "/assay:audit"];
-const COMMANDS = ["claude", "codex", "craft-rules", "craft-skill"];
+const RETIRED_COMMANDS = ["/assay:assay", "/assay:audit", "/assay:claude"];
+// [Foreman: 165] The four model commands replaced the single audit door.
+const MODEL_COMMANDS = ["opus5", "sonnet5", "haiku45", "fable5"];
+const COMMANDS = [...MODEL_COMMANDS, "codex", "craft-rules", "craft-skill"];
+// Not a command: the one file the four model commands defer to.
+const SHARED_DIR = "_shared";
+const SHARED_AUDIT = path.join(PLUGIN_ROOT, "skills", SHARED_DIR, "audit.md");
 
 function shippedFiles(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -1463,10 +1472,13 @@ test("release gate: no retired command name survives anywhere in the plugin", ()
   assert.deepEqual(offenders, [], "a retired command name still ships:\n" + offenders.join("\n"));
 });
 
-test("release gate: four commands, each named by its own skill, none taking --host", () => {
+test("release gate: every command is named by its own skill, and none takes --host", () => {
   const dirs = fs.readdirSync(path.join(PLUGIN_ROOT, "skills")).sort();
-  assert.deepEqual(dirs, [...COMMANDS].sort());
+  assert.deepEqual(dirs, [...COMMANDS, SHARED_DIR].sort());
   for (const dir of dirs) {
+    // `_shared` carries no SKILL.md and is no command; it is the procedure the
+    // model commands open, and G9 below is what holds it in step with them.
+    if (dir === SHARED_DIR) continue;
     const fm = engine.parseFrontmatter(fs.readFileSync(path.join(PLUGIN_ROOT, "skills", dir, "SKILL.md"), "utf-8"));
     // the command name is the frontmatter name, not the directory
     assert.equal(fm.name, dir, dir + " names itself something else");
@@ -1640,9 +1652,9 @@ test("release gate: every Codex surface carries the guards that keep a fix hones
 // host with different steps — but the step COUNT drifting is the same class of
 // silent divergence, and it is cheap to notice.
 test("release gate: the Claude audit surface still describes a numbered flow of its own", () => {
-  const claude = stepHeadings(fs.readFileSync(path.join(PLUGIN_ROOT, "skills", "claude", "SKILL.md"), "utf-8"));
+  const claude = stepHeadings(fs.readFileSync(SHARED_AUDIT, "utf-8"));
   const codex = stepHeadings(readTwin(CODEX_TWINS.hosted));
-  assert.ok(claude.length >= 6, "the Claude audit skill must have numbered steps");
+  assert.ok(claude.length >= 6, "the shared audit procedure must have numbered steps");
   assert.equal(claude.length, codex.length,
     "one audit surface grew or lost a step the others did not — deliberate is fine, silent is not");
 });
@@ -1716,4 +1728,92 @@ test("release gate G8: no profile source file writes a forbidden evidence level"
     const text = fs.readFileSync(path.join(dir, file), "utf-8");
     assert.ok(!re.test(text), `${file} writes an evidence level nothing has measured`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// [Foreman: 165] G9. One procedure, four doors.
+// ---------------------------------------------------------------------------
+
+// The single audit command became four, one per model target, and the whole
+// reason that is affordable is that none of them carries the procedure. The
+// procedure is `skills/_shared/audit.md` and the four SKILL.md files are a
+// frontmatter and a pointer. The failure this gate exists to stop is the one
+// the Codex twins already suffered in 1.11.0–1.15.0: a step or a flag added to
+// one surface and not the others, drifting silently until a manual read found
+// it. Four copies drift four ways, so the four are not allowed to have a copy.
+//
+// It also holds the thing that MUST differ. Each command names one model
+// target, the four are distinct, and they are exactly the profiles the engine
+// ships — a fifth command with no profile behind it, or two commands claiming
+// one model, is a door that cannot mean what it says.
+const modelSkill = (name) => fs.readFileSync(path.join(PLUGIN_ROOT, "skills", name, "SKILL.md"), "utf-8");
+const bodyOf = (text) => text.split(/^---$/m).slice(2).join("---");
+// Every distinct `--flag` token, `--top <n>` and `--top` counting as one.
+const flagSet = (text) => [...new Set((text.match(/--[a-z][a-z-]+/g) || []))].sort();
+
+test("release gate G9: the audit procedure is stated once, and only there", () => {
+  assert.ok(fs.existsSync(SHARED_AUDIT), "the shared audit procedure is missing");
+  assert.ok(stepHeadings(fs.readFileSync(SHARED_AUDIT, "utf-8")).length >= 6,
+    "the shared audit procedure no longer carries the numbered steps");
+  // and the retired single-door skill is gone rather than left beside it
+  assert.ok(!fs.existsSync(path.join(PLUGIN_ROOT, "skills", "claude")),
+    "the retired single-door audit skill still ships");
+
+  for (const name of MODEL_COMMANDS) {
+    const body = bodyOf(modelSkill(name));
+    assert.deepEqual(stepHeadings(body), [],
+      name + " restates a step of the procedure instead of deferring to it");
+    assert.match(body, /\.\.\/_shared\/audit\.md/,
+      name + " never sends the reader to the shared procedure");
+    // A pointer, not a paraphrase. The bound is generous on purpose: what it
+    // catches is a file that has started growing a second copy of the flow.
+    const lines = body.split("\n").filter((l) => l.trim()).length;
+    assert.ok(lines <= 12, name + " is " + lines + " lines of body — it is no longer thin:\n" + body);
+    // Every engine call belongs to the procedure. A command that runs one has
+    // begun to duplicate it.
+    assert.doesNotMatch(body, /assay\.js/, name + " calls the engine itself");
+  }
+});
+
+test("release gate G9: the four commands know exactly the flags the procedure documents", () => {
+  const shared = fs.readFileSync(SHARED_AUDIT, "utf-8");
+  const para = shared.slice(shared.indexOf("Flags in `$ARGUMENTS`"));
+  const documented = flagSet(para.slice(0, para.indexOf("\n\n")));
+  assert.ok(documented.length >= 6, "the shared procedure no longer lists its flags in one paragraph");
+  assert.ok(!documented.includes("--fix"), "the shared procedure still documents the retired --fix");
+  assert.ok(documented.includes("--dry-run"), "the shared procedure never documents --dry-run");
+
+  const hints = MODEL_COMMANDS.map((name) => String(engine.parseFrontmatter(modelSkill(name))["argument-hint"] || ""));
+  assert.equal(new Set(hints).size, 1, "the four commands offer different flags:\n" + hints.join("\n"));
+  assert.deepEqual(flagSet(hints[0]), documented,
+    "a command offers a flag the procedure does not document, or hides one it does");
+});
+
+test("release gate G9: each command names one model target, and the four are the shipped profiles", () => {
+  const targets = new Map();
+  for (const name of MODEL_COMMANDS) {
+    const body = bodyOf(modelSkill(name));
+    const found = [...body.matchAll(/\*\*Model target: ([^*]+?)\.\*\*/g)].map((m) => m[1]);
+    assert.equal(found.length, 1, name + " names " + found.length + " model targets; it must name exactly one");
+    targets.set(name, found[0]);
+  }
+  assert.equal(new Set(targets.values()).size, MODEL_COMMANDS.length,
+    "two commands claim the same model target: " + [...targets].map((p) => p.join("→")).join(", "));
+  // The target is the profile's own display name, so the command cannot name a
+  // model the engine has never heard of.
+  for (const [name, target] of targets) {
+    const profile = MODEL_PROFILES[name];
+    assert.ok(profile, name + " is a command with no model profile behind it");
+    assert.equal(target, profile.displayName,
+      name + " names `" + target + "`; its profile is `" + profile.displayName + "`");
+  }
+  assert.deepEqual([...targets.keys()].sort(), Object.keys(MODEL_PROFILES).sort(),
+    "the commands and the shipped model profiles are not the same set");
+});
+
+test("release gate G9: no surface still offers the retired --fix", () => {
+  const offenders = shippedFiles(PLUGIN_ROOT)
+    .filter((f) => /--fix\b/.test(fs.readFileSync(f, "utf-8")))
+    .map((f) => path.relative(PLUGIN_ROOT, f));
+  assert.deepEqual(offenders, [], "--fix was retired but still ships:\n" + offenders.join("\n"));
 });

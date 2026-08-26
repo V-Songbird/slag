@@ -44,7 +44,8 @@ plan stale and the journal blind.
   to appear exactly once. Match by text, never by line number. `"old": null`
   creates a file, and `plan` refuses if that file already exists.
 - Never state a source hash yourself — `plan` fingerprints every affected file.
-- `batches` — only under `--fix`.
+- `batches` — optional, and unused by these commands: every change is approved
+  by id.
 
 ## What each kind carries
 
@@ -139,9 +140,8 @@ plan stale and the journal blind.
    and wait for the answer. Never treat silence, "looks good" on the preview, or
    an earlier yes to the menu as approval for a specific patch.
 
-   Then `apply --change <id> --change <id>` with exactly the ids approved — or
-   `apply --batch fix-batch` under `--fix`, where the batch is the boundary
-   instead. There is no apply-everything default, and a change the user did not
+   Then `apply --change <id> --change <id>` with exactly the ids approved.
+   There is no apply-everything default, and a change the user did not
    name is not applied even though the plan carries it. A stale file exits 1
    naming both fingerprints and writes nothing; re-plan rather than forcing it. A
    write whose result does not parse is restored and exits 1.

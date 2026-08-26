@@ -8,7 +8,7 @@ description: >-
   reliably — e.g. "make me a skill", "create a skill for X", "my skill never
   fires", "Claude keeps ignoring my skill", "fix this skill description", "craft
   a skill" — or invokes /assay:craft-skill. Do NOT use for auditing CLAUDE.md
-  rules — that is /assay:claude.
+  rules — that is /assay:opus5.
 argument-hint: "[skill name or what it should do]"
 allowed-tools: Bash, Read, Write, Glob, AskUserQuestion, WebFetch
 ---

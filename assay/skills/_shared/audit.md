@@ -1,33 +1,26 @@
----
-name: claude
-description: >-
-  Grades every rule in the project's CLAUDE.md and .claude/rules/ on how it is
-  written, scoped and placed, and flags the ones a hook or a skill would enforce
-  better than prose. Also grades each project skill's frontmatter description in
-  .claude/skills/ against the trigger recipe, and offers to rewrite what it
-  finds. English-only scoring. Use when the user wants feedback on existing rule files
-  — e.g. "are my rules any good", "check my CLAUDE.md", "grade my instruction
-  files", "which rules are weak or vague", "audit my rules", "which rules should
-  be hooks", "Claude keeps ignoring my instructions" — or invokes /assay:claude
-  with any flags. Do NOT use to review code,
-  PRs, non-Claude config like eslint, or the AGENTS.md chain — auditing that is
-  /assay:codex.
-argument-hint: "[--fix] [--verbose] [--json] [--top <n>] [--no-verify] [--deterministic] [--semantic] [--project-only]"
-allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent
----
+# The audit procedure
 
-# assay:claude
+The one statement of how a Claude Code audit runs. Every model command under
+`skills/` opens this file and follows it; none of them repeats a step of it.
+What differs between them is the **model target** — the model the findings are
+written for — which the command that sent you here names in its own `SKILL.md`.
+
+Carry that target into your closing sentences and nowhere else. The engine
+scores one way today and takes no model argument, so the target says who the
+advice is for. It is never a claim that anything here was measured on that
+model.
 
 The script measures everything mechanical; you judge two factors and present the
 result. Never re-derive by hand what the script already computed.
 
-Flags in `$ARGUMENTS`: `--fix` (apply rewrites without the menu), `--verbose`
-(the full report), `--json` (the machine-readable record), `--top <n>` (show
-more than the default 8 rows in the fix table), `--no-verify` (skip
-the subagent in step 2, which otherwise runs), `--deterministic` (skip every
-model step and report what the script alone can see), `--semantic` (also propose
-paraphrased duplicates and indirect conflicts the script cannot see),
-`--project-only` (skip the user's own instruction files).
+Flags in `$ARGUMENTS`: `--dry-run` (audit and preview only — the menu is not
+asked, nothing is written), `--verbose` (the full report), `--json` (the
+machine-readable record), `--top <n>` (show more than the default 8 rows in the
+fix table), `--no-verify` (skip the subagent in step 2, which otherwise runs),
+`--deterministic` (skip every model step and report what the script alone can
+see), `--semantic` (also propose paraphrased duplicates and indirect conflicts
+the script cannot see), `--project-only` (skip the user's own instruction
+files).
 
 ## 1. Scan
 
@@ -223,12 +216,12 @@ report behind it asks the user to choose blind.
 Skip to step 6 when the report has no weak rules, no weak descriptions, no dead
 references, and nothing under **Could be automatic instead**.
 
-Under `--fix`, skip the question instead: put every **wording rewrite** into one
-batch named `fix-batch` in the draft plan and apply that batch by name, which is
-what keeps `--fix` a recorded approval rather than an implicit one. `--fix`
-covers rewrites and nothing else, so name in the final message which options
-below were NOT offered — dead references, building a mechanism, writing a plan
-down — and say that `/assay:claude` with no flag offers them.
+Under `--dry-run`, do not ask the question at all and write nothing. Say what
+each option below would have covered and how many rules it names, say plainly
+that nothing was changed, then go to step 6. Do not assemble a draft plan and do
+not run `plan`: that command writes a file, and this flag exists so a person can
+see the whole audit with no artifact left behind. Name the command they ran
+without the flag as the way to act on any of it.
 
 Otherwise ask ONE question with `AskUserQuestion` (`multiSelect: true`, header
 `"Fix menu"`), including only the options that have evidence:
@@ -279,7 +272,7 @@ goes into ONE draft plan.
 
 ## 5. Plan, preview, apply, validate
 
-Read [references/fixes.md](references/fixes.md) and follow it. It carries the
+Read [fixes.md](fixes.md) and follow it. It carries the
 draft-plan shape, what each change kind must carry, and the five transaction
 steps — assemble, plan, preview, apply per approved id, validate.
 

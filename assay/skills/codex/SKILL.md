@@ -11,8 +11,8 @@ description: >-
   "what does Codex actually load here", "which AGENTS.md files get ignored",
   "audit the Codex skills" — or invokes /assay:codex with any flags. Do NOT use
   for CLAUDE.md, .claude/rules/ or .claude/skills/ — auditing those is
-  /assay:claude.
-argument-hint: "[--startup <path>] [--fix] [--verbose] [--json] [--top <n>] [--no-verify] [--deterministic] [--semantic] [--project-only]"
+  /assay:opus5 and its per-model siblings.
+argument-hint: "[--startup <path>] [--dry-run] [--verbose] [--json] [--top <n>] [--no-verify] [--deterministic] [--semantic] [--project-only]"
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, WebFetch, Agent
 ---
 
@@ -33,8 +33,8 @@ context `report` reads. The commands that re-scan inherit nothing from that
 context: `remeasure` and `validate` need `--host codex` and the same `--startup`
 passed again.
 
-Other flags in `$ARGUMENTS`: `--fix` (apply repairs without the menu),
-`--verbose` (the full report), `--json` (the machine-readable record),
+Other flags in `$ARGUMENTS`: `--dry-run` (audit and preview only — the menu is
+not asked, nothing is written), `--verbose` (the full report), `--json` (the machine-readable record),
 `--top <n>` (show more than the default 8 rows in the fix table),
 `--no-verify` (skip the subagent in step 2, which otherwise runs),
 `--deterministic` (skip every model step), `--semantic` (also propose duplicates
@@ -182,9 +182,12 @@ step 4**, go to step 6, and make the report the final message.
 
 ## 4. Offer fixes
 
-Skip to step 6 when the report has nothing repairable. Under `--fix`, skip the
-question instead: put every repair into one batch named `fix-batch` in the draft
-plan and apply that batch by name.
+Skip to step 6 when the report has nothing repairable. Under `--dry-run`, do not
+ask the question at all and write nothing: say what each option below would have
+covered and how many rules it names, say plainly that nothing was changed, and
+go to step 6. Do not assemble a draft plan and do not run `plan` — that command
+writes a file, and this flag exists so the whole audit can be read with no
+artifact left behind.
 
 Otherwise ask ONE question with `AskUserQuestion` (`multiSelect: true`, header
 `"Fix menu"`), including only the options that have evidence:
@@ -244,7 +247,8 @@ this flow is going to write.
   to appear exactly once. Match by text, never by line number. `"old": null`
   creates a file, and `plan` refuses if that file already exists.
 - Never state a source hash yourself — `plan` fingerprints every affected file.
-- `batches` — only under `--fix`.
+- `batches` — optional, and unused by this command: every change is approved
+  by id.
 
 **What each kind carries here:**
 
@@ -302,9 +306,8 @@ and the journal.
    and wait for the answer. Never treat silence, "looks good" on the preview, or
    an earlier yes to the menu as approval for a specific patch.
 
-   Then `apply --change <id>` with
-   exactly the ids approved — or `apply --batch fix-batch` under
-   `--fix`. There is no apply-everything default. A stale file exits 1 naming
+   Then `apply --change <id>` with exactly the ids approved. There is no
+   apply-everything default. A stale file exits 1 naming
    both fingerprints and writes nothing; re-plan rather than forcing it. A write
    whose result does not parse is restored and exits 1.
 4. `validate --change <id> --host codex --startup <the same directory passed to

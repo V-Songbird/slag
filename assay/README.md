@@ -70,9 +70,10 @@ On Codex, point its plugin install at this repository's `assay/` directory. Ther
 
 | You want to… | Where you run it | Command |
 | --- | --- | --- |
-| See what's wrong with your rules | Claude Code | `/assay:claude` |
-| Apply the rewrites without the menu | Claude Code | `/assay:claude --fix` |
-| See the full analysis behind the short report | Claude Code | `/assay:claude --verbose` |
+| See what's wrong with your rules | Claude Code | `/assay:opus5` |
+| The same audit, written for another model | Claude Code | `/assay:sonnet5`, `/assay:haiku45`, `/assay:fable5` |
+| Read the whole audit without changing anything | Claude Code | `/assay:opus5 --dry-run` |
+| See the full analysis behind the short report | Claude Code | `/assay:opus5 --verbose` |
 | Audit what Codex loads instead | Claude Code | `/assay:codex` |
 | The same audit, from inside Codex | Codex | `$assay` |
 | Write a new rule that sticks | Claude Code | `/assay:craft-rules` |
@@ -84,11 +85,11 @@ On Codex, point its plugin install at this repository's `assay/` directory. Ther
 
 | You want to… | Command |
 | --- | --- |
-| Grade the repo's files only, not your own | `/assay:claude --project-only` |
-| Skip every model step and see what the script alone finds | `/assay:claude --deterministic` |
-| Also propose duplicates and conflicts that share no words | `/assay:claude --semantic` |
-| Skip the "is this a rule at all" check | `/assay:claude --no-verify` |
-| Get the whole record as JSON instead of a report | `/assay:claude --json` |
+| Grade the repo's files only, not your own | `/assay:opus5 --project-only` |
+| Skip every model step and see what the script alone finds | `/assay:opus5 --deterministic` |
+| Also propose duplicates and conflicts that share no words | `/assay:opus5 --semantic` |
+| Skip the "is this a rule at all" check | `/assay:opus5 --no-verify` |
+| Get the whole record as JSON instead of a report | `/assay:opus5 --json` |
 | Show more than the first eight rows | `assay.js report --top 20` |
 | Audit a Codex session started in a subdirectory | `/assay:codex --startup <path>` |
 | Enforce the findings in a build instead of reading them | `assay.js ci` |

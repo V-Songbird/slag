@@ -5506,7 +5506,7 @@ function renderBrief(audit, opts = {}) {
     duplicateRows.push({ finding: f, spans, rule: kept[0] });
   }
 
-  // Bucket 5 — the wording itself. This is what `--fix` repairs.
+  // Bucket 5 — the wording itself. This is what the rewrite option repairs.
   // [Foreman: 097] A rule every session reads outranks one only some sessions
   // reach, so an always-loaded rule sorts above a nested one at the same score.
   const alwaysLoadedFiles = new Set(files.filter((f) => f.alwaysLoaded).map((f) => f.path));
@@ -5821,23 +5821,22 @@ function renderBrief(audit, opts = {}) {
       : "Nothing to audit yet — run `/assay:craft-rules` to write your first rule.");
     return out.join("\n");
   }
-  // [Foreman: 097] A function of the table above it. It used to offer `--fix`
-  // whenever anything was weak and nothing at all otherwise — so a report of
+  // [Foreman: 097] A function of the table above it. It used to offer an
+  // apply-everything flag whenever anything was weak and nothing at all otherwise — so a report of
   // gates, disagreements and dead paths ended with no action to take.
-  // [Foreman: 097] `--fix` is not a flag this engine takes — it is the audit
-  // skill's, and the Codex profile grades no wording, so `weak` is empty there by
-  // construction and the line was unreachable copy naming a flag that would be
-  // rejected. What a Codex reader gets is the repairs, which are real on every
-  // host.
+  // [Foreman: 165] The line named the retired one-command audit and its retired
+  // apply-everything flag. Both halves are gone: the audit is four model
+  // commands now and the engine cannot know which one the reader typed, so it
+  // names the offer rather than a command. The menu is always offered.
   const next = [];
-  if (weak.length && !codexHost) next.push("Run `/assay:claude --fix` to rewrite the weak ones.");
+  if (weak.length && !codexHost) next.push("The audit offers to rewrite the weak ones.");
   if (gated.length || conflictRows.length || stale.length || duplicateRows.length) {
     next.push("The rest are yours to decide — each row above carries its own fix.");
   }
   if (weakDescriptions.length && !codexHost) {
     next.push("Run `/assay:craft-skill <name>` to rewrite a description that never fires.");
   }
-  next.push(codexHost ? "Rerun with `--verbose` to see everything assay found." : "Run `/assay:claude --verbose` to see everything assay found.");
+  next.push("Rerun with `--verbose` to see everything assay found.");
   out.push(next.join(" "));
 
   return out.join("\n");
@@ -6630,7 +6629,7 @@ function cmdReport(root, opts) {
   const scanFile = path.join(root, TMP_DIR, "scan.json");
   if (!fs.existsSync(scanFile)) {
     process.stderr.write("No " + TMP_DIR + "/scan.json to report from — run `assay.js scan` here first" +
-      " (in Claude Code, `/assay:claude` runs both).\n");
+      " (in Claude Code, an audit command like `/assay:opus5` runs both).\n");
     process.exit(1);
   }
   const { record: scanData, problem } = readRecord(scanFile, "scan");
@@ -7364,7 +7363,7 @@ function cmdApply(root, opts) {
   let ids = opts.changes;
   if (opts.batch) {
     // A batch is an approval too — an explicitly named one, defined in the plan.
-    // It is how `--fix` stays a recorded boundary rather than "apply everything".
+    // It is what kept the retired apply-everything flag a recorded boundary.
     const found = findBatch(root, opts.batch);
     if (found.problem) fail(found.problem);
     ids = [...ids, ...found.members];
@@ -7976,7 +7975,8 @@ const USAGE = [
   "assay — reads the instruction files an agent loads for a project and reports what is",
   "vague, stale, buried, or better done by a script.",
   "",
-  "In Claude Code the front door is `/assay:claude`, which runs all of this for you.",
+  "In Claude Code the front door is the audit command for your model —",
+  "`/assay:opus5`, `/assay:sonnet5`, `/assay:haiku45` or `/assay:fable5` — each runs all of this for you.",
   "",
   "Usage: assay.js <command> [--root <path>]",
   "",

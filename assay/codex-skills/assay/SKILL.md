@@ -33,7 +33,8 @@ the session starts; pass it to `scan`, which fixes it in the saved context
 `report` reads. The commands that re-scan inherit nothing from that context:
 `remeasure` and `validate` need `--host codex` and the same `--startup` passed
 again),
-`--fix` (apply repairs without the menu), `--verbose` (the full report),
+`--dry-run` (audit and preview only — the menu is not asked, nothing is
+written), `--verbose` (the full report),
 `--json` (the machine-readable record), `--top <n>` (show more than the default
 8 rows in the fix table), `--no-verify` (skip the second pass in step 2),
 `--deterministic` (skip every model step), `--semantic` (also propose duplicates
@@ -182,9 +183,12 @@ no report behind it asks the user to approve what they were never shown.
 
 ## 4. Offer fixes
 
-Skip to step 6 when the report has nothing repairable. Under `--fix`, skip the
-question instead: put every repair into one batch named `fix-batch` in the
-draft plan and apply that batch by name.
+Skip to step 6 when the report has nothing repairable. Under `--dry-run`, do not
+ask the question at all and write nothing: say what each option below would have
+covered and how many rules it names, say plainly that nothing was changed, and
+go to step 6. Do not assemble a draft plan and do not run `plan` — that command
+writes a file, and this flag exists so the whole audit can be read with no
+artifact left behind.
 
 Otherwise ask the user one question, listing only the options that have
 evidence, and let them pick any combination:
@@ -243,7 +247,8 @@ file this flow is going to write.
   to appear exactly once. Match by text, never by line number. `"old": null`
   creates a file, and `plan` refuses if that file already exists.
 - Never state a source hash yourself — `plan` fingerprints every affected file.
-- `batches` — only under `--fix`.
+- `batches` — optional, and unused by this command: every change is approved
+  by id.
 
 **What each kind carries here:**
 
@@ -302,9 +307,8 @@ plan and the journal.
    for the answer. Never treat silence, "looks good" on the preview, or an
    earlier yes to the menu as approval for a specific patch.
 
-   Then `apply --change <id>` with exactly the ids approved — or
-   `apply --batch fix-batch` under `--fix`, where the batch is the boundary
-   instead. There is no apply-everything default, and a change the user did not
+   Then `apply --change <id>` with exactly the ids approved. There is no
+   apply-everything default, and a change the user did not
    name is not applied even though the plan carries it. A stale file exits 1
    naming both fingerprints and writes nothing; re-plan rather than forcing
    it. A write whose result does not parse is restored and exits 1.

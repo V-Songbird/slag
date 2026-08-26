@@ -19,7 +19,7 @@ description: >-
   checks to this repo", "what keeps breaking here", "catch skipped tests before
   they merge", "guard this project against agent mistakes" — or invokes
   /jig:jig. Do NOT use to grade or audit existing rules or skill descriptions —
-  that is /assay:claude — and not to write one rule or one skill — those are
+  that is /assay:opus5 — and not to write one rule or one skill — those are
   /assay:craft-rules and /assay:craft-skill.
 argument-hint: "[--quick] [--edition <id>] [--select <classId,…>] [--no-ci] [--observe]"
 allowed-tools: Bash, Read, Write, AskUserQuestion

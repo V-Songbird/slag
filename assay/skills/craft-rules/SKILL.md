@@ -8,7 +8,7 @@ description: >-
   wants a rule written or made to stick — e.g. "add a rule", "write a CLAUDE.md
   rule for X", "make Claude always do X", "help me write a rule" — or invokes
   /assay:craft-rules. Do NOT use to grade or rewrite existing rules, or when the
-  user says Claude keeps ignoring their instructions — that is /assay:claude —
+  user says Claude keeps ignoring their instructions — that is /assay:opus5 —
   and not for skill descriptions, which is /assay:craft-skill.
 argument-hint: "[what the rule should enforce]"
 allowed-tools: Bash, Read, Write, Glob, AskUserQuestion, WebFetch
@@ -18,7 +18,7 @@ allowed-tools: Bash, Read, Write, Glob, AskUserQuestion, WebFetch
 
 You write one rule per run. The wording and placement are the product: follow
 [references/recipe.md](references/recipe.md) exactly — it encodes the same
-factors `/assay:claude` grades. `$ARGUMENTS`, if present, describes what the
+factors `/assay:opus5` grades. `$ARGUMENTS`, if present, describes what the
 rule should enforce.
 
 You never write a policy file yourself. Every write goes through the engine's
@@ -143,7 +143,7 @@ Then compose the draft bullet per the recipe's anatomy and check it against
   Do not write, do not merge them, and do not pick a winner: assay identifies
   incompatibility and the developer resolves intent. Once they answer, the
   resolution is theirs to state — a change to the existing rule is
-  `/assay:claude`'s rewrite path, not something you do quietly here.
+  `/assay:opus5`'s rewrite path, not something you do quietly here.
 - **Duplicate.** Does an active rule already state this duty, in these words or
   other ones? Say so, quote it with its file and line, and ask whether they want
   the existing one reworded instead. A second copy of a rule is corpus noise,
