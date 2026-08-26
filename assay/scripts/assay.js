@@ -70,6 +70,9 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
+// [Foreman: 167] Only the hook admission pass runs anything, and only a command
+// out of the change it is proving.
+const { spawnSync } = require("child_process");
 
 // [Foreman: 073] Real parsers, bundled rather than installed. Both are the
 // published single-file UMD dists, committed verbatim under scripts/vendor/ —
@@ -6825,6 +6828,169 @@ const VALIDATION_STEP_NAMES = ["reparse", "host-discovery", "static-reanalysis"]
 
 const MECHANISM_TYPES = ["hook", "skill", "subagent"];
 
+// ---------------------------------------------------------------------------
+// [Foreman: 167] Hook admission: proving a promoted hook before it is installed
+// ---------------------------------------------------------------------------
+//
+// A hook is the one mechanism assay generates that changes what runs on every
+// future turn of every future session. It is written from fetched
+// documentation, and until now nothing between "the model wrote it" and "it is
+// wired into settings.json" showed that it fires at all.
+//
+// Borrowed from jig's fixture-pair admission, with the one difference the
+// primitive forces: jig proves a check by running its patterns over text, and a
+// hook is a command, so this proves it by running the command. The shape is the
+// same and so is the rule - a hook is admitted when it fires on its own
+// violation fixture AND stays silent on its own near miss, and never for any
+// other reason. The near miss is the half that matters: a hook that refuses
+// everything passes the violation test.
+//
+// What this executes: the command out of the settings patch of the change being
+// proved, nothing else, with the change's own files materialized in a scratch
+// directory and the project untouched. It runs BEFORE the owner has approved
+// anything, which is the point - the alternative is discovering the hook is
+// wrong after it is installed - and fixes.md states it, so the procedure never
+// hands assay a command the owner has not been shown.
+const ADMISSION_TIMEOUT_MS = 10000;
+const HOOK_SETTINGS_FILES = [".claude/settings.json", ".claude/settings.local.json"];
+
+// Every command a settings file wires, with the event and matcher it sits
+// under, so a discard can name the hook it is about.
+function wiredHooks(settingsText) {
+  let settings;
+  try {
+    settings = JSON.parse(settingsText);
+  } catch (err) {
+    return { problem: "the settings file it writes is not valid JSON (" + err.message + ")" };
+  }
+  const hooks = [];
+  const table = (settings && settings.hooks) || {};
+  for (const event of Object.keys(table)) {
+    for (const group of Array.isArray(table[event]) ? table[event] : []) {
+      for (const entry of Array.isArray(group && group.hooks) ? group.hooks : []) {
+        if (entry && entry.type === "command" && typeof entry.command === "string" && entry.command.trim()) {
+          hooks.push({ event, matcher: (group && group.matcher) || null, command: entry.command });
+        }
+      }
+    }
+  }
+  return { hooks };
+}
+
+// The change's own files, at their project-relative paths, in a throwaway
+// directory. An editing patch is replayed against the file as it stands now, so
+// what runs is the settings file the apply WOULD produce rather than a fragment.
+function materializeChange(root, change) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "assay-admission-"));
+  const written = new Map();
+  for (const patch of change.patches) {
+    let content = patch.new;
+    if (patch.old !== null && patch.old !== undefined) {
+      const from = path.join(root, patch.path);
+      if (!fs.existsSync(from)) return { dir, problem: "it edits " + patch.path + ", which is not there" };
+      content = fs.readFileSync(from, "utf-8").replace(patch.old, patch.new);
+    }
+    const target = path.join(dir, patch.path);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, content);
+    written.set(patch.path, content);
+  }
+  return { dir, written };
+}
+
+// Did the hook refuse this input? Claude Code gives a hook two ways to say no -
+// exit code 2, and a JSON decision on stdout - and any other non-zero exit is a
+// failure the agent sees as a refusal too. Everything else is silence.
+function hookRefused(result) {
+  if (result.error) return { problem: "the hook command could not be run (" + result.error.message + ")" };
+  if (result.signal) return { problem: "the hook command was killed (" + result.signal + "), so it proved nothing" };
+  if (result.status !== 0) return { refused: true };
+  const out = String(result.stdout || "").trim();
+  if (out.startsWith("{")) {
+    try {
+      const decision = JSON.parse(out);
+      const specific = decision.hookSpecificOutput || {};
+      if (decision.decision === "block" || decision.continue === false ||
+          decision.permissionDecision === "deny" || specific.permissionDecision === "deny") {
+        return { refused: true };
+      }
+    } catch {
+      // Unparseable stdout from an exit-0 hook is not a refusal; the host
+      // ignores it too.
+    }
+  }
+  return { refused: false };
+}
+
+function runHookOnce(command, dir, fixture) {
+  const input = typeof fixture === "string" ? fixture : JSON.stringify(fixture);
+  return spawnSync(command, {
+    cwd: dir, shell: true, input, encoding: "utf-8", timeout: ADMISSION_TIMEOUT_MS,
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+  });
+}
+
+// The admission itself. Returns null when the promotion is admitted, or a
+// sentence naming what stopped it - which is what the caller reports as the
+// discard reason.
+function admitHookPromotion(root, change) {
+  const fixtures = change.fixtures;
+  if (!isRecordObject(fixtures) || fixtures.violation === undefined || fixtures.nearMiss === undefined) {
+    return "it carries no fixture pair, so nothing shows it fires - a hook promotion needs " +
+      "`fixtures: { violation, nearMiss }`: the input the hook must refuse, and the neighbouring input it must let through";
+  }
+  const settingsPatch = change.patches.find((p) => HOOK_SETTINGS_FILES.includes(p.path));
+  if (!settingsPatch) {
+    return "it wires no hook: a hook promotion patches " + HOOK_SETTINGS_FILES.join(" or ");
+  }
+  const made = materializeChange(root, change);
+  try {
+    if (made.problem) return made.problem;
+    const found = wiredHooks(made.written.get(settingsPatch.path));
+    if (found.problem) return found.problem;
+    if (!found.hooks.length) return "the settings file it writes wires no command hook";
+    for (const hook of found.hooks) {
+      const name = hook.event + (hook.matcher ? " on " + hook.matcher : "");
+      const onViolation = hookRefused(runHookOnce(hook.command, made.dir, fixtures.violation));
+      if (onViolation.problem) return name + ": " + onViolation.problem;
+      if (!onViolation.refused) {
+        return name + " let its own violation fixture through - the hook does not catch the thing it was written for";
+      }
+      const onNearMiss = hookRefused(runHookOnce(hook.command, made.dir, fixtures.nearMiss));
+      if (onNearMiss.problem) return name + ": " + onNearMiss.problem;
+      if (onNearMiss.refused) {
+        return name + " refused its near miss too - a hook that blocks the neighbouring case blocks work it was never asked to stop";
+      }
+    }
+    return null;
+  } finally {
+    fs.rmSync(made.dir, { recursive: true, force: true });
+  }
+}
+
+// Every hook promotion in a draft, proved before the plan exists. A discarded
+// change never reaches the plan artifact, so it can never be previewed,
+// approved or applied - and every discard is reported, because a promotion that
+// quietly vanished would read as one the audit never proposed.
+function admitDraftHooks(root, changes) {
+  const kept = [];
+  const discarded = [];
+  for (const raw of changes) {
+    const isHook = isRecordObject(raw) && raw.kind === "placement-promotion" &&
+      isRecordObject(raw.mechanism) && raw.mechanism.type === "hook";
+    if (!isHook) { kept.push(raw); continue; }
+    let reason;
+    try {
+      reason = admitHookPromotion(root, { ...raw, patches: Array.isArray(raw.patches) ? raw.patches : [] });
+    } catch (err) {
+      reason = "the admission test could not be run (" + err.message + ")";
+    }
+    if (reason) discarded.push({ id: typeof raw.id === "string" ? raw.id : "?", mechanism: raw.mechanism.name, reason });
+    else kept.push(raw);
+  }
+  return { kept, discarded };
+}
+
 // A path a plan is allowed to write: project-relative, inside the root. The
 // trust boundary — a draft plan is JSON the skill assembled, and an absolute or
 // `..` path in it must never become a write outside the project.
@@ -7353,8 +7519,30 @@ function cmdPlan(root, opts) {
   } catch (err) {
     fail(opts.from + " is not valid JSON: " + err.message);
   }
-  const { problems, payload } = planFromDraft(draft, root);
+  // [Foreman: 167] Every hook promotion is proved against its own fixture pair
+  // before the plan exists. A hook that misses its violation, or fires on its
+  // near miss, is discarded here - so it can never be previewed, approved or
+  // installed - and every discard is reported below rather than disappearing.
+  const admitted = admitDraftHooks(root, Array.isArray(draft.changes) ? draft.changes : []);
+  const discardReport = admitted.discarded
+    .map((d) => "  " + d.id + " (hook " + d.mechanism + "): " + d.reason);
+  if (admitted.discarded.length && !admitted.kept.length) {
+    fail("Every change in the draft was discarded by the hook admission test, so there is no plan:\n" +
+      discardReport.join("\n"));
+  }
+  const batches = {};
+  for (const name of Object.keys(draft.batches || {})) {
+    const members = (draft.batches[name] || []).filter((id) => !admitted.discarded.some((d) => d.id === id));
+    if (members.length) batches[name] = members;
+  }
+  const { problems, payload } = planFromDraft({ ...draft, changes: admitted.kept, batches }, root);
   if (problems.length) fail("The draft plan was rejected:\n  " + problems.join("\n  "));
+  for (const d of admitted.discarded) {
+    appendJournal(root, {
+      event: "discard", stage: "plan", plan: payload.planId, change: d.id,
+      mechanism: d.mechanism, reason: d.reason,
+    });
+  }
   const file = statePath(root, "plan-" + payload.planId + ".json");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   // The one file `plan` writes. It never touches a policy file: a plan states
@@ -7365,7 +7553,14 @@ function cmdPlan(root, opts) {
     planFile: STATE_DIR + "/plan-" + payload.planId + ".json",
     changes: payload.changes.map((c) => ({ id: c.id, kind: c.kind, files: c.files })),
     batches: payload.batches,
+    // [Foreman: 167] What the admission test threw away, and why. Never
+    // omitted when empty: "nothing was discarded" is a result too.
+    discarded: admitted.discarded,
   }, null, 2) + "\n");
+  if (admitted.discarded.length) {
+    process.stderr.write("Discarded by the hook admission test - not in this plan:\n" +
+      discardReport.join("\n") + "\n");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -8259,6 +8454,8 @@ module.exports = {
   // [Foreman: 175] which commands compute a record, and therefore the only
   // ones --host, --startup, --project-only and --model mean anything to
   SCANNING_COMMANDS,
+  // [Foreman: 167] the fixture-pair admission a promoted hook has to pass
+  admitDraftHooks, admitHookPromotion, wiredHooks, hookRefused,
   // [Foreman: 074] discovery lives in the adapter; re-exported so callers and
   // tests keep one import
   adapter: claudeAdapter, findRuleMarkdownFiles: claudeAdapter.findRuleMarkdownFiles,

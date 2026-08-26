@@ -98,7 +98,24 @@ plan stale and the journal blind.
   and park the candidate instead if a fetch fails. A hook wires its event in
   `.claude/settings.json` with any check script as a second patch in the same
   change; skip it when that file already wires the same event and matcher, and
-  keep it to one hook per change or the second goes stale. A skill becomes
+  keep it to one hook per change or the second goes stale.
+
+  A hook change also carries `fixtures` — `{ "violation": …, "nearMiss": … }`,
+  each the JSON a hook of that event receives, one the hook must refuse and one
+  it must let through. `plan` writes both into a scratch directory with the
+  change's own files, runs the wired command against each, and **discards the
+  promotion** unless it refuses the violation and stays silent on the near miss.
+  The near miss is the half that matters: a hook that blocks everything passes
+  the violation test and then blocks work nobody asked it to stop. Choose a near
+  miss that is genuinely adjacent — the same tool and the same shape, differing
+  only in the thing the rule is about. A discard is printed and journalled, the
+  change is not in the plan, and there is nothing to approve; say so plainly
+  rather than re-drafting the same hook a second time.
+
+  This is the one place assay runs a command it wrote. It runs before any
+  approval, against copies in a temp directory, and the project is untouched —
+  which is the point: the alternative is finding out after the hook is installed
+  on every future session. A skill becomes
   `.claude/skills/<name>/SKILL.md` with the rule text as its first section and a
   description written to the recipe. A subagent becomes
   `.claude/agents/<name>.md` with the rule text as its prompt. Choose the level

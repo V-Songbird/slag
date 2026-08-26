@@ -4876,6 +4876,149 @@ const PROMOTE_CHANGE = {
   }],
 };
 
+// ---------------------------------------------------------------------------
+// [Foreman: 167] Hook admission: the fixture pair a promoted hook must pass
+// ---------------------------------------------------------------------------
+
+// A hook that refuses exactly the inputs naming `docs/gone.md`. The guard is a
+// real script the change writes, and the command is the one the settings patch
+// wires, so what the admission runs is what an apply would install.
+const GUARD_SCRIPT = [
+  "let raw = \"\";",
+  "process.stdin.on(\"data\", (d) => { raw += d; });",
+  "process.stdin.on(\"end\", () => {",
+  "  if (raw.includes(\"docs/gone.md\")) {",
+  "    process.stderr.write(\"that file is gone\\n\");",
+  "    process.exit(2);",
+  "  }",
+  "  process.exit(0);",
+  "});",
+  "",
+].join("\n");
+
+const ALWAYS_BLOCKS = "process.exit(2);\n";
+const NEVER_BLOCKS = "process.exit(0);\n";
+
+function hookChange(script, fixtures) {
+  const change = {
+    id: "c-hook",
+    kind: "placement-promotion",
+    rationale: "A mechanical pre-commit duty is a hook, not a sentence.",
+    mechanism: { type: "hook", name: "gone-doc-guard" },
+    provenance: [{ claim: "hook settings format", url: "https://code.claude.com/docs/en/hooks.md", verified: "2026-08-25" }],
+    patches: [
+      { path: ".claude/hooks/gone-doc-guard.js", old: null, new: script },
+      {
+        path: ".claude/settings.json",
+        old: null,
+        new: JSON.stringify({
+          hooks: {
+            PreToolUse: [{
+              matcher: "Bash",
+              hooks: [{ type: "command", command: "node .claude/hooks/gone-doc-guard.js" }],
+            }],
+          },
+        }, null, 2) + "\n",
+      },
+    ],
+  };
+  if (fixtures !== undefined) change.fixtures = fixtures;
+  return change;
+}
+
+const GUARD_FIXTURES = {
+  violation: { tool_name: "Bash", tool_input: { command: "cat docs/gone.md" } },
+  nearMiss: { tool_name: "Bash", tool_input: { command: "cat docs/here.md" } },
+};
+
+test("a promoted hook that catches its violation and lets its near miss through is planned", () => {
+  const root = txProject();
+  const { code, out, summary } = planDraft(root, { changes: [hookChange(GUARD_SCRIPT, GUARD_FIXTURES)] });
+  assert.equal(code, 0, out);
+  assert.deepEqual(summary.changes.map((c) => c.id), ["c-hook"]);
+  assert.deepEqual(summary.discarded, [], "nothing was discarded, and the empty list still says so");
+  // proving it wrote nothing into the project: the plan artifact is still the
+  // only file `plan` creates
+  assert.equal(fs.existsSync(path.join(root, ".claude", "settings.json")), false);
+  assert.equal(fs.existsSync(path.join(root, ".claude", "hooks")), false);
+});
+
+test("a promoted hook that misses its own violation is discarded, not planned", () => {
+  const root = txProject();
+  const { code, err, summary } = planDraft(root, {
+    changes: [hookChange(NEVER_BLOCKS, GUARD_FIXTURES), REWRITE_CHANGE],
+  });
+  assert.equal(code, 0, err);
+  assert.deepEqual(summary.changes.map((c) => c.id), ["c-rewrite"], "the discarded hook is not in the plan");
+  assert.equal(summary.discarded.length, 1);
+  assert.equal(summary.discarded[0].id, "c-hook");
+  assert.match(summary.discarded[0].reason, /let its own violation fixture through/);
+});
+
+test("a promoted hook that also refuses its near miss is discarded", () => {
+  const root = txProject();
+  const { summary } = planDraft(root, { changes: [hookChange(ALWAYS_BLOCKS, GUARD_FIXTURES), REWRITE_CHANGE] });
+  assert.deepEqual(summary.changes.map((c) => c.id), ["c-rewrite"]);
+  assert.match(summary.discarded[0].reason, /near miss/);
+});
+
+test("a promoted hook with no fixture pair is discarded — nothing shows it fires", () => {
+  const root = txProject();
+  const { summary } = planDraft(root, { changes: [hookChange(GUARD_SCRIPT, undefined), REWRITE_CHANGE] });
+  assert.deepEqual(summary.changes.map((c) => c.id), ["c-rewrite"]);
+  assert.match(summary.discarded[0].reason, /no fixture pair/);
+});
+
+test("every discard is reported on stderr and journalled, so a promotion never just vanishes", () => {
+  const root = txProject();
+  const { err } = planDraft(root, { changes: [hookChange(ALWAYS_BLOCKS, GUARD_FIXTURES), REWRITE_CHANGE] });
+  assert.match(err, /Discarded by the hook admission test/);
+  assert.match(err, /c-hook \(hook gone-doc-guard\)/);
+  const discards = journalRows(root).filter((r) => r.event === "discard");
+  assert.equal(discards.length, 1);
+  assert.equal(discards[0].stage, "plan");
+  assert.equal(discards[0].change, "c-hook");
+  assert.match(discards[0].reason, /near miss/);
+});
+
+test("a draft whose only change is a discarded hook produces no plan at all", () => {
+  const root = txProject();
+  const { code, err } = planDraft(root, { changes: [hookChange(ALWAYS_BLOCKS, GUARD_FIXTURES)] });
+  assert.equal(code, 1);
+  assert.match(err, /no plan/);
+  assert.match(err, /near miss/);
+  const state = path.join(root, ".assay");
+  assert.deepEqual(fs.existsSync(state) ? fs.readdirSync(state).filter((f) => f.startsWith("plan-")) : [], []);
+});
+
+test("a discarded hook is dropped from every batch that named it", () => {
+  const root = txProject();
+  const { summary } = planDraft(root, {
+    changes: [hookChange(ALWAYS_BLOCKS, GUARD_FIXTURES), REWRITE_CHANGE],
+    batches: { everything: ["c-hook", "c-rewrite"], "hooks-only": ["c-hook"] },
+  });
+  assert.deepEqual(summary.batches.everything, ["c-rewrite"]);
+  assert.equal(summary.batches["hooks-only"], undefined,
+    "a batch left with nothing in it is not an approval boundary");
+});
+
+test("admission only runs on hook promotions — a skill promotion needs no fixtures", () => {
+  const root = txProject();
+  const { code, summary } = planDraft(root, { changes: [PROMOTE_CHANGE] });
+  assert.equal(code, 0);
+  assert.deepEqual(summary.changes.map((c) => c.id), ["c-skill"]);
+  assert.deepEqual(summary.discarded, []);
+});
+
+test("a hook whose settings patch wires no command is discarded rather than trusted", () => {
+  const root = txProject();
+  const change = hookChange(GUARD_SCRIPT, GUARD_FIXTURES);
+  change.patches[1].new = JSON.stringify({ hooks: { PreToolUse: [] } }, null, 2) + "\n";
+  const { summary } = planDraft(root, { changes: [change, REWRITE_CHANGE] });
+  assert.deepEqual(summary.changes.map((c) => c.id), ["c-rewrite"]);
+  assert.match(summary.discarded[0].reason, /wires no command hook/);
+});
+
 function journalRows(root) {
   return engine.readJournal(root);
 }
