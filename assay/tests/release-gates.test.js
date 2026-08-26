@@ -1870,18 +1870,61 @@ function revertFixture() {
   const head = tgit(root, ["rev-parse", "HEAD"]).stdout.trim();
   const pre = contentTree(root);
 
-  const txId = "t0123456789";
-  const files = [".claude/skills/made/SKILL.md", "CLAUDE.md"];
-  const backupDir = SAFETY.backupFiles(root, txId, files);
-  SAFETY.appendTransaction(root, {
-    txId, startedAt: "2026-08-25T00:00:00.000Z", gitHead: head, backupDir, files, changes: [],
-  });
+  // [Foreman: 176] The row under test is written by a real `apply`, not by
+  // hand. A hand-built row can be given both routes; the gate is worth
+  // something only if the run an owner actually makes records both too.
+  fs.mkdirSync(path.join(root, ".assay-tmp"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".assay-tmp", "draft.json"), JSON.stringify({
+    changes: [
+      {
+        id: "c-rewrite",
+        kind: "rule-rewrite",
+        rationale: "The rule names no firing moment, so the duty is skipped.",
+        patches: [{
+          path: "CLAUDE.md",
+          old: "- Always read the plan before applying it.",
+          new: "- Rewritten by the run.",
+        }],
+      },
+      {
+        id: "c-skill",
+        kind: "placement-promotion",
+        rationale: "A multi-step duty is a workflow, not a sentence.",
+        mechanism: { type: "skill", name: "made" },
+        provenance: [{ claim: "SKILL.md frontmatter", url: "https://code.claude.com/docs/en/skills.md", verified: "2026-07-28" }],
+        patches: [{
+          path: ".claude/skills/made/SKILL.md",
+          old: null,
+          new: "---\nname: made\ndescription: Updates CHANGELOG.md when a public API changes. Use when \"update the changelog\". Do NOT use for internal refactors.\n---\n\n# made\n\nAlways update the changelog when you touch a public API.\n",
+        }],
+      },
+    ],
+  }, null, 2));
+  const planned = cli(root, ["plan", "--from", ".assay-tmp/draft.json"]);
+  assert.equal(planned.code, 0, planned.err);
+  const applied = cli(root, ["apply", "--change", "c-rewrite", "--change", "c-skill"]);
+  assert.equal(applied.code, 0, applied.err);
 
-  fs.writeFileSync(path.join(root, "CLAUDE.md"), "# Rules\n\n- Rewritten by the run.\n");
-  fs.mkdirSync(path.join(root, ".claude", "skills", "made"), { recursive: true });
-  fs.writeFileSync(path.join(root, ".claude", "skills", "made", "SKILL.md"), "---\nname: made\n---\n");
-  return { root, txId, head, pre };
+  const [row] = SAFETY.readTransactions(root);
+  return { root, txId: row.txId, head, pre, row };
 }
+
+test("release gate G10: a row written by a real apply offers both restore routes", {
+  skip: GIT_MISSING ? disclose("revert route availability",
+    "git is not on PATH in this environment, so an apply inside a repository cannot be exercised") : false,
+}, () => {
+  // [Foreman: 176] Before this, `apply` inside a repository recorded gitHead
+  // and a null backupDir, so the choice the revert skill offers existed only in
+  // hand-built rows. Both routes are recorded on every run now.
+  const { root, txId, row, head } = revertFixture();
+  assert.equal(row.gitHead, head);
+  assert.match(row.backupDir, /^\.assay\/backup-t[0-9a-f]{10}$/);
+
+  const plan = SAFETY.revertPlan(root, txId);
+  assert.deepEqual(plan.routes.map((r) => r.via).slice().sort(), ["backup", "git"]);
+  assert.deepEqual(plan.ready.slice().sort(), ["backup", "git"],
+    "a route that is recorded but not ready is not a choice: " + JSON.stringify(plan.routes));
+});
 
 test("release gate G10: both restore routes put the tree back byte for byte", {
   skip: GIT_MISSING ? disclose("revert route equivalence",
