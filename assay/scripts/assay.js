@@ -9,7 +9,7 @@
 //                                        discover + extract + mechanical scores;
 //                                        writes .assay-tmp/scan.json, prints a
 //                                        JSON summary with the judgment worklist
-//   node assay.js report [--verbose] [--json] [--root <path>]
+//   node assay.js report [--plain] [--verbose] [--json] [--root <path>]
 //                                        merges .assay-tmp/judgments.json when it
 //                                        exists, computes composite scores +
 //                                        placement candidates, prints the finished
@@ -5843,6 +5843,131 @@ function renderBrief(audit, opts = {}) {
   return out.join("\n");
 }
 
+
+// [Foreman: 164] The third renderer, beside the short report and `--verbose`.
+// The auto-fix flow shows this to the owner before the transaction opens, so
+// what it owes them is the worst thing first, in words they had before they
+// installed anything, and an honest list of the hooks about to appear on disk.
+// No factor codes and no grade: a letter is a verdict on the project, and this
+// page is a list of decisions about to be taken on the reader's behalf.
+//
+// razor: a filter over the same audit record the other two read. It derives
+// nothing, keeps renderBrief's bucket order, and reuses its `claim` discipline
+// so "one rule, one line" is a property of the data rather than of care taken
+// here — which is what G7 asserts.
+
+// G7. The auto-fix flow shows this above a prompt, so it is budgeted much
+// harder than the short report: a page the reader must scroll to reach the
+// approval line is a page they approve without reading.
+const PLAIN_MAX_LINES = 25;
+const PLAIN_MAX_ITEMS = 10;
+const PLAIN_MAX_HOOKS = 6;
+
+function renderPlain(audit) {
+  const out = [];
+  const files = audit.files || [];
+  const rules = (audit.rules || []).filter((r) => !r.suppressed);
+  const findings = audit.findings || [];
+  const rulesById = new Map(rules.map((r) => [r.id, r]));
+  const ruleAt = new Map(rules.map((r) => [r.file + ":" + r.lineStart, r]));
+  const outside = new Set(files.filter(notReadersOwn).map((f) => f.path));
+  const mine = rules.filter((r) => !outside.has(r.file));
+
+  const claimed = new Set();
+  const claim = (candidates) => {
+    const kept = [];
+    for (const r of candidates) {
+      if (!r || claimed.has(r.id)) continue;
+      claimed.add(r.id);
+      kept.push(r);
+    }
+    return kept;
+  };
+  // A group row names every place it is about, so it may only print while ALL
+  // of them are still unclaimed — otherwise one line repeats an address an
+  // earlier, more urgent line already used.
+  const freeSpans = (spans) => {
+    const found = spans.map((s) => ruleAt.get(s.path + ":" + s.lineStart));
+    return found.every((r) => r && !claimed.has(r.id)) ? found : null;
+  };
+  const at = (r) => displayPath(r.file) + ":" + r.lineStart;
+  const spanList = (spans) => spans.map((s) => displayPath(s.path) + ":" + s.lineStart).join(" and ");
+  const quote = (r) => '"' + truncateCell(String(r.text).replace(/\s*\n\s*/g, " "), 56) + '"';
+
+  const items = [];
+  // Bucket order is renderBrief's, for the same reasons: a rule the host never
+  // reads outranks a pair that argues, which outranks a dead path, which
+  // outranks a duty written twice, which outranks wording.
+  const gated = findings.filter((f) => HARD_GATE_STATES.has(f.state) && f.state !== "blocked");
+  for (const r of claim(gated.map((f) => rulesById.get(f.rule)).filter((r) => r && !outside.has(r.file)))) {
+    items.push(`${at(r)} — ${quote(r)} is never read by the assistant. Move it somewhere that loads.`);
+  }
+  for (const f of findings) {
+    if (f.type !== "conflict" && f.type !== "conditional-conflict") continue;
+    const spans = (f.sources || []).filter((s) => !outside.has(s.path));
+    if (spans.length < 2) continue;
+    const kept = freeSpans(spans);
+    if (!kept) continue;
+    claim(kept);
+    items.push(`${spanList(spans)} — these rules ask for opposite things. Decide which one you meant.`);
+  }
+  for (const r of claim(mine.filter((r) => r.staleness && r.staleness.missing.length))) {
+    const missing = r.staleness.missing[0].ref;
+    items.push(`${at(r)} — ${quote(r)} points at ${missing}, which is not there. Fix the path or drop it.`);
+  }
+  for (const f of findings) {
+    if (f.type !== "duplicate") continue;
+    const spans = (f.sources || []).filter((s) => !outside.has(s.path));
+    if (spans.length < 2) continue;
+    const kept = freeSpans(spans);
+    if (!kept) continue;
+    claim(kept);
+    items.push(`${spanList(spans)} — the same job is written out twice. Keep one copy.`);
+  }
+  // Wording. A rule every session reads outranks one only some sessions reach,
+  // so an always-loaded file sorts first at the same score.
+  const always = new Set(files.filter((f) => f.alwaysLoaded).map((f) => f.path));
+  const weak = claim(mine.filter((r) => r.weak)
+    .sort((a, b) => (always.has(a.file) ? 0 : 1) - (always.has(b.file) ? 0 : 1) || a.score - b.score));
+  for (const r of weak) {
+    const names = rowWeaknesses(r);
+    const why = names.map((n) => (n === "F7" ? vagueEvidence(r).problem : PLAIN_PROBLEMS[n])).filter(Boolean)[0]
+      || "too vague to act on";
+    items.push(`${at(r)} — ${quote(r)} ${why}. Rewrite it.`);
+  }
+
+  const total = items.length;
+  const shown = items.slice(0, PLAIN_MAX_ITEMS);
+  out.push(total
+    ? `assay read ${mine.length} ${mine.length === 1 ? "rule" : "rules"} here and found ${total} worth fixing, worst first.`
+    : `assay read ${mine.length} ${mine.length === 1 ? "rule" : "rules"} here and found nothing worth fixing.`);
+  out.push("");
+  for (const line of shown) out.push("- " + line);
+  if (total > shown.length) out.push(`- and ${total - shown.length} more, smaller than these.`);
+  if (total) out.push("");
+
+  // The closing block: what is about to appear on disk, named the way the file
+  // that carries it will name it. A rule a wired hook already covers is not
+  // about to be installed, so it is not listed here.
+  const alreadyWired = new Set(findings.filter((f) => f.type === "redundant-enforcement").map((f) => f.rule));
+  const byHook = new Map();
+  for (const r of mine) {
+    const h = (r.placement || {}).hookEvent;
+    if (!h || alreadyWired.has(r.id)) continue;
+    const key = h.event + "|" + (h.matcher || "*");
+    if (!byHook.has(key)) byHook.set(key, { event: h.event, matcher: h.matcher || "*", n: 0 });
+    byHook.get(key).n++;
+  }
+  const hooks = [...byHook.values()];
+  out.push("About to be installed:");
+  if (!hooks.length) out.push("- no hooks — nothing here is ready to run on its own yet.");
+  for (const h of hooks.slice(0, PLAIN_MAX_HOOKS)) {
+    out.push(`- a hook on ${h.event}, matching ${h.matcher} — covers ${h.n} ${h.n === 1 ? "rule" : "rules"}.`);
+  }
+  if (hooks.length > PLAIN_MAX_HOOKS) out.push(`- and ${hooks.length - PLAIN_MAX_HOOKS} more hooks.`);
+
+  return out.join("\n");
+}
 // [Foreman: 075]
 // The report leads with findings and ends with the hygiene grade. Four sections
 // carry the whole diagnosis — hard gates, operational findings, policy
@@ -6534,6 +6659,7 @@ function cmdReport(root, opts) {
   // [Foreman: 095] The default is the short report; --verbose is the full one,
   // unchanged. One line, so reverting the default is one line too.
   if (opts.json) process.stdout.write(JSON.stringify(audit, null, 2) + "\n");
+  else if (opts.plain) process.stdout.write(renderPlain(audit) + "\n");
   else if (opts.verbose) process.stdout.write(renderReport(audit, opts) + "\n");
   else process.stdout.write(renderBrief(audit, opts) + "\n");
 }
@@ -7820,7 +7946,7 @@ const COMMANDS = ["scan", "report", "remeasure", "clean",
 // ones a host profile or a startup directory means anything to. Both flags are
 // refused elsewhere rather than accepted and ignored.
 const SCANNING_COMMANDS = ["scan", "remeasure", "ci", "validate"];
-const FLAGS = new Set(["--verbose", "--json", "--project-only", "--force"]);
+const FLAGS = new Set(["--verbose", "--json", "--project-only", "--force", "--plain"]);
 // [Foreman: 079] Flags that take a value, mapped to what that value is, so the
 // parser skips the argument instead of rejecting it as an unknown flag and the
 // error says what was missing.
@@ -7857,7 +7983,7 @@ const USAGE = [
   "Commands to run yourself:",
   "  scan            [--host <" + HOSTS + ">] [--startup <dir>] [--project-only]",
   "                  read the project and write " + TMP_DIR + "/scan.json",
-  "  report          [--verbose] [--json] [--top <n>]",
+  "  report          [--plain] [--verbose] [--json] [--top <n>]",
   "                  print the report from that scan",
   "  remeasure       [--host <" + HOSTS + ">] [--startup <dir>] [--project-only] [--verbose] [--json]",
   "                  re-scan after fixes and print the before/after",
@@ -8010,6 +8136,11 @@ function main() {
     if (!Number.isInteger(top) || top < 1) usageError("--top takes a whole number of rows, at least 1.");
     if (command !== "report") usageError("--top belongs to `report`, which is the command that prints the short report.");
   }
+  // [Foreman: 164] Same rule as `--top`: the plain renderer belongs to the one
+  // command that prints a report a person reads before approving an edit.
+  if (args.includes("--plain") && command !== "report") {
+    usageError("--plain belongs to `report`, which is the command that prints the report the fix flow reads.");
+  }
   if (startup && !SCANNING_COMMANDS.includes(command)) {
     usageError("--startup belongs to the commands that scan (" + SCANNING_COMMANDS.join(", ") + "); " +
       command + " works from the saved records, which already carry it.");
@@ -8025,6 +8156,8 @@ function main() {
   }
   const opts = {
     verbose: args.includes("--verbose"),
+    // [Foreman: 164] The third renderer, read by the auto-fix flow.
+    plain: args.includes("--plain"),
     json: args.includes("--json"),
     // [Foreman: 074] Keep the audit inside the repo: no user-scope discovery.
     projectOnly: args.includes("--project-only"),
@@ -8072,6 +8205,8 @@ module.exports = {
   // [Foreman: 095] the default report, the three limits its gates assert, and
   // the one escape both renderers share
   renderBrief, BRIEF_MAX_LINES, BRIEF_BANNED_WORDS, REPORT_BANNED_WORDS, escapeTableCell,
+  // [Foreman: 164] the third renderer and the line budget G7 asserts
+  renderPlain, PLAIN_MAX_LINES,
   // [Foreman: 075] the finding contract
   deriveFindings, evidenceTag, FINDING_STATES,
   // [Foreman: 076] the corpus relationship contract

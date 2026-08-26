@@ -950,6 +950,88 @@ test("release gate G6: a finding outside the repository never gates", () => {
   assert.equal(Number(headcount[1]), 1, "the headcount counts rules the grade never saw:\n" + headcount[0]);
 });
 
+
+// [Foreman: 164] G7. The plain report is the page the auto-fix flow puts in
+// front of the owner before it opens a transaction on their files. A page they
+// have to scroll to reach the approval line is a page they approve without
+// reading, so its budget is far tighter than the short report's — and a rule
+// named twice inside 25 lines spends a large part of the page saying one thing.
+//
+// The fixture is the brief report's, plus the two rules whose own wording names
+// a lifecycle moment. Without them the closing block has no hook to name and
+// this gate would be measuring an empty list.
+const PLAIN_FIXTURE = {
+  ...BRIEF_FIXTURE,
+  "CLAUDE.md": BRIEF_FIXTURE["CLAUDE.md"] + [
+    "- Before pushing, record the change in `docs/pushed.md`.",
+    "- After each edit, note the change in `docs/notes.md`.",
+    "",
+  ].join("\n"),
+  "docs/pushed.md": "# Pushed\n",
+  "docs/notes.md": "# Notes\n",
+};
+
+function plainReport() {
+  const root = tmpProject(PLAIN_FIXTURE);
+  assert.equal(cli(root, ["scan"]).code, 0);
+  const report = cli(root, ["report", "--plain"]);
+  assert.equal(report.code, 0, report.err);
+  const out = report.out.replace(/\n$/, "");
+  // The anti-vacuity check, same discipline as `briefReport`: every part this
+  // gate measures has to render, or the assertions below pass on an empty page.
+  assert.match(out, /points at .+, which is not there/, "the fixture no longer produces a dead path:\n" + out);
+  assert.match(out, /ask for opposite things/, "the fixture no longer produces a conflicting pair:\n" + out);
+  // Worst first, mechanically: a rule the host never reads at all opens the
+  // page, ahead of every disagreement, dead path and wording problem below it.
+  assert.match(out.split("\n")[2], /is never read by the assistant/,
+    "the plain report no longer leads with the worst finding it has:\n" + out);
+  assert.match(out, /and \d+ more, smaller than these\./, "the fixture no longer overflows the item cap, so the budget is not measured at its worst case:\n" + out);
+  assert.match(out, /^About to be installed:$/m, "the plain report no longer closes with what it is about to install:\n" + out);
+  return out;
+}
+
+test("release gate G7: the plain report fits above a prompt and names each rule once", () => {
+  const out = plainReport();
+  const lines = out.split("\n");
+  assert.ok(lines.length <= engine.PLAIN_MAX_LINES,
+    `the plain report is ${lines.length} lines on the gate fixture, budget is ${engine.PLAIN_MAX_LINES}:\n` + out);
+
+  // Every hook in the closing block is named by BOTH halves of what installs it.
+  // An event with no matcher is a hook that fires on everything, and the reader
+  // approving the install is entitled to know which one they are getting.
+  const hooks = lines.filter((l) => /^- a hook on /.test(l));
+  assert.ok(hooks.length >= 2, "the fixture no longer proposes hooks on two different events:\n" + out);
+  for (const h of hooks) {
+    assert.match(h, /^- a hook on \w+, matching \S+ — covers \d+ rules?\.$/, "a hook is listed without its event and matcher: " + h);
+  }
+
+  // A rule is addressed as `path:line`, so the same address on two lines is the
+  // repetition this gate exists to stop.
+  const seen = new Map();
+  const offenders = [];
+  lines.forEach((line, i) => {
+    for (const m of line.matchAll(/(?:^|[\s(])([\w./\-]+):(\d+)\b/g)) {
+      const at = m[1] + ":" + m[2];
+      if (seen.has(at)) offenders.push(`${at} is named on line ${seen.get(at) + 1} and again on line ${i + 1}`);
+      else seen.set(at, i);
+    }
+  });
+  assert.deepEqual(offenders, [], "a rule is named twice in the plain report:\n" + offenders.join("\n") + "\n" + out);
+  assert.ok(seen.size >= 8,
+    `the fixture names only ${seen.size} rules, so the repeat check is measuring almost nothing:\n` + out);
+
+  // No factor codes and no grade: this page is a list of decisions about to be
+  // taken, not a verdict on the project.
+  const jargon = [];
+  if (/\bF[1-8]\b/.test(out)) jargon.push("F1-F8 factor codes");
+  if (/\bgrades?\b/i.test(out)) jargon.push("a grade");
+  // Every entry in this list is a plain word, so it needs no escaping.
+  for (const word of engine.BRIEF_BANNED_WORDS) {
+    if (new RegExp("\\b" + word + "\\b", "i").test(out)) jargon.push(word);
+  }
+  assert.deepEqual(jargon, [], "the plain report needs host internals:\n" + out);
+});
+
 // ---------------------------------------------------------------------------
 // "installation and fresh-session end-to-end tests pass"
 // ---------------------------------------------------------------------------
