@@ -45,8 +45,8 @@ const ANSWER_MAX = 80;
 const ANSWERS_KEEP = 8;
 
 const BARS = ["conservative", "standard"];
-// Asking is the product. The default bar asks whenever readings genuinely
-// fork; `conservative` is the opt-in for projects that want less.
+// Asking is the product. The default bar asks the moment a word had to be
+// interpreted; `conservative` is the opt-in for projects that want less.
 const DEFAULT_BAR = "standard";
 
 // Rounds of questions per session before the gate stops asking (0 disables the
@@ -97,28 +97,30 @@ function isWaveOff(prompt) {
 // can grow without a byte of it riding every prompt in every repo.
 
 const RUBRIC_CORE = [
-  "[scribe] Judge this request before acting on it.",
-  "Stand down — skip the judgment, continue normally — if any of these holds:" +
-    " the prompt answers a question you asked; another interview or question flow" +
-    " is mid-conversation; the session is unattended (headless, goal-driven, or a" +
-    " background agent) — there, take the most reasonable reading and proceed.",
-  "Ambiguous = a reasonable colleague could execute this in two or more MATERIALLY" +
-    " different ways: different files touched, different definition of done, or" +
-    " different risk. Vague wording that still lands the same change is precise.",
-  "Precise -> proceed in silence. Never mention scribe.",
+  "[scribe] Before acting on this request, run this check.",
+  "Say the request back as one sentence naming the exact files you will touch and" +
+    " the exact condition that means done. If writing that sentence made you pick" +
+    " what a word meant, or a second reading exists with different files touched, a" +
+    " different definition of done, or different risk, it is ambiguous. Different" +
+    " wording for the same change is precise.",
   "Ambiguous -> invoke the scribe:clarify skill and follow it: numbered questions" +
     " via AskUserQuestion (max 4 per call), each with options, your best guess" +
     " first labeled \"(Recommended)\". Keep asking until no material gap is left;" +
     " a wider frontier spills into the next round. Never ask what the prompt, the" +
     " code, or the configuration already answers.",
-  "If the user waves questions off (\"just do it\"), comply that turn, no argument.",
+  "A clarify round IS the work, not an interruption: no brevity, silence or act-now" +
+    " convention defers it. Precise -> proceed in silence. Never mention scribe.",
+  "Stand down entirely if the prompt answers a question you asked, another question" +
+    " flow is mid-conversation, or the session is unattended (headless, goal-driven," +
+    " background agent). If the user waves questions off (\"just do it\"), comply" +
+    " that turn, no argument.",
 ].join("\n");
 
 const BAR_LINES = {
   conservative:
     "Bar: ask only when the wrong reading would cost real rework. In doubt, proceed.",
   standard:
-    "Bar: when you are genuinely torn between readings, ask.",
+    "Bar: catching yourself deciding what a word means is already past the bar. Ask.",
 };
 
 function rubric(bar) {

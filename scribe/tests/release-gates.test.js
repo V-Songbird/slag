@@ -49,6 +49,13 @@ describe("gate: the labeled fixture", () => {
       assert.match(text, /definition of done/);
       assert.match(text, /risk/);
       assert.match(text, /same change is precise/, "the near-miss rule itself");
+      // The ask must survive a host that also tells the model to stay quiet or
+      // act at once — an output style, a brevity rule, a razor. Without this
+      // clause those conventions silently outrank the round.
+      assert.match(text, /not an interruption/, "the anti-suppression clause");
+      // The judgment is a check the model runs, not a feeling it consults:
+      // restating the request is what surfaces the word it was about to guess.
+      assert.match(text, /Say the request back/, "the say-it-back check");
     }
   });
 

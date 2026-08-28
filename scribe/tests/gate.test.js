@@ -122,7 +122,11 @@ describe("the judged path", () => {
   test("the default bar is the one that asks more", () => {
     const root = tmpRoot();
     const r = runGate(root, AMBIGUOUS);
-    assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /genuinely torn/);
+    const ctx = JSON.parse(r.stdout).hookSpecificOutput.additionalContext;
+    assert.strictEqual(ctx, lib.rubric("standard"));
+    // The property that makes it the eager one: it never tells the model to
+    // proceed on doubt, which is exactly what the conservative line does.
+    assert.doesNotMatch(ctx, /In doubt, proceed/);
   });
 
   test("config bar conservative changes the rubric line and the ledger", () => {

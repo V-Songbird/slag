@@ -4,6 +4,14 @@ All notable changes to scribe are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.3.0] — 2026-08-28
+
+### Changed
+
+- scribe now asks the moment a word has to be interpreted, rather than when two readings feel evenly matched. Claude restates your request as one sentence naming the files it will touch and what would count as done; if writing that sentence meant picking what a word meant, you get the question instead of the guess.
+- A question round no longer loses to a quiet host. Output styles, brevity rules and act-now instructions used to outrank the ask without ever saying so, and a project that ran one saw scribe stay silent on requests it should have stopped.
+- The ask itself is what Claude reads first now. It used to sit behind the list of reasons to skip it.
+
 ## [1.2.1] — 2026-08-18
 
 ### Fixed

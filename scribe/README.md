@@ -88,7 +88,7 @@ Most people never touch these. An optional `.scribe/config.json` in your project
 
 | Key | What it does |
 | --- | --- |
-| `bar` | `"standard"` (default) asks whenever readings genuinely fork; `"conservative"` asks only when a wrong guess would cost real rework |
+| `bar` | `"standard"` (default) asks the moment a word has to be interpreted; `"conservative"` asks only when a wrong guess would cost real rework |
 | `fatigueCap` | Question rounds per session before scribe stops asking (default `0`, no cap) |
 | `off` | `true` silences scribe in this project |
 
