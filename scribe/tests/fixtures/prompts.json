@@ -12,6 +12,15 @@
     { "label": "ambiguous", "text": "handle errors properly in the importer",
       "why": "log-and-continue vs fail-fast vs retry differ in behavior and risk" },
 
+    { "label": "ambiguous", "text": "add a --dry-run flag to the CLI",
+      "why": "surface-specific, forks on restatement: every subcommand or only the writing ones, and what it prints instead" },
+    { "label": "ambiguous", "text": "make the review command exit non-zero when it finds problems",
+      "why": "surface-specific, forks on restatement: which tier of finding counts decides whether CI can ever pass" },
+    { "label": "ambiguous", "text": "retry the network call if it fails",
+      "why": "surface-specific, forks on restatement: which failures retry, how many attempts, what backoff" },
+    { "label": "ambiguous", "text": "validate the config file before we use it",
+      "why": "surface-specific, forks on restatement: a bad config warns and falls back, or refuses the turn — opposite risk" },
+
     { "label": "precise", "text": "rename getUserById to fetchUserById across the repo and update every call site",
       "why": "one honest reading" },
     { "label": "precise", "text": "fix the typo 'recieve' in README.md",
