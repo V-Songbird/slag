@@ -1,7 +1,8 @@
 #!/bin/sh
-# jig:owned — generated from jig's pre-commit shim template. Point
-# core.hooksPath at .jig/hooks, or copy this file into your hook location;
-# jig never installs it for you.
+# jig:owned — generated from jig's pre-commit shim template. Git does not read
+# this file until it is told to: run `jig plan --wire-commit` to have jig
+# propose that as an approved, reversible change, or set core.hooksPath at
+# .jig/hooks yourself. jig writes no file inside .git/.
 #
 # If node is not on PATH in the hook's environment (fnm/nvm/volta), the check
 # is skipped rather than blocking the commit — the CI workflow is the floor

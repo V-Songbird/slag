@@ -712,12 +712,73 @@ test("a guard whose check carries no violation fixture is reported unprobed, nev
 // What jig refuses to do for you
 // ---------------------------------------------------------------------------
 
-test("apply says out loud that the pre-commit line and the permissions are yours to apply", () => {
+test("apply says out loud that commit-time checks and the permissions are still open", () => {
   const root = nodeProject();
   const { applied } = install(root);
   assert.equal(applied.proposals.length, 2);
-  assert.ok(applied.proposals.some((n) => /activation\.md/.test(n) && /does not edit it/.test(n)));
+  const lane = applied.proposals.find((n) => /activation\.md/.test(n));
+  assert.ok(lane, "the commit-lane note is missing");
+  // The note leads with what it buys, names the one command, and says plainly
+  // that skipping it does not leave the project uncovered.
+  assert.match(lane, /at the moment you commit/);
+  assert.match(lane, /git config core\.hooksPath \.jig\/hooks/);
+  assert.match(lane, /CI still stops the merge/);
   assert.ok(applied.proposals.some((n) => /proposed-permissions\.json/.test(n) && /never edits your settings/.test(n)));
+});
+
+test("a repository whose hook already runs the checks gets no commit-lane note", () => {
+  const root = nodeProject();
+  fs.mkdirSync(path.join(root, ".git", "hooks"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".git", "hooks", "pre-commit"),
+    "#!/bin/sh\nnode .jig/checks/run.mjs || exit 1\n");
+  const { applied } = install(root);
+  assert.equal(applied.proposals.some((n) => /activation\.md/.test(n)), false,
+    "jig reported a wiring gap that is not there");
+});
+
+test("plan --wire-commit proposes the setting as a named, item-tier change", () => {
+  const root = nodeProject();
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  install(root);
+
+  const plan = engine.cmdPlan(root, { _: [], change: [], "wire-commit": true });
+  const wire = plan.changes.find((c) => c.kind === "set-git-config");
+  assert.ok(wire, "--wire-commit planned no setting");
+  assert.equal(wire.path, engine.GIT_SETTING_PATH);
+  assert.equal(wire.value, ".jig/hooks");
+  assert.equal(engine.consentFor(wire, []).tier, "item");
+
+  engine.cmdApply(root, { _: [], change: [wire.id], path: [wire.path] });
+  const read = spawnSync("git", ["config", "--get", "core.hooksPath"], { cwd: root, encoding: "utf-8" });
+  assert.equal(read.stdout.trim(), ".jig/hooks");
+  assert.equal(engine.commitLane(root).state, "live");
+});
+
+test("--wire-commit refuses rather than hiding a hook the owner already wrote", () => {
+  const root = nodeProject();
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  install(root);
+  fs.mkdirSync(path.join(root, ".git", "hooks"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".git", "hooks", "pre-commit"), "#!/bin/sh\nnpm run lint\n");
+
+  assert.throws(() => engine.cmdPlan(root, { _: [], change: [], "wire-commit": true }),
+    /pointing git elsewhere would stop it running/);
+
+  // And it refuses the no-op too, rather than proposing work already done.
+  fs.appendFileSync(path.join(root, ".git", "hooks", "pre-commit"), "node .jig/checks/run.mjs || exit 1\n");
+  assert.throws(() => engine.cmdPlan(root, { _: [], change: [], "wire-commit": true }),
+    /already run here/);
+});
+
+test("a hook that exists but does not run the checks is told to add the line, not to repoint git", () => {
+  const root = nodeProject();
+  fs.mkdirSync(path.join(root, ".git", "hooks"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".git", "hooks", "pre-commit"), "#!/bin/sh\nnpm run lint\n");
+  const { applied } = install(root);
+  const lane = applied.proposals.find((n) => /activation\.md/.test(n));
+  assert.match(lane, /You already have a commit hook/);
+  assert.equal(/git config core\.hooksPath/.test(lane), false,
+    "repointing git would hide the owner's own hook");
 });
 
 test("the activation file names both hook shapes and the version-manager hazard", () => {

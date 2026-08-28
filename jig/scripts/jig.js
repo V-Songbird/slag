@@ -92,8 +92,17 @@ const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 // activation, it only ever targets a committed hook file, and it always lands
 // in the item consent tier — an edit to a file jig does not own is approved by
 // name or not at all.
-const CHANGE_KINDS = ["write-side-file", "write-config", "include-line", "write-settings", "write-rule", "write-agents-region", "run-install"];
-const INSTALLABLE_KINDS = ["write-side-file", "write-config", "include-line", "write-settings", "write-rule", "write-agents-region", "run-install"];
+const CHANGE_KINDS = ["write-side-file", "write-config", "include-line", "write-settings", "write-rule", "write-agents-region", "run-install", "set-git-config"];
+const INSTALLABLE_KINDS = ["write-side-file", "write-config", "include-line", "write-settings", "write-rule", "write-agents-region", "run-install", "set-git-config"];
+
+// The one git setting jig may change, and the sentinel path the journal files
+// it under. A setting has a pre-image the journal can hold — a value, or its
+// absence — which is what separates it from every path under `.git/`, where a
+// repository is not a file and the refusal in `targetProblem` still stands.
+// Nothing here writes `.git/config`: `git config` does, and `git config` is
+// also what puts the old value back.
+const GIT_SETTING = "core.hooksPath";
+const GIT_SETTING_PATH = "git:" + GIT_SETTING;
 
 // The prose budget: the most always-loaded bytes one
 // plan may add to the rule corpus. A default, stated as one — measured against
@@ -153,6 +162,8 @@ const KIND_TARGETS = {
   "write-rule": [".claude/rules/"],
   "write-agents-region": ["AGENTS.md"],
   "run-install": null,
+  // The narrowest list in the table: one sentinel, one setting.
+  "set-git-config": [GIT_SETTING_PATH],
 };
 
 // The one directory no approval reaches. A write into `.git/` can rewrite
@@ -287,12 +298,23 @@ function isEngineOwned(rel) {
 // Returns null when the path is writable for that kind, otherwise the reason.
 function targetProblem(root, kind, rel) {
   if (typeof rel !== "string" || !rel.trim()) return "the change has no path";
-  if (!resolveInsideRoot(root, rel)) return rel + " escapes the project root";
-  if (isEngineOwned(rel)) return rel + " belongs to the engine — a change may not rewrite the transaction record";
+  // First, and for every kind including the git-setting one: no path under
+  // `.git/` is writable, whatever it was approved for.
   if (matchesTarget(rel, GIT_DIR)) {
     return rel + " is inside .git/ — jig never writes there, whatever it was approved for. A repository is not a" +
       " file the journal can put back.";
   }
+  // Then the one target that is not a path at all. A setting has a pre-image
+  // the journal can hold, so it is reachable where a file under `.git/` is not
+  // — but only through its own kind, and only for the one key. Everything below
+  // this line is about files.
+  if (kind === "set-git-config" || rel === GIT_SETTING_PATH) {
+    if (kind !== "set-git-config") return rel + " is a git setting — only set-git-config may name it";
+    return rel === GIT_SETTING_PATH ? null
+      : rel + " — set-git-config only ever names " + GIT_SETTING_PATH;
+  }
+  if (!resolveInsideRoot(root, rel)) return rel + " escapes the project root";
+  if (isEngineOwned(rel)) return rel + " belongs to the engine — a change may not rewrite the transaction record";
   if (!Object.prototype.hasOwnProperty.call(KIND_TARGETS, kind)) {
     return rel + " — " + JSON.stringify(kind) + " is not a change kind this engine writes";
   }
@@ -578,15 +600,30 @@ function planFromDraft(draft, root) {
         problems.push(label + ": a run-install change needs the frozen `install` item from proposeInstalls");
         continue;
       }
+    } else if (raw.kind === "set-git-config") {
+      // The value is the whole change, so it is the whole validation. A relative
+      // directory is the only shape jig ever proposes — an absolute one would
+      // point every clone of the repository at one machine's disk.
+      if (typeof raw.value !== "string" || !raw.value.trim()) {
+        problems.push(label + ": a set-git-config change needs a `value` string"); continue;
+      }
+      if (path.isAbsolute(raw.value) || raw.value.includes("..")) {
+        problems.push(label + ": " + GIT_SETTING + " must be a relative path inside the project — " +
+          JSON.stringify(raw.value) + " is not"); continue;
+      }
     } else if (typeof raw.content !== "string") {
       problems.push(label + ": " + rel + " has no `content` string"); continue;
     }
 
+    // A git setting has no file behind it, so every fact computed from one is
+    // computed from nothing: no bytes to style, no format to verify by. It gets
+    // its own row rather than a file row full of nulls that read like a gap.
+    const setting = raw.kind === "set-git-config";
     const full = path.join(root, rel);
-    const current = readIfExists(full);
+    const current = setting ? null : readIfExists(full);
     const style = detectStyle(current);
-    const format = formatOf(root, rel) || FORMAT_BY_EXT[path.extname(rel).toLowerCase()] || null;
-    const verifyBy = verifyByFor(format);
+    const format = setting ? null : (formatOf(root, rel) || FORMAT_BY_EXT[path.extname(rel).toLowerCase()] || null);
+    const verifyBy = setting ? "git-config" : verifyByFor(format);
     changes.push({
       id,
       kind: raw.kind,
@@ -601,7 +638,13 @@ function planFromDraft(draft, root) {
       // D17: an artifact jig cannot read back is a gap, stamped at plan time so
       // the matrix can render it before anybody approves anything.
       enforcementGap: verifyBy === "none",
-      content: raw.kind === "include-line" ? raw.line : raw.kind === "run-install" ? "" : raw.content,
+      content: raw.kind === "include-line" ? raw.line
+        : raw.kind === "run-install" ? ""
+          : setting ? raw.value : raw.content,
+      // The value the setting is being moved to, carried beside `content` so a
+      // reader of the plan and a reader of the manifest see the same word for
+      // it that `git config` will.
+      value: setting ? raw.value : undefined,
       // The install item and the fixture-pair proof ride the plan untouched.
       // The proof is what the manifest records, so a hand-edited config cannot
       // claim a proof it does not have (SCOPE, "What binds a proof").
@@ -761,6 +804,26 @@ function journalledWrite(root, ctx, change, bytes) {
 // write created the file, so undoing it removes the file — and the directories
 // the write had to create, or a reverted install leaves empty folders behind.
 function restoreWrite(root, ctx, changeId, write, cause) {
+  // The setting's way back. A null pre-image means jig created the setting, so
+  // undoing it unsets the key — the same rule the file branch below follows,
+  // through `git config` instead of the file writer.
+  if (write.path === GIT_SETTING_PATH) {
+    const back = write.preImage === null ? null : loadPreImage(root, write.preImage).toString("utf8");
+    const argv = back === null ? ["config", "--unset", GIT_SETTING] : ["config", GIT_SETTING, back];
+    const r = spawnSync("git", argv, { cwd: root, encoding: "utf-8", windowsHide: true });
+    // `--unset` exits 5 when the key is already gone, which is the state revert
+    // was asking for. Every other non-zero exit left the setting where it was.
+    if (r.error || (r.status !== 0 && !(back === null && r.status === 5))) {
+      throw expected("Refusing to report " + GIT_SETTING + " restored for change " + changeId +
+        ": `git " + argv.join(" ") + "` " + (r.error ? r.error.message : "exited " + r.status) +
+        ". The setting is unchanged.");
+    }
+    appendJournal(root, {
+      event: "restore", tx: ctx.tx, plan: ctx.plan, change: changeId, path: write.path, cause,
+      hashAfter: write.preImage, setting: GIT_SETTING, valueAfter: back,
+    });
+    return;
+  }
   const full = resolveWritePath(root, write.path);
   if (!full) {
     throw expected("Refusing to restore " + write.path + " for change " + changeId +
@@ -862,8 +925,66 @@ function applyInstall(root, ctx, change) {
   };
 }
 
+// The other change that runs a command instead of writing bytes — and the only
+// one whose target is not a file at all. `git config` owns `.git/config`; jig
+// owns the record of what the value was before it, and that record is the whole
+// reason a setting is reachable where a path under `.git/` is not. The old
+// value goes down BEFORE the new one goes in, on the same crash-ordering rule
+// every write obeys.
+function applyGitConfig(root, ctx, change) {
+  const before = gitConfig(root, GIT_SETTING);
+  const bytes = before === null ? null : Buffer.from(before, "utf8");
+  appendJournal(root, {
+    event: "intent", tx: ctx.tx, plan: ctx.plan, change: change.id, kind: change.kind, path: change.path,
+    // A setting that was unset has no pre-image, exactly as a file that did not
+    // exist has none. Revert reads both the same way: put nothing back, take
+    // what jig put there back out.
+    preImage: bytes === null ? null : storePreImage(root, bytes),
+    hashBefore: bytes === null ? null : hashBytes(bytes),
+    setting: GIT_SETTING,
+    valueBefore: before,
+  });
+
+  const r = spawnSync("git", ["config", GIT_SETTING, change.value], { cwd: root, encoding: "utf-8", windowsHide: true });
+  if (r.error || r.status !== 0) {
+    appendJournal(root, {
+      event: "reject", tx: ctx.tx, plan: ctx.plan, change: change.id, path: change.path, cause: "git-config-failed",
+    });
+    throw expected("Setting " + GIT_SETTING + " failed: `git config " + GIT_SETTING + " " + change.value + "` " +
+      (r.error ? r.error.message : "exited " + r.status) + "\n  " +
+      String(r.stderr || "").trim() + "\n  Nothing was changed.");
+  }
+
+  // Read it back through git rather than trusting the exit code, for the same
+  // reason every written file is read back: the check is what makes the outcome
+  // row a fact instead of an assumption.
+  const after = gitConfig(root, GIT_SETTING);
+  if (after !== change.value) {
+    appendJournal(root, {
+      event: "reject", tx: ctx.tx, plan: ctx.plan, change: change.id, path: change.path, cause: "git-config-not-read-back",
+    });
+    throw expected("Set " + GIT_SETTING + " to " + JSON.stringify(change.value) + " and git reads " +
+      JSON.stringify(after) + " back. Another config file is overriding it. Nothing else was changed.");
+  }
+  appendJournal(root, {
+    event: "outcome", tx: ctx.tx, plan: ctx.plan, change: change.id, path: change.path,
+    hashAfter: hashBytes(Buffer.from(after, "utf8")), verifyBy: "git-config", gap: false,
+  });
+
+  return {
+    change: change.id,
+    path: change.path,
+    outcome: "set",
+    setting: GIT_SETTING,
+    value: after,
+    valueBefore: before,
+    enforcementGap: false,
+  };
+}
+
 function applyChange(root, ctx, change) {
   if (change.kind === "run-install") return applyInstall(root, ctx, change);
+  if (change.kind === "set-git-config") return applyGitConfig(root, ctx, change);
 
   const full = path.join(root, change.path);
   const current = readIfExists(full);
@@ -1101,6 +1222,16 @@ function templateIndex() {
       SCHEMA_VERSION);
   }
   return record.templates;
+}
+
+// The version a manifest row records for a template, read from the index that
+// owns it. A hand-written version string here would go stale the first time a
+// template's bytes changed, and the manifest would then claim a version that
+// never shipped.
+function templateVersion(name) {
+  const row = templateIndex().find((t) => t.name === name);
+  if (!row) throw expected("jig ships no template named " + name);
+  return String(row.version);
 }
 
 // The hash gate. A template that does not match what jig recorded for it is
@@ -1521,7 +1652,10 @@ function draftFromTemplates(root, opts, checks) {
   const raw = typeof opts.select === "string" ? opts.select : "";
   const asked = [...new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))];
   const authoredChecks = checks || readAuthored(root, opts);
-  if (!asked.length && !authoredChecks.length) {
+  // `--wire-commit` is the one plan that proposes no coverage: it points git at
+  // checks that are already installed. Every other route still has to say what
+  // it is covering.
+  if (!asked.length && !authoredChecks.length && !opts["wire-commit"]) {
     throw expected("plan needs --select <classId,…> (ids are namespaced, e.g. python/swallowed-exception) or" +
       " --from <file> holding the checks the model wrote for this project");
   }
@@ -1769,10 +1903,47 @@ function draftFromTemplates(root, opts, checks) {
         classIds: selection,
         ownership: "line",
         provenance,
-        template: { name: "activation", version: "1.0.0" },
+        template: { name: "activation", version: templateVersion("activation") },
         rationale: "run the committed checks from " + host.path,
       });
     }
+  }
+  // The other half of the same job, for the repository that has no committed
+  // hook to weave into — which is most of them, because `.git/hooks/` is where
+  // git looks by default and nothing commits it. jig already wrote a hook
+  // there is nothing wrong with; what is missing is git being told to use it,
+  // and that is a setting, not a file.
+  if (opts["wire-commit"]) {
+    const lane = commitLane(root);
+    if (lane.state === "live") {
+      throw expected("commit-time checks already run here — " + lane.path + " invokes the jig driver." +
+        " Nothing to wire.");
+    }
+    // Repointing git would hide a hook the owner wrote, and a harness that
+    // silently disables somebody's own check is worse than one that is not
+    // installed. The line goes INTO their hook instead, and that is a different
+    // approval.
+    if (lane.state === "hook-without-jig") {
+      throw expected(lane.path + " is already your commit hook, and pointing git elsewhere would stop it running." +
+        "\n  Add jig's line to it instead:\n    " + ACTIVATION.sh.line +
+        "\n  See " + STATE_DIR + "/" + ACTIVATION_FILE + ".");
+    }
+    if (!lane.shimExists) {
+      throw expected("there is no hook at " + lane.shim + " to point git at yet." +
+        " Run the install first, or use --weave-precommit against a committed hook.");
+    }
+    const value = STATE_DIR + "/hooks";
+    changes.push({
+      id: changeId("wire-commit", value),
+      kind: "set-git-config",
+      path: GIT_SETTING_PATH,
+      value,
+      classIds: selection,
+      ownership: "schema",
+      provenance,
+      template: { name: "activation", version: templateVersion("activation") },
+      rationale: "run the committed checks at commit time, from " + lane.shim,
+    });
   }
 
   // The governance pointer rule: computed from the scan's own orphan list,
@@ -2073,6 +2244,12 @@ function consentFor(change, guards) {
   }
   if (change.kind === "run-install") {
     return { tier: "item", why: "runs " + JSON.stringify(change.install ? change.install.command : "an install") + " against this machine" };
+  }
+  if (change.kind === "set-git-config") {
+    return {
+      tier: "item",
+      why: "changes " + GIT_SETTING + " in this clone, which decides whether your commits are checked at all",
+    };
   }
   if (toPosix(change.path).startsWith(".github/workflows/")) {
     return { tier: "item", why: "fails the build for everyone who pushes" };
@@ -2412,7 +2589,10 @@ function cmdPlan(root, opts) {
 
   let draft;
   let generated = null;
-  if (typeof opts.select === "string" || typeof opts.authored === "string" || fromChecks) {
+  // `--wire-commit` is its own reason to plan. It proposes one setting and no
+  // coverage, so it needs neither a selection nor an authored check behind it —
+  // a repository whose install is already done is exactly where it is used.
+  if (typeof opts.select === "string" || typeof opts.authored === "string" || fromChecks || opts["wire-commit"]) {
     generated = draftFromTemplates(root, opts, fromChecks || undefined);
     draft = generated.draft;
   } else if (record) {
@@ -2446,6 +2626,9 @@ function cmdPlan(root, opts) {
     changes: payload.changes.map((c) => ({
       id: c.id, kind: c.kind, path: c.path, creates: c.sourceHash === null,
       eol: c.eol, bom: c.bom, verifyBy: c.verifyBy, enforcementGap: c.enforcementGap,
+      // The setting's whole content is its value, so a change list that hid it
+      // would name a change without saying what it does.
+      value: c.value,
     })),
     enforcementGaps: payload.changes.filter((c) => c.enforcementGap).map((c) => c.path),
     selection: generated ? generated.selection : null,
@@ -2543,7 +2726,7 @@ function cmdApply(root, opts) {
     manifest: manifest ? STATE_DIR + "/" + MANIFEST_FILE : null,
     // Everything the user now has to do by hand, in one place: whatever jig
     // could not vet, or was never approved to write, lands here as a proposal.
-    proposals: proposalNotes(results),
+    proposals: proposalNotes(root, results),
   };
 }
 
@@ -2609,16 +2792,27 @@ function writeManifest(root, ctx, selected, results) {
   return payload;
 }
 
-// The two things v1 refuses to install for you. Both were already written to
-// `.jig/` as files you can read; this is the printed half of "printed AND
-// persisted", so a run that installs them says so instead of leaving them to
-// be found.
-function proposalNotes(results) {
+// What is left for the owner to do, in one place, said as an outcome rather
+// than a mechanism. The commit-time half is asked of the repository rather than
+// assumed: a hook that already runs the checks gets no note at all, because a
+// leftover task nobody has is noise that makes the real ones easier to skip.
+function proposalNotes(root, results) {
   const notes = [];
   const wrote = new Set(results.map((r) => r.path));
-  if (wrote.has(STATE_DIR + "/" + ACTIVATION_FILE)) {
-    notes.push("Commit-time checks are not wired up. " + STATE_DIR + "/" + ACTIVATION_FILE + " holds the exact line" +
-      " to paste into your own pre-commit hook — jig does not edit it. Until you do, the CI workflow is the floor.");
+  const lane = commitLane(root);
+  if (wrote.has(STATE_DIR + "/" + ACTIVATION_FILE) && lane.state !== "live") {
+    notes.push("Your checks run in CI, and CI catches everything before it merges. What is missing is the" +
+      " earlier catch, on your own machine, at the moment you commit — so a mistake never reaches a" +
+      " pull request at all." +
+      (lane.state === "hook-without-jig"
+        ? "\n  You already have a commit hook at " + lane.path + ". Add jig's one line to it:" +
+          "\n    " + ACTIVATION.sh.line +
+          "\n  " + STATE_DIR + "/" + ACTIVATION_FILE + " has the same line for other kinds of hook."
+        : "\n  jig wrote a ready-made hook at " + lane.shim + ". One command tells git to use it:" +
+          "\n    git config " + GIT_SETTING + " " + STATE_DIR + "/hooks" +
+          "\n  Run `jig plan --wire-commit` instead and jig proposes that as an approved, reversible change." +
+          "\n  " + STATE_DIR + "/" + ACTIVATION_FILE + " explains both routes and what each costs.") +
+      "\n  Skipping this costs you nothing except finding out later. CI still stops the merge.");
   }
   if (wrote.has(STATE_DIR + "/" + PERMISSIONS_FILE)) {
     notes.push("Permission rules are proposed, not applied. " + STATE_DIR + "/" + PERMISSIONS_FILE + " says what" +
@@ -2686,8 +2880,11 @@ function cmdRevert(root, opts) {
   // file, and make --force the explicit way to say "yes, discard it".
   if (!opts.force) {
     const drifted = live.filter(({ w }) => {
-      const full = path.join(root, w.path);
-      const now = readIfExists(full);
+      // Same question for the setting, asked of git instead of the disk: is the
+      // value still the one jig left there, or did somebody move it since.
+      const now = w.path === GIT_SETTING_PATH
+        ? (() => { const v = gitConfig(root, GIT_SETTING); return v === null ? null : Buffer.from(v, "utf8"); })()
+        : readIfExists(path.join(root, w.path));
       return now === null ? w.hashAfter !== null : hashBytes(now) !== w.hashAfter;
     });
     if (drifted.length) {
@@ -2701,9 +2898,14 @@ function cmdRevert(root, opts) {
     // An install journals every file its ecosystem could have written, so some
     // of those paths never existed and still do not. Saying "removed" about
     // one of them would be a report of work nobody did.
-    const there = fs.existsSync(path.join(root, w.path));
+    const setting = w.path === GIT_SETTING_PATH;
+    const there = setting ? gitConfig(root, GIT_SETTING) !== null : fs.existsSync(path.join(root, w.path));
     restoreWrite(root, { tx: c.tx, plan: c.plan }, c.id, w, opts.force ? "revert --force" : "revert");
-    report.push({ change: c.id, path: w.path, outcome: w.preImage === null ? (there ? "removed" : "absent") : "restored" });
+    report.push({
+      change: c.id,
+      path: w.path,
+      outcome: w.preImage !== null ? "restored" : there ? (setting ? "unset" : "removed") : "absent",
+    });
   }
   // The manifest and the lockfile are back as they were; the packages on this
   // machine are not, and jig will not run that command behind your back
@@ -3193,6 +3395,43 @@ function precommitHosts(root) {
   return out;
 }
 
+// Where git ACTUALLY reads hooks from, and whether the one it would run at
+// commit time already runs jig's checks.
+//
+// `precommitHosts` above answers a different question — which committed file
+// jig could weave a line into — and a repository can easily have none of those
+// and still have a working hook, because `.git/hooks/` is where git looks by
+// default and nothing commits it. Reporting that repository as unwired is
+// reporting a coverage gap that is not there, which is the one thing SCOPE says
+// jig must never do. Reading `.git/` is allowed and always was: the refusal in
+// `targetProblem` is a write boundary.
+function commitLane(root) {
+  const configured = gitConfig(root, GIT_SETTING);
+  const dir = configured || ".git/hooks";
+  const rel = toPosix(dir.replace(/\/+$/, "") + "/pre-commit");
+  const full = path.isAbsolute(dir) ? path.join(dir, "pre-commit") : path.join(root, rel);
+  const buf = readIfExists(full);
+  const body = buf === null ? null : stripBom(buf.toString("utf8"));
+  // Either spelling counts: the marker a woven line carries, or the driver path
+  // a hand-written hook names. A hook that runs the checks is wired however it
+  // came to say so.
+  const runsChecks = body !== null &&
+    (body.includes(ACTIVATION.sh.marker) || body.includes(STATE_DIR + "/checks/run.mjs"));
+  return {
+    setting: configured,
+    hooksDir: toPosix(dir),
+    path: rel,
+    exists: body !== null,
+    runsChecks,
+    // The shim jig wrote, and the value that would point git at it. Both are
+    // facts about this repository rather than advice, so the surfaces that give
+    // advice can all read the same ones.
+    shim: toPosix(STATE_DIR + "/hooks/pre-commit"),
+    shimExists: fs.existsSync(path.join(root, STATE_DIR, "hooks", "pre-commit")),
+    state: runsChecks ? "live" : body !== null ? "hook-without-jig" : "no-hook",
+  };
+}
+
 function governanceFacts(root, rules, hooks) {
   const found = [];
   const seen = new Set();
@@ -3280,6 +3519,11 @@ function cmdScan(root, opts) {
   } catch { /* a scan disclosure is never worth failing the scan for */ }
 
   const precommit = precommitHosts(root);
+  const lane = commitLane(root);
+  if (lane.state === "live") {
+    disclosures.push("Commit-time checks already run here: " + lane.path + " invokes the jig driver." +
+      " Nothing needs wiring.");
+  }
   for (const host of precommit) {
     if (host.woven) continue;
     disclosures.push(host.path + " is a committed pre-commit hook, so jig can weave its one check line" +
@@ -3340,7 +3584,7 @@ function cmdScan(root, opts) {
     edition: working[0] || stack.edition,
     editions: working,
     node,
-    guardrails: { hooks, coreHooksPath: gitConfig(root, "core.hooksPath"), rules, precommit },
+    guardrails: { hooks, coreHooksPath: gitConfig(root, GIT_SETTING), rules, precommit, commitLane: lane },
     governance,
     slots,
     occupied: occupied.map((s) => s.slot),
@@ -3474,10 +3718,31 @@ function cmdReview(root) {
       barrier: ifArmed.mode === "armed" ? null : ifArmed.why,
     };
   });
+  // Which lanes actually run today, read fresh rather than remembered. Wiring
+  // is reported once at install and can go quiet later — a fresh clone, or
+  // somebody resetting the setting — and a review that only reported guards
+  // would call a repository covered while its commit lane was dead.
+  const lane = commitLane(root);
+  const ci = fs.existsSync(path.join(root, ".github", "workflows", "jig.yml"));
   return {
     ok: true,
     schemaVersion: SCHEMA_VERSION,
     guards: rows,
+    lanes: {
+      session: { runs: rows.some((r) => r.mode === "armed"), observing: rows.some((r) => r.mode === "observe") },
+      commit: {
+        runs: lane.state === "live",
+        state: lane.state,
+        path: lane.path,
+        // The one thing to do about it, named here so every surface that
+        // reports the gap offers the same fix.
+        fix: lane.state === "live" ? null
+          : lane.state === "hook-without-jig"
+            ? "add jig's line to " + lane.path + ": " + ACTIVATION.sh.line
+            : "jig plan --wire-commit",
+      },
+      ci: { runs: ci, path: ci ? ".github/workflows/jig.yml" : null },
+    },
     ledger: { file: STATE_DIR + "/" + LEDGER_FILE, lines: ledgerLines(root) },
   };
 }
@@ -3689,7 +3954,7 @@ module.exports = {
   SCHEMA_VERSION, STATE_DIR, JOURNAL_FILE, PREIMAGE_DIR, PROFILE_FILE,
   CONFIG_FILE, MANIFEST_FILE, PERMISSIONS_FILE, ACTIVATION_FILE, LEDGER_FILE, HOOK_RUNNERS,
   PLAN_MD_FILE, PLAN_JSON_FILE, BACKLOG_FILE, AVAILABLE_NOW, CELL_RANK, CONSENT_TIERS,
-  ACTORS, LEVERS, PLUGIN_ROOT, GIT_DIR,
+  ACTORS, LEVERS, PLUGIN_ROOT, GIT_DIR, GIT_SETTING, GIT_SETTING_PATH, commitLane,
   leverOf, leverAvailable, toolchainFacts, toolchainToolFor, RELEASE_ORDER,
   denyCapable, hostNeutralFloor, floorNote, detectorGrade, detectorCeiling,
   detectorCell, matrixRow, consentFor, bestGrade, backlogFor, buildReview, cellText, renderReviewMd,

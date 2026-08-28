@@ -23,23 +23,23 @@
     },
     {
       "name": "activation",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "file": "activation.md",
       "target": ".jig/activation.md",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "b84f0b05fd63fd3208f7b379a18adc85db0ba204728ddf682bd460ec6404f494"
+      "sha256": "7f3cad9632e6c5e741429475d27e6cc7ddf0223ab1f3a0ea7c119c0451277529"
     },
     {
       "name": "hook-shim",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "file": "hook-pre-commit.sh",
       "target": ".jig/hooks/pre-commit",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "5fbce14380de41ea1a181fb5440a038cbf36f929306e4cf4358e03d0966b0dde"
+      "sha256": "a2b082884b2fd0592f4d6440497645520da210dc85aa3d3ce956df651b526396"
     }
   ]
 }

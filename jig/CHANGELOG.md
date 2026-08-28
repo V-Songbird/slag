@@ -4,6 +4,22 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.4.0] — 2026-08-27
+
+### Added
+
+- jig can now finish wiring the commit-time checks for you, instead of handing you a command to run. It is one more item on the plan, approved by name like everything else, and `revert` puts the setting back exactly as it was. jig still never writes a file inside `.git/`.
+- If you already have a commit hook of your own, jig offers to add its one line to that hook instead. It will not point git elsewhere, because that would stop your own hook running.
+- `/jig:review` now reports which of the three places the checks can run are actually running — in a Claude session, at commit time, and in CI — and names the one thing to do about any that is not. Wiring used to be mentioned once at install and never checked again.
+
+### Fixed
+
+- jig no longer reports commit-time checks as missing when they are already running. It only looked for a hook in the two places a repository can commit one, so a working hook in the usual place went unseen and every run ended by asking you to wire something already wired.
+
+### Changed
+
+- The note at the end of an install now says what the leftover step buys you and what it costs to skip it, rather than naming git internals. `.jig/activation.md` was rewritten the same way, and leads with the fact that CI already covers you.
+
 ## [2.3.2] — 2026-08-26
 
 ### Changed

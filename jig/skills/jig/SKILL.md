@@ -342,6 +342,7 @@ asked, so pass every one the user said yes to:**
 | --- | --- |
 | `--observe` | asked for guards that watch rather than block. It applies to the whole install; a single guard is moved afterwards in `/jig:review` |
 | `--weave-precommit` | agreed to let jig put its one line into the pre-commit hook their repository already commits. The scan lists the hosts under `guardrails.precommit`, and a repo with none refuses rather than creating one |
+| `--wire-commit` | agreed to let jig point git at the hook it wrote, by setting `core.hooksPath` to `.jig/hooks`. Run it as its own `plan` AFTER the install, because the hook has to exist before git can be pointed at it. It refuses when the lane already runs, and refuses rather than hiding a pre-commit hook the owner wrote |
 | `--wire-governance` | agreed to wire the orphaned governance documents the scan found. It writes one computed pointer rule, `.claude/rules/jig-governance.md` |
 | `--agents-region` | said another AI tool reads this repository, so `AGENTS.md` should carry a fenced block pointing at the same checks |
 
@@ -420,7 +421,16 @@ other path, which is what makes undoing it ordinary.
 `.git/` is never writable. A committed pre-commit hook (`scripts/git-hooks/`,
 `.husky/`) can take jig's activation line as a reviewed, journaled
 `include-line` change — ask first, item-approve it, apply it only on the user's
-yes. A hook under `.git/hooks/` is machine-local and stays a printed proposal.
+yes.
+
+Every file under `.git/` stays unwritable, including `.git/hooks/pre-commit`.
+What jig may change is one setting: `core.hooksPath`, through
+`plan --wire-commit`, which points git at the hook jig already wrote under
+`.jig/hooks/`. A setting has a pre-image the journal can hold, so it reverts;
+a repository does not, so it never becomes writable. Read
+`guardrails.commitLane` from the scan before offering it — a repository whose
+hook already runs the checks needs nothing, and one with a hook of its own gets
+the line woven in rather than git pointed away from it.
 
 Print `proposals` from the result **verbatim**. That is work jig deliberately
 left with the user: anything it declined to do on their behalf, saved where the

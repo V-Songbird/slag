@@ -250,6 +250,116 @@ test("revert --all unwinds a whole install and says so when there is nothing lef
 });
 
 // ---------------------------------------------------------------------------
+// The one git setting
+// ---------------------------------------------------------------------------
+//
+// SCOPE's write boundary refuses every path under `.git/` because the journal
+// cannot hold a repository's pre-image. A setting is the exception the owner
+// ratified on 2026-08-27: its pre-image is a value, present or absent, and
+// `git config` puts it back. These tests are what keeps the exception narrow.
+
+function gitProject(files) {
+  const root = tmpProject(files);
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  return root;
+}
+
+function hooksPath(root) {
+  const r = spawnSync("git", ["config", "--get", "core.hooksPath"], { cwd: root, encoding: "utf-8" });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+
+test("set-git-config may name one key, and no other kind may name it", () => {
+  const root = tmpProject({});
+  assert.equal(engine.targetProblem(root, "set-git-config", "git:core.hooksPath"), null);
+  assert.match(String(engine.targetProblem(root, "set-git-config", "git:user.email")),
+    /only ever names git:core\.hooksPath/);
+  assert.match(String(engine.targetProblem(root, "write-side-file", "git:core.hooksPath")),
+    /only set-git-config may name it/);
+  // The reversal is a setting, never a file. `.git/` stays shut for every kind,
+  // this one included.
+  for (const kind of ["set-git-config", "write-side-file"]) {
+    assert.match(String(engine.targetProblem(root, kind, ".git/hooks/pre-commit")), /inside \.git\//);
+  }
+});
+
+test("a set-git-config change must carry a relative value inside the project", () => {
+  const root = tmpProject({});
+  for (const value of ["/etc/hooks", "../elsewhere", ""]) {
+    assert.throws(
+      () => draft(root, [{ id: "w", kind: "set-git-config", path: "git:core.hooksPath", value }]),
+      /needs a `value` string|must be a relative path/,
+      JSON.stringify(value) + " was planned and should not have been");
+  }
+});
+
+test("wiring the commit lane sets core.hooksPath, and revert unsets it again", () => {
+  const root = gitProject({});
+  assert.equal(hooksPath(root), null);
+  draft(root, [{ id: "w", kind: "set-git-config", path: "git:core.hooksPath", value: ".jig/hooks" }]);
+  const applied = apply(root, ["w"]);
+
+  assert.equal(applied.applied[0].outcome, "set");
+  assert.equal(applied.applied[0].valueBefore, null);
+  assert.equal(hooksPath(root), ".jig/hooks");
+
+  // A setting jig created is a setting revert removes, exactly as a file jig
+  // created is one revert deletes.
+  const back = engine.cmdRevert(root, { _: [], change: [], all: true });
+  assert.equal(back.reverted[0].outcome, "unset");
+  assert.equal(hooksPath(root), null);
+});
+
+test("revert puts a core.hooksPath the owner already had back to its old value", () => {
+  const root = gitProject({});
+  spawnSync("git", ["config", "core.hooksPath", "my/hooks"], { cwd: root });
+  draft(root, [{ id: "w", kind: "set-git-config", path: "git:core.hooksPath", value: ".jig/hooks" }]);
+  assert.equal(apply(root, ["w"]).applied[0].valueBefore, "my/hooks");
+  assert.equal(hooksPath(root), ".jig/hooks");
+
+  const back = engine.cmdRevert(root, { _: [], change: [], all: true });
+  assert.equal(back.reverted[0].outcome, "restored");
+  assert.equal(hooksPath(root), "my/hooks");
+});
+
+test("revert refuses a setting somebody moved after jig set it, until forced", () => {
+  const root = gitProject({});
+  draft(root, [{ id: "w", kind: "set-git-config", path: "git:core.hooksPath", value: ".jig/hooks" }]);
+  apply(root, ["w"]);
+  spawnSync("git", ["config", "core.hooksPath", "somewhere/else"], { cwd: root });
+
+  assert.throws(() => engine.cmdRevert(root, { _: [], change: [], all: true }),
+    /changed after jig wrote it/);
+  assert.equal(hooksPath(root), "somewhere/else");
+  engine.cmdRevert(root, { _: [], change: [], all: true, force: true });
+  assert.equal(hooksPath(root), null);
+});
+
+test("the commit lane reads where git actually looks, not where jig would like to weave", () => {
+  const root = gitProject({});
+  fs.mkdirSync(path.join(root, ".git", "hooks"), { recursive: true });
+
+  let lane = engine.commitLane(root);
+  assert.equal(lane.state, "no-hook");
+
+  fs.writeFileSync(path.join(root, ".git", "hooks", "pre-commit"), "#!/bin/sh\nnpm run lint\n");
+  lane = engine.commitLane(root);
+  assert.equal(lane.state, "hook-without-jig");
+  assert.equal(lane.path, ".git/hooks/pre-commit");
+
+  // The hand-written spelling counts, not only the woven marker — a hook that
+  // runs the driver is wired however it came to say so.
+  fs.appendFileSync(path.join(root, ".git", "hooks", "pre-commit"), "node .jig/checks/run.mjs || exit 1\n");
+  assert.equal(engine.commitLane(root).state, "live");
+
+  // And it follows core.hooksPath rather than assuming the default.
+  spawnSync("git", ["config", "core.hooksPath", ".jig/hooks"], { cwd: root });
+  lane = engine.commitLane(root);
+  assert.equal(lane.hooksDir, ".jig/hooks");
+  assert.equal(lane.state, "no-hook");
+});
+
+// ---------------------------------------------------------------------------
 // The journal
 // ---------------------------------------------------------------------------
 

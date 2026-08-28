@@ -623,6 +623,31 @@ function configRow(root, id) {
   return readJson(root, ".jig/config.json").guards.find((g) => g.id === (id || GUARD));
 }
 
+test("review reports which lanes actually run, and the one fix for a dead one", () => {
+  const root = armProject();
+  let lanes = engine.cmdReview(root).lanes;
+  // `armProject` installs with --no-ci and nothing wired, so exactly one lane
+  // is alive: the session, and only as an observer.
+  assert.equal(lanes.ci.runs, false);
+  assert.equal(lanes.commit.runs, false);
+  assert.equal(lanes.commit.state, "no-hook");
+  assert.equal(lanes.commit.fix, "jig plan --wire-commit");
+  assert.equal(lanes.session.observing, true);
+
+  // A wiring that goes quiet later is reported later. This is the whole reason
+  // the lane is read fresh instead of remembered from the install.
+  fs.mkdirSync(path.join(root, ".git", "hooks"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".git", "hooks", "pre-commit"), "#!/bin/sh\nnpm test\n");
+  lanes = engine.cmdReview(root).lanes;
+  assert.equal(lanes.commit.state, "hook-without-jig");
+  assert.match(lanes.commit.fix, /add jig's line to \.git\/hooks\/pre-commit/);
+
+  fs.appendFileSync(path.join(root, ".git", "hooks", "pre-commit"), "node .jig/checks/run.mjs || exit 1\n");
+  lanes = engine.cmdReview(root).lanes;
+  assert.equal(lanes.commit.runs, true);
+  assert.equal(lanes.commit.fix, null);
+});
+
 test("an observing guard reports that nobody asked it to arm, and arming is offered", () => {
   const root = armProject();
   const row = engine.cmdReview(root).guards.find((g) => g.guardId === GUARD);

@@ -8,8 +8,9 @@ description: >-
   whether a guard is worth keeping, to change what a guard does on a match, to
   mark a report as wrong, or to see what has changed since the install — e.g.
   "what did jig catch", "that jig warning was wrong", "stop the force-push
-  guard blocking", "has anything drifted" — or invokes /jig:review. Do NOT use
-  to install or set up guardrails — that is /jig:jig.
+  guard blocking", "has anything drifted", "are my commit checks running" — or
+  invokes /jig:review. Do NOT use to install or set up guardrails — that is
+  /jig:jig.
 argument-hint: "[fp <guardId>] [arm <guardId>] [disarm <guardId>] [retire <guardId>] [rerun]"
 allowed-tools: Bash, Read, AskUserQuestion
 ---
@@ -52,8 +53,22 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" review
 - `provenance` — how the row was chosen. An `assumed` row is a default the owner
   never saw, and it is labelled as one wherever it is reported.
 
-Show the rows as three groups: fired, never fired, waved off. Then say what each
-group means:
+`lanes` carries the three places the checks can run, read fresh on every review
+rather than remembered from the install:
+
+- `lanes.session` — the guards above, inside a Claude session.
+- `lanes.commit` — the git hook. `runs` is the whole answer; `state` says why
+  when it is false, and `fix` is the one thing to do about it.
+- `lanes.ci` — the workflow. This is the floor, and it is the reason a dead
+  commit lane is an inconvenience rather than a hole.
+
+Report a dead lane in plain terms: what does not run, what still does, and the
+one command that fixes it. Offer the fix; never run it unasked. A `fix` of
+`jig plan --wire-commit` is an approved, reversible change like any other — send
+the user to `/jig:jig` to apply it rather than applying it here.
+
+Show the guard rows as three groups: fired, never fired, waved off. Then say
+what each group means:
 
 - **Fired** — working, unless the user says otherwise. Ask whether any of the
   reports were wrong.
