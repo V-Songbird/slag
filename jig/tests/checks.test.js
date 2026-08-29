@@ -565,6 +565,90 @@ test("the selftest witnesses a check whose globs carry a directory prefix", () =
     "the fixture was not seeded at a path the check's own first glob matches");
 });
 
+// ---------------------------------------------------------------------------
+// The paired-change kind, end to end through the installed driver
+// ---------------------------------------------------------------------------
+
+function git(root, args) {
+  return spawnSync("git", args, { cwd: root, encoding: "utf-8", windowsHide: true });
+}
+
+// A real index, because the whole claim of a paired-change detector is that it
+// reads one. Identity is set on the repository so the suite never depends on
+// whoever is running it having a global git config.
+function stage(root, files) {
+  git(root, ["init", "-q"]);
+  git(root, ["config", "user.email", "suite@example.test"]);
+  git(root, ["config", "user.name", "suite"]);
+  for (const [rel, content] of Object.entries(files)) {
+    const full = path.join(root, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, content);
+    git(root, ["add", "--", rel]);
+  }
+}
+
+test("a staged change that touches the engine and leaves the docs alone is a finding", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.DOC_LEFT_BEHIND]);
+  stage(root, { "src/engine/solver.ts": "export const solve = () => 1;\n" });
+  const { status, out } = driverJson(root);
+  assert.equal(status, 1);
+  assert.deepEqual(out.findings.map((f) => [f.classId, f.path, f.line]),
+    [["doc-left-behind", "src/engine/solver.ts", 1]]);
+  assert.match(out.findings[0].note, /changed with nothing matching docs/);
+});
+
+test("the same change with the doc staged beside it is silent", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.DOC_LEFT_BEHIND]);
+  stage(root, {
+    "src/engine/solver.ts": "export const solve = () => 1;\n",
+    "docs/engine.md": "# engine\n\nIt solves.\n",
+  });
+  const { status, out } = driverJson(root);
+  assert.deepEqual(out.findings, []);
+  assert.equal(status, 0);
+});
+
+test("a change that touches neither side is silent", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.DOC_LEFT_BEHIND]);
+  stage(root, { "src/ui/button.ts": "export const Button = 1;\n" });
+  assert.deepEqual(driverJson(root).out.findings, []);
+});
+
+// The honest limit, asserted rather than left to a comment in the workflow: a
+// run with no index to read reports the class as skipped. Passing would claim
+// coverage nothing demonstrated, which is the one thing SCOPE forbids outright.
+test("with no change set to read the class is skipped, not passed", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.DOC_LEFT_BEHIND]);
+  fs.mkdirSync(path.join(root, "src", "engine"), { recursive: true });
+  fs.writeFileSync(path.join(root, "src", "engine", "solver.ts"), "export const solve = () => 1;\n");
+  const { status, out } = driverJson(root);
+  assert.deepEqual(out.findings, []);
+  assert.equal(status, 0);
+  assert.equal(out.skipped.length, 1);
+  assert.equal(out.skipped[0].id, "doc-left-behind");
+  assert.match(out.skipped[0].why, /nothing is staged/);
+});
+
+// And the reason that limit is affordable: the selftest needs no index at all,
+// so the check is still proven everywhere the driver runs, CI included.
+test("the selftest proves a paired-change check from its change-set fixtures alone", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.DOC_LEFT_BEHIND]);
+  const run = driver(root, ["--selftest", "--json"]);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  const result = JSON.parse(run.stdout).selftest.find((r) => r.id === "doc-left-behind");
+  assert.equal(result.caught, true, result && result.why);
+  // One finding per file left behind, and the violation fixture lists two —
+  // the report names every file whose pair is missing, not just the first.
+  assert.equal(result.hits, 2);
+  assert.equal(result.nearMissHits, 0);
+});
+
 test("a check module that will not load is reported and the others still run", () => {
   const root = nodeProject();
   install(root, { "no-ci": true }, [A.EMPTY_CATCH]);

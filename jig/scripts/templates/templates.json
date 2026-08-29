@@ -3,23 +3,23 @@
   "templates": [
     {
       "name": "check-driver",
-      "version": "1.0.1",
+      "version": "1.1.0",
       "file": "run.mjs",
       "target": ".jig/checks/run.mjs",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "75f2536255f21d2d7987321a79b01f62c0add0768577dc89412051c37cb9b6db"
+      "sha256": "4ed09965b0858406e07fff9fce7f2f31ff3cd08fc596c5a9cb6011c15f0e32bc"
     },
     {
       "name": "ci-workflow",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "file": "jig.yml",
       "target": ".github/workflows/jig.yml",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "a908cfe6dcbe91f802cbabe350d961f7f736df51c30f93dfc8d4d55cecc6e64b"
+      "sha256": "6f9f432595baa91e42cafcc13e4647592c4d773bea91fa1862e7fb41229e4cdc"
     },
     {
       "name": "activation",

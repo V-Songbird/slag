@@ -295,6 +295,44 @@ A check that is heuristic by construction may declare `expectedNearMissHits` up
 front. That declaration is disclosed to the user; it is never a way to quiet a
 check that simply does not work.
 
+### When the mistake is two files drifting apart
+
+Some mistakes are not inside any file. The doc that stopped describing the
+module. The migration that never followed the schema. The fixture that never
+followed the format. No pattern over source can see those, because nothing in
+the changed file is wrong — what is wrong is the file that did not change with
+it.
+
+For those, the same `check-driver` detector takes `pairedWith` in place of
+`patterns`: `paths` names the files whose change obliges something matching
+`pairedWith` to change in the same commit. Write it when the user describes a
+mistake as one thing going stale whenever another moves.
+
+Its fixtures are change sets rather than source — **one path per line**, the way
+`git diff --cached --name-only` prints them. The violation set touches `paths`
+and nothing in `pairedWith`; the near miss touches both:
+
+```json
+{
+  "detectors": [{ "lever": "check-driver",
+    "params": { "paths": ["src/engine/**"], "pairedWith": ["docs/**/*.md"] } }],
+  "fixtures": {
+    "violation": "src/engine/solver.ts\nsrc/engine/types.ts\n",
+    "nearMiss": "src/engine/solver.ts\ndocs/engine.md\n"
+  }
+}
+```
+
+Tell the user the limit before they approve it, because it decides where the
+check is worth anything: it reads the git index, so it speaks at commit time and
+reports itself **skipped** anywhere nothing is staged — CI included. It is a
+pre-commit guard, not a CI one. The selftest still proves it everywhere, because
+a change-set fixture needs no index.
+
+Two things make one of these useless, and both are worth a second look before
+planning: `paths` so wide that every commit trips it, and a `pairedWith` the
+repository never has, which is the same fault wearing a different hat.
+
 Write the drafted checks to `.jig/authored.json`, as a `checks` array holding
 one object per check, and hand that file to step 5.
 

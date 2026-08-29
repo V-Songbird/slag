@@ -4,6 +4,17 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.5.0] — 2026-08-29
+
+### Added
+
+- jig can now catch a mistake that is not inside any file: two things that are supposed to change together, and one of them did not. A doc that stopped describing the module. A migration that never followed the schema. You name the two sets of files in the interview, and a commit that touches one and leaves the other alone is a finding.
+- These checks earn their place the same way every other one does. Each is proven against its own pair before it counts as coverage — a change that should trip it, and a change that should not — and the proof re-runs anywhere, including CI.
+
+### Changed
+
+- One honest limit, said out loud rather than buried: a paired check reads what is staged, so it speaks at commit time. Where nothing is staged it reports itself skipped instead of passing, so a green CI run never reads as coverage it did not give you.
+
 ## [2.4.0] — 2026-08-27
 
 ### Added

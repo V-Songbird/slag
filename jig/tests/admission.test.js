@@ -203,6 +203,97 @@ test("refusals are errors a human can act on", () => {
   assert.match(bad.discarded[0].why, /non-negative integer/);
 });
 
+// ---------------------------------------------------------------------------
+// The paired-change kind
+// ---------------------------------------------------------------------------
+//
+// Its fixtures are change sets rather than source, so the whole point of these
+// cases is that a check with no pattern in it is still admitted the same way:
+// on its own pair, and on nothing else.
+
+const { globToRegExp } = require("../hooks/jig-lib.js");
+const match = (glob) => globToRegExp(glob);
+
+function paired(over) {
+  return {
+    id: "doc-left-behind",
+    deny: DENY,
+    detectors: [{
+      lever: "check-driver",
+      params: { paths: ["src/engine/**"], pairedWith: ["docs/**/*.md"] },
+    }],
+    fixtures: {
+      violation: "src/engine/solver.ts\nsrc/engine/types.ts\n",
+      nearMiss: "src/engine/solver.ts\ndocs/engine.md\n",
+    },
+    ...over,
+  };
+}
+
+test("a paired-change check is admitted on a change set the way a pattern check is on source", () => {
+  const result = admission.ownPair(paired(), blank, match);
+  assert.deepEqual(result, {
+    id: "doc-left-behind",
+    violationHits: 1,
+    nearMissHits: 0,
+    passes: true,
+    why: null,
+  });
+  assert.deepEqual(admission.admit([paired()], blank, { match }).discarded, []);
+});
+
+test("a paired rule its own violation does not trip is discarded", () => {
+  // The violation set names nothing under `paths`, so nothing obliged the docs
+  // to move and the rule is silent on the very change it was written for.
+  const wrong = paired({ fixtures: { violation: "README.md\n", nearMiss: "src/engine/a.ts\ndocs/a.md\n" } });
+  const result = admission.ownPair(wrong, blank, match);
+  assert.equal(result.passes, false);
+  assert.equal(result.violationHits, 0);
+  assert.match(result.why, /never fired on the violation fixture/);
+  assert.deepEqual(admission.admit([wrong], blank, { match }).admitted, []);
+});
+
+test("a paired rule that also fires on its own near miss is discarded", () => {
+  // `pairedWith` names a path this repository never has, so every change to the
+  // engine reads as drift — including the near miss that updated the doc.
+  const loose = paired({
+    detectors: [{ lever: "check-driver", params: { paths: ["src/engine/**"], pairedWith: ["CHANGELOG.md"] } }],
+  });
+  const result = admission.ownPair(loose, blank, match);
+  assert.equal(result.passes, false);
+  assert.equal(result.nearMissHits, 1);
+  assert.match(result.why, /fired on the near miss/);
+  assert.deepEqual(admission.admit([loose], blank, { match }).admitted, []);
+});
+
+test("a paired check with no glob matcher injected is discarded, never admitted untested", () => {
+  assert.throws(() => admission.ownPair(paired(), blank), /no glob matcher was injected/);
+  const { admitted, discarded } = admission.admit([paired()], blank);
+  assert.deepEqual(admitted, []);
+  assert.match(discarded[0].why, /no glob matcher was injected/);
+});
+
+test("a paired check that fires on everything is caught by another paired check's near miss", () => {
+  const greedy = paired({
+    id: "fires-on-everything",
+    detectors: [{ lever: "check-driver", params: { paths: ["**"], pairedWith: ["nothing/ever/here.md"] } }],
+    fixtures: { violation: "anything.ts\n", nearMiss: "nothing/ever/here.md\n" },
+  });
+  const rows = admission.crossNearMiss([paired(), greedy], blank, match);
+  assert.deepEqual(rows, [{ check: "fires-on-everything", foreignCheck: "doc-left-behind", pattern: "paired-change" }]);
+
+  const { admitted, discarded } = admission.admit([paired(), greedy], blank, { cross: true, match });
+  assert.deepEqual(admitted.map((a) => a.id), ["doc-left-behind"]);
+  assert.equal(discarded.length, 1);
+  assert.match(discarded[0].why, /fired on doc-left-behind's near miss/);
+});
+
+test("the two kinds are never crossed against each other", () => {
+  // A source pattern over a list of paths, or a path rule over somebody's
+  // JavaScript, compares two different kinds of thing and would fail at random.
+  assert.deepEqual(admission.crossNearMiss([check(), paired()], blank, match), []);
+});
+
 test("writeDiscarded puts the discards on disk, including when there are none", () => {
   const stateDir = path.join(tmpDir(), ".jig");
   const rows = admission.admit([check({ deny: undefined })], blank).discarded;

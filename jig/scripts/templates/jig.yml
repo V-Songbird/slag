@@ -7,10 +7,11 @@
 # manager, where the agent host is not installed, and where nobody pasted the
 # pre-commit activation line.
 #
-# One honest limit: the staged-deletion check reads the git index, and a CI
-# checkout has nothing staged. That class is covered here only for what is
-# already committed — the pre-commit and agent-session guards are what see a
-# deletion as it happens.
+# One honest limit: a check that reads the git index — the staged-deletion
+# class, and every paired-change detector — has nothing to read in a CI
+# checkout, where nothing is staged. Those report themselves skipped here rather
+# than passing, and the pre-commit lane is what sees them. The selftest step
+# still proves them, because a change-set fixture needs no index at all.
 
 name: jig checks
 

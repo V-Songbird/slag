@@ -44,16 +44,47 @@ function driverUnits(check, id) {
     if (syntax) opts.commentSyntax = syntax;
     units.push({ filename: "fixture" + ext, opts, perLine: p.perLine === true, patterns });
   }
-  if (!units.length) {
-    throw new Error(
-      `admission: check "${id}" declares no check-driver patterns, so there is nothing to prove against its fixtures`,
-    );
+  return units;
+}
+
+// The paired-change kind. Its fixtures are change sets rather than source, so
+// it carries no filename, no blanker options and no patterns — two path sets
+// and that is all there is to prove.
+function pairedUnits(check) {
+  const units = [];
+  for (const det of (check.detectors || []).filter((d) => d && d.lever === "check-driver")) {
+    const p = det.params || {};
+    const paths = (p.paths || []).filter((s) => typeof s === "string" && s.length);
+    const pairedWith = (p.pairedWith || []).filter((s) => typeof s === "string" && s.length);
+    if (paths.length && pairedWith.length) units.push({ paths, pairedWith });
   }
   return units;
 }
 
+// A change-set fixture is one path per line. Blank lines and stray indentation
+// are the author's formatting, never part of a path.
+function changeSet(text) {
+  return text.split("\n").map((s) => s.trim()).filter(Boolean);
+}
+
+// The paired detector's whole rule, written once so admission and the shipped
+// driver cannot answer it differently: the set touched something in `paths` and
+// nothing in `pairedWith`.
+function pairedFires(units, set, match) {
+  return units.some((u) => set.some((rel) => matchesAny(rel, u.paths, match)) &&
+    !set.some((rel) => matchesAny(rel, u.pairedWith, match)));
+}
+
+function matchesAny(rel, globs, match) {
+  return globs.some((g) => match(g).test(rel));
+}
+
+// What a passing check has to have fired. One per pattern, plus one for the
+// paired rule if the check carries one — the same total `ownPair` counts up to,
+// because a mismatch between the two would discard every check silently.
 function patternCount(check, id) {
-  return driverUnits(check, id).reduce((n, u) => n + u.patterns.length, 0);
+  return driverUnits(check, id).reduce((n, u) => n + u.patterns.length, 0) +
+    (pairedUnits(check).length ? 1 : 0);
 }
 
 function checkId(check) {
@@ -84,13 +115,25 @@ function fires(blanked, pattern, perLine) {
   return perLine ? blanked.split("\n").some((line) => re.test(line)) : re.test(blanked);
 }
 
-function ownPair(check, blank) {
+function ownPair(check, blank, match) {
   const id = checkId(check);
   if (typeof blank !== "function") {
     throw new Error(`admission: check "${id}" cannot be tested — no blanker function was injected`);
   }
   const { violation, nearMiss } = fixturesOf(check, id);
   const units = driverUnits(check, id);
+  const paired = pairedUnits(check);
+  if (!units.length && !paired.length) {
+    throw new Error(
+      `admission: check "${id}" declares no check-driver patterns, so there is nothing to prove against its fixtures`,
+    );
+  }
+  // A paired check is proven the same way and by the same rule the driver runs,
+  // so it needs the glob matcher the way a pattern check needs the blanker.
+  // Missing, it is untestable, and an untestable check is never an admitted one.
+  if (paired.length && typeof match !== "function") {
+    throw new Error(`admission: check "${id}" is a paired-change check and no glob matcher was injected — it cannot be tested`);
+  }
 
   let violationHits = 0;
   let nearMissHits = 0;
@@ -119,7 +162,19 @@ function ownPair(check, blank) {
     }
   }
 
-  const total = units.reduce((n, u) => n + u.patterns.length, 0);
+  // The paired half. Its fixtures are read as change sets, and the pair means
+  // the same thing it means for a pattern check: the violation must fire it and
+  // the near miss must not. One unit, one hit, so the totals stay comparable.
+  if (paired.length) {
+    if (pairedFires(paired, changeSet(violation), match)) violationHits++;
+    else missed.push("paired-change");
+    if (pairedFires(paired, changeSet(nearMiss), match)) {
+      nearMissHits++;
+      falsePositives.push("paired-change");
+    }
+  }
+
+  const total = units.reduce((n, u) => n + u.patterns.length, 0) + (paired.length ? 1 : 0);
   const passes = violationHits === total && nearMissHits === 0;
   const reasons = [];
   if (missed.length) {
@@ -135,28 +190,44 @@ function ownPair(check, blank) {
 // that fires on everything still fires on its own violation and can still be
 // written to dodge its own near miss. Somebody else's near miss is the only
 // sample it was not authored against.
-function crossNearMiss(checks, blank) {
+// The two kinds are crossed separately, and never against each other. A foreign
+// near miss only tests a check when it is the kind of thing that check reads:
+// running a source pattern over a list of file paths, or a path rule over
+// somebody's Python, proves nothing about either and would fail at random.
+function crossNearMiss(checks, blank, match) {
   if (!Array.isArray(checks)) throw new Error("admission: crossNearMiss expects an array of checks");
   if (typeof blank !== "function") throw new Error("admission: crossNearMiss needs the blanker function injected");
   const rows = [];
   for (const owner of checks) {
     const ownerId = checkId(owner);
     const { nearMiss } = fixturesOf(owner, ownerId);
-    // The foreign fixture is blanked under the foreign check's own filename:
-    // it is that language's source, whatever language the check reading it was
-    // written for. Only the strip flags come from the reader, because those
-    // are its own reading of source.
-    const ownerName = driverUnits(owner, ownerId)[0].filename;
+    const ownerUnits = driverUnits(owner, ownerId);
+    const ownerPaired = pairedUnits(owner);
     for (const runner of checks) {
       const runnerId = checkId(runner);
       if (runnerId === ownerId) continue;
-      for (const unit of driverUnits(runner, runnerId)) {
-        const blanked = blank(nearMiss, ownerName, unit.opts);
-        for (const pattern of unit.patterns) {
-          if (fires(blanked, pattern, unit.perLine)) {
-            rows.push({ check: runnerId, foreignCheck: ownerId, pattern });
+      if (ownerUnits.length) {
+        // The foreign fixture is blanked under the foreign check's own
+        // filename: it is that language's source, whatever language the check
+        // reading it was written for. Only the strip flags come from the
+        // reader, because those are its own reading of source.
+        const ownerName = ownerUnits[0].filename;
+        for (const unit of driverUnits(runner, runnerId)) {
+          const blanked = blank(nearMiss, ownerName, unit.opts);
+          for (const pattern of unit.patterns) {
+            if (fires(blanked, pattern, unit.perLine)) {
+              rows.push({ check: runnerId, foreignCheck: ownerId, pattern });
+            }
           }
         }
+      }
+      // A paired check that fires on everything is the same hazard with a
+      // different shape: `**` paired with something nothing ever matches. Every
+      // other paired check's near-miss change set is the sample that finds it.
+      const runnerPaired = pairedUnits(runner);
+      if (ownerPaired.length && runnerPaired.length && typeof match === "function" &&
+          pairedFires(runnerPaired, changeSet(nearMiss), match)) {
+        rows.push({ check: runnerId, foreignCheck: ownerId, pattern: "paired-change" });
       }
     }
   }
@@ -192,6 +263,10 @@ function declaredNearMissHits(check, id) {
 // because two checks over the same language legitimately share shapes, and a
 // disclosed cross hit is evidence for the owner rather than an automatic
 // verdict. Turning it on makes admission strict.
+//
+// `opts.match` is the glob matcher, injected the way the blanker is, and only a
+// paired-change check needs it. Without it such a check is discarded with that
+// as the reason rather than admitted untested.
 function admit(checks, blank, opts) {
   if (!Array.isArray(checks)) throw new Error("admission: admit expects an array of authored checks");
   if (typeof blank !== "function") throw new Error("admission: admit needs the blanker function injected");
@@ -220,7 +295,7 @@ function admit(checks, blank, opts) {
     let total;
     try {
       expected = declaredNearMissHits(check, id);
-      result = ownPair(check, blank);
+      result = ownPair(check, blank, o.match);
       total = patternCount(check, id);
     } catch (err) {
       discarded.push({ id, why: err.message });
@@ -241,7 +316,7 @@ function admit(checks, blank, opts) {
   }
 
   if (o.cross) {
-    for (const row of crossNearMiss(admitted.map((a) => a.check), blank)) {
+    for (const row of crossNearMiss(admitted.map((a) => a.check), blank, o.match)) {
       const at = admitted.findIndex((a) => a.id === row.check);
       if (at === -1) continue;
       admitted.splice(at, 1);

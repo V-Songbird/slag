@@ -1439,7 +1439,7 @@ function checkSlug(id) {
 function admitAuthored(root, checks) {
   // jig-lib is required lazily: it requires this module back for the shared
   // vocabulary, and a top-level require would be a cycle.
-  const { blankRegions } = require("../hooks/jig-lib.js");
+  const { blankRegions, globToRegExp } = require("../hooks/jig-lib.js");
   const discarded = [];
   const testable = [];
   for (const check of checks) {
@@ -1453,7 +1453,10 @@ function admitAuthored(root, checks) {
     testable.push(check);
   }
 
-  const result = admission.admit(testable, blankRegions, { cross: true });
+  // The blanker proves a pattern check and the glob matcher proves a paired
+  // one. Both are the real ones the session guards and the driver use — a pair
+  // proved against a toy is a pair that proves nothing about what will run.
+  const result = admission.admit(testable, blankRegions, { cross: true, match: globToRegExp });
   discarded.push(...result.discarded);
 
   const admitted = [];

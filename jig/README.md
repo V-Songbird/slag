@@ -33,6 +33,7 @@ Starting something new? Run it on the empty folder. jig writes the project file,
 - **Checks that outlive the plugin.** The main guardrail is a small script committed to your repo. Any teammate, any CI, any machine with node runs it — no plugin, no account, no jig.
 - **Every check proves itself first.** A check ships with a violation sample and a near-miss sample. It has to fire on the first and stay silent on the second, and on every other check's near miss too. One that fails is discarded and reported, never quietly counted as coverage.
 - **It finds the documents your sessions never read.** ADRs, scopes, roadmaps — jig checks whether anything actually points Claude at them, and can wire in one small pointer rule when nothing does.
+- **It catches the two files that drifted apart.** The doc that stopped describing the module, the migration that never followed the schema. Name the two sets, and a commit that touches one and leaves the other alone is a finding. These read what you have staged, so they speak at commit time and report themselves skipped in CI rather than pretending to have looked.
 - **It watches the AI too.** Session guards see what an agent is about to do: the downloaded script piped into a shell, the force-push to main, the test file on its way out. A blocked call always shows the reason, an alternative, and the way to override.
 - **One command undoes everything.** Every write is journaled with the original bytes, your manifest and lockfile included. Revert restores every file it touched, then hands you the one command your package manager needs to take the tool off disk.
 
@@ -43,6 +44,7 @@ Starting something new? Run it on the empty folder. jig writes the project file,
 | You run `/jig:jig` | It scans the repo, mines the git history, and shows what it found — then asks the things it can't read |
 | The folder is empty | It asks which language, writes the starter project file, and carries on. Nothing about the run changes |
 | You pick what to guard | Describe a mistake in your own words. jig writes a check for it, plus the two samples that prove the check works |
+| The mistake is two files drifting apart | Name both sets. The samples become a commit that should trip it and one that should not, and the proof runs the same way |
 | jig proposes your toolchain | Each tool is one item carrying the exact install command, the config it would write, and the command that removes it again |
 | You approve, item by item | Every path is named before it is written, and every write is journaled with the bytes that were there before |
 | The install closes | Each check is shown catching a planted violation, live — without the demonstration, jig won't claim you're covered |

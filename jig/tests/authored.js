@@ -136,6 +136,28 @@ const HEURISTIC_ONLY = authored({
   },
 });
 
+// The paired-change kind. No patterns at all: it names two path sets, and its
+// fixtures are change sets rather than source — one path per line, the way the
+// driver reads `git diff --cached --name-only`. The violation set touched the
+// engine and left the docs alone; the near miss moved both.
+const DOC_LEFT_BEHIND = authored({
+  id: "doc-left-behind",
+  title: "A module changed without the doc that describes it",
+  detectors: [
+    { lever: "check-driver", actor: "human-editor", confidence: "deterministic",
+      params: { paths: ["src/engine/**"], pairedWith: ["docs/**/*.md"] } },
+  ],
+  fixtures: {
+    violation: "src/engine/solver.ts\nsrc/engine/types.ts\n",
+    nearMiss: "src/engine/solver.ts\ndocs/engine.md\n",
+  },
+  deny: {
+    reason: "This changes the engine and leaves its documentation behind.",
+    alternative: "update the doc in the same commit",
+    override: "say why the change is invisible to a reader of the docs",
+  },
+});
+
 // The checks the model wrote, handed to the engine the way the skill hands them
 // over: one file, read by `plan --authored`.
 function writeChecks(root, checks) {
@@ -159,6 +181,7 @@ module.exports = {
   PIPED_INSTALLER,
   EMPTY_CATCH,
   HEURISTIC_ONLY,
+  DOC_LEFT_BEHIND,
   PIPE_PATTERN,
   CATCH_PATTERN,
   DENY_PIPE,
