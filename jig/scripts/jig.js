@@ -2765,6 +2765,12 @@ function writeManifest(root, ctx, selected, results) {
         install: c.kind === "run-install" && c.install
           ? { tool: c.install.id, packageManager: c.install.packageManager, command: c.install.command, uninstall: c.install.uninstallCommand }
           : null,
+        // Why this artifact is here, carried from the plan item the owner
+        // approved rather than recomputed. Additive and optional, so an older
+        // jig ignores the field instead of refusing a manifest it reads as
+        // newer; a row written before the field existed answers from the plan
+        // file it was applied from, which is still on disk beside it.
+        rationale: c.rationale || null,
         template: c.template,
         state: "active",
         installedAt: new Date().toISOString(),
@@ -3682,6 +3688,10 @@ function guardEvidence(lib, root, guard, stats) {
     problem: record.problem || (dets.length ? null : "the installed check `" + guard.check +
       "` declares no " + guard.runner + " detector"),
     det: dets[0] || null,
+    // The module itself, for the readers that describe what a check watches
+    // rather than what it has caught. Null when it would not load, because
+    // there is nothing honest to say about a module that is not there.
+    mod: record.problem ? null : record.mod,
     fired: s.fired || 0,
     wavedOff: s.falsePositives || 0,
     evidence: {
@@ -3695,6 +3705,79 @@ function guardEvidence(lib, root, guard, stats) {
 // fired / never fired / waved off, per guard, straight from the ledger — plus
 // what arming would say right now, so a review can offer it exactly when it
 // would hold and name the barrier when it would not.
+// What a guard watches, which is the half `fired` and `mode` never say. The
+// patterns are COUNTED rather than printed: the config is a trust boundary a
+// teammate edits by design, and a matcher rendered into a report is a matcher
+// somebody can paste back in without anybody reviewing it.
+function watchesOf(lib, det, mod, deny) {
+  if (!det) return null;
+  const params = isObject(det.params) ? det.params : {};
+  return {
+    // `PreToolUse` and `PostToolUse` run inside a session; `checks` runs in the
+    // commit hook and in CI, and never appears in a guard row at all.
+    event: det.runner || null,
+    tools: (lib.EVENT_TOOLS && lib.EVENT_TOOLS[det.runner]) || [],
+    lever: det.lever || null,
+    paths: Array.isArray(params.paths) ? params.paths : [],
+    patterns: Array.isArray(params.patterns) ? params.patterns.length : 0,
+    // The second detector kind: what has to change alongside `paths`. Empty on
+    // a pattern detector, which is every session guard.
+    pairedWith: Array.isArray(params.pairedWith) ? params.pairedWith : [],
+    title: mod && typeof mod.title === "string" ? mod.title : null,
+    severity: mod && typeof mod.severity === "string" ? mod.severity : null,
+    // The three-part reply an armed match shows. Null means this detector
+    // cannot arm at all, whatever any config row says about it.
+    deny,
+  };
+}
+
+// Every rationale still recoverable from the plan files in `.jig/`, keyed by
+// the change id the manifest row carries. A plan that will not parse is skipped
+// rather than thrown on: refusing to describe a whole install because one old
+// plan file went bad is worse than saying `none` for the rows it covered.
+function rationaleIndex(root) {
+  const map = new Map();
+  for (const file of planFiles(root)) {
+    let record;
+    try {
+      record = readPlan(file);
+    } catch {
+      continue;
+    }
+    for (const c of record.changes) {
+      if (typeof c.rationale === "string" && c.rationale.trim()) map.set(c.id, c.rationale.trim());
+    }
+  }
+  return map;
+}
+
+// The check modules on disk, read for what they watch. A session detector gets
+// a row in the config; a `checks` detector gets none, and it is exactly what
+// the commit hook and CI run — so a report built from the config alone would
+// present a fraction of the coverage as the whole of it.
+function installedChecks(root) {
+  const lib = require("../hooks/jig-lib.js");
+  const dir = path.join(root, STATE_DIR, "checks");
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter((f) => f.endsWith(".check.mjs")).sort().map((f) => {
+    const slug = f.slice(0, -".check.mjs".length);
+    const record = lib.loadCheck(root, slug);
+    if (record.problem) return { slug, problem: record.problem, title: null, severity: null, provable: false, detectors: [] };
+    const mod = record.mod;
+    const dets = Array.isArray(mod.detectors) ? mod.detectors.filter(isObject) : [];
+    return {
+      slug,
+      problem: null,
+      title: typeof mod.title === "string" ? mod.title : null,
+      severity: typeof mod.severity === "string" ? mod.severity : null,
+      // A fixture pair is what admitted this check. Without one it can never be
+      // re-proven, and no guard naming it can arm.
+      provable: lib.checkProof(record) !== null,
+      detectors: dets.map((det) => watchesOf(lib, det, mod, lib.denyOf(mod, det))),
+    };
+  });
+}
+
 function cmdReview(root) {
   const { lib, config, guards } = configuredGuards(root);
   const stats = lib.ledgerStats(root);
@@ -3708,6 +3791,12 @@ function cmdReview(root) {
       check: g.check,
       actor: e.det ? e.det.actor || null : null,
       confidence: e.det ? e.det.confidence || null : null,
+      // What this guard watches. A guard reported only by its activity is one
+      // nobody can check against the mistake it was installed for.
+      watches: watchesOf(lib, e.det, e.mod, e.evidence.deny),
+      // A check missing a fixture can never be re-proven, so a row naming it
+      // cannot arm however its config reads.
+      provable: e.evidence.proof !== null,
       provenance: g.provenance,
       fired: e.fired,
       wavedOff: e.wavedOff,
@@ -3721,32 +3810,94 @@ function cmdReview(root) {
       barrier: ifArmed.mode === "armed" ? null : ifArmed.why,
     };
   });
-  // Which lanes actually run today, read fresh rather than remembered. Wiring
-  // is reported once at install and can go quiet later — a fresh clone, or
-  // somebody resetting the setting — and a review that only reported guards
-  // would call a repository covered while its commit lane was dead.
-  const lane = commitLane(root);
-  const ci = fs.existsSync(path.join(root, ".github", "workflows", "jig.yml"));
   return {
     ok: true,
     schemaVersion: SCHEMA_VERSION,
     guards: rows,
-    lanes: {
-      session: { runs: rows.some((r) => r.mode === "armed"), observing: rows.some((r) => r.mode === "observe") },
-      commit: {
-        runs: lane.state === "live",
-        state: lane.state,
-        path: lane.path,
-        // The one thing to do about it, named here so every surface that
-        // reports the gap offers the same fix.
-        fix: lane.state === "live" ? null
-          : lane.state === "hook-without-jig"
-            ? "add jig's line to " + lane.path + ": " + ACTIVATION.sh.line
-            : "jig plan --wire-commit",
-      },
-      ci: { runs: ci, path: ci ? ".github/workflows/jig.yml" : null },
-    },
+    lanes: lanesOf(root, rows),
     ledger: { file: STATE_DIR + "/" + LEDGER_FILE, lines: ledgerLines(root) },
+  };
+}
+
+// Which lanes actually run today, read fresh rather than remembered. Wiring is
+// reported once at install and can go quiet later — a fresh clone, or somebody
+// resetting the setting — and a surface that only reported guards would call a
+// repository covered while its commit lane was dead. Its own function because
+// the answer does not depend on the config, and a report that could not read
+// the config still owes it.
+function lanesOf(root, rows) {
+  const lane = commitLane(root);
+  const ci = fs.existsSync(path.join(root, ".github", "workflows", "jig.yml"));
+  return {
+    session: { runs: rows.some((r) => r.mode === "armed"), observing: rows.some((r) => r.mode === "observe") },
+    commit: {
+      runs: lane.state === "live",
+      state: lane.state,
+      path: lane.path,
+      // The one thing to do about it, named here so every surface that
+      // reports the gap offers the same fix.
+      fix: lane.state === "live" ? null
+        : lane.state === "hook-without-jig"
+          ? "add jig's line to " + lane.path + ": " + ACTIVATION.sh.line
+          : "jig plan --wire-commit",
+    },
+    ci: { runs: ci, path: ci ? ".github/workflows/jig.yml" : null },
+  };
+}
+
+// The third surface, beside installing and reviewing. `review` answers what the
+// guards have CAUGHT; this answers what is here, why it was installed, and
+// whether it is watching anything today. Nothing here decides, changes or
+// installs — every action stays where it already lives.
+function cmdInventory(root) {
+  // A report is not an enforcement surface. An absent config means nothing is
+  // installed and an invalid one is the single most important thing the owner
+  // could be told — refusing the whole report over either would hide the
+  // artifacts, the checks and the lanes, which are all still readable.
+  let review = null;
+  let guardsProblem = null;
+  try {
+    review = cmdReview(root);
+  } catch (err) {
+    if (!err.expected) throw err;
+    guardsProblem = err.message;
+  }
+  const manifest = readManifest(root);
+  const why = rationaleIndex(root);
+  const artifacts = manifestStates(root, manifest).map((a) => {
+    const recorded = typeof a.rationale === "string" && a.rationale.trim() ? a.rationale.trim() : null;
+    const recovered = recorded ? null : why.get(a.id) || null;
+    return {
+      id: a.id,
+      path: a.path,
+      kind: a.kind,
+      ownership: a.ownership,
+      provenance: a.provenance,
+      classIds: a.classIds || [],
+      install: a.install || null,
+      installedAt: a.installedAt || null,
+      // Measured, not remembered: `drifted` means the file is the owner's now,
+      // and `retired` means it is gone.
+      state: a.state,
+      why: recorded || recovered,
+      // Where the answer came from. `plan` means the row predates the manifest
+      // field and its plan file survives; `none` means neither does, and jig
+      // says so rather than inventing a reason it never recorded.
+      whySource: recorded ? "manifest" : recovered ? "plan" : "none",
+    };
+  });
+  return {
+    ok: true,
+    schemaVersion: SCHEMA_VERSION,
+    guards: review ? review.guards : [],
+    // Non-null means no guard below is being reported. Say it first: a silent
+    // empty list reads as "nothing installed", which is the opposite of what a
+    // config jig refused actually means.
+    guardsProblem,
+    checks: installedChecks(root),
+    artifacts,
+    lanes: review ? review.lanes : lanesOf(root, []),
+    ledger: review ? review.ledger : { file: STATE_DIR + "/" + LEDGER_FILE, lines: ledgerLines(root) },
   };
 }
 
@@ -3928,7 +4079,7 @@ function cmdRetire(root, opts) {
 const COMMANDS = {
   scan: cmdScan, toolchain: cmdToolchain, admit: cmdAdmit,
   plan: cmdPlan, apply: cmdApply, status: cmdStatus, revert: cmdRevert, selftest: cmdSelftest,
-  review: cmdReview, arm: cmdArm, disarm: cmdDisarm, fp: cmdFp,
+  review: cmdReview, inventory: cmdInventory, arm: cmdArm, disarm: cmdDisarm, fp: cmdFp,
   rerun: cmdRerun, retire: cmdRetire,
   // Required lazily, like jig-lib: migrate reads this module for the
   // transaction core, and a top-level require here would close that loop.
@@ -3971,7 +4122,8 @@ module.exports = {
   formatOf, verifyByFor, verifyWritten,
   planFromDraft, readPlan, planFiles, readJournal, replayJournal, changeState,
   includeLineText, journalledWrite, restoreWrite,
-  cmdReview, cmdArm, cmdDisarm, cmdFp, cmdRerun, cmdRetire,
+  cmdReview, cmdInventory, cmdArm, cmdDisarm, cmdFp, cmdRerun, cmdRetire,
+  watchesOf, rationaleIndex, installedChecks, lanesOf,
   templateIndex, templateBody, draftFromTemplates, configFromSelection, permissionsProposal,
   readManifest, manifestStates, occupancyProblem,
   matcherMatches, hookRows, collectHooks, nodeOnPath, stackFacts, ruleCorpus, conflictPreflight, readProfile,

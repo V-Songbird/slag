@@ -361,9 +361,12 @@ test("apply records every generated artifact with the whole row shape", () => {
   for (const row of manifest.artifacts) {
     assert.deepEqual(Object.keys(row).sort(), [
       "classIds", "hash", "id", "install", "installedAt", "kind", "ownership", "path",
-      "proof", "provenance", "state", "template", "txId",
+      "proof", "provenance", "rationale", "state", "template", "txId",
     ]);
     assert.equal(row.txId, applied.tx);
+    // Why the owner approved it, recorded beside what was written. Without it
+    // the manifest says a file is jig's and cannot say what it is for.
+    assert.ok(row.rationale, row.path + " landed with no recorded reason");
     assert.equal(row.provenance, "elicited");
     assert.equal(row.hash, crypto.createHash("sha256").update(fs.readFileSync(path.join(root, row.path))).digest("hex"));
     assert.ok(engine.OWNERSHIPS.includes(row.ownership));

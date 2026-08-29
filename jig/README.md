@@ -34,6 +34,7 @@ Starting something new? Run it on the empty folder. jig writes the project file,
 - **Every check proves itself first.** A check ships with a violation sample and a near-miss sample. It has to fire on the first and stay silent on the second, and on every other check's near miss too. One that fails is discarded and reported, never quietly counted as coverage.
 - **It finds the documents your sessions never read.** ADRs, scopes, roadmaps — jig checks whether anything actually points Claude at them, and can wire in one small pointer rule when nothing does.
 - **It catches the two files that drifted apart.** The doc that stopped describing the module, the migration that never followed the schema. Name the two sets, and a commit that touches one and leaves the other alone is a finding. These read what you have staged, so they speak at commit time and report themselves skipped in CI rather than pretending to have looked.
+- **It tells you what it put there, and why.** Ask any time and jig lists every guard, every committed check and every file it wrote — what each one watches, what it does when it fires, and the reason you approved it in the first place. It also says whether the checks are really running right now.
 - **It watches the AI too.** Session guards see what an agent is about to do: the downloaded script piped into a shell, the force-push to main, the test file on its way out. A blocked call always shows the reason, an alternative, and the way to override.
 - **One command undoes everything.** Every write is journaled with the original bytes, your manifest and lockfile included. Revert restores every file it touched, then hands you the one command your package manager needs to take the tool off disk.
 
@@ -76,6 +77,8 @@ Takes effect next session. Nothing to configure — the interview is the configu
 | See what the guards caught, and which checks are actually running | `/jig:review` |
 | Put a noisy guard back to watching | `/jig:review` |
 | Call out a false alarm | `/jig:review` — "that warning was wrong" |
+| See everything jig installed, and what each thing watches | `/jig:inventory` |
+| Find out why a check is there at all | `/jig:inventory` |
 
 ## Benchmarks
 

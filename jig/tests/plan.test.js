@@ -893,3 +893,102 @@ test("rerun on a bare repository refuses with the reason", () => {
   const root = project({});
   assert.throws(() => engine.cmdRerun(root), /nothing is installed here/);
 });
+
+// ---------------------------------------------------------------------------
+// The inventory surface: what is here, why, and whether it watches anything
+// ---------------------------------------------------------------------------
+//
+// `review` answers what the guards have CAUGHT. Everything below is about the
+// other half — what each one WATCHES, and why the owner approved it — which
+// lived nowhere on disk before this surface existed.
+
+test("inventory reports what each guard watches, and counts the matchers rather than printing them", () => {
+  const root = armProject();
+  const inv = engine.cmdInventory(root);
+  const row = inv.guards.find((g) => g.guardId === GUARD);
+
+  assert.equal(row.watches.event, "PreToolUse");
+  assert.deepEqual(row.watches.tools, ["Bash"]);
+  assert.ok(row.watches.patterns > 0, "the guard reports no matchers at all");
+  assert.ok(row.watches.deny && row.watches.deny.reason, "an armable guard with no deny reply");
+  assert.equal(row.provable, true);
+
+  // The matcher source is behind an approval boundary. A report that re-issued
+  // it would be a matcher nobody reviewed, arriving through the back door.
+  assert.ok(!JSON.stringify(inv).includes(A.PIPED_INSTALLER.detectors[0].params.patterns[0]),
+    "the inventory printed a matcher instead of counting it");
+});
+
+test("inventory records why each artifact is here, and says where the answer came from", () => {
+  const root = armProject();
+  const inv = engine.cmdInventory(root);
+  const rows = inv.artifacts.filter((a) => a.why);
+  assert.ok(rows.length, "no artifact carried a rationale");
+  for (const a of rows) assert.equal(a.whySource, "manifest");
+
+  const check = inv.artifacts.find((a) => a.path.endsWith("piped-installer.check.mjs"));
+  assert.ok(check.why, "the check module landed with no recorded reason");
+  assert.equal(check.state, "active");
+});
+
+test("inventory recovers a missing rationale from the plan file, and never invents one", () => {
+  const root = armProject();
+  const file = path.join(root, ".jig", "manifest.json");
+
+  // A manifest written before the field existed. The plan it was applied from
+  // is still beside it, so the answer survives.
+  const manifest = JSON.parse(fs.readFileSync(file, "utf-8"));
+  for (const a of manifest.artifacts) delete a.rationale;
+  fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n");
+
+  const recovered = engine.cmdInventory(root).artifacts.filter((a) => a.why);
+  assert.ok(recovered.length, "nothing was recovered from the plan files");
+  for (const a of recovered) assert.equal(a.whySource, "plan");
+
+  // Now take the plan files away too. Neither source survives, and jig says so
+  // rather than supplying a reason it never recorded.
+  for (const f of fs.readdirSync(path.join(root, ".jig")).filter((n) => /^plan-[0-9a-f]+\.json$/.test(n))) {
+    fs.unlinkSync(path.join(root, ".jig", f));
+  }
+  for (const a of engine.cmdInventory(root).artifacts) {
+    assert.equal(a.why, null);
+    assert.equal(a.whySource, "none");
+  }
+});
+
+test("inventory lists the check modules, including detectors no guard row carries", () => {
+  const root = armProject();
+  const inv = engine.cmdInventory(root);
+  const check = inv.checks.find((c) => c.slug === "piped-installer");
+
+  assert.equal(check.problem, null);
+  assert.equal(check.provable, true);
+  assert.ok(check.detectors.length, "the module reports no detectors");
+
+  // The whole reason this section is not the guard list: a `checks` detector is
+  // what the commit hook and CI run and it appears in no config row at all.
+  const guarded = new Set(inv.guards.map((g) => g.watches && g.watches.event));
+  const beyond = inv.checks.flatMap((c) => c.detectors).filter((d) => !guarded.has(d.event));
+  assert.ok(beyond.length, "every detector was already covered by a guard row");
+});
+
+test("inventory reports a repository jig never touched instead of refusing it", () => {
+  const root = project({});
+  const inv = engine.cmdInventory(root);
+  assert.deepEqual(inv.guards, []);
+  assert.deepEqual(inv.artifacts, []);
+  assert.deepEqual(inv.checks, []);
+  assert.equal(inv.lanes.commit.runs, false);
+  assert.ok(inv.lanes.commit.fix, "a dead commit lane was reported with no fix");
+});
+
+test("inventory reports a refused config as the problem it is, not as an empty list", () => {
+  const root = armProject();
+  fs.writeFileSync(path.join(root, ".jig", "config.json"), "{ not json\n");
+  const inv = engine.cmdInventory(root);
+  assert.deepEqual(inv.guards, []);
+  assert.match(inv.guardsProblem, /config/);
+  // The rest of the report survives, which is the point of not throwing.
+  assert.ok(inv.artifacts.length, "an unreadable config took the artifact list with it");
+  assert.ok(inv.checks.length, "an unreadable config took the check list with it");
+});

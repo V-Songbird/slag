@@ -4,6 +4,17 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.6.0] — 2026-08-29
+
+### Added
+
+- `/jig:inventory` — a straight answer to what jig put in this repository and why. It lists every guard with what it watches and what it does when it fires, every committed check including the ones that only run at commit time and in CI, and every file jig wrote with the reason you approved it and whether you have edited it since. It also says whether the checks are running right now, in your session, at commit time and in CI. It only reports. Nothing in it changes anything, and the actions all stay where they already were.
+- jig now records why each file was installed, beside what was installed. An older install still gets an answer wherever the plan that wrote it is still on disk, and where nothing survives jig says the reason was not recorded rather than inventing one.
+
+### Changed
+
+- `/jig:review` now shows what each guard watches, not only what it has caught: the tool it sees, the files it looks at, and the reply it gives when it blocks something.
+
 ## [2.5.0] — 2026-08-29
 
 ### Added
