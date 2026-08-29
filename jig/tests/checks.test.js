@@ -1065,3 +1065,21 @@ test("the unwired doc no longer claims jig cannot do the wiring", () => {
   assert.ok(text.indexOf("Let jig do it") < text.indexOf("Or do it by hand"));
   assert.match(text, /jig plan --wire-commit/);
 });
+
+test("a wiring plan never proposes a guard config, because it would be an empty one", () => {
+  const root = nodeProject();
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  install(root, { "no-ci": true });
+  const before = JSON.parse(fs.readFileSync(path.join(root, ".jig", "config.json"), "utf-8")).guards.length;
+  assert.ok(before > 0, "the fixture installed no guards, so this proves nothing");
+
+  const wire = engine.cmdPlan(root, { _: [], change: [], "wire-commit": true });
+  assert.equal(wire.changes.some((c) => c.kind === "write-config"), false,
+    "a plan carrying no selection proposed a guard config, which can only be an empty one");
+
+  // The whole plan, approved the way a skill walking both consent tiers would.
+  engine.cmdApply(root, { _: [], change: wire.changes.map((c) => c.id), path: wire.changes.map((c) => c.path) });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, ".jig", "config.json"), "utf-8")).guards.length, before,
+    "approving the wiring silently disarmed the guards");
+  assert.equal(engine.commitLane(root).state, "live");
+});

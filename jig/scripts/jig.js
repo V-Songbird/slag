@@ -1907,13 +1907,23 @@ function draftFromTemplates(root, opts, checks) {
 
   // The two computed artifacts ride the same path as the copied ones: same
   // change kinds, same occupancy rule, same journal.
-  const config = configFromSelection(classes, provenance, mode);
-  add({ name: "config", version: "1.0.0", target: STATE_DIR + "/" + CONFIG_FILE, kind: "write-config", ownership: "schema" },
-    JSON.stringify(config, null, 2) + "\n", selection);
-  const permissions = permissionsProposal(classes);
-  if (permissions) {
-    add({ name: "permissions", version: "1.0.0", target: STATE_DIR + "/" + PERMISSIONS_FILE, kind: "write-side-file", ownership: "file" },
-      JSON.stringify(permissions, null, 2) + "\n", selection);
+  //
+  // Both are computed FROM THE SELECTION, so a wiring plan — which carries no
+  // selection by definition — would compute a guard config holding no guards
+  // and propose it over the real one. Approving a plan that only claimed to
+  // point git at a hook would silently disarm every guard in the repository,
+  // which is the exact thing SCOPE says jig must never do, arriving through
+  // jig's own approval flow. A plan that proposes no coverage proposes no
+  // config.
+  if (!wiringOnly) {
+    const config = configFromSelection(classes, provenance, mode);
+    add({ name: "config", version: "1.0.0", target: STATE_DIR + "/" + CONFIG_FILE, kind: "write-config", ownership: "schema" },
+      JSON.stringify(config, null, 2) + "\n", selection);
+    const permissions = permissionsProposal(classes);
+    if (permissions) {
+      add({ name: "permissions", version: "1.0.0", target: STATE_DIR + "/" + PERMISSIONS_FILE, kind: "write-side-file", ownership: "file" },
+        JSON.stringify(permissions, null, 2) + "\n", selection);
+    }
   }
 
   // The Codex region (0.5.0): computed from the selection, marker-fenced,

@@ -4,6 +4,13 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.7.1] — 2026-08-29
+
+### Fixed
+
+- Approving `jig plan --wire-commit` could switch off every guard in your repository. That plan is supposed to do one thing — point git at the hook jig wrote — but it also proposed a fresh `.jig/config.json` built from a selection it did not have, which is an empty one. Approve the whole plan and your guards were gone. It no longer proposes that file at all, because a plan that adds no coverage has no business rewriting the list of what covers you.
+- This was reachable for the first time in 2.7.0. Before that a separate defect stopped those plans applying, which had been hiding it. If you ran `--wire-commit` on 2.7.0 and your guards disappeared, `jig revert` puts the config back, and this release stops it happening again.
+
 ## [2.7.0] — 2026-08-29
 
 ### Fixed
