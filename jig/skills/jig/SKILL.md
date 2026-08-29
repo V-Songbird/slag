@@ -381,6 +381,7 @@ asked, so pass every one the user said yes to:**
 | `--observe` | asked for guards that watch rather than block. It applies to the whole install; a single guard is moved afterwards in `/jig:review` |
 | `--weave-precommit` | agreed to let jig put its one line into the pre-commit hook their repository already commits. The scan lists the hosts under `guardrails.precommit`, and a repo with none refuses rather than creating one |
 | `--wire-commit` | agreed to let jig point git at the hook it wrote, by setting `core.hooksPath` to `.jig/hooks`. Run it as its own `plan` AFTER the install, because the hook has to exist before git can be pointed at it. It refuses when the lane already runs, and refuses rather than hiding a pre-commit hook the owner wrote |
+| `--refresh-activation` | is in a repository whose commit lane already runs while `.jig/activation.md` still reads as though it does not. It proposes that one file and nothing else, and refuses when the lane is dead or the file is already right |
 | `--wire-governance` | agreed to wire the orphaned governance documents the scan found. It writes one computed pointer rule, `.claude/rules/jig-governance.md` |
 | `--agents-region` | said another AI tool reads this repository, so `AGENTS.md` should carry a fenced block pointing at the same checks |
 
@@ -460,6 +461,22 @@ other path, which is what makes undoing it ordinary.
 `.husky/`) can take jig's activation line as a reviewed, journaled
 `include-line` change — ask first, item-approve it, apply it only on the user's
 yes.
+
+A wiring plan proposes two items, not one: the setting or the woven line, and a
+rewrite of `.jig/activation.md`. That file is written during the install, while
+the lane genuinely is not running, and it tells the owner how to turn commit-time
+checks on. The moment the wiring lands it is describing a task nobody has, so the
+same plan puts it right — approve both. The wired text says what runs and how to
+undo it, and it differs by route, because taking jig's line back out of your own
+hook is not unsetting `core.hooksPath`.
+
+A file the owner edited is refused rather than rewritten, and the plan says so in
+`refused` while still proposing the wiring. Their file, their words.
+
+A repository wired under an older jig has the stale file and no plan coming to
+fix it. When the scan says the commit lane is live and `.jig/activation.md` still
+reads unwired, offer `plan --refresh-activation` — one file, approved by name,
+nothing rewired. `/jig:inventory` is where that mismatch shows up between runs.
 
 Every file under `.git/` stays unwritable, including `.git/hooks/pre-commit`.
 What jig may change is one setting: `core.hooksPath`, through

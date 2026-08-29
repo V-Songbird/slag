@@ -1646,6 +1646,38 @@ function composeConfigs(items, manifests) {
   return { writes, notes, conflicts, composed };
 }
 
+// Which face of the activation doc a plan writes. The unwired one tells the
+// owner how to turn commit-time checks on. The wired ones say the checks are
+// already running and how to turn them off, and there are two because undoing
+// the two routes is two different things: unsetting `core.hooksPath` for the
+// hook jig wrote, taking one line back out of a hook the owner already had.
+//
+// A plan that does the wiring writes the wired face in the same plan, so the
+// file cannot outlive the sentence that made it true. That is the whole defect
+// this exists to close: `--wire-commit` runs as its own plan AFTER the install,
+// so the unwired file was written while the lane really was dead and then
+// nothing ever went back to correct it.
+//
+// `--refresh-activation` asks the repository instead of the plan, which is how
+// a repo wired under an older jig gets the right file without being rewired.
+function activationFace(root, opts) {
+  if (opts["wire-commit"]) return "activation-wired";
+  if (opts["weave-precommit"]) return "activation-woven";
+  if (!opts["refresh-activation"]) return "activation";
+  const lane = commitLane(root);
+  if (lane.state !== "live") return "activation";
+  return lane.setting === STATE_DIR + "/hooks" ? "activation-wired" : "activation-woven";
+}
+
+// What each face is for, in the manifest's own words. `inventory` reports this
+// back as why the file is here, and "activation-wired" is a template name, not
+// a reason.
+const ACTIVATION_WHY = {
+  "activation": "how to run the committed checks at commit time",
+  "activation-wired": "what runs at commit time now that git points at jig's hook, and how to undo it",
+  "activation-woven": "what runs at commit time now that jig's line is in your own hook, and how to undo it",
+};
+
 function draftFromTemplates(root, opts, checks) {
   // The edition is resolved ONCE, here, and threaded through everything below.
   // Detection walks the tree, and a plan that asked the question twice could
@@ -1658,7 +1690,7 @@ function draftFromTemplates(root, opts, checks) {
   // `--wire-commit` is the one plan that proposes no coverage: it points git at
   // checks that are already installed. Every other route still has to say what
   // it is covering.
-  if (!asked.length && !authoredChecks.length && !opts["wire-commit"]) {
+  if (!asked.length && !authoredChecks.length && !opts["wire-commit"] && !opts["refresh-activation"]) {
     throw expected("plan needs --select <classId,…> (ids are namespaced, e.g. python/swallowed-exception) or" +
       " --from <file> holding the checks the model wrote for this project");
   }
@@ -1719,15 +1751,34 @@ function draftFromTemplates(root, opts, checks) {
       ownership: entry.ownership,
       provenance,
       template: { name: entry.name, version: entry.version },
-      rationale: entry.name,
+      rationale: ACTIVATION_WHY[entry.name] || entry.name,
     });
   };
 
   // The driver and the wiring around it. There is no per-class check template
   // any more: the model authors every check and the fixture pair admits it, so
   // the only check modules this plan writes are the admitted ones below.
-  const wanted = ["check-driver", "activation", "hook-shim"];
-  if (!opts["no-ci"]) wanted.push("ci-workflow");
+  const face = activationFace(root, opts);
+  if (opts["refresh-activation"]) {
+    const lane = commitLane(root);
+    if (lane.state !== "live") {
+      throw expected("commit-time checks do not run here yet, so " + STATE_DIR + "/" + ACTIVATION_FILE +
+        " already says the right thing. `jig plan --wire-commit` is what turns them on.");
+    }
+    const entry = byName.get(face);
+    const current = readIfExists(path.join(root, STATE_DIR, ACTIVATION_FILE));
+    if (entry && current !== null && templateText(current) === templateBody(entry)) {
+      throw expected(STATE_DIR + "/" + ACTIVATION_FILE + " already says the checks are running — nothing to refresh.");
+    }
+  }
+  // A plan with no coverage behind it is a wiring plan — `--wire-commit`,
+  // `--refresh-activation`. The driver, the shim and the workflow are already
+  // installed, and re-emitting them byte for byte mints change ids that two
+  // plans define, which `apply` refuses by design. The only file such a plan
+  // touches is the activation doc, and only to keep it in step with the lane.
+  const wiringOnly = !asked.length && !authoredChecks.length;
+  const wanted = wiringOnly ? [face] : ["check-driver", face, "hook-shim"];
+  if (!wiringOnly && !opts["no-ci"]) wanted.push("ci-workflow");
   for (const name of wanted) {
     const entry = byName.get(name);
     if (!entry) continue;
@@ -2595,7 +2646,10 @@ function cmdPlan(root, opts) {
   // `--wire-commit` is its own reason to plan. It proposes one setting and no
   // coverage, so it needs neither a selection nor an authored check behind it —
   // a repository whose install is already done is exactly where it is used.
-  if (typeof opts.select === "string" || typeof opts.authored === "string" || fromChecks || opts["wire-commit"]) {
+  // `--refresh-activation` is the same kind of reason and proposes even less:
+  // one file, put back in step with a lane that is already live.
+  if (typeof opts.select === "string" || typeof opts.authored === "string" || fromChecks ||
+      opts["wire-commit"] || opts["refresh-activation"]) {
     generated = draftFromTemplates(root, opts, fromChecks || undefined);
     draft = generated.draft;
   } else if (record) {
@@ -2780,7 +2834,16 @@ function writeManifest(root, ctx, selected, results) {
   if (!rows.length) return null;
 
   const byId = new Map(readManifest(root).artifacts.map((a) => [a.id, a]));
-  for (const row of rows) byId.set(row.id, row);
+  for (const row of rows) {
+    // A change id carries the content hash, so rewriting an artifact from a
+    // different template — or the same one at a new version — arrives under a
+    // new id. Keyed by id alone the old row survives beside the new one, both
+    // claiming the same path, and every reader that looks a path up by name
+    // gets whichever came first. The path is what a file is; the id is only
+    // how this write was named.
+    for (const [id, a] of byId) if (a.path === row.path && id !== row.id) byId.delete(id);
+    byId.set(row.id, row);
+  }
   const payload = {
     schemaVersion: SCHEMA_VERSION,
     artifacts: [...byId.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
@@ -4124,6 +4187,7 @@ module.exports = {
   includeLineText, journalledWrite, restoreWrite,
   cmdReview, cmdInventory, cmdArm, cmdDisarm, cmdFp, cmdRerun, cmdRetire,
   watchesOf, rationaleIndex, installedChecks, lanesOf,
+  activationFace, ACTIVATION_WHY,
   templateIndex, templateBody, draftFromTemplates, configFromSelection, permissionsProposal,
   readManifest, manifestStates, occupancyProblem,
   matcherMatches, hookRows, collectHooks, nodeOnPath, stackFacts, ruleCorpus, conflictPreflight, readProfile,

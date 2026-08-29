@@ -11,22 +11,23 @@ machine the moment you commit, so a mistake never travels as far as a pull
 request. That is the whole difference. It is convenience, not safety.
 
 Git can run a script before every commit. jig wrote one for you at
-`.jig/hooks/pre-commit`, but git will not use it until it is told to — and
-telling it is the one step jig leaves to you, because that switch lives inside
-`.git/`, which jig never touches.
+`.jig/hooks/pre-commit`, and git will not use it until it is told to. jig can
+do that for you, as a change you approve like any other.
 
-## The short way
-
-Let jig propose it as a normal, reviewable change:
+## Let jig do it
 
 ```sh
 jig plan --wire-commit
 ```
 
-You approve it by name like anything else, and `jig revert` puts the setting
-back exactly as it was.
+You approve it by name, and `jig revert` puts the setting back exactly as it
+was. jig writes no file inside `.git/`; it sets one git setting, the same one
+you would set by hand below.
 
-## The manual way
+If you already have a pre-commit hook of your own, this refuses rather than
+hiding it, and offers to add jig's line to your hook instead.
+
+## Or do it by hand
 
 One command, run once in this repository:
 

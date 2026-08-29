@@ -26,6 +26,14 @@ const A = require("./authored.js");
 const TEMPLATE_DIR = path.join(__dirname, "..", "scripts", "templates");
 const INDEX = JSON.parse(fs.readFileSync(path.join(TEMPLATE_DIR, "templates.json"), "utf-8"));
 
+// One reader for both sides of a template comparison: the writer applies the
+// project's own line endings, so a CRLF checkout would otherwise fail every one.
+function templateOf(file) {
+  // Dropping every CR normalises CRLF to LF without a single escape in the
+  // source, which is what this file kept getting wrong.
+  return fs.readFileSync(file, "utf-8").split(String.fromCharCode(13)).join("");
+}
+
 const CHECKS = [A.PIPED_INSTALLER, A.EMPTY_CATCH];
 
 const roots = [];
@@ -172,11 +180,16 @@ test("a plan installs no shipped check template — every check module is an adm
 test("nothing is interpolated into a template on the way out", () => {
   const root = nodeProject();
   install(root);
+  // More than one template can own a target — the activation doc has an
+  // unwired face and two wired ones — so the installed file has to match the
+  // source of the template that actually wrote it, not of every template that
+  // could have.
   for (const entry of INDEX.templates) {
     if (!fs.existsSync(path.join(root, entry.target))) continue;
-    const installed = fs.readFileSync(path.join(root, entry.target), "utf-8").replace(/\r\n/g, "\n");
-    const source = fs.readFileSync(path.join(TEMPLATE_DIR, entry.file), "utf-8").replace(/\r\n/g, "\n");
-    assert.equal(installed, source, entry.name + " was not copied out verbatim");
+    const installed = templateOf(path.join(root, entry.target));
+    const sources = INDEX.templates.filter((t) => t.target === entry.target)
+      .map((t) => templateOf(path.join(TEMPLATE_DIR, t.file)));
+    assert.ok(sources.includes(installed), entry.target + " was not copied out verbatim from any of its templates");
   }
 });
 
@@ -928,4 +941,127 @@ test("a repository with no installed tool config gets no toolchain probe at all"
   install(root, { "no-ci": true });
   const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
   assert.deepEqual(result.probes.filter((p) => p.kind === "toolchain"), []);
+});
+
+// ---------------------------------------------------------------------------
+// The activation doc keeps step with the lane
+// ---------------------------------------------------------------------------
+//
+// `--wire-commit` runs as its own plan AFTER the install, because git cannot be
+// pointed at a hook that does not exist yet. So `.jig/activation.md` is written
+// while the lane really is dead, and before this nothing ever went back to
+// correct it. A file that hands the owner a task they no longer have is the
+// same failure jig exists to prevent, one level up.
+
+function wireCommit(root) {
+  const plan = engine.cmdPlan(root, { _: [], change: [], "wire-commit": true });
+  const ids = plan.changes.map((c) => c.id);
+  const paths = plan.changes.map((c) => c.path);
+  engine.cmdApply(root, { _: [], change: ids, path: paths });
+  return plan;
+}
+
+test("the wiring plan rewrites the activation doc in the same plan that makes it stale", () => {
+  const root = nodeProject();
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  install(root);
+
+  const before = fs.readFileSync(path.join(root, ".jig", "activation.md"), "utf-8");
+  assert.match(before, /Let jig do it/, "the unwired doc should offer the wiring");
+
+  const plan = wireCommit(root);
+  assert.ok(plan.changes.some((c) => c.kind === "set-git-config"), "--wire-commit planned no setting");
+  assert.equal(engine.commitLane(root).state, "live");
+
+  const after = fs.readFileSync(path.join(root, ".jig", "activation.md"), "utf-8");
+  assert.match(after, /Commit-time checks are running/);
+  assert.match(after, /Nothing here is a task/);
+  assert.match(after, /git config --unset core\.hooksPath/);
+  // The sentence that sent the owner to ask a session whether they had to act.
+  assert.equal(/one step jig leaves to you/.test(after), false);
+  assert.equal(/Let jig do it/.test(after), false);
+});
+
+test("a rewritten artifact leaves one manifest row for its path, not two", () => {
+  const root = nodeProject();
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  install(root);
+  wireCommit(root);
+
+  const rows = engine.readManifest(root).artifacts.filter((a) => a.path === ".jig/activation.md");
+  assert.equal(rows.length, 1, "the rewrite left a stale row claiming the same path");
+  assert.equal(rows[0].template.name, "activation-wired");
+  // The manifest now says why the file is there in words, not by template name.
+  assert.match(rows[0].rationale, /commit time/);
+});
+
+test("each route gets the way back from the thing it actually did", () => {
+  const root = nodeProject();
+  assert.equal(engine.activationFace(root, {}), "activation");
+  assert.equal(engine.activationFace(root, { "wire-commit": true }), "activation-wired");
+  // Weaving puts one line into a hook the owner already had, and taking that
+  // line back out is not unsetting core.hooksPath.
+  assert.equal(engine.activationFace(root, { "weave-precommit": true }), "activation-woven");
+});
+
+test("a repository wired under an older jig can be put back in step without being rewired", () => {
+  const root = nodeProject();
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  install(root);
+
+  // Wired the manual way, which is exactly what an older jig told people to do.
+  spawnSync("git", ["config", "core.hooksPath", ".jig/hooks"], { cwd: root });
+  assert.equal(engine.commitLane(root).state, "live");
+  assert.match(fs.readFileSync(path.join(root, ".jig", "activation.md"), "utf-8"), /Let jig do it/);
+
+  const plan = engine.cmdPlan(root, { _: [], change: [], "refresh-activation": true });
+  const row = plan.changes.find((c) => c.path === ".jig/activation.md");
+  assert.ok(row, "--refresh-activation planned no rewrite");
+  engine.cmdApply(root, { _: [], change: [row.id], path: [row.path] });
+
+  const after = fs.readFileSync(path.join(root, ".jig", "activation.md"), "utf-8");
+  assert.match(after, /Commit-time checks are running/);
+  // Nothing was rewired. The setting is whatever it already was.
+  assert.equal(engine.commitLane(root).state, "live");
+});
+
+test("refresh refuses rather than proposing nothing, and says which case it is", () => {
+  const root = nodeProject();
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  install(root);
+
+  assert.throws(() => engine.cmdPlan(root, { _: [], change: [], "refresh-activation": true }),
+    /commit-time checks do not run here yet/);
+
+  wireCommit(root);
+  assert.throws(() => engine.cmdPlan(root, { _: [], change: [], "refresh-activation": true }),
+    /already says the checks are running/);
+});
+
+test("a file the owner edited is refused rather than rewritten out from under them", () => {
+  const root = nodeProject();
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  install(root);
+  const file = path.join(root, ".jig", "activation.md");
+  fs.appendFileSync(file, "\nOur team also runs the linter by hand on Fridays.\n");
+
+  const plan = engine.cmdPlan(root, { _: [], change: [], "wire-commit": true });
+  assert.equal(plan.changes.some((c) => c.path === ".jig/activation.md"), false,
+    "an edited file was planned for overwrite");
+  assert.ok(plan.refused.some((r) => /activation\.md/.test(r) && /yours now/.test(r)),
+    "the refusal was not reported");
+  // The setting is still proposed: the doc being theirs does not block the wiring.
+  assert.ok(plan.changes.some((c) => c.kind === "set-git-config"));
+  assert.match(fs.readFileSync(file, "utf-8"), /Fridays/);
+});
+
+test("the unwired doc no longer claims jig cannot do the wiring", () => {
+  const root = nodeProject();
+  install(root);
+  const text = fs.readFileSync(path.join(root, ".jig", "activation.md"), "utf-8");
+  assert.equal(/one step jig leaves to you/.test(text), false);
+  assert.equal(/which jig never touches/.test(text), false);
+  // The route jig can actually take comes first; the manual one is the fallback.
+  assert.ok(text.indexOf("Let jig do it") < text.indexOf("Or do it by hand"));
+  assert.match(text, /jig plan --wire-commit/);
 });

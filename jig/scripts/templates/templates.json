@@ -23,13 +23,33 @@
     },
     {
       "name": "activation",
-      "version": "1.0.1",
+      "version": "1.1.0",
       "file": "activation.md",
       "target": ".jig/activation.md",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "7f3cad9632e6c5e741429475d27e6cc7ddf0223ab1f3a0ea7c119c0451277529"
+      "sha256": "f9d4d18185efc37451786d5462bab1f97188b30d7e61fc669de0ebec98028b1c"
+    },
+    {
+      "name": "activation-woven",
+      "version": "1.0.0",
+      "file": "activation-woven.md",
+      "target": ".jig/activation.md",
+      "kind": "write-side-file",
+      "ownership": "file",
+      "classId": null,
+      "sha256": "0618f2126e423ff9ad6868b9a0d895ed66ee7230acb4fb9f4698c73fb3ee5f86"
+    },
+    {
+      "name": "activation-wired",
+      "version": "1.0.0",
+      "file": "activation-wired.md",
+      "target": ".jig/activation.md",
+      "kind": "write-side-file",
+      "ownership": "file",
+      "classId": null,
+      "sha256": "e70a507058fafde0a186cb7b2efc20c3feedf5f8b44bb3fed4ebac525be6731e"
     },
     {
       "name": "hook-shim",

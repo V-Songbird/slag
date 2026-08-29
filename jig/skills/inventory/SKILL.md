@@ -98,6 +98,15 @@ changed with nothing in `pairedWith` changing beside it.
 - `install` non-null means jig ran a package install, and the row carries the
   exact command that undoes it.
 
+One row deserves a second look every time: `.jig/activation.md`. Its `template`
+name says which face is on disk — `activation` for "here is how to turn
+commit-time checks on", `activation-wired` or `activation-woven` for "they are
+running, here is how to turn them off". If `lanes.commit.runs` is true while the
+template still reads `activation`, the file is handing the owner a task they do
+not have. That is a repository wired under an older jig. Say so, and name
+`jig plan --refresh-activation` through `/jig:jig` as the fix. Never apply it
+here.
+
 ## 4. Lanes — is any of this actually running
 
 `lanes`, read fresh rather than remembered from the install.

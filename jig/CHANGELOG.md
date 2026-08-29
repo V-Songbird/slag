@@ -4,6 +4,19 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.7.0] — 2026-08-29
+
+### Fixed
+
+- `.jig/activation.md` no longer tells you to go and switch commit-time checks on after jig has already switched them on. That file is written during the install, when the checks really are not running yet, and nothing ever went back to correct it once you wired them up. People were reading it months later and asking whether they still had something to do. Now the same plan that does the wiring rewrites the file, so it says what is running and how to turn it off instead.
+- The file also used to say that pointing git at the hook was the one step jig leaves to you, because that switch lives inside `.git/`. jig has been able to do it for you since 2.4.0. It now offers that first and keeps the by-hand command as the alternative.
+- If you already wired jig up under an older version, your copy is still the stale one. `/jig:jig` offers to put it right as a single approved file, and rewires nothing. `/jig:inventory` points out the mismatch any time you look.
+- A file you have edited yourself is never rewritten. jig says it is yours and carries on with the rest.
+
+### Changed
+
+- The wired file comes in two forms, because undoing the two routes is two different things: unsetting `core.hooksPath` where jig pointed git at its own hook, or taking jig's one line back out of a pre-commit hook you already had.
+
 ## [2.6.0] — 2026-08-29
 
 ### Added
