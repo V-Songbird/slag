@@ -13,7 +13,8 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const lib = require("../hooks/scribe-lib.js");
 const {
-  analyze, STREAK_WINDOW, STREAK_WAVES, QUIET_JUDGED, OFFMENU_WINDOW, OFFMENU_ROUNDS,
+  analyze, STREAK_WINDOW, STREAK_WAVES, QUIET_JUDGED, QUIET_PASS_RATE,
+  OFFMENU_WINDOW, OFFMENU_ROUNDS,
 } = require("../scripts/cli.js");
 
 const CLI = path.join(__dirname, "..", "scripts", "cli.js");
@@ -84,9 +85,20 @@ describe("analyze", () => {
     assert.ok(!r.suggestions.some((s) => /wave-off streak/.test(s)));
   });
 
-  test("a quiet gate is reported on either bar, with the remedy that fits it", () => {
+  // A ledger of `n` one-prompt sessions, the first `answered` of which got a
+  // round. Every other judged row is a derived pass, so the pass-through rate
+  // is exactly (n - answered) / n.
+  function atRate(n, answered) {
     const rows = [];
-    for (let i = 0; i < QUIET_JUDGED; i++) rows.push(judged("s" + i));
+    for (let i = 0; i < n; i++) {
+      rows.push(judged("s" + i));
+      if (i < answered) rows.push(asked("s" + i));
+    }
+    return rows;
+  }
+
+  test("a quiet gate is reported on either bar, with the remedy that fits it", () => {
+    const rows = atRate(QUIET_JUDGED, 0);
 
     const con = analyze(rows, { ...cfg, bar: "conservative" }).suggestions.find((s) => /quiet gate/.test(s));
     assert.ok(con, "the conservative bar earns the quiet-gate note");
@@ -98,12 +110,32 @@ describe("analyze", () => {
     assert.ok(std, "the default bar earns it too");
     assert.doesNotMatch(std, /"bar": "standard"/, "it must not suggest the bar already in force");
     assert.match(std, /not landing/, "its remedy points at the install, not the bar");
+    assert.match(std, /never asked here/, "zero rounds is still called out by name");
+    assert.match(
+      std,
+      new RegExp("rule: " + QUIET_JUDGED + "\\+ judged, " + Math.round(QUIET_PASS_RATE * 100) + "%\\+ passing"),
+      "both constants are quoted verbatim",
+    );
   });
 
-  test("no quiet-gate note once a round has been asked", () => {
-    const rows = [];
-    for (let i = 0; i < QUIET_JUDGED; i++) rows.push(judged("s" + i));
-    rows.push(asked("s0"));
+  // The defect this rule was rewritten for: a gate that asks sometimes reads as
+  // healthy to a rule that only knows total silence. One real project sat at
+  // 89% pass-through with seventeen rounds behind it and earned no note at all.
+  test("a gate that asks, but rarely, still earns the note", () => {
+    const rows = atRate(QUIET_JUDGED, 3); // 17 of 20 pass — exactly the floor
+    const hit = analyze(rows, cfg).suggestions.find((s) => /quiet gate/.test(s));
+    assert.ok(hit, "asking a few times must not buy silence from the rule");
+    assert.match(hit, /17 of 20 judged prompts passed through, 85%/);
+    assert.doesNotMatch(hit, /never asked here/, "it has asked, so that clause stays off");
+  });
+
+  test("a gate asking often enough stays quiet", () => {
+    const rows = atRate(QUIET_JUDGED, 4); // 16 of 20 pass — under the floor
+    assert.ok(!analyze(rows, cfg).suggestions.some((s) => /quiet gate/.test(s)));
+  });
+
+  test("too few judged prompts is a quiet week, not a quiet gate", () => {
+    const rows = atRate(QUIET_JUDGED - 1, 0);
     assert.ok(!analyze(rows, cfg).suggestions.some((s) => /quiet gate/.test(s)));
   });
 

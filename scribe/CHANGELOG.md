@@ -4,6 +4,12 @@ All notable changes to scribe are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [1.3.1] — 2026-08-29
+
+### Fixed
+
+- `/scribe:review` can now tell you that scribe is asking too little. It used to say so only when scribe had never asked at all, so a project where it fired on one prompt in ten was reported as healthy. It now reads how many prompts went by untouched, and says something once that share passes 85 percent.
+
 ## [1.3.0] — 2026-08-28
 
 ### Changed

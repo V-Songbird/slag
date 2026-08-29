@@ -17,9 +17,16 @@ const lib = require("../hooks/scribe-lib");
 // wave-offs inside it count as a streak. Stated in the output verbatim.
 const STREAK_WINDOW = 5;
 const STREAK_WAVES = 2;
-// How many judged-and-never-asked prompts it takes before "the gate never
-// asks" is worth a line. Below this, silence is just a quiet week.
+// How many judged prompts it takes before a quiet gate is worth a line. Below
+// this, silence is just a quiet week.
 const QUIET_JUDGED = 20;
+// And how much of that silence counts as too much. A gate that never asks is
+// the obvious case, but it is not the common one: the rubric can ride every
+// prompt and land on almost none of them, which reads to the user as a plugin
+// that never fires. Picked against the pass-through rates of six real ledgers
+// on the author's machine, which ran from 54% to 93% — this floor sits above
+// the projects where the gate was working and below the two where it was not.
+const QUIET_PASS_RATE = 0.85;
 // Ask quality. When a round settles on an answer none of the options offered,
 // the options missed the real reading — the cleanest signal there is that the
 // questions were badly shaped rather than too frequent. No data exists to
@@ -92,13 +99,19 @@ function analyze(rows, cfg) {
         : 'consider "off": true in .scribe/config.json, or touch .scribe/off.'),
     );
   }
-  // The one under-ask rule. It fires on either bar: a silent gate means the
+  // The one under-ask rule. It fires on either bar: a quiet gate means the
   // prompts are precise or the nudge is not landing, and which of those it is
-  // depends on the bar, not on whether the question is worth asking.
-  if (t.rounds === 0 && t.judged >= QUIET_JUDGED) {
+  // depends on the bar, not on whether the question is worth asking. It reads
+  // the derived pass-through rate over the whole ledger rather than demanding
+  // total silence, because total silence is the rarest way to under-ask and
+  // the only one the rule used to catch.
+  if (t.judged >= QUIET_JUDGED && t.passed / t.judged >= QUIET_PASS_RATE) {
     suggestions.push(
-      "quiet gate: " + t.judged + " prompts judged, zero questions asked (rule: " +
-      QUIET_JUDGED + "+ judged, none asked). Either your prompts are precise — good — or " +
+      "quiet gate: " + t.passed + " of " + t.judged + " judged prompts passed through, " +
+      Math.round((100 * t.passed) / t.judged) + "% (rule: " + QUIET_JUDGED + "+ judged, " +
+      Math.round(QUIET_PASS_RATE * 100) + "%+ passing)" +
+      (t.rounds === 0 ? " — the gate has never asked here" : "") +
+      ". Either your prompts are precise — good — or " +
       (cfg.bar === "conservative"
         ? 'the bar is high; "bar": "standard" asks whenever readings genuinely fork.'
         : "the nudge is not landing; the bar is already the eager one, so check scribe is " +
@@ -303,5 +316,6 @@ if (require.main === module) main(process.argv.slice(2));
 // The three thresholds are exported because the suggestion text quotes them
 // verbatim, and the tests pin the quote to the constant.
 module.exports = {
-  analyze, STREAK_WINDOW, STREAK_WAVES, QUIET_JUDGED, OFFMENU_WINDOW, OFFMENU_ROUNDS,
+  analyze, STREAK_WINDOW, STREAK_WAVES, QUIET_JUDGED, QUIET_PASS_RATE,
+  OFFMENU_WINDOW, OFFMENU_ROUNDS,
 };
