@@ -22,16 +22,19 @@
 const fs = require("fs");
 const path = require("path");
 
-// The engine owns the shared vocabulary: the schema version every jig artifact
-// ships at and the directory they all live in. Re-declaring either here is how
-// they would drift apart.
+// `vocab.js` owns the shared vocabulary: the schema version every jig artifact
+// ships at, the directory they all live in, and the pure helpers that read
+// them. Re-declaring any of it here is how the two halves would drift apart —
+// and requiring the engine for it is what made every hook spawn parse five
+// thousand lines it never called into (`tests/runner.test.js` holds this
+// boundary open).
 const {
   SCHEMA_VERSION, STATE_DIR, VERIFY_FILE, stripBom, fixturePath, proposedVerifyEntries,
-} = require("../scripts/jig.js");
+} = require("../scripts/vocab.js");
 // The one function that says what binds a proof to the check it proves. A
 // second copy of that hashing rule here would be a second answer to the
 // question admission already answered.
-const { proofHash } = require("../scripts/admission.js");
+const { proofHash, fencedHalves, SESSION_PARAMS } = require("../scripts/admission.js");
 
 const CONFIG_FILE = "config.json";
 const LEDGER_FILE = "ledger.jsonl";
@@ -42,7 +45,20 @@ const CHECKS_DIR = "checks";
 // point of a closed set is that a teammate cannot introduce a new execution
 // point by editing a JSON file.
 const HOOK_RUNNERS = ["PreToolUse", "PostToolUse"];
-const EVENT_TOOLS = { PreToolUse: ["Bash"], PostToolUse: ["Edit", "Write"] };
+const EVENT_TOOLS = { PreToolUse: ["Bash", "Edit", "Write"], PostToolUse: ["Edit", "Write"] };
+
+// Which tools each session lever reads. Two levers share PreToolUse now — a
+// shell command and an edit payload arrive on the same event — so the EVENT can
+// no longer say how a detector's params are read. Its lever does. `edit-guard`
+// denies before the bytes land; `edit-observe-guard` is the PostToolUse lever
+// installs made before 2.11.0 carry, and it keeps working exactly as it was
+// until its owner migrates it, because the proof hash recorded for it binds the
+// lever it was admitted on.
+const LEVER_TOOLS = {
+  "bash-guard": ["Bash"],
+  "edit-guard": ["Edit", "Write"],
+  "edit-observe-guard": ["Edit", "Write"],
+};
 
 // The events the runner dispatches, which is deliberately wider than the set a
 // guard may name. The three added here carry no guard and can carry none: two
@@ -62,7 +78,7 @@ const DEFAULT_MODE = "observe";
 // config.mode survive").
 const CONFIG_KEYS = ["schemaVersion", "guards", "defaultBranches", "zones"];
 const CONFIG_MODES = ["observe", "armed"];
-const GUARD_KEYS = ["id", "check", "classId", "runner", "mode", "provenance", "proof"];
+const GUARD_KEYS = ["id", "check", "classId", "runner", "mode", "provenance", "proof", "teach"];
 
 // Provenance rides the guard rather than the plan, because two mistakes out of
 // one interview can be answered for differently. It is recorded and disclosed;
@@ -234,6 +250,21 @@ function validateConfig(raw) {
       problems.push(label + ": `proof` must be the hash recorded when the check was admitted");
       return;
     }
+    // Teaching is opt-in per guard and off unless this row says otherwise
+    // (SCOPE, "Does an observing guard teach by default"). A non-boolean is a
+    // config that cannot be read as an answer rather than one that happens to
+    // be false.
+    if (g.teach !== undefined && typeof g.teach !== "boolean") {
+      problems.push(label + ": `teach` must be true or false, and got " + JSON.stringify(g.teach));
+      return;
+    }
+    // The channel is PostToolUse `additionalContext` and nothing else — a
+    // non-blocking PreToolUse channel is unverified against a live host and is
+    // not assumed. A guard asking to teach from the wrong event is told so, out
+    // loud, rather than left believing the transcript will carry its line.
+    if (g.teach === true && g.runner !== "PostToolUse") {
+      warnings.push(label + ": `teach` speaks on PostToolUse only, and " + id + " runs on " + g.runner);
+    }
     // An unrecognized provenance degrades to `assumed`: the weakest claim, and
     // the one the coverage matrix discloses.
     const provenance = PROVENANCES.includes(g.provenance) ? g.provenance : "assumed";
@@ -241,6 +272,7 @@ function validateConfig(raw) {
       id, check, classId: typeof g.classId === "string" && g.classId ? g.classId : check,
       runner: g.runner, mode: g.mode || DEFAULT_MODE, provenance,
       proof: typeof g.proof === "string" ? g.proof : null,
+      teach: g.teach === true && g.runner === "PostToolUse",
     });
   });
 
@@ -452,10 +484,33 @@ function loadCheck(root, name) {
 // A session guard's detectors are the check's own, selected by the runner they
 // declare. A check with none for this event is an install that went wrong, and
 // the caller says so out loud rather than passing silently.
-function sessionDetectors(mod, runner) {
+//
+// `tool` narrows further, and only a caller holding a real payload has it: a
+// bash-guard and an edit-guard both declare PreToolUse, and running one over the
+// other's payload would match a shell pattern against a file's contents.
+// A detector on a lever this build does not run is dropped WITH the tool
+// unnarrowed too, so the caller's "does this check carry anything for this
+// event" question answers no and the broken install is reported. Narrowing on
+// the tool alone made an unknown lever look like a guard reading another tool,
+// which is a coverage hole that said nothing.
+function sessionDetectors(mod, runner, tool) {
   const dets = mod && Array.isArray(mod.detectors) ? mod.detectors : [];
-  return dets.filter((d) => isObject(d) && d.runner === runner &&
-    Array.isArray(d.params && d.params.patterns) && d.params.patterns.length > 0);
+  return dets.filter((d) => isObject(d) && d.runner === runner && leverTools(d).length &&
+    (!tool || leverTools(d).includes(tool)) && hasMatcher(d));
+}
+
+// What a session detector matches WITH, either kind of it. A removal detector
+// names no `patterns` and is a detector all the same; reading only `patterns`
+// here is what let a removal check admit and then guard nothing at all.
+function hasMatcher(det) {
+  const p = (det && det.params) || {};
+  return SESSION_PARAMS.some((k) => Array.isArray(p[k]) && p[k].length > 0);
+}
+
+// A lever this build does not run reads no tool at all, which is what keeps an
+// unknown lever from being evaluated as an edit by default.
+function leverTools(det) {
+  return (det && LEVER_TOOLS[det.lever]) || [];
 }
 
 // The check may state one deny reply for itself or one per detector; either way
@@ -477,12 +532,32 @@ function denyOf(mod, det) {
 // is also the one place worth saying what to run next. Gated on the driver
 // existing — an install with guards and no `run.mjs` would otherwise name a
 // file that is not there.
+// Each of the three is closed here rather than trusted to have closed itself:
+// the triple is authored prose and jig prints it as one string, so an
+// alternative that ended without a stop ran straight into "To override" and the
+// refusal the model reads was two sentences with no break between them.
+function sentence(text) {
+  const t = String(text).trim();
+  return /[.!?]$/.test(t) ? t : t + ".";
+}
+
 function denyText(guardId, deny, hasDriver) {
-  return "[jig guard " + guardId + "] " + deny.reason +
-    " Instead: " + deny.alternative +
-    " To override: " + deny.override + "." +
+  return "[jig guard " + guardId + "] " + sentence(deny.reason) +
+    " Instead: " + sentence(deny.alternative) +
+    " To override: " + sentence(deny.override) +
     (hasDriver ? " Before calling this work done, run: node .jig/checks/run.mjs." : "") +
     " (false alarm? /jig:review fp " + guardId + ")";
+}
+
+// What an observing guard says when its owner opted it into teaching. The same
+// triple a deny carries, and deliberately nothing else: no false-alarm command,
+// because nothing was refused and there is no report to withdraw; no harness
+// pointer, because this is not the moment work is being called done; and no
+// source, because the model already has the edit it just made in front of it.
+function teachText(guardId, deny) {
+  return "[jig guard " + guardId + " would have denied this] " + sentence(deny.reason) +
+    " Instead: " + sentence(deny.alternative) +
+    " To override: " + sentence(deny.override);
 }
 
 // What binds a proof to the check it proves: the module as installed plus both
@@ -754,12 +829,18 @@ function evalBash(det, payload, config, failed) {
   return null;
 }
 
-// PostToolUse carries the edit, not the file's history. For an Edit that is
-// enough: `onlyWhenIntroduced` compares the replacement against what it
+// The edit payload carries the edit, not the file's history. For an Edit that
+// is enough: `onlyWhenIntroduced` compares the replacement against what it
 // replaced. A Write supplies no prior text at all, so the whole payload counts
 // as introduced — an over-match that is a ledger line and never a block.
 // Both sides are blanked before matching, so a shape that lives only in a
 // comment, a string, or a regular expression is not an introduction.
+//
+// `removed` is the other direction and the session half of the removal kind: it
+// fires when a pattern is in the replaced text more times than in the
+// replacement. A Write carries no `old_string`, so a removal detector never
+// fires on one — the disclosed limit of reading a removal one call at a time,
+// and the reason `evalSessionDetector` cannot prove such a lever.
 function evalEdit(det, payload, failed, rel) {
   const params = det.params || {};
   const input = payload.tool_input || {};
@@ -771,7 +852,11 @@ function evalEdit(det, payload, failed, rel) {
   if (Array.isArray(params.paths) && params.paths.length && !matchesPathGlobs(params.paths, rel)) return null;
   const after = String(input.new_string !== undefined ? input.new_string : (input.content || ""));
   const before = String(input.old_string || "");
-  if (!after) return null;
+  // An edit that empties a region — `new_string: ""`, the shape a deleted test
+  // arrives in — is exactly the payload the removal kind exists to read, so it
+  // is no longer the end of this function. The pattern kind still needs
+  // something to have landed, and returns below.
+  if (!after && !before) return null;
   // The check states how its own language is read — which comments, which
   // string rules — because that is language data and the guard is one of six
   // editions' worth of them.
@@ -782,6 +867,12 @@ function evalEdit(det, payload, failed, rel) {
   };
   const cleanAfter = blankRegions(after, rel, opts);
   const cleanBefore = before ? blankRegions(before, rel, opts) : "";
+  for (const source of params.removed || []) {
+    const re = compilePattern(source, "g", failed);
+    if (!re) continue;
+    if ((cleanBefore.match(re) || []).length > (cleanAfter.match(re) || []).length) return source;
+  }
+  if (!after) return null;
   for (const source of params.patterns || []) {
     const re = compilePattern(source, "g", failed);
     if (!re) continue;
@@ -805,13 +896,20 @@ function evalEdit(det, payload, failed, rel) {
 // `rel` is the payload's file made repo-relative by the caller that holds the
 // root. A caller with no root falls back to the payload's own spelling, which
 // matches no repo-relative glob unless it already is one.
-function evaluateGuard(dets, event, payload, config, failed, rel) {
+//
+// Which of the two evaluations a detector gets is read off its lever, never off
+// the event: since 2.11.0 an edit guard and a bash guard both run at PreToolUse.
+function evaluateGuard(dets, payload, config, failed, rel) {
   const bad = failed || [];
   const file = rel === undefined
     ? String((payload.tool_input || {}).file_path || "").replace(/\\/g, "/")
     : rel;
   for (const det of dets) {
-    const matched = event === "PreToolUse" ? evalBash(det, payload, config, bad) : evalEdit(det, payload, bad, file);
+    const tools = leverTools(det);
+    if (!tools.length) continue;
+    const matched = tools.includes("Bash")
+      ? evalBash(det, payload, config, bad)
+      : evalEdit(det, payload, bad, file);
     if (matched) return { det, matched };
   }
   return null;
@@ -825,8 +923,10 @@ function evaluateGuard(dets, event, payload, config, failed, rel) {
 // `zzz-never-matches-anything` ship under a printed proof.
 // A path-scoped edit detector only fires on a path its own globs match, so the
 // fixture is seeded at the same derived path `jig selftest` probes it at.
-function evalSessionDetector(det, runner, text) {
-  if (runner === "PreToolUse") {
+// The lever picks the payload shape, not the runner: `edit-guard` and
+// `bash-guard` share PreToolUse and read nothing alike.
+function evalSessionDetector(det, text) {
+  if (leverTools(det).includes("Bash")) {
     // `branchInScope` passes a push that names no branch, because a bare
     // `git push` cannot be read for one. That is right at runtime and it is not
     // a proof: a fixture naming no branch would admit a guard scoped to a
@@ -834,10 +934,18 @@ function evalSessionDetector(det, runner, text) {
     // is proven by a fixture that names the push it exists to stop.
     const params = (det && det.params) || {};
     if (Array.isArray(params.onlyBranches) && params.onlyBranches.length && pushBranch(text) === null) return false;
-    return !!evaluateGuard([det], runner, { tool_input: { command: text } }, {}, [], "");
+    return !!evaluateGuard([det], { tool_input: { command: text } }, {}, [], "");
   }
   const rel = fixturePath({ params: (det && det.params) || {} });
-  return !!evaluateGuard([det], runner, { tool_input: { file_path: rel, content: text } }, {}, [], rel);
+  // A fenced fixture IS an edit — the file before it and the file after it — so
+  // it is proven as one, `old_string` against `new_string`. That is the only
+  // shape a removal lever can be proven on, and without the fence there is no
+  // before: a Write carries none, which is the disclosed limit of the kind.
+  const halves = fencedHalves(text);
+  const input = halves
+    ? { file_path: rel, old_string: halves.before, new_string: halves.after }
+    : { file_path: rel, content: text };
+  return !!evaluateGuard([det], { tool_input: input }, {}, [], rel);
 }
 
 // ---------------------------------------------------------------------------
@@ -1128,16 +1236,29 @@ function runEvent(root, event, payload, warn) {
   const tools = EVENT_TOOLS[event] || [];
   const running = check.guards.filter((g) => g.runner === event && (!base.tool || tools.includes(base.tool)));
   // The ledger is read once, and only when some guard is asking to arm — a set
-  // of observing guards never pays for it.
-  const stats = running.some((g) => g.mode === "armed") ? ledgerStats(root) : {};
+  // of observing guards never pays for it. Read on first use rather than up
+  // front, so an Edit call whose guards all turn out to read Bash pays for
+  // nothing at all: PreToolUse now carries both, and the common case on a large
+  // ledger was a megabyte read for zero evaluations.
+  let stats = null;
+  const statsFor = (id) => {
+    if (stats === null) stats = running.some((g) => g.mode === "armed") ? ledgerStats(root) : {};
+    return stats[id];
+  };
   const results = [];
   let deny = null;
   let denyGuard = null;
+  let teach = null;
   for (const guard of running) {
     const started = process.hrtime.bigint();
     const durMs = () => Math.round(Number(process.hrtime.bigint() - started) / 1e6 * 1000) / 1000;
     const record = loadCheck(root, guard.check);
-    const dets = record.problem ? [] : sessionDetectors(record.mod, event);
+    const dets = record.problem ? [] : sessionDetectors(record.mod, event, base.tool);
+    // A bash guard on an Edit call, or an edit guard on a Bash call: both are
+    // registered for PreToolUse now, and a guard with nothing to say about this
+    // tool did not evaluate. No warning and no row — it is not a broken install
+    // and a pass row here would inflate every other guard's denominator.
+    if (!dets.length && !record.problem && sessionDetectors(record.mod, event).length) continue;
     // A guard whose check will not load, or which carries nothing for this
     // event, is a broken install: it is reported once, out loud, and the tool
     // call goes through untouched.
@@ -1154,9 +1275,9 @@ function runEvent(root, event, payload, warn) {
     }
 
     const failed = [];
-    const hit = evaluateGuard(dets, event, payload, read.config, failed, rel);
+    const hit = evaluateGuard(dets, payload, read.config, failed, rel);
     const det = hit ? hit.det : dets[0];
-    const s = stats[guard.id];
+    const s = statsFor(guard.id);
     const eff = effectiveState(guard, read.config, rel, {
       // The proof is hashed only for a guard that asked to arm. An observing
       // guard needs the check's patterns and nothing else.
@@ -1196,6 +1317,13 @@ function runEvent(root, event, payload, warn) {
       deny = denyOf(record.mod, det);
       if (deny) denyGuard = guard.id;
     }
+    // One line per event, so the first teaching guard to match is the one that
+    // speaks. A guard whose check ships no complete triple has nothing to teach
+    // WITH — the same reason it could not arm — and stays silent.
+    if (decision === "would-deny" && guard.teach && !teach) {
+      const triple = denyOf(record.mod, det);
+      if (triple) teach = teachText(guard.id, triple);
+    }
   }
 
   const out = {
@@ -1223,17 +1351,21 @@ function runEvent(root, event, payload, warn) {
       out.reason = reason;
     }
   }
+  // The observe-mode channel, and the only one jig has to the model that does
+  // not refuse anything. `teach` is only ever set on PostToolUse, so it cannot
+  // collide with the PreToolUse deny reply above.
+  if (teach) out.hookSpecificOutput = { hookEventName: event, additionalContext: teach };
   return out;
 }
 
 module.exports = {
   HOOK_RUNNERS, HOOK_EVENTS, STOP_EVENTS,
-  EVENT_TOOLS, DEFAULT_MODE, CONFIG_KEYS, CONFIG_MODES, GUARD_KEYS, MATCHER_KEYS,
+  EVENT_TOOLS, LEVER_TOOLS, DEFAULT_MODE, CONFIG_KEYS, CONFIG_MODES, GUARD_KEYS, MATCHER_KEYS,
   DEFAULT_BRANCHES, PROVENANCES, DENY_PARTS,
   CONFIG_FILE, LEDGER_FILE, OFF_FILE, CHECKS_DIR,
   statePath, isOff, isConfigured, readInput,
   readConfig, validateConfig,
-  loadCheck, sessionDetectors, denyOf, denyText, checkProof,
+  loadCheck, sessionDetectors, denyOf, denyText, teachText, checkProof,
   blankRegions, globToRegExp, pushBranch, branchInScope, evaluateGuard, evalSessionDetector,
   effectiveState, ledgerStats, CLASS_KEY, zoneForcesObserve,
   appendLedger, runEvent,

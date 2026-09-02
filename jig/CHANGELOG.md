@@ -4,6 +4,24 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.11.0] — 2026-09-02
+
+### Added
+
+- Edit guards can now refuse an edit before it happens. Until now they ran after the file had been written, so the block arrived one step too late — the mistake was on disk and the guard was describing it. `edit-guard` is a new lever that denies at the moment the edit is proposed. It is a new lever rather than a change to the old one, because a check's proof is bound to the thing it proves; moving the old one quietly would have left every installed guard claiming a proof for something it no longer ran. Installs that do not migrate keep working exactly as they did.
+- `jig migrate` moves an installed edit guard onto the new lever: it rewrites the module, re-runs the fixture pair against the new lever, and re-records the proof — as one approved change per guard, applied by you, with nothing written until you say so. A guard that cannot move is named and left where it is.
+- jig can see what was deleted. Every check until now read what is in a file; nothing read what stopped being there, so "the AI deleted my tests" — the first thing the interview asks about — had no check that could be admitted for it. A check can now carry a removal rule, proved by a before/after fixture pair, and a session guard carrying one refuses the deletion as it is proposed. Six `test-count-dropped` classes ship with it, one per language.
+- jig can watch its own files. Guards over `.jig/config.json`, `.jig/checks/`, `.jig/off` and the CI workflow are offered at install like any other check, written by the model, proved by a fixture pair and approved by you.
+- An observing guard can tell your session what it would have blocked, if you ask it to. Off unless you turn it on, per guard, and never as a default — observing is a choice you made, and a harness that talks over that choice is one you switch off. It says the guard's id and the reply the guard would have given, and nothing about your source.
+
+### Changed
+
+- `jig migrate` refuses before it writes anything if the upgrade would drop a guard, naming each one and why. `--accept-drops` is how you say you read the list. Migrating a 1.0.1 install is still one transaction that reverts whole.
+- Loading jig's hook library no longer loads the whole engine with it. Every tool call in a session pays that cost, and it was about 16ms of parsing per hook run, for eight small definitions. They now live in their own file, and a test fails if the engine finds its way back in.
+- Where a check's removal rule has no lane that can run it, the coverage table says so instead of naming the file as coverage. The commit-time half of that is still to come.
+- Every part of a blocked call's reply now ends before the next one starts. They used to run together into one sentence.
+- The self-watch recipe in the skill sets `stripStrings: false`, because a check over a JSON file reads nothing otherwise — every token in JSON lives inside a string.
+
 ## [2.10.0] — 2026-09-02
 
 ### Added

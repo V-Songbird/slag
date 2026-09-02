@@ -315,6 +315,125 @@ test("the two kinds are never crossed against each other", () => {
   assert.deepEqual(admission.crossNearMiss([check(), paired()], blank, match), []);
 });
 
+// ---------------------------------------------------------------------------
+// The removal kind
+// ---------------------------------------------------------------------------
+//
+// A removal is not in any file's content: the deleted case is absent from the
+// text that is left, which is why `onlyWhenRemoved` over one text could never
+// pass this test. So each fixture carries two texts, fenced by `--- after`, and
+// the rule is that the count went down.
+
+function removed(over) {
+  return {
+    id: "tests-deleted",
+    deny: DENY,
+    detectors: [{
+      lever: "check-driver",
+      params: { removed: ["\\b(?:it|test)\\s*\\("], paths: ["**/*.test.js"] },
+    }],
+    fixtures: {
+      violation: "describe('suite', () => {\n  it('a', () => {});\n  it('b', () => {});\n});\n" +
+        "--- after\ndescribe('suite', () => {\n  it('a', () => {});\n});\n",
+      // The near miss drops the redundant `describe` wrapper and keeps both
+      // cases: an edit that removes real text without removing a test.
+      nearMiss: "describe('suite', () => {\n  it('a', () => {});\n  it('b', () => {});\n});\n" +
+        "--- after\nit('a', () => {});\nit('b', () => {});\n",
+    },
+    ...over,
+  };
+}
+
+test("a removal check is admitted when the count drops on the violation and holds on the near miss", () => {
+  const result = admission.ownPair(removed(), blank);
+  assert.deepEqual(result, {
+    id: "tests-deleted",
+    violationHits: 1,
+    nearMissHits: 0,
+    passes: true,
+    why: null,
+  });
+  assert.deepEqual(admission.admit([removed()], blank).discarded, []);
+});
+
+test("a removal rule its own violation does not trip is discarded", () => {
+  // The edit renamed a case rather than deleting one, so nothing was removed and
+  // the rule is silent on the very change it was written for.
+  const wrong = removed({
+    fixtures: {
+      violation: "it('a', () => {});\n--- after\nit('renamed a', () => {});\n",
+      nearMiss: "it('a', () => {});\n--- after\nit('a', () => { expect(1).toBe(1); });\n",
+    },
+  });
+  const result = admission.ownPair(wrong, blank);
+  assert.equal(result.passes, false);
+  assert.equal(result.violationHits, 0);
+  assert.match(result.why, /never fired on the violation fixture: removal/);
+  assert.deepEqual(admission.admit([wrong], blank).admitted, []);
+});
+
+test("a removal rule that also fires on its own near miss is discarded", () => {
+  // Counting arrow functions instead of cases goes down on any edit that
+  // removes a wrapper, including the near miss that kept every case.
+  const loose = removed({
+    detectors: [{ lever: "check-driver", params: { removed: ["=>"], paths: ["**/*.test.js"] } }],
+  });
+  const result = admission.ownPair(loose, blank);
+  assert.equal(result.passes, false);
+  assert.equal(result.nearMissHits, 1);
+  assert.match(result.why, /fired on the near miss: removal/);
+  assert.deepEqual(admission.admit([loose], blank).admitted, []);
+});
+
+test("a removal fixture with no `--- after` fence is discarded, never admitted on half a pair", () => {
+  const halved = removed({
+    fixtures: { violation: "it('a', () => {});\n", nearMiss: "it('a', () => {});\nit('b', () => {});\n" },
+  });
+  assert.throws(() => admission.ownPair(halved, blank), /violation fixture has no `--- after` fence/);
+  const { admitted, discarded } = admission.admit([halved], blank);
+  assert.deepEqual(admitted, []);
+  assert.match(discarded[0].why, /`--- after` fence/);
+});
+
+test("a case that only ever lived in a comment is not a removal", () => {
+  // Both halves are blanked before they are counted, exactly as the pattern kind
+  // blanks a file — otherwise deleting a commented-out example reads as deleting
+  // the test it quotes.
+  const commented = removed({
+    fixtures: {
+      violation: "it('a', () => {});\nit('b', () => {});\n--- after\nit('a', () => {});\n",
+      nearMiss: "it('a', () => {});\n// it('b', () => {});\n--- after\nit('a', () => {});\n",
+    },
+  });
+  const result = admission.ownPair(commented, blank);
+  assert.equal(result.passes, true);
+  assert.equal(result.nearMissHits, 0);
+});
+
+test("a removal check that reads every edit as a deletion is caught by another one's near miss", () => {
+  const greedy = removed({
+    id: "fires-on-everything",
+    detectors: [{ lever: "check-driver", params: { removed: ["\\w"], paths: ["**/*.test.js"] } }],
+    fixtures: {
+      violation: "aaaa\n--- after\na\n",
+      nearMiss: "a\n--- after\naaaa\n",
+    },
+  });
+  const rows = admission.crossNearMiss([removed(), greedy], blank, match);
+  assert.deepEqual(rows, [{ check: "fires-on-everything", foreignCheck: "tests-deleted", pattern: "removal" }]);
+
+  const { admitted, discarded } = admission.admit([removed(), greedy], blank, { cross: true, match });
+  assert.deepEqual(admitted.map((a) => a.id), ["tests-deleted"]);
+  assert.equal(discarded.length, 1);
+  assert.match(discarded[0].why, /fired on tests-deleted's near miss/);
+});
+
+test("removal crosses only among removal kinds", () => {
+  // A pattern check reading a fenced pair, or a removal rule counting a list of
+  // paths, compares two different kinds of thing and would fail at random.
+  assert.deepEqual(admission.crossNearMiss([check(), removed(), paired()], blank, match), []);
+});
+
 test("writeDiscarded puts the discards on disk, including when there are none", () => {
   const stateDir = path.join(tmpDir(), ".jig");
   const rows = admission.admit([check({ deny: undefined })], blank).discarded;
@@ -429,6 +548,165 @@ test("an edit-observe-guard is proven at a path its own globs match", () => {
   const result = admission.ownPair(missing, blank, undefined, evalSessionDetector);
   assert.equal(result.passes, false);
   assert.match(result.why, /edit-observe-guard-0/);
+});
+
+// 2.11.0 / C2. `edit-guard` is the same detector at PreToolUse, and it earns
+// its place the same way roadmap 199 made the other two earn theirs: through
+// the runner's own evaluation, at a path its own globs match.
+test("an edit-guard is proven the way the lever it replaces is", () => {
+  const prevented = {
+    id: "swallowed-exception-prevented",
+    deny: DENY,
+    detectors: [{
+      lever: "edit-guard",
+      params: { patterns: ["catch\\s*(\\([^)]*\\))?\\s*\\{\\s*\\}"], paths: ["src/**/*.ts"] },
+    }],
+    fixtures: check().fixtures,
+  };
+  const ok = admission.ownPair(prevented, blank, undefined, evalSessionDetector);
+  assert.equal(ok.passes, true);
+  assert.equal(ok.violationHits, 1);
+  assert.deepEqual(admission.admit([prevented], blank, { evaluate: evalSessionDetector }).discarded, []);
+
+  const missing = { ...prevented, detectors: [{ ...prevented.detectors[0], params: { patterns: ["\\bdebugger\\b"] } }] };
+  const result = admission.ownPair(missing, blank, undefined, evalSessionDetector);
+  assert.equal(result.passes, false);
+  assert.match(result.why, /edit-guard-0/, "the failing lever is named, not just counted");
+});
+
+// 2.11.0 / N11. The removal kind on a session lever. A fenced fixture IS an
+// edit — the file before it and the file after it — so it is proven as one,
+// which is the only way a rule about a count going down can be demonstrated at
+// all. Before this, `evalSessionDetector` built a Write payload with no
+// `old_string`, so a removal lever missed its own violation and every check
+// carrying one was discarded while the SKILL and six catalogues said the session
+// lane was where it watched.
+const REMOVAL_PAIR = {
+  violation: "it('a', () => {});\nit('b', () => {});\n--- after\nit('a', () => {});\n",
+  nearMiss: "it('a', () => {});\n--- after\nit('a', () => { expect(1).toBe(1); });\n",
+};
+
+test("a removal on a session lever is proven by the edit its fenced pair describes", () => {
+  const session = {
+    id: "tests-deleted-session",
+    deny: DENY,
+    detectors: [{
+      lever: "edit-guard",
+      params: { paths: ["**/*.test.js"], removed: ["\\b(?:it|test)\\s*\\("] },
+    }],
+    fixtures: REMOVAL_PAIR,
+  };
+  const ok = admission.ownPair(session, blank, undefined, evalSessionDetector);
+  assert.equal(ok.passes, true);
+  assert.equal(ok.violationHits, 1);
+  assert.equal(ok.nearMissHits, 0);
+  assert.deepEqual(admission.admit([session], blank, { evaluate: evalSessionDetector }).discarded, []);
+
+  // And it is held to a fence like every other removal: unfenced there is no
+  // before, and a check admitted over half a pair would claim a deletion it
+  // never saw one of.
+  const unfenced = { ...session, fixtures: { violation: "it('a', () => {});\n", nearMiss: "it('b', () => {});\n" } };
+  assert.throws(() => admission.ownPair(unfenced, blank, undefined, evalSessionDetector),
+    /violation fixture has no `--- after` fence/);
+});
+
+test("a `removed` rule beside patterns is proven on its own, never on the patterns' hit", () => {
+  // The smuggle: one evaluation over the whole detector fires on either kind, so
+  // a `removed: ["."]` nobody exercised rode into an armed guard under the
+  // patterns' proof — and then denied any edit that shortened a file.
+  const smuggled = {
+    id: "smuggled-removal",
+    deny: DENY,
+    detectors: [{
+      lever: "edit-guard",
+      params: { paths: ["**/*.test.js"], patterns: ["\\bit\\.only\\s*\\("], removed: ["."] },
+    }],
+    fixtures: { violation: "it.only('a', () => {});\n", nearMiss: "it('a', () => {});\n" },
+  };
+  const out = admission.admit([smuggled], blank, { evaluate: evalSessionDetector });
+  assert.deepEqual(out.admitted, [], "a rule the pair never exercised was admitted as proven");
+  assert.match(out.discarded[0].why, /`--- after` fence/);
+
+  // Both kinds on one detector count one hit each, and each names itself.
+  const both = {
+    ...smuggled,
+    detectors: [{
+      lever: "edit-guard",
+      params: { paths: ["**/*.test.js"], patterns: ["\\bit\\s*\\("], removed: ["\\b(?:it|test)\\s*\\("] },
+    }],
+    fixtures: REMOVAL_PAIR,
+  };
+  const ok = admission.ownPair(both, blank, undefined, evalSessionDetector);
+  assert.equal(ok.violationHits, 2, "one of the two kinds on the detector was never proven");
+  const half = { ...both, detectors: [{ ...both.detectors[0],
+    params: { ...both.detectors[0].params, removed: ["\\bnothing-here\\b"] } }] };
+  const result = admission.ownPair(half, blank, undefined, evalSessionDetector);
+  assert.equal(result.passes, false);
+  assert.match(result.why, /edit-guard-0 \(removed\)/, "the failing kind is named, not just the detector");
+});
+
+// 2.11.0 / N14. The laziness classes are authored for the "Me and my AI
+// sessions" persona as ONE module with a driver and an edit guard over the same
+// patterns, so the mistake is refused in the session AND caught at commit. That
+// shape is only writable if one fixture pair proves both levers — two pairs per
+// module would be two checks wearing one id — so this is the assertion the
+// SKILL's guidance rests on.
+test("one fixture pair proves both a check-driver and the edit-guard beside it", () => {
+  const ONLY = "\\b(?:describe|it|test)\\s*\\.\\s*only\\s*\\(";
+  const twinned = (over) => ({
+    id: "focused-test",
+    deny: DENY,
+    detectors: [
+      { lever: "check-driver", params: { paths: ["**/*.test.js"], patterns: [ONLY] } },
+      { lever: "edit-guard", params: { paths: ["**/*.test.js"], patterns: [ONLY], onlyWhenIntroduced: true } },
+    ],
+    fixtures: {
+      violation: "it.only('collapses runs of whitespace', () => {});\n",
+      nearMiss: "it('collapses runs of whitespace', () => {});\n",
+    },
+    ...over,
+  });
+
+  const ok = admission.ownPair(twinned(), blank, undefined, evalSessionDetector);
+  assert.equal(ok.passes, true);
+  // Two hits off one pair: the driver's pattern and the guard's own evaluation.
+  assert.equal(ok.violationHits, 2, "one of the two levers was never proven");
+  assert.equal(ok.nearMissHits, 0);
+  assert.deepEqual(admission.admit([twinned()], blank, { evaluate: evalSessionDetector }).discarded, []);
+
+  // Either lever failing discards the WHOLE module, so a plan can never print
+  // the driver as coverage while the session half sits unproven beside it.
+  for (const [i, id] of [[0, "check-driver"], [1, "edit-guard-1"]]) {
+    const dets = twinned().detectors.map((det, j) => (j === i
+      ? { ...det, params: { ...det.params, patterns: ["\\bdebugger\\b"] } } : det));
+    const out = admission.admit([twinned({ detectors: dets })], blank, { evaluate: evalSessionDetector });
+    assert.deepEqual(out.admitted, [], id + " failed its own pair and the module was still admitted");
+    assert.match(out.discarded[0].why, i === 0 ? /debugger/ : /edit-guard-1/);
+  }
+});
+
+// The cross pairs a lever against its own KIND — a command against a command,
+// an edit against an edit. That is no longer the same question as which event a
+// lever runs on: `bash-guard` and `edit-guard` share PreToolUse and read nothing
+// alike, so crossing them would discard both for a reason neither is guilty of.
+test("the cross never runs a bash-guard over an edit guard's near-miss source", () => {
+  const bashOnly = {
+    id: "save-by-shell",
+    deny: DENY,
+    // The word is in the edit check's near miss, so grouping the cross by event
+    // rather than by kind fires this guard on source it will never be handed.
+    detectors: [{ lever: "bash-guard", params: { patterns: ["\\bsave\\b"] } }],
+    fixtures: { violation: "save --force\n", nearMiss: "restore --dry-run\n" },
+  };
+  const prevented = {
+    id: "swallowed-exception-prevented",
+    deny: DENY,
+    detectors: [{ lever: "edit-guard", params: { patterns: ["catch\\s*(\\([^)]*\\))?\\s*\\{\\s*\\}"] } }],
+    fixtures: check().fixtures,
+  };
+  const out = admission.admit([bashOnly, prevented], blank, { cross: true, evaluate: evalSessionDetector });
+  assert.deepEqual(out.discarded, []);
+  assert.deepEqual(out.admitted.map((a) => a.id).sort(), ["save-by-shell", "swallowed-exception-prevented"]);
 });
 
 test("a check carrying a session lever with no evaluator injected is discarded, never admitted untested", () => {

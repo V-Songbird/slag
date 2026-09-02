@@ -57,8 +57,11 @@ showing an empty list, which reads as "everything was retired".
 `guards[]`, one row per configured guard. `watches` is the new half and the
 reason this skill exists:
 
-- `watches.event` — `PreToolUse` (before a `Bash` call) or `PostToolUse` (after
-  an `Edit` or `Write`). `watches.tools` names the tools it sees.
+- `watches.event` — `PreToolUse` (before the call, which is where a `bash-guard`
+  and an `edit-guard` both run) or `PostToolUse` (after the edit, where the older
+  `edit-observe-guard` runs and the bytes have already landed). `watches.tools`
+  names the tools it sees, and it is the lever that decides them: the two events
+  no longer split Bash from Edit.
 - `watches.paths` — the globs it looks at. `watches.patterns` — how many
   matchers it carries. The matchers themselves are counted, never printed: they
   live behind an approval boundary and a report is not a place to re-issue one.
@@ -72,6 +75,11 @@ reason this skill exists:
   thinks they have.
 - `provable: false` — a fixture is missing, so this check can never be
   re-proven and no row naming it can arm.
+- `teach` — whether an observing match also says so in the transcript: one line
+  of PostToolUse context carrying this guard's id and its deny triple, and no
+  source. Off unless the guard's own row set it, on PostToolUse guards only.
+  Report it where it is on; a guard that teaches is one the owner will hear from
+  and should be able to find here.
 - `provenance: "assumed"` — a default the owner never saw. Label it as one every
   time it is reported.
 
@@ -86,7 +94,10 @@ the coverage as the whole of it.
 Each row carries `title`, `severity`, `provable`, and its `detectors[]` in the
 same `watches` shape as above. A detector with a non-empty `pairedWith` is the
 second kind: it does not match text at all — it reports a file in `paths` that
-changed with nothing in `pairedWith` changing beside it.
+changed with nothing in `pairedWith` changing beside it. A non-zero `removed` is
+the third: it counts what stopped being there rather than what is there, so the
+driver reports that class **skipped** on a normal run — say so, because a class
+this lane cannot evaluate is not a class that came back clean.
 
 ## 3. Files — what jig wrote, and why
 

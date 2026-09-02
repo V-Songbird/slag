@@ -42,9 +42,13 @@
 //                                            the catch; --live actually runs
 //                                            them, and --toolchain names the
 //                                            installed tools it may spawn
-//   node jig.js migrate                      rewrite a 1.0.1 install into the
+//   node jig.js migrate [--accept-drops]     rewrite a 1.0.1 install into the
 //                                            shape this engine reads, as one
-//                                            journalled transaction
+//                                            journalled transaction. It refuses
+//                                            outright when a guard cannot be
+//                                            carried forward, naming each one;
+//                                            --accept-drops is how the owner
+//                                            says they read that list
 //
 // Two flags matter on a project that does not exist yet, where detection has
 // nothing on disk to read: `--edition <id>` names the language, and
@@ -80,6 +84,13 @@ const toolchainLib = require("./toolchain.js");
 // share, which is the only reason jig can harden a Python or a .NET project
 // without the last tool applied erasing every earlier one.
 const sectionsLib = require("./sections.js");
+// The vocabulary the session hooks share with the engine. It lives in its own
+// module so a hook can name a constant without requiring this file, which a
+// hook spawn would otherwise parse in full on every tool call.
+const {
+  SCHEMA_VERSION, STATE_DIR, VERIFY_FILE,
+  isObject, stripBom, proposedVerifyEntries, fixturePath,
+} = require("./vocab.js");
 
 const PLUGIN_ROOT = path.dirname(__dirname);
 
@@ -90,13 +101,6 @@ const PLUGIN_ROOT = path.dirname(__dirname);
 const WIRE_COMMIT_FIX = "ask /jig:jig to wire the commit lane, or run: node " +
   toPosix(__filename) + " plan --wire-commit";
 
-// Additive-only rule: every jig schema ships at 1 and only ever
-// gains fields. Reading a plan stamped higher is a refusal rather than a guess,
-// because a field this build cannot see could be the one that made the write
-// safe. Unknown keys at the SAME version are warned about and ignored.
-const SCHEMA_VERSION = 1;
-
-const STATE_DIR = ".jig";
 const JOURNAL_FILE = "journal.jsonl";
 const PREIMAGE_DIR = "preimages";
 const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
@@ -218,10 +222,6 @@ function expected(message) {
   return err;
 }
 
-function isObject(v) {
-  return v !== null && typeof v === "object" && !Array.isArray(v);
-}
-
 function toPosix(rel) {
   return String(rel).replace(/\\/g, "/");
 }
@@ -252,10 +252,6 @@ function readIfExists(full) {
 
 function hasBom(buf) {
   return buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf;
-}
-
-function stripBom(text) {
-  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
 // The dominant line ending, not the first one: a file with three CRLF lines and
@@ -1250,10 +1246,6 @@ const CONFIG_FILE = "config.json";
 const MANIFEST_FILE = "manifest.json";
 const PERMISSIONS_FILE = "proposed-permissions.json";
 const ACTIVATION_FILE = "activation.md";
-// What each lane runs besides the check driver: the linter, the type checker and
-// the test runner the owner ticked. Part of the install a teammate clones, like
-// the config and the checks — CI reads it, so it is committed and never ignored.
-const VERIFY_FILE = "verify.json";
 // The one line that makes a committed pre-commit hook run the checks, per host.
 // It lives in `catalogues/shared.json` so the wiring and the editions ship as
 // one body of data rather than half data and half constant.
@@ -1277,6 +1269,15 @@ function installMode(opts) {
 // second copy honest.
 const HOOK_RUNNERS = ["PreToolUse", "PostToolUse"];
 
+// The directories `run.mjs` never walks, and never reads staged either. Copied
+// here for the same reason HOOK_RUNNERS is: the driver is a standalone template
+// written into somebody else's repository and cannot import the engine. A test
+// asserts the two lists are identical, which is what keeps a second copy honest.
+const DRIVER_SKIPS = [
+  ".git", ".jig", "node_modules", "dist", "build", "out", "coverage",
+  ".next", ".nuxt", ".svelte-kit", ".venv", "venv", "vendor", "target",
+];
+
 // The actors a coverage cell can be about. An engine list rather than an
 // edition one: who is at the keyboard is not a fact about a language, and an
 // edition that could add a column would be an edition deciding what jig
@@ -1292,6 +1293,7 @@ const LEVERS = {
   "ci-workflow": { hostNeutral: true, probabilistic: false, availableAt: "0.1.0-alpha" },
   "tool-rule": { hostNeutral: true, probabilistic: false, availableAt: "0.3.0-alpha" },
   "bash-guard": { hostNeutral: false, probabilistic: false, availableAt: "0.1.0-alpha" },
+  "edit-guard": { hostNeutral: false, probabilistic: false, availableAt: "0.5.0-alpha" },
   "edit-observe-guard": { hostNeutral: false, probabilistic: false, availableAt: "0.1.0-alpha" },
   "prose-rule": { hostNeutral: false, probabilistic: true, availableAt: "0.4.0-alpha" },
   "agents-region": { hostNeutral: false, probabilistic: true, availableAt: "0.5.0-alpha" },
@@ -1306,6 +1308,11 @@ const AUTHORED_RUNNERS = {
   "ci-workflow": "ci",
   "tool-rule": "ci",
   "bash-guard": "PreToolUse",
+  // The edit lever an authored check should reach for: it denies the edit
+  // before the host writes the bytes. `edit-observe-guard` still runs — installs
+  // made before 2.11.0 carry it and their proof hashes bind it — and `migrate`
+  // is what moves one across, re-recording the proof per guard.
+  "edit-guard": "PreToolUse",
   "edit-observe-guard": "PostToolUse",
 };
 
@@ -1507,6 +1514,12 @@ function configFromSelection(classes, provenance, mode) {
         // per-guard").
         provenance: PROVENANCES.includes(provenance) ? provenance : "assumed",
       };
+      // Teaching is opted into per guard and never derived (SCOPE, "Does an
+      // observing guard teach by default"). The authored detector is where the
+      // owner says so, and the key is only ever written when it was authored
+      // true — a plan proposing one nobody asked for would be jig answering a
+      // question it was not given.
+      if (det.teach === true) guard.teach = true;
       if (typeof cls.proof === "string") guard.proof = cls.proof;
       guards.push(guard);
     }
@@ -1555,6 +1568,9 @@ function configFace(root, classes, provenance, mode) {
     // disarmed does not come back armed because they ran the interview again.
     if ("mode" in row) merged.mode = row.mode;
     else delete merged.mode;
+    // Teaching is the owner's answer too, and a re-run of the interview is not
+    // where it silently reverts to off.
+    if ("teach" in row) merged.teach = row.teach;
     return merged;
   });
   const have = new Set(carried.map((g) => g.id));
@@ -2610,12 +2626,48 @@ function denyCapable(det) {
   return HOOK_RUNNERS.includes(det.runner);
 }
 
+// Which skipped directory a `check-driver` detector has confined itself to, or
+// null. The fixture pair cannot see this: a fixture is text and never a file on
+// disk, so a check scoped to `.jig/config.json` passes admission and then the
+// driver walks straight past the only file it names. jig's own state directory
+// is the one every author of a self-protection check reaches for first, which
+// is where this was found.
+//
+// Only literal, non-final segments count. A glob may legitimately end in a file
+// named `build` or `vendor`, and a wildcard segment never resolves to a skipped
+// name — the walk removed those directories before the glob was ever asked.
+function driverBlindDir(det) {
+  if (!det || det.lever !== "check-driver") return null;
+  const globs = ((det.params || {}).paths || []).filter((p) => typeof p === "string" && p);
+  if (!globs.length) return null;
+  const blind = globs.map((g) => g.split("/").slice(0, -1).find((seg) => DRIVER_SKIPS.includes(seg)) || null);
+  return blind.every(Boolean) ? blind[0] : null;
+}
+
+// The other thing the driver cannot see, and for the same reason the fixture
+// pair cannot show it: a removal is a count going down between two versions of a
+// file, and the driver reads the tree as it is. Such a detector proves itself on
+// its fenced pair, is reported skipped on every real run, and catches nothing —
+// so it is not an artifact and not a floor. Only when it is the detector's ONLY
+// kind: a module that also names patterns is evaluated on every run.
+function driverBlindRemoval(det) {
+  if (!det || det.lever !== "check-driver") return false;
+  const p = det.params || {};
+  const has = (k) => Array.isArray(p[k]) && p[k].length > 0;
+  return has("removed") && !has("patterns") && !has("pairedWith");
+}
+
 // The floor: something a person or a CI runner can run
 // with no agent host involved, and that cannot be wrong about what it found.
 function hostNeutralFloor(cls) {
   return cls.detectors.some((d) => {
     const lever = leverOf(d.lever);
-    return !!lever && lever.hostNeutral && d.confidence === "deterministic";
+    // A driver detector the walk never reaches is not a floor, and neither is
+    // one the run has no earlier version to evaluate. Both are host neutral on
+    // paper and catch nothing anywhere, which is the enforcement gap this field
+    // exists to report.
+    return !!lever && lever.hostNeutral && d.confidence === "deterministic" &&
+      !driverBlindDir(d) && !driverBlindRemoval(d);
   });
 }
 
@@ -2643,21 +2695,6 @@ function detectorCeiling(det) {
   return lever && lever.probabilistic ? "unmeasured" : det.confidence;
 }
 
-// The lane entries a change would leave on disk, or null when the change carries
-// no readable list. Null is not "no entries" — the same rule `proposedGuards`
-// draws for the config, for the same reason.
-function proposedVerifyEntries(content) {
-  if (typeof content !== "string") return null;
-  let record = null;
-  try {
-    record = JSON.parse(stripBom(content));
-  } catch {
-    return null;
-  }
-  if (!isObject(record) || !Array.isArray(record.entries)) return null;
-  return record.entries.filter((e) => isObject(e));
-}
-
 // Whether this plan puts the tool in the CI lane — the lane a `tool-rule`
 // detector runs in, by the lever's own definition. Read off the plan's own
 // changes, like every other cell input: a matrix cell that trusted a
@@ -2678,6 +2715,10 @@ function detectorArtifact(cls, det, index, changes, guards) {
     return hit ? hit.path : null;
   };
   if (det.lever === "check-driver") {
+    // A module the driver will never run this detector's paths through catches
+    // nothing, whatever the plan installs. Named before the artifact lookup, so
+    // no cell can point at a check module as proof of a lane it does not reach.
+    if (driverBlindDir(det) || driverBlindRemoval(det)) return null;
     // By what the change is FOR rather than what it was called: an authored
     // check module is named after its own slug, and a cell that keyed on a
     // template name could not see it. The driver itself is deliberately not a
@@ -2732,13 +2773,19 @@ function detectorCell(cls, det, index, provenance, changes, guards) {
       : "this detector names a lever `" + det.lever + "` this build does not run";
   } else if (artifact === null) {
     grade = "GAP";
-    // A tool rule is the one lever whose gap is about a lane rather than a file.
-    // Naming the artifact it "writes no" would send the owner looking for a
-    // config that is often already there; what is missing is something running
-    // the tool.
-    why = det.lever === "tool-rule"
-      ? "no lane runs " + ((det.params && det.params.tool) || det.lever)
-      : "this plan writes no " + det.lever + " artifact for " + cls.id;
+    // Two gaps are about a lane rather than a file. A tool rule's config is
+    // often already there, so naming the artifact it "writes no" sends the owner
+    // looking for the wrong thing; what is missing is something running the
+    // tool. And a driver detector inside a directory the walk skips has its
+    // module installed and still catches nothing, so naming the module would be
+    // worse than saying nothing.
+    const blind = driverBlindDir(det);
+    why = blind ? "the check driver never walks " + blind + "/"
+      : driverBlindRemoval(det) ? "the check driver reads the tree as it is and has no earlier version to count" +
+        " against, so it reports this class skipped on every run"
+      : det.lever === "tool-rule"
+        ? "no lane runs " + ((det.params && det.params.tool) || det.lever)
+        : "this plan writes no " + det.lever + " artifact for " + cls.id;
   }
   return {
     grade,
@@ -3025,6 +3072,13 @@ function buildReview(payload, generated, root) {
     editions,
     denyReplies,
     selection,
+    // The derail pass, N14: an `--select` install of a class the catalogue
+    // ships with only host-neutral detectors writes no guard that runs inside a
+    // session, and nothing on this page said so. The per-actor cells say each
+    // class names no session detector; none of them says the install has no
+    // session lane at all, which is the thing an owner who works through agents
+    // is approving.
+    sessionGuards: guards.map((g) => g.id),
     rows,
     artifacts,
     consent: {
@@ -3085,6 +3139,18 @@ function renderReviewMd(review, backlog) {
       review.actors.map((a) => cellText(row.cells[a])).join(" | ") + " |");
   }
   out.push("");
+
+  if (review.rows.length && !(review.sessionGuards || []).length) {
+    out.push("## No session guard");
+    out.push("");
+    out.push("This plan installs nothing that runs inside a session. Every detector behind " +
+      review.rows.map((r) => "`" + r.classId + "`").join(", ") + " is a committed-lane lever, so these");
+    out.push("mistakes are caught by the check driver at commit time and in CI — after the bytes");
+    out.push("have landed — and never in the session that wrote them. An edition class carries no");
+    out.push("session detector, so a `--select` run installs none: watching one of these in session");
+    out.push("means authoring the class a second detector and the fixture pair that proves it.");
+    out.push("");
+  }
 
   const stamped = review.rows.filter((r) => r.enforcementGap);
   if (stamped.length) {
@@ -3684,56 +3750,27 @@ const DRIVER_PATH = STATE_DIR + "/checks/run.mjs";
 // no probe table in here any more — a table keyed on class names could only
 // ever witness the four classes jig 1.0.1 shipped, and a witnessed close that
 // cannot see an authored check is not a close at all.
-// The fixture path derivation, hand-copied from `scripts/templates/run.mjs`.
-// That file is ESM text jig byte-copies into somebody's repository, so this one
-// cannot import it; `tests/blanker-drift.test.js` holds the two copies to the
-// letter. Every glob segment collapses to a concrete one, so the seeded path
-// satisfies the detector's own first glob.
-function concreteSegment(glob, star) {
-  let out = "";
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i];
-    if (c === "*") {
-      out += star;
-      while (glob[i + 1] === "*") i++;
-    } else if (c === "?") {
-      out += "x";
-    } else if (c === "{") {
-      const end = glob.indexOf("}", i);
-      const body = end === -1 ? glob.slice(i + 1) : glob.slice(i + 1, end);
-      out += body.split(",")[0];
-      i = end === -1 ? glob.length : end;
-    } else {
-      out += c;
-    }
-  }
-  return out;
-}
-
-function fixturePath(det) {
-  const glob = (det.params.paths || [])[0] || "fixture.txt";
-  const segments = glob.split("/");
-  const base = concreteSegment(segments.pop(), "fixture");
-  const dirs = segments
-    .filter((seg) => seg !== "**" && seg !== "")
-    .map((seg) => concreteSegment(seg, "fx"));
-  return [...dirs, base].join("/");
-}
-
 function guardProbe(guard, record) {
   const mod = record.mod || {};
   const violation = mod.fixtures && mod.fixtures.violation;
   if (typeof violation !== "string" || !violation.trim()) return null;
   const what = "the violation fixture `" + guard.check + "` was admitted on";
-  if (guard.runner === "PreToolUse") return { event: "PreToolUse", tool: "Bash", input: { command: violation }, what };
+  // Which tool call to build is the detector's lever's answer, not the event's:
+  // a bash guard and an edit guard both run at PreToolUse, and probing one with
+  // the other's payload reports `caught: false` for a healthy guard.
+  const { LEVER_TOOLS } = require("../hooks/jig-lib.js");
+  const det = (Array.isArray(mod.detectors) ? mod.detectors : [])
+    .find((d) => d && d.runner === guard.runner && LEVER_TOOLS[d.lever]) || {};
+  if ((LEVER_TOOLS[det.lever] || []).includes("Bash")) {
+    return { event: guard.runner, tool: "Bash", input: { command: violation }, what };
+  }
   // The blanker reads comment and string syntax off a filename, and the guard
   // reads its own `paths` off it too, so the seeded path is derived from the
   // detector's own first glob rather than dropped at the root: a probe outside
   // a directory-scoped guard's globs reports `caught: false` for a guard doing
   // exactly what it was installed to do.
-  const det = (Array.isArray(mod.detectors) ? mod.detectors : []).find((d) => d && d.runner === guard.runner) || {};
   const file_path = fixturePath({ params: det.params || {} });
-  return { event: "PostToolUse", tool: "Write", input: { file_path, content: violation }, what };
+  return { event: guard.runner, tool: "Write", input: { file_path, content: violation }, what };
 }
 
 function ledgerLines(root) {
@@ -4665,9 +4702,10 @@ function parseArgs(argv) {
 // The review surface and the arming commands (0.2.0)
 // ---------------------------------------------------------------------------
 //
-// jig-lib is required lazily inside these functions: it requires this module
-// for the shared vocabulary, and a top-level require here would make that a
-// cycle with half-initialized exports.
+// jig-lib is required lazily inside these functions. The cycle that forced it is
+// gone — jig-lib takes the shared vocabulary from `vocab.js` now, not from here —
+// and it stays lazy because jig-lib is the session hook's whole load cost and no
+// jig.js command outside this section touches it.
 
 function configuredGuards(root) {
   const lib = require("../hooks/jig-lib.js");
@@ -4741,13 +4779,20 @@ function watchesOf(lib, det, mod, deny) {
     // `PreToolUse` and `PostToolUse` run inside a session; `checks` runs in the
     // commit hook and in CI, and never appears in a guard row at all.
     event: det.runner || null,
-    tools: (lib.EVENT_TOOLS && lib.EVENT_TOOLS[det.runner]) || [],
+    // The lever's tools, not the event's: PreToolUse now carries both kinds, and
+    // reporting a bash guard as watching Edit and Write is a coverage claim.
+    tools: (lib.LEVER_TOOLS && lib.LEVER_TOOLS[det.lever]) ||
+      (lib.EVENT_TOOLS && lib.EVENT_TOOLS[det.runner]) || [],
     lever: det.lever || null,
     paths: Array.isArray(params.paths) ? params.paths : [],
     patterns: Array.isArray(params.patterns) ? params.patterns.length : 0,
     // The second detector kind: what has to change alongside `paths`. Empty on
     // a pattern detector, which is every session guard.
     pairedWith: Array.isArray(params.pairedWith) ? params.pairedWith : [],
+    // And the third: counted, not printed, for the same reason `patterns` is.
+    // Non-zero means this detector reads a count going down between the text an
+    // edit replaced and the text it wrote, rather than what is in a file.
+    removed: Array.isArray(params.removed) ? params.removed.length : 0,
     title: mod && typeof mod.title === "string" ? mod.title : null,
     severity: mod && typeof mod.severity === "string" ? mod.severity : null,
     // The three-part reply an armed match shows. Null means this detector
@@ -4839,6 +4884,10 @@ function cmdReview(root) {
       // A check missing a fixture can never be re-proven, so a row naming it
       // cannot arm however its config reads.
       provable: e.evidence.proof !== null,
+      // Opt-in, per guard, off unless the row asked. True means a would-deny
+      // from this guard also reaches the transcript as one line of
+      // PostToolUse context.
+      teach: g.teach,
       provenance: g.provenance,
       fired: e.fired,
       evaluated: e.evaluated,
@@ -5301,7 +5350,8 @@ module.exports = {
   PLAN_MD_FILE, PLAN_JSON_FILE, BACKLOG_FILE, AVAILABLE_NOW, CELL_RANK, CONSENT_TIERS,
   ACTORS, LEVERS, PLUGIN_ROOT, GIT_DIR, GIT_SETTING, GIT_SETTING_PATH, commitLane,
   leverOf, leverAvailable, toolchainFacts, toolchainToolFor, RELEASE_ORDER,
-  denyCapable, hostNeutralFloor, floorNote, detectorGrade, detectorCeiling,
+  denyCapable, hostNeutralFloor, floorNote, detectorGrade, detectorCeiling, DRIVER_SKIPS, driverBlindDir,
+  driverBlindRemoval,
   detectorCell, matrixRow, consentFor, bestGrade, backlogFor, buildReview, cellText, renderReviewMd,
   resolveEditions, editionClassById, AUTHORED_RUNNERS, adaptAuthoredDetector, readAuthored, admitAuthored, checkSlug,
   authoredChecksIn, readFromFile, toolchainProposal, toolchainRow, installTouchPaths, guardEvidence,

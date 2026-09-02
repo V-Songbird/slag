@@ -167,10 +167,21 @@ plenty; the rest are reachable through the free text below. When class ids
 arrive namespaced from more than one edition, say which language each row is
 for.
 
-When no edition matched, this question has no options to draw. Ask it as free
-text instead: "Describe the mistakes you want caught, one per line."
+When no edition matched, there are no class rows to draw from. Ask the mistakes
+as free text instead — "Describe the mistakes you want caught, one per line" —
+and keep the two standing options below, which need no edition.
 
-The last option is always:
+Two options are always there, whatever the editions matched. The first is a
+standing offer about jig itself, and it goes last but one:
+
+- `jig's own guards being switched off` — "An agent edits `.jig/config.json`,
+  guts a check under `.jig/checks/`, drops `.jig/off` in place or defuses the CI
+  workflow, and the harness is off with nothing saying so. Four checks, written
+  and proved like any other."
+
+Nothing about that row is installed by ticking it — it is the same authoring,
+admission and per-item approval as every other check, and SKILL.md step 4 holds
+the four shapes and the limits to read out. Then, last:
 
 - `Something else — I'll describe it` — "Type it in your own words. jig writes
   the check, and proves it against a violation and a near-miss before it counts

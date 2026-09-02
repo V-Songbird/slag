@@ -307,6 +307,232 @@ function authoredFrom(root, artifact, guardRows, edition) {
 }
 
 // ---------------------------------------------------------------------------
+// The 2.11.0 pass: an installed edit guard moves to PreToolUse
+// ---------------------------------------------------------------------------
+//
+// `edit-observe-guard` runs at PostToolUse, so the file is already written by
+// the time the guard denies — jig's prevention story ended one step too late.
+// `edit-guard` is the same detector at PreToolUse.
+//
+// It is a NEW lever rather than a new event for the old one because the proof
+// hash recorded for a guard binds the check source it was admitted on (SCOPE,
+// "What binds a proof to the check it proves"). Moving the event underneath an
+// installed guard would leave it claiming a proof for a lever it no longer runs,
+// so the move is a migration: the module is rewritten, the pair is run again
+// through the new lever's own evaluation, and the proof is re-recorded over the
+// rewritten bytes.
+//
+// What this pass does NOT share with the 1.0.1 one is the internal apply.
+// Arriving at PreToolUse turns a report into a refusal, so every guard's module
+// is its own item-tier change the owner approves by name — and a guard whose
+// owner never approves it keeps running exactly as it did.
+
+const OLD_EDIT_LEVER = "edit-observe-guard";
+const NEW_EDIT_LEVER = "edit-guard";
+
+// The two words, matched only where a detector states them: an optional quoted
+// key, a colon, and the quoted value. Both key spellings a module can use are
+// accepted, because a check module is the model's own source and jig rewrites
+// the two words in place rather than reformatting the file around them.
+const LEVER_RE = /(["']?)\blever\1(\s*:\s*)(["'])edit-observe-guard\3/g;
+const RUNNER_RE = /(["']?)\brunner\1(\s*:\s*)(["'])PostToolUse\3/g;
+
+// The rewrite, counted. The count IS the safety: an occurrence anywhere but on
+// the detectors the runner read — inside a fixture, say — makes the totals
+// disagree, and then the module is left alone rather than silently rewritten
+// into something nobody proved.
+function swapEditLever(source, wanted) {
+  let levers = 0;
+  let runners = 0;
+  const out = source
+    .replace(LEVER_RE, (m, q, sep, vq) => { levers++; return q + "lever" + q + sep + vq + NEW_EDIT_LEVER + vq; })
+    .replace(RUNNER_RE, (m, q, sep, vq) => { runners++; return q + "runner" + q + sep + vq + "PreToolUse" + vq; });
+  if (levers !== wanted || runners !== wanted) {
+    return { problem: "its source states `" + OLD_EDIT_LEVER + "` " + levers + " time(s) and `PostToolUse` " +
+      runners + " time(s), and this install runs " + wanted + " edit detector(s) out of it — jig will not guess" +
+      " which of those words are the detector's" };
+  }
+  return { source: out };
+}
+
+// The same check with its edit detectors moved. Built from the module's own
+// exports rather than from the rewritten text, so admission grades the detector
+// this migration means, and the text rewrite is checked against it by the count.
+function migratedCheck(mod, slug) {
+  return {
+    id: typeof mod.id === "string" && mod.id ? mod.id : slug,
+    title: mod.title,
+    severity: mod.severity,
+    deny: mod.deny,
+    fixtures: mod.fixtures || {},
+    detectors: (mod.detectors || []).map((d) => (isObject(d) && d.lever === OLD_EDIT_LEVER
+      ? { ...d, lever: NEW_EDIT_LEVER, runner: "PreToolUse" }
+      : d)),
+  };
+}
+
+function migrateEditGuards(root, modules, guards, states) {
+  // Keyed by the check a guard names, because the module is what gets rewritten
+  // and two guards may name one check.
+  const bySlug = new Map();
+  for (const g of guards) {
+    if (g.runner !== "PostToolUse" || typeof g.check !== "string" || !g.check) continue;
+    bySlug.set(g.check, [...(bySlug.get(g.check) || []), g]);
+  }
+
+  const candidates = [];
+  const refused = [];
+  for (const [slug, rows] of bySlug) {
+    const ids = rows.map((g) => g.id);
+    const refuse = (why) => refused.push({ check: slug, guards: ids, why });
+    const artifact = modules.find((a) => path.basename(a.path, CHECK_SUFFIX) === slug);
+    if (!artifact) { refuse("no installed check module under " + CHECKS_DIR + "/ answers for it"); continue; }
+    const loaded = loadModule(root, artifact.path);
+    if (loaded.problem) { refuse("the installed check " + loaded.problem); continue; }
+    const dets = (loaded.mod.detectors || []).filter((d) => isObject(d) && d.lever === OLD_EDIT_LEVER);
+    // Not a candidate and not a problem: the guard watches some other lever, or
+    // an earlier approved change already moved this one.
+    if (!dets.length) continue;
+    const blocked = jig.occupancyProblem(root, artifact.path, states);
+    if (blocked) { refuse(blocked); continue; }
+    const swapped = swapEditLever(readText(root, artifact.path).toString("utf8"), dets.length);
+    if (swapped.problem) { refuse(swapped.problem); continue; }
+    candidates.push({ slug, rows, artifact, source: swapped.source, check: migratedCheck(loaded.mod, slug) });
+  }
+
+  // The same fixture pair, run again through the NEW lever's own evaluation.
+  // No cross near-miss pass: these checks were crossed when they were admitted,
+  // and what this migration has to demonstrate is the narrower thing it is for —
+  // that the pair still fires one event earlier.
+  const { blankRegions, globToRegExp, evalSessionDetector } = require("../hooks/jig-lib.js");
+  const verdict = admission.admit(candidates.map((c) => c.check), blankRegions,
+    { match: globToRegExp, evaluate: evalSessionDetector });
+  const admitted = new Set(verdict.admitted.map((a) => a.id));
+  const moving = [];
+  for (const row of candidates) {
+    if (!admitted.has(row.check.id)) {
+      refused.push({
+        check: row.slug,
+        guards: row.rows.map((g) => g.id),
+        why: (verdict.discarded.find((d) => d.id === row.check.id) || {}).why ||
+          "the fixture pair did not pass under " + NEW_EDIT_LEVER,
+      });
+      continue;
+    }
+    moving.push(row);
+  }
+
+  if (!moving.length) {
+    return {
+      ok: true,
+      migrated: [],
+      moving: [],
+      refused,
+      why: "this install is already on the pair shape — every guard names an installed check, no check carries" +
+        " a 1.0.1 selftest, and no guard is left watching an edit at PostToolUse. Nothing was written.",
+    };
+  }
+
+  const changes = [];
+  const proofBySlug = new Map();
+  for (const row of moving) {
+    const disk = asWritten(root, row.artifact.path, row.source);
+    const proof = admission.proofHash(disk.text, row.check.fixtures.violation, row.check.fixtures.nearMiss);
+    proofBySlug.set(row.slug, proof);
+    changes.push({
+      id: changeId("edit-guard-" + row.slug, row.source),
+      kind: "write-side-file",
+      path: row.artifact.path,
+      content: row.source,
+      classIds: [row.check.id],
+      ownership: "file",
+      provenance: row.artifact.provenance,
+      proof,
+      template: row.artifact.template || { name: "check-" + row.slug, version: "migrated" },
+      rationale: "move " + row.rows.map((g) => g.id).join(", ") + " to PreToolUse, so the edit is refused" +
+        " before the bytes land",
+    });
+  }
+
+  // The config, carrying the re-recorded proof for every guard that moved. The
+  // rows keep their ids, their modes and their provenance: this migration moves
+  // WHEN a guard runs and nothing about what the owner decided.
+  //
+  // The one answer it cannot carry is `teach`. That channel is PostToolUse only
+  // — a non-blocking PreToolUse channel is unverified against a live host — so a
+  // guard that moves loses it. Carrying it would leave a row `validateConfig`
+  // warns about on every single call and then ignores, which is worse than
+  // dropping it and saying so; `teachingLost` below is what says so.
+  const record = JSON.parse(jig.stripBom(readText(root, CONFIG_PATH).toString("utf8")));
+  const teachingLost = [];
+  const newGuards = (record.guards || []).map((g) => {
+    if (!isObject(g) || !proofBySlug.has(g.check) || g.runner !== "PostToolUse") return g;
+    const moved = { ...g, runner: "PreToolUse", proof: proofBySlug.get(g.check) };
+    if (moved.teach === true) { teachingLost.push(g.id); delete moved.teach; }
+    return moved;
+  });
+  const configContent = JSON.stringify({ ...record, guards: newGuards }, null, 2) + "\n";
+  const movedIds = moving.flatMap((row) => row.rows.map((g) => g.id));
+  changes.push({
+    id: changeId("edit-guard-config", configContent),
+    kind: "write-config",
+    path: CONFIG_PATH,
+    content: configContent,
+    classIds: moving.map((row) => row.check.id),
+    ownership: "schema",
+    template: { name: "config", version: "1.0.0" },
+    rationale: movedIds.join(", ") + " deny at PreToolUse, each under the proof re-recorded for the new lever",
+  });
+
+  const { problems, payload } = jig.planFromDraft({ changes }, root);
+  if (problems.length) throw expected("The migration was rejected:\n  - " + problems.join("\n  - "));
+  fs.writeFileSync(statePath(root, "plan-" + payload.planId + ".json"),
+    JSON.stringify(payload, null, 2) + "\n");
+
+  return {
+    ok: true,
+    // Nothing has been applied. The word stays for the 1.0.1 pass, which does
+    // apply, so a caller reading both cannot mistake a plan for a landed change.
+    migrated: [],
+    plan: payload.planId,
+    moving: moving.map((row) => ({
+      check: row.slug,
+      classId: row.check.id,
+      guards: row.rows.map((g) => g.id),
+      proof: proofBySlug.get(row.slug),
+    })),
+    // One approval token per change. Order does not matter: a half-approved
+    // move leaves the guard naming an event its check no longer carries, which
+    // is the fail-open path — one warning per call and nothing blocked.
+    changes: payload.changes.map((c) => ({
+      id: c.id,
+      path: c.path,
+      rationale: c.rationale,
+      apply: "apply --change " + c.id + " --path " + c.path,
+    })),
+    refused,
+    why: "this install is already on the pair shape, and " + movedIds.length + " guard" +
+      (movedIds.length === 1 ? " still watches" : "s still watch") +
+      " an edit at PostToolUse — after the bytes have landed. The plan below moves each one to PreToolUse and" +
+      " re-records its proof. Nothing was written to the install.",
+    notes: [
+      "Approve every change, and the config last. The config change carries all " + movedIds.length +
+        " row" + (movedIds.length === 1 ? "" : "s") + " at once, so a guard whose check module you leave" +
+        " unapproved names PreToolUse with a module that still declares PostToolUse: it warns on every call" +
+        " and guards nothing until that module change is applied too.",
+      "No mode changes here. A guard that observes keeps observing, one event earlier.",
+    ].concat(refused.length
+      ? ["Some guards cannot move and are named on `refused`. They stay on " + OLD_EDIT_LEVER + ", which still runs."]
+      : []).concat(teachingLost.length
+      ? [teachingLost.join(", ") + (teachingLost.length === 1 ? " was" : " were") + " opted into teaching," +
+          " and teaching speaks on PostToolUse only. Moving " + (teachingLost.length === 1 ? "it" : "them") +
+          " earlier means " + (teachingLost.length === 1 ? "it stops" : "they stop") + " teaching. The guard" +
+          " still runs, and now refuses the edit instead of describing it afterwards."]
+      : []),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // migrate
 // ---------------------------------------------------------------------------
 
@@ -324,7 +550,7 @@ function asWritten(root, rel, content) {
   return { text: bytes.toString("utf8"), hash: jig.hashBytes(bytes) };
 }
 
-function cmdMigrate(root) {
+function cmdMigrate(root, opts) {
   if (!fs.existsSync(statePath(root))) {
     throw expected("there is no " + jig.STATE_DIR + "/ here — `migrate` upgrades an install jig already made," +
       " and there is nothing here to upgrade. Nothing was written.");
@@ -356,15 +582,10 @@ function cmdMigrate(root) {
     modules.some((a) => /\bexport const selftest\b/.test(String(readText(root, a.path))));
   // Not a refusal. "There was nothing to upgrade" is the answer migrate exists
   // to give on a repository that is already current, and exiting 1 on it made
-  // every caller treat the healthy case as a failure.
-  if (!legacy) {
-    return {
-      ok: true,
-      migrated: [],
-      why: "this install is already on the pair shape — every guard names an installed check and no check" +
-        " carries a 1.0.1 selftest. Nothing was written.",
-    };
-  }
+  // every caller treat the healthy case as a failure. An install already on the
+  // pair shape still has one thing left to upgrade — its edit guards run one
+  // event too late — and that pass answers here.
+  if (!legacy) return migrateEditGuards(root, modules, guards, states);
 
   // jig will not write over a file it does not own, and a file jig installed
   // and somebody then edited is theirs now. One edited artifact refuses
@@ -475,6 +696,9 @@ function cmdMigrate(root) {
       droppedGuards.push({
         guardId: id || null,
         classId: g.classId || null,
+        // The mode is part of what the owner has to see: a dropped row that was
+        // armed is enforcement disappearing, not a report going quiet.
+        mode: MODES.includes(g.mode) ? g.mode : "observe",
         why: !id ? "the guard has no id"
           : !slug ? "no check module in this install answers for " + JSON.stringify(g.classId)
           : !row ? "the check it names was discarded"
@@ -492,6 +716,22 @@ function cmdMigrate(root) {
       proof: row.proof,
     });
   }
+  // SCOPE, "May `migrate` remove a guard without asking (227)". The migration
+  // stays ONE journaled transaction (decision 2), so the pause it needs is a
+  // pre-flight one rather than a per-item plan: every row that would not survive
+  // is named here — id, mode and reason — before a byte is written, and the
+  // owner says `--accept-drops` to go ahead. Dropping an armed guard is
+  // enforcement vanishing under an owner who only asked for an upgrade, which is
+  // the same shape N17 closed on `disarm`, `retire` and `fp`.
+  if (droppedGuards.length && !(opts && opts["accept-drops"])) {
+    throw expected("Refusing to migrate: " + droppedGuards.length + " guard" +
+      (droppedGuards.length === 1 ? "" : "s") + " cannot be carried forward and would be removed:\n" +
+      droppedGuards.map((d) => "  - " + (d.guardId || "(a guard with no id)") + " [" + d.mode + "] — " + d.why)
+        .join("\n") +
+      "\n  Migration cannot keep coverage it cannot prove, so there is nothing to repair here — read each" +
+      " row, then run `migrate --accept-drops` to migrate without them. Nothing was written.");
+  }
+
   const configPayload = { schemaVersion: jig.SCHEMA_VERSION, guards: newGuards };
   if (Array.isArray(config.defaultBranches)) configPayload.defaultBranches = config.defaultBranches;
   if (isObject(config.zones)) configPayload.zones = config.zones;
@@ -573,7 +813,10 @@ function cmdMigrate(root) {
 module.exports = {
   CLASS_MAP,
   LEGACY_EDITION,
+  OLD_EDIT_LEVER,
+  NEW_EDIT_LEVER,
   cmdMigrate,
+  swapEditLever,
   authoredFrom,
   fixturePair,
   moduleSource,

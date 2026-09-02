@@ -169,7 +169,7 @@ test("loadEdition loads one edition and caches it", () => {
   const python = editions.loadEdition(PLUGIN_ROOT, "python");
   assert.equal(python.schemaVersion, 4);
   assert.equal(python.edition, "python");
-  assert.equal(python.classes.length, 25);
+  assert.equal(python.classes.length, 26);
   assert.equal(editions.loadEdition(PLUGIN_ROOT, "python"), python);
 });
 
@@ -329,7 +329,7 @@ test("namespacing makes the 26 shared class ids unambiguous", () => {
     }
   }
   assert.ok(shared > 0, "the editions do share class ids");
-  assert.equal(seen.size, 141);
+  assert.equal(seen.size, 147);
 });
 
 test("namespacedId refuses an empty half rather than producing `/x`", () => {

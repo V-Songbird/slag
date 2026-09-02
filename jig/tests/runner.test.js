@@ -77,6 +77,21 @@ const SCOPED_CATCH = A.authored({
   deny: A.DENY_CATCH,
 });
 
+// 2.11.0 / C2: the same catch shape on the lever that denies BEFORE the host
+// writes the file. It is a second lever rather than a new event for the first,
+// because the proof recorded for an installed guard binds the lever it was
+// admitted on — `migrate` is what moves one across and re-records that proof.
+const PREVENTED_CATCH = A.authored({
+  id: "prevented-catch",
+  title: "A swallowed error, refused before it is written",
+  detectors: [
+    { lever: "edit-guard", actor: "claude-session", confidence: "deterministic",
+      params: { patterns: [A.CATCH_PATTERN] } },
+  ],
+  fixtures: A.EMPTY_CATCH.fixtures,
+  deny: A.DENY_CATCH,
+});
+
 // A Bash guard whose params carry `paths` anyway. A Bash call names no file, so
 // the field must not reach it — scoping a command by a path it does not have
 // would silence the guard entirely.
@@ -155,7 +170,7 @@ function guarded(checks, opts) {
   const root = tmpRoot();
   const guards = checks.map((check) => {
     const proof = installCheck(root, check);
-    const runner = check.detectors[0].lever === "bash-guard" ? "PreToolUse" : "PostToolUse";
+    const runner = A.RUNNER_BY_LEVER[check.detectors[0].lever];
     return {
       id: "g-" + check.id,
       check: check.id,
@@ -163,6 +178,7 @@ function guarded(checks, opts) {
       runner,
       provenance: o.provenance === undefined ? "elicited" : o.provenance,
       ...(o.mode ? { mode: o.mode } : {}),
+      ...(o.teach === undefined ? {} : { teach: o.teach }),
       ...(o.proof === null ? {} : { proof: o.proof || proof }),
     };
   });
@@ -210,11 +226,15 @@ test("hooks.json registers one shell-free node entry per event", () => {
   const wiring = JSON.parse(fs.readFileSync(HOOKS_JSON, "utf-8"));
   assert.deepEqual(Object.keys(wiring.hooks).sort(),
     ["PostToolUse", "PostToolUseFailure", "PreToolUse", "Stop", "SubagentStop"]);
-  // The Bash half of PostToolUse and the whole of PostToolUseFailure are the
-  // witness registrations; Stop and SubagentStop take no matcher because they
-  // name no tool. Every one of them is the same shell-free node entry.
+  // PreToolUse carries both session kinds since 2.11.0: a bash-guard over the
+  // command, and an edit-guard over the edit BEFORE the host writes it. The
+  // Bash half of PostToolUse and the whole of PostToolUseFailure are the witness
+  // registrations, and its Edit/Write half still runs the older
+  // `edit-observe-guard` installs that have not migrated. Stop and SubagentStop
+  // take no matcher because they name no tool. Every one of them is the same
+  // shell-free node entry.
   const expected = {
-    PreToolUse: "Bash", PostToolUse: "Bash|Edit|Write", PostToolUseFailure: "Bash",
+    PreToolUse: "Bash|Edit|Write", PostToolUse: "Bash|Edit|Write", PostToolUseFailure: "Bash",
     Stop: undefined, SubagentStop: undefined,
   };
   for (const [event, matcher] of Object.entries(expected)) {
@@ -521,6 +541,86 @@ test("an edit that introduces an empty catch fires", () => {
   assert.equal(rows[0].decision, "would-deny");
   assert.equal(rows[0].path, "a.js");
   assert.equal(rows[0].tool, "Edit");
+});
+
+// ---------------------------------------------------------------------------
+// 2.11.0 / C6: an observing guard that was asked to say so
+//
+// SCOPE, "Does an observing guard teach by default": no. Observe is a mode the
+// owner chose, and turning every observing guard into a line in the transcript
+// changes what that choice meant after the fact. So the default below is the
+// binding half of this feature, not the feature.
+
+test("an observing guard says nothing in the transcript unless its own row asked", () => {
+  const root = guarded([A.EMPTY_CATCH]);
+  const out = JSON.parse(run(root, "PostToolUse", edit("a.js", "risky();", "try { risky(); } catch {}")).stdout);
+  assert.equal(out.jig.decision, "would-deny");
+  assert.deepEqual(Object.keys(out), ["jig"], "a would-deny reached the model with nobody asking it to");
+});
+
+test("a guard opted into teaching emits the would-deny as one line of PostToolUse context", () => {
+  const root = guarded([A.EMPTY_CATCH], { teach: true });
+  const out = JSON.parse(run(root, "PostToolUse", edit("a.js", "risky();", "try { risky(); } catch {}")).stdout);
+  assert.equal(out.jig.decision, "would-deny");
+  assert.equal(out.jig.mode, "observe");
+  assert.equal(out.hookSpecificOutput.hookEventName, "PostToolUse");
+  const line = out.hookSpecificOutput.additionalContext;
+  // The guard id and the deny triple, and one line of them.
+  assert.equal(line.includes("\n"), false);
+  assert.match(line, /^\[jig guard g-empty-catch would have denied this\]/);
+  assert.ok(line.includes(A.DENY_CATCH.reason));
+  assert.ok(line.includes(A.DENY_CATCH.alternative));
+  assert.ok(line.includes(A.DENY_CATCH.override));
+  // No source. The line names the mistake, never the bytes that made it.
+  assert.equal(line.includes("catch {}"), false);
+  assert.equal(line.includes("a.js"), false);
+  // Teaching is not deciding: nothing here blocks the call the host already ran.
+  assert.equal(out.decision, undefined);
+});
+
+test("teaching stays quiet on a pass, and speaks once however many guards matched", () => {
+  const root = guarded([A.EMPTY_CATCH, FOCUSED_TEST], { teach: true });
+  const clean = JSON.parse(run(root, "PostToolUse", write("a.test.js", "it('a', () => {});")).stdout);
+  assert.equal(clean.jig.decision, "pass");
+  assert.equal(clean.hookSpecificOutput, undefined);
+  const both = JSON.parse(run(root, "PostToolUse",
+    write("a.test.js", "it.only('a', () => { try { x(); } catch {} });")).stdout);
+  assert.deepEqual(both.jig.guards.map((g) => g.decision), ["would-deny", "would-deny"]);
+  assert.equal(both.hookSpecificOutput.additionalContext.split("\n").length, 1);
+  // And it is the FIRST match that speaks. One line is true whichever guard
+  // wrote it, so without naming the guard the first-wins rule is untested.
+  assert.match(both.hookSpecificOutput.additionalContext,
+    /^\[jig guard g-empty-catch would have denied this\]/);
+});
+
+test("teaching is refused the unverified PreToolUse channel, out loud", () => {
+  // HARNESS-PASS C6: a non-blocking model-visible channel on PreToolUse is
+  // unverified against a live host, so a row asking for one is told so rather
+  // than left believing the transcript carries its line.
+  const root = guarded([A.PIPED_INSTALLER], { teach: true });
+  const out = run(root, "PreToolUse", PIPE_CALL);
+  assert.match(out.stderr, /`teach` speaks on PostToolUse only, and g-piped-installer runs on PreToolUse/);
+  const emitted = JSON.parse(out.stdout);
+  assert.equal(emitted.jig.decision, "would-deny");
+  assert.deepEqual(Object.keys(emitted), ["jig"]);
+});
+
+test("a non-boolean teach is a config that cannot be read as an answer", () => {
+  const check = lib.validateConfig({
+    schemaVersion: 1,
+    guards: [{ id: "g", check: "c", runner: "PostToolUse", teach: "yes" }],
+  });
+  assert.match(check.problems.join("\n"), /`teach` must be true or false/);
+  assert.equal(check.guards.length, 0);
+});
+
+test("an armed guard on the same event still refuses, and teaching does not ride the refusal", () => {
+  const root = guarded([A.EMPTY_CATCH], { mode: "armed", teach: true });
+  const out = JSON.parse(run(root, "PostToolUse", edit("a.js", "risky();", "try { risky(); } catch {}")).stdout);
+  assert.equal(out.jig.decision, "deny");
+  assert.equal(out.decision, "block");
+  // Nothing to teach: the guard armed, so the deny reply already said it.
+  assert.equal(out.hookSpecificOutput, undefined);
 });
 
 test("a whole-file Write has no prior text, so its whole body counts as introduced", () => {
@@ -882,6 +982,35 @@ test("an armed edit guard blocks a PostToolUse write with the same three-part re
   assert.match(emitted.reason, /To override:/);
 });
 
+// 2.11.0 / C2. The `edit-observe-guard` above denies at PostToolUse, by which
+// time the host has already written the file: jig's prevention story ended one
+// step too late. `edit-guard` is the same detector one event earlier, and the
+// answer the host reads is a permission decision rather than a block after the
+// fact.
+test("an armed edit-guard refuses the write before the bytes land", () => {
+  const root = guarded([PREVENTED_CATCH], { mode: "armed" });
+  const call = write("a.js", "try { risky(); } catch (err) {}");
+  const emitted = JSON.parse(run(root, "PreToolUse", call).stdout);
+  assert.equal(emitted.jig.decision, "deny");
+  assert.equal(emitted.hookSpecificOutput.hookEventName, "PreToolUse");
+  assert.equal(emitted.hookSpecificOutput.permissionDecision, "deny");
+  assert.match(emitted.hookSpecificOutput.permissionDecisionReason, /Instead:/);
+  // And nothing is left behind on the event the older lever runs on.
+  assert.equal(JSON.parse(run(root, "PostToolUse", call).stdout).jig.decision, "pass");
+});
+
+// Both session levers arrive on PreToolUse now, so the EVENT can no longer say
+// how a detector's params are read. Reading them by event would run a shell
+// pattern over a file's contents, and would put a pass row on the guard that
+// was never asked — inflating the denominator `fired` is reported against.
+test("a bash guard and an edit guard share PreToolUse and never read each other's call", () => {
+  const root = guarded([A.PIPED_INSTALLER, PREVENTED_CATCH]);
+  run(root, "PreToolUse", PIPE_CALL);
+  run(root, "PreToolUse", write("a.js", "try { risky(); } catch (err) {}"));
+  assert.deepEqual(ledger(root).map((r) => r.guardId + " " + r.decision),
+    ["g-piped-installer would-deny", "g-prevented-catch would-deny"]);
+});
+
 test("a config claiming a proof the check does not have cannot deny", () => {
   const root = guarded([A.PIPED_INSTALLER], { mode: "armed", proof: "0".repeat(64) });
   const emitted = JSON.parse(run(root, "PreToolUse", PIPE_CALL).stdout);
@@ -993,6 +1122,131 @@ test("a guard whose every pattern compiles records none as failed", () => {
   const root = guarded([A.PIPED_INSTALLER], { mode: "armed" });
   run(root, "PreToolUse", PIPE_CALL);
   assert.equal(ledger(root)[0].patternsFailed, null);
+});
+
+// ---------------------------------------------------------------------------
+// The removal kind's session half (2.11.0 / N11)
+//
+// `removed` reads a count going down between the text an edit replaced and the
+// text it wrote. An Edit carries both; a Write carries only the second, and the
+// miss that follows is disclosed rather than worked around.
+
+const REMOVAL_DET = A.TESTS_DELETED.detectors[0].params;
+const REMOVAL = { lever: "edit-guard", runner: "PreToolUse", params: REMOVAL_DET };
+const fired = (payload) => {
+  const hit = lib.evaluateGuard([REMOVAL], payload, {}, [], payload.tool_input.file_path);
+  return hit ? hit.matched : null;
+};
+
+test("an edit that deletes a test case fires the removal detector", () => {
+  assert.equal(fired(edit("src/a.test.js", "it('a', () => {});\nit('b', () => {});\n", "it('a', () => {});\n")),
+    A.TEST_COUNT_PATTERN);
+});
+
+test("an edit that deletes the case outright fires it too", () => {
+  // `new_string: ""` is the shape a deleted test actually arrives in, and it is
+  // the payload the pattern kind returns null on.
+  assert.equal(fired(edit("src/a.test.js", "it('b', () => {});\n", "")), A.TEST_COUNT_PATTERN);
+});
+
+test("an edit that rewrites a test body without dropping one is silent", () => {
+  assert.equal(fired(edit("src/a.test.js", "it('a', () => {});\n",
+    "it('a', () => { expect(1).toBe(1); });\n")), null);
+});
+
+test("a case deleted out of a comment is not a removal", () => {
+  // With the control beside it, because "returns null" is also what a removal
+  // branch that does not exist returns.
+  assert.equal(fired(edit("src/a.test.js", "it('b', () => {});\n", "")), A.TEST_COUNT_PATTERN);
+  assert.equal(fired(edit("src/a.test.js", "// it('b', () => {});\n", "")), null);
+});
+
+test("a Write payload can never fire a removal detector, which is the disclosed limit", () => {
+  // A Write carries no prior text, so a whole-file rewrite that drops half the
+  // suite is invisible here. It is also why a removal lever cannot be proven in
+  // the session lane: admission builds exactly this payload.
+  assert.equal(fired(write("src/a.test.js", "it('a', () => {});\n")), null);
+  assert.equal(lib.evalSessionDetector(REMOVAL, "it('a', () => {});\nit('b', () => {});\n"), false);
+});
+
+test("a removal detector still honours the paths that scope it", () => {
+  const scoped = { lever: "edit-guard", runner: "PreToolUse",
+    params: { ...REMOVAL_DET, paths: ["src/**/*.test.js"] } };
+  const deletion = (file) => edit(file, "it('a', () => {});\nit('b', () => {});\n", "it('a', () => {});\n");
+  // In scope first: without the control, "null" is what a removal that never
+  // ran returns and the path scoping is never exercised at all.
+  const hit = lib.evaluateGuard([scoped], deletion("src/a.test.js"), {}, [], "src/a.test.js");
+  assert.equal(hit && hit.matched, A.TEST_COUNT_PATTERN);
+  assert.equal(lib.evaluateGuard([scoped], deletion("docs/a.test.js"), {}, [], "docs/a.test.js"), null);
+});
+
+// 2.11.0 / N11, the other half. A removal detector names no `patterns`, and
+// `sessionDetectors` used to require some — so a check that admitted on its
+// fenced pair was filtered out before it was ever evaluated, and the class was
+// watched by nothing anywhere.
+const TESTS_DELETED_SESSION = A.authored({
+  id: "tests-deleted-session",
+  title: "Fewer test cases after the edit than before it",
+  detectors: [
+    { lever: "edit-guard", actor: "claude-session", confidence: "heuristic",
+      params: { paths: ["**/*.test.js"], removed: [A.TEST_COUNT_PATTERN] } },
+  ],
+  fixtures: {
+    violation: "it('a', () => {});\nit('b', () => {});\n--- after\nit('a', () => {});\n",
+    nearMiss: "it('a', () => {});\n--- after\nit('a', () => { expect(1).toBe(1); });\n",
+  },
+  deny: A.TESTS_DELETED.deny,
+});
+
+test("a removal-only session guard is dispatched, and denies the deletion at PreToolUse", () => {
+  const dets = TESTS_DELETED_SESSION.detectors.map((d) => ({ ...d, runner: "PreToolUse" }));
+  assert.equal(lib.sessionDetectors({ detectors: dets }, "PreToolUse", "Edit").length, 1,
+    "a detector with no `patterns` was filtered out before it could guard");
+
+  const root = guarded([TESTS_DELETED_SESSION], { mode: "armed" });
+  const out = JSON.parse(run(root, "PreToolUse",
+    edit("a.test.js", "it('a', () => {});\nit('b', () => {});\n", "it('a', () => {});\n")).stdout);
+  assert.equal(out.jig.decision, "deny");
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+  const clean = JSON.parse(run(root, "PreToolUse",
+    edit("a.test.js", "it('a', () => {});\n", "it('a', () => { expect(1).toBe(1); });\n")).stdout);
+  assert.equal(clean.jig.decision, "pass");
+});
+
+test("a session guard on a lever this build does not run is reported, never silently skipped", () => {
+  // The narrowing `continue` that keeps a bash guard quiet on an Edit call also
+  // swallowed this: an unknown lever reads no tool, so it was dropped by the
+  // tool-narrowed pass AND matched by the tool-less one, and the guard stopped
+  // evaluating with no warning, no ledger row and no `problem` on /jig:review.
+  const root = tmpRoot();
+  const dir = path.join(root, ".jig", "checks");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "unknown-lever.check.mjs"),
+    A.EMPTY_CATCH.module.split('"edit-observe-guard"').join('"edit-guard-v2"'));
+  configure(root, { schemaVersion: 1, guards: [{
+    id: "g-unknown-lever", check: "unknown-lever", classId: "empty-catch",
+    runner: "PostToolUse", provenance: "elicited",
+  }] });
+  const out = run(root, "PostToolUse", edit("a.js", "risky();", "try { risky(); } catch {}"));
+  assert.match(out.stderr, /g-unknown-lever is not running — the installed check `unknown-lever` declares no PostToolUse detector/);
+  const emitted = JSON.parse(out.stdout);
+  assert.deepEqual(emitted.jig.guards.map((g) => g.guardId), ["g-unknown-lever"]);
+  assert.equal(ledger(root)[0].check, "unusable");
+});
+
+// DERAIL-PASS: the deny reply is three authored sentences printed as one string,
+// and an author who ended a clause without a stop had it run straight into the
+// next label.
+test("every part of a deny reply is closed before the next one starts", () => {
+  const text = lib.denyText("g-empty-catch", A.DENY_CATCH, false);
+  assert.ok(text.includes(A.DENY_CATCH.alternative + ". To override:"),
+    "the alternative ran into the override with no sentence break: " + text);
+  assert.ok(text.includes(A.DENY_CATCH.reason + " Instead:"));
+  // Already closed stays closed once, never twice.
+  assert.equal(text.includes(".."), false, text);
+  const taught = lib.teachText("g-empty-catch", A.DENY_CATCH);
+  assert.ok(taught.endsWith(A.DENY_CATCH.override + "."));
+  assert.equal(taught.includes(".."), false, taught);
 });
 
 // ---------------------------------------------------------------------------
@@ -1242,4 +1496,25 @@ test("staleVerification says nothing when the working tree is clean", () => {
 test("a renamed path is read from its destination", () => {
   assert.equal(lib.porcelainPath('R  "old name.js" -> src/new.js'), "src/new.js");
   assert.equal(lib.porcelainPath(" M src/a.js"), "src/a.js");
+});
+
+// ---------------------------------------------------------------------------
+// The hook/engine boundary
+
+// A hook spawns on every tool call, and 2.10.0's witness doubled how often.
+// `jig-lib.js` used to require `scripts/jig.js` at top level, so each of those
+// spawns parsed the whole engine to read a schema number, a directory name and
+// two pure helpers — all of which now live in `scripts/vocab.js`. The boundary
+// is worth opening once, so this holds it open: nothing `jig-lib.js` pulls in
+// may reach the engine at load time, transitively included.
+test("loading jig-lib does not load the engine", () => {
+  const engine = JSON.stringify(path.join(__dirname, "..", "scripts", "jig.js"));
+  const probe =
+    "require(" + JSON.stringify(path.join(HOOKS_DIR, "jig-lib.js")) + ");" +
+    "console.log(Object.keys(require.cache).filter((k) => k === require.resolve(" + engine + ")).join());";
+  const res = spawnSync(process.execPath, ["-e", probe], { encoding: "utf-8" });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stdout.trim(), "",
+    "hooks/jig-lib.js reaches scripts/jig.js at require time again — every hook spawn " +
+    "now parses the whole engine. Move what it needs into scripts/vocab.js instead.");
 });

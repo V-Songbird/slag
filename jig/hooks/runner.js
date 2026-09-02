@@ -23,10 +23,13 @@ function main(argv) {
   if (lib.isOff(root) || !lib.isConfigured(root)) return;
 
   const out = lib.runEvent(root, event, lib.readInput(), (line) => process.stderr.write(line + "\n"));
-  // The host reads its control fields off the top level, and runEvent puts one
-  // there only for a guard that armed: its own row asked to, and the proof it
-  // recorded still matches the check on disk. Everything else an observing
-  // guard has to say stays under the `jig` key, where nothing acts on it.
+  // The host reads its control fields off the top level, and runEvent puts a
+  // DECIDING one there only for a guard that armed: its own row asked to, and
+  // the proof it recorded still matches the check on disk. An observing guard
+  // reaches the top level too, through `hookSpecificOutput.additionalContext`,
+  // and only where its own row set `teach` — that channel refuses nothing.
+  // Everything else it has to say stays under the `jig` key, where nothing acts
+  // on it.
   process.stdout.write(JSON.stringify(out) + "\n");
 }
 

@@ -461,7 +461,7 @@
         "violation": "from reporting import monthly_summary\n\n\ndef test_monthly_summary_totals_by_category() -> None:\n    pass\n\n\ndef test_monthly_summary_excludes_refunds() -> None:\n    ...\n\n\ndef test_monthly_summary_handles_empty_month() -> None:\n    summary = monthly_summary([])\n    assert summary.total == 0\n",
         "nearMiss": "from typing import Protocol\n\nfrom reporting import monthly_summary\n\n\nclass SummarySink(Protocol):\n    def write(self, row: str) -> None: ...\n\n\ndef helper_no_op() -> None:\n    pass\n\n\ndef test_monthly_summary_totals_by_category() -> None:\n    \"\"\"Regression cover for the 2026-03 rounding bug.\"\"\"\n    summary = monthly_summary([(\"food\", 12), (\"food\", 8)])\n    assert summary.by_category[\"food\"] == 20\n"
       },
-      "gapNotes": "No ruff or mypy rule exists for an empty test body, so this is regex-only. It sees only the two literal empty bodies: a test gutted down to `assert True`, to a lone `print()`, or to setup with every assertion removed still matches nothing. A test method inside a `TestFoo` class matches (the `def test_` prefix survives indentation), but a unittest method named `runTest` does not. Most importantly it cannot see a test that was deleted outright — for that, `--cov-fail-under` in pytest's addopts is the only backstop, and only if coverage actually drops. A body of docstring-then-`pass` is the common real shape and matches nothing, because the pattern needs `pass` immediately after the colon.",
+      "gapNotes": "No ruff or mypy rule exists for an empty test body, so this is regex-only. It sees only the two literal empty bodies: a test gutted down to `assert True`, to a lone `print()`, or to setup with every assertion removed still matches nothing. A test method inside a `TestFoo` class matches (the `def test_` prefix survives indentation), but a unittest method named `runTest` does not. Most importantly it cannot see a test that was deleted outright — for that, the `test-count-dropped` class in this edition counts `def test_` across an edit, and `--cov-fail-under` in pytest's addopts is the CI-side backstop. A body of docstring-then-`pass` is the common real shape and matches nothing, because the pattern needs `pass` immediately after the colon.",
       "evidence": {
         "tier": "reasoned",
         "source": "No documented linter rule covers empty test bodies; pattern derived from pytest's `test_` collection convention (python_functions default) documented in pytest's configuration reference."
@@ -1595,6 +1595,45 @@
       "evidence": {
         "tier": "documented",
         "source": "pip-audit project documentation: exits 1 when one or more known vulnerabilities are found, prints 'Found N known vulnerabilities in M package(s)'; `--strict` fails the audit if dependency collection fails."
+      }
+    },
+    {
+      "id": "test-count-dropped",
+      "title": "Fewer test cases after the edit than before it",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Deletes the failing test case and reports the suite green",
+        "Trims a parameterised case list down to the inputs that already pass",
+        "Removes the whole case rather than the assertion inside it, so no empty test body is left to find"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "removed": [
+              "\\bdef\\s+test_\\w+\\s*\\("
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": true,
+            "stripStrings": true
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import pytest\n\nfrom billing.invoice import total_due\n\n\ndef test_totals_a_single_line():\n    assert total_due([(\"seat\", 1200)]) == 1200\n\n\ndef test_applies_the_annual_discount():\n    assert total_due([(\"seat\", 1200)], term=\"annual\") == 1080\n\n\ndef test_rejects_a_negative_line():\n    with pytest.raises(ValueError):\n        total_due([(\"seat\", -1)])\n--- after\nimport pytest\n\nfrom billing.invoice import total_due\n\n\ndef test_totals_a_single_line():\n    assert total_due([(\"seat\", 1200)]) == 1200\n",
+        "nearMiss": "import pytest\n\nfrom billing.invoice import total_due\n\n\ndef test_totals_a_single_line():\n    assert total_due([(\"seat\", 1200)]) == 1200\n\n\ndef test_rejects_a_negative_line():\n    assert total_due([(\"seat\", -1)]) == 0\n--- after\nimport pytest\n\nfrom billing.invoice import total_due\n\n\ndef test_totals_a_single_line():\n    assert total_due([(\"seat\", 1200)]) == 1200\n\n\ndef test_rejects_a_negative_line():\n    with pytest.raises(ValueError):\n        total_due([(\"seat\", -1)])\n"
+      },
+      "gapNotes": "A removal is not in any file's content — the deleted case is absent from the file that is left, so the committed check driver reports this class skipped on a normal run and proves it only from the fixture pair, which carries the file before the edit and the file after it. Nothing in this catalogue watches it — a catalogue never carries a session guard — so the class ships as a named mistake with a proven pair and no lane, and the plan grades that cell GAP. The lane is an authored `edit-guard` on the same removal rule, which reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a test module is seen, and a Write payload carries none, so a whole-file rewrite that drops a test module is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right — behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "No tool in the Python ecosystem gates on a drop in test count between two revisions; the runners report what they discovered, never what they stopped discovering. The judgement that a shrinking suite is a defect is jig's own."
       }
     }
   ]

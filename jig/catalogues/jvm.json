@@ -439,6 +439,23 @@
       "severity": "safety",
       "detectors": [
         {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "removed": [
+              "@Test\\b",
+              "\\bclass\\s+\\w*Tests?\\b"
+            ],
+            "paths": [
+              "**/src/test/**/*.java",
+              "**/src/test/**/*.kt"
+            ],
+            "stripComments": true,
+            "stripStrings": true
+          }
+        },
+        {
           "lever": "tool-rule",
           "actor": "human-ci",
           "confidence": "deterministic",
@@ -465,10 +482,10 @@
         }
       ],
       "fixtures": {
-        "violation": "package com.example.auth;\n\nimport org.junit.jupiter.api.BeforeEach;\n\nimport java.time.Clock;\nimport java.time.Instant;\nimport java.time.ZoneOffset;\n\nclass TokenExpiryTest {\n\n    private Clock clock;\n    private TokenService service;\n\n    @BeforeEach\n    void setUp() {\n        clock = Clock.fixed(Instant.parse(\"2026-01-01T00:00:00Z\"), ZoneOffset.UTC);\n        service = new TokenService(clock);\n    }\n}\n",
-        "nearMiss": "package com.example.auth;\n\nimport static org.junit.jupiter.api.Assertions.assertFalse;\nimport static org.junit.jupiter.api.Assertions.assertTrue;\n\nimport org.junit.jupiter.api.BeforeEach;\nimport org.junit.jupiter.api.Nested;\nimport org.junit.jupiter.api.Test;\n\nimport java.time.Clock;\nimport java.time.Duration;\nimport java.time.Instant;\nimport java.time.ZoneOffset;\n\nclass TokenExpiryTest {\n\n    private Clock clock;\n    private TokenService service;\n\n    @BeforeEach\n    void setUp() {\n        clock = Clock.fixed(Instant.parse(\"2026-01-01T00:00:00Z\"), ZoneOffset.UTC);\n        service = new TokenService(clock);\n    }\n\n    @Nested\n    class WithinLifetime {\n        @Test\n        void tokenIsValid() {\n            Token token = service.issue(Duration.ofMinutes(5));\n            assertTrue(service.isValid(token));\n        }\n    }\n\n    @Nested\n    class PastLifetime {\n        @Test\n        void tokenIsRejected() {\n            Token token = service.issue(Duration.ZERO);\n            assertFalse(service.isValid(token));\n        }\n    }\n}\n"
+        "violation": "package com.example.auth;\n\nimport static org.junit.jupiter.api.Assertions.assertFalse;\nimport static org.junit.jupiter.api.Assertions.assertTrue;\n\nimport org.junit.jupiter.api.BeforeEach;\nimport org.junit.jupiter.api.Test;\n\nimport java.time.Clock;\nimport java.time.Duration;\nimport java.time.Instant;\nimport java.time.ZoneOffset;\n\nclass TokenExpiryTest {\n\n    private Clock clock;\n    private TokenService service;\n\n    @BeforeEach\n    void setUp() {\n        clock = Clock.fixed(Instant.parse(\"2026-01-01T00:00:00Z\"), ZoneOffset.UTC);\n        service = new TokenService(clock);\n    }\n\n    @Test\n    void tokenIsValidWithinItsLifetime() {\n        Token token = service.issue(Duration.ofMinutes(5));\n        assertTrue(service.isValid(token));\n    }\n\n    @Test\n    void tokenIsRejectedPastItsLifetime() {\n        Token token = service.issue(Duration.ZERO);\n        assertFalse(service.isValid(token));\n    }\n}\n--- after\npackage com.example.auth;\n\nimport org.junit.jupiter.api.BeforeEach;\n\nimport java.time.Clock;\nimport java.time.Instant;\nimport java.time.ZoneOffset;\n\nclass TokenExpiryTest {\n\n    private Clock clock;\n    private TokenService service;\n\n    @BeforeEach\n    void setUp() {\n        clock = Clock.fixed(Instant.parse(\"2026-01-01T00:00:00Z\"), ZoneOffset.UTC);\n        service = new TokenService(clock);\n    }\n}\n",
+        "nearMiss": "package com.example.auth;\n\nimport static org.junit.jupiter.api.Assertions.assertFalse;\nimport static org.junit.jupiter.api.Assertions.assertTrue;\n\nimport org.junit.jupiter.api.BeforeEach;\nimport org.junit.jupiter.api.Test;\n\nimport java.time.Clock;\nimport java.time.Duration;\nimport java.time.Instant;\nimport java.time.ZoneOffset;\n\nclass TokenExpiryTest {\n\n    private Clock clock;\n    private TokenService service;\n\n    @BeforeEach\n    void setUp() {\n        clock = Clock.fixed(Instant.parse(\"2026-01-01T00:00:00Z\"), ZoneOffset.UTC);\n        service = new TokenService(clock);\n    }\n\n    @Test\n    void tokenIsValidWithinItsLifetime() {\n        Token token = service.issue(Duration.ofMinutes(5));\n        assertTrue(service.isValid(token));\n    }\n\n    @Test\n    void tokenIsRejectedPastItsLifetime() {\n        Token token = service.issue(Duration.ZERO);\n        assertFalse(service.isValid(token));\n    }\n}\n--- after\npackage com.example.auth;\n\nimport static org.junit.jupiter.api.Assertions.assertFalse;\nimport static org.junit.jupiter.api.Assertions.assertTrue;\n\nimport org.junit.jupiter.api.BeforeEach;\nimport org.junit.jupiter.api.Nested;\nimport org.junit.jupiter.api.Test;\n\nimport java.time.Clock;\nimport java.time.Duration;\nimport java.time.Instant;\nimport java.time.ZoneOffset;\n\nclass TokenExpiryTest {\n\n    private Clock clock;\n    private TokenService service;\n\n    @BeforeEach\n    void setUp() {\n        clock = Clock.fixed(Instant.parse(\"2026-01-01T00:00:00Z\"), ZoneOffset.UTC);\n        service = new TokenService(clock);\n    }\n\n    @Nested\n    class WithinLifetime {\n        @Test\n        void tokenIsValid() {\n            Token token = service.issue(Duration.ofMinutes(5));\n            assertTrue(service.isValid(token));\n        }\n    }\n\n    @Nested\n    class PastLifetime {\n        @Test\n        void tokenIsRejected() {\n            Token token = service.issue(Duration.ZERO);\n            assertFalse(service.isValid(token));\n        }\n    }\n}\n"
       },
-      "gapNotes": "Deletion is invisible to any check that reads only the current tree \u2014 the evidence lives in the diff, not the file. `failOnNoDiscoveredTests` (Gradle Test task, default true) only fires when a source set drops to zero discovered tests, so deleting nine tests of ten passes silently; PMD's TestClassWithoutTestCases only fires when a class keeps its Test-shaped name but loses every @Test. The real gate is a git-aware count comparison against the merge base, which no tool in this ecosystem provides and which jig's check driver must supply itself. The near-miss is the genuine trap for the PMD rule: a class whose own body has no @Test method because every test lives in @Nested inner classes.",
+      "gapNotes": "Deletion is invisible to any check that reads only the current tree \u2014 the evidence lives in the diff, not the file. `failOnNoDiscoveredTests` (Gradle Test task, default true) only fires when a source set drops to zero discovered tests, so deleting nine tests of ten passes silently; PMD's TestClassWithoutTestCases only fires when a class keeps its Test-shaped name but loses every @Test. The removal detector on this class is that count comparison, read between the file an edit replaced and the file it wrote rather than against a merge base: a session guard authored on the same rule sees an Edit's own two halves, and a Write carries no prior text and is a disclosed miss. The near-miss is the genuine trap for the PMD rule: a class whose own body has no @Test method because every test lives in @Nested inner classes.",
       "evidence": {
         "tier": "documented",
         "source": "Gradle DSL reference for org.gradle.api.tasks.testing.Test \u2014 `failOnNoDiscoveredTests`, 'Whether the task should fail if test sources are present, but no tests are discovered during test execution. Defaults to true.'; PMD 7 java errorprone TestClassWithoutTestCases."
@@ -1515,6 +1532,47 @@
       "evidence": {
         "tier": "documented",
         "source": "checkstyle.org coding category (EqualsHashCode); docs.pmd-code.org PMD 7 java errorprone (OverrideBothEqualsAndHashcode); detekt.dev potential-bugs ruleset (EqualsWithHashCodeExist)."
+      }
+    },
+    {
+      "id": "test-count-dropped",
+      "title": "Fewer test cases after the edit than before it",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Deletes the failing test case and reports the suite green",
+        "Trims a parameterised case list down to the inputs that already pass",
+        "Removes the whole case rather than the assertion inside it, so no empty test body is left to find"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "removed": [
+              "@Test\\b",
+              "@ParameterizedTest\\b"
+            ],
+            "paths": [
+              "**/src/test/**/*.java",
+              "**/src/test/**/*.kt"
+            ],
+            "stripComments": true,
+            "stripStrings": true
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package com.example.billing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nimport org.junit.jupiter.api.Test;\n\nclass InvoiceTest {\n\n    private final Invoice invoice = new Invoice();\n\n    @Test\n    void totalsASingleLine() {\n        assertEquals(1200, invoice.totalDue(Line.of(\"seat\", 1200)));\n    }\n\n    @Test\n    void appliesTheAnnualDiscount() {\n        assertEquals(1080, invoice.totalDue(Line.of(\"seat\", 1200), Term.ANNUAL));\n    }\n\n    @Test\n    void rejectsANegativeLine() {\n        assertThrows(IllegalArgumentException.class, () -> invoice.totalDue(Line.of(\"seat\", -1)));\n    }\n}\n--- after\npackage com.example.billing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nimport org.junit.jupiter.api.Test;\n\nclass InvoiceTest {\n\n    private final Invoice invoice = new Invoice();\n\n    @Test\n    void totalsASingleLine() {\n        assertEquals(1200, invoice.totalDue(Line.of(\"seat\", 1200)));\n    }\n}\n",
+        "nearMiss": "package com.example.billing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nimport org.junit.jupiter.api.Test;\n\nclass InvoiceTest {\n\n    private final Invoice invoice = new Invoice();\n\n    @Test\n    void totalsASingleLine() {\n        assertEquals(1200, invoice.totalDue(Line.of(\"seat\", 1200)));\n    }\n\n    @Test\n    void rejectsANegativeLine() {\n        assertEquals(0, invoice.totalDue(Line.of(\"seat\", -1)));\n    }\n}\n--- after\npackage com.example.billing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nimport org.junit.jupiter.api.Test;\n\nclass InvoiceTest {\n\n    private final Invoice invoice = new Invoice();\n\n    @Test\n    void totalsASingleLine() {\n        assertEquals(1200, invoice.totalDue(Line.of(\"seat\", 1200)));\n    }\n\n    @Test\n    void rejectsANegativeLine() {\n        assertThrows(IllegalArgumentException.class, () -> invoice.totalDue(Line.of(\"seat\", -1)));\n    }\n}\n"
+      },
+      "gapNotes": "A removal is not in any file's content — the deleted case is absent from the file that is left, so the committed check driver reports this class skipped on a normal run and proves it only from the fixture pair, which carries the file before the edit and the file after it. Nothing in this catalogue watches it — a catalogue never carries a session guard — so the class ships as a named mistake with a proven pair and no lane, and the plan grades that cell GAP. The lane is an authored `edit-guard` on the same removal rule, which reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a test class is seen, and a Write payload carries none, so a whole-file rewrite that drops a test class is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right — behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "No tool in the JVM ecosystem gates on a drop in test count between two revisions; the runners report what they discovered, never what they stopped discovering. The judgement that a shrinking suite is a defect is jig's own."
       }
     }
   ]

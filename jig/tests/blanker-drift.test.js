@@ -23,8 +23,9 @@ const path = require("path");
 
 const DRIVER = path.join(__dirname, "..", "scripts", "templates", "run.mjs");
 const LIB = path.join(__dirname, "..", "hooks", "jig-lib.js");
-const ENGINE = path.join(__dirname, "..", "scripts", "jig.js");
+const VOCAB = path.join(__dirname, "..", "scripts", "vocab.js");
 const TOOLCHAIN = path.join(__dirname, "..", "scripts", "toolchain.js");
+const ADMISSION = path.join(__dirname, "..", "scripts", "admission.js");
 
 // The blocks that must be identical, each named by the exact first and last
 // line of its region and by the pair of files that carry it. Markers rather than
@@ -47,9 +48,19 @@ const BLOCKS = [
     // guard side, and a probe seeded where the guard does not look reports a
     // miss the guard never had.
     what: "the fixture path derivation",
-    files: [DRIVER, ENGINE],
+    files: [DRIVER, VOCAB],
     from: "function concreteSegment(glob, star) {",
     to: '  return [...dirs, base].join("/");\n}',
+  },
+  {
+    // A removal fixture is one file before an edit and the same file after it,
+    // and admission and the shipped driver have to read that fence the same way
+    // or a check admits on a pair the driver splits differently — the selftest
+    // then disagrees with the admission that let the check in.
+    what: "the removal fixture's fence",
+    files: [DRIVER, ADMISSION],
+    from: "function fencedHalves(text) {",
+    to: '  return { before: text.slice(0, at), after: nl === -1 ? "" : text.slice(nl + 1) };\n}',
   },
   {
     // The lanes run the same argv the installer runs, and on Windows `npx` is a

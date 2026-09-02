@@ -134,8 +134,8 @@ Three of those vocabularies are only partly used, and the unused half is the hon
 
 - No detector in any edition names `claude-session` or `codex-session`. Every detector is either a
   `check-driver` pattern run for `human-editor` or a `tool-rule` run for `human-ci`. Actor and
-  lever are paired in all 287 detectors; nothing mixes them.
-- No class is `experiment-supported` or `inherited`. 122 are `documented`, 19 are `reasoned`.
+  lever are paired in all 303 detectors; nothing mixes them.
+- No class is `experiment-supported` or `inherited`. 122 are `documented`, 25 are `reasoned`.
 - `agentModes` is free text, not a vocabulary. It is required when the class carries the `agent`
   axis and empty otherwise.
 
@@ -149,8 +149,9 @@ Three of those vocabularies are only partly used, and the unused half is the hon
 
 `params` is shaped by the lever, not by the class:
 
-- `check-driver` — `paths`, `patterns`, `perLine`, `stripComments`, `stripStrings`. Every pattern
-  compiles as a regular expression.
+- `check-driver` — `paths`, `patterns`, `perLine`, `stripComments`, `stripStrings`, and `removed`
+  in place of `patterns` where the mistake is a count going down between the text an edit replaced
+  and the text it wrote. Every pattern compiles as a regular expression.
 - `tool-rule` — `tool`, `rule`, `options`. `tool` is always an id declared in the same edition's
   `toolchain`; no detector names a tool the edition does not install.
 
@@ -217,14 +218,14 @@ converts and can truncate; a double cast only lies about the type.
 
 | Edition | Classes | Toolchain |
 | --- | --- | --- |
-| `dotnet` — C# / .NET (dotnet CLI, csproj, NuGet) | 24 | csc, dotnet-analyzers, dotnet-format, xunit-analyzers, dotnet-test, nuget-audit, sonaranalyzer-csharp |
-| `go` — Go (go modules, go toolchain) | 23 | golangci-lint, gofumpt, go-vet, go-test, go-build, govulncheck |
-| `javascript-typescript` — JavaScript & TypeScript | 25 | eslint, typescript, vitest, prettier, audit |
-| `jvm` — Java & Kotlin (Gradle / Maven) | 21 | gradle, checkstyle, pmd, errorprone, detekt, spotbugs, junit5 |
-| `python` — Python | 25 | ruff, ruff-format, mypy, pytest, pip-audit, build |
-| `rust` — Rust (cargo / Cargo.toml / workspaces) | 23 | clippy, rustfmt, cargo-check, cargo-nextest, cargo-deny, cargo |
+| `dotnet` — C# / .NET (dotnet CLI, csproj, NuGet) | 25 | csc, dotnet-analyzers, dotnet-format, xunit-analyzers, dotnet-test, nuget-audit, sonaranalyzer-csharp |
+| `go` — Go (go modules, go toolchain) | 24 | golangci-lint, gofumpt, go-vet, go-test, go-build, govulncheck |
+| `javascript-typescript` — JavaScript & TypeScript | 26 | eslint, typescript, vitest, prettier, audit |
+| `jvm` — Java & Kotlin (Gradle / Maven) | 22 | gradle, checkstyle, pmd, errorprone, detekt, spotbugs, junit5 |
+| `python` — Python | 26 | ruff, ruff-format, mypy, pytest, pip-audit, build |
+| `rust` — Rust (cargo / Cargo.toml / workspaces) | 24 | clippy, rustfmt, cargo-check, cargo-nextest, cargo-deny, cargo |
 
-141 classes, 287 detectors, 77 distinct ids.
+147 classes, 303 detectors, 78 distinct ids.
 
 ## index.json
 
@@ -245,15 +246,15 @@ extension without opening half a megabyte of class rows. Nothing else is duplica
 ## What this data does not claim
 
 - **No class is measured.** 122 rows are `documented`, meaning a tool's own reference confirms the
-  rule id, the flag or the syntax the row asserts. 19 are `reasoned`, meaning nothing but the
+  rule id, the flag or the syntax the row asserts. 25 are `reasoned`, meaning nothing but the
   argument in `evidence.source` stands behind them. Nothing here says which of these classes
   actually costs projects the most, because that has not been measured.
 - **Coverage is uneven across editions.** A shared id does not mean equal detection. The same class
   can carry two tool rules and a pattern in one edition and a single heuristic pattern in another.
-- **58 of 296 detectors are heuristic**, per detector rather than per lever. A deterministic lever
+- **65 of 303 detectors are heuristic**, per detector rather than per lever. A deterministic lever
   carries heuristic patterns in several places, which is why `confidence` sits on the detector.
-- **`dotnet` is the thinnest edition.** It has the fewest detectors per class (1.58 against 2.57
-  for `jvm`) and the highest heuristic share (13 of 38). `go` is second thinnest on the same
+- **`dotnet` is the thinnest edition.** It has the fewest detectors per class (1.56 against 2.55
+  for `jvm`) and the highest heuristic share (14 of 39). `go` is second thinnest on the same
   measures.
 - **`verify` blocks are declared, not executed.** Every tool in every edition carries an `argv`, an
   `expected` string and an `expectedExit`. None of the 37 has been run, and neither has any `seed`

@@ -429,7 +429,7 @@ test("AVAILABLE_NOW picks out exactly the levers this build can emit an artifact
   const now = Object.keys(engine.LEVERS).filter((id) => engine.leverAvailable(engine.LEVERS[id]));
   assert.deepEqual(now.sort(), [
     "agents-region", "bash-guard", "check-driver", "ci-workflow",
-    "edit-observe-guard", "prose-rule", "tool-rule",
+    "edit-guard", "edit-observe-guard", "prose-rule", "tool-rule",
   ]);
   // …and the ordering really is an ordering: an earlier release's lever stays
   // available, a later one does not.
@@ -624,6 +624,28 @@ test("a refusal reaches the review surface rather than being swallowed", () => {
   assert.equal(matrix.refused.length, 1);
   assert.match(matrix.refused[0], /already exists and jig did not write it/);
   assert.ok(fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8").includes(matrix.refused[0]));
+});
+
+// 2.11.0 / N14. A `--select` install of `focused-test` wrote no guard that runs
+// inside a session — an edition class carries only host-neutral detectors — and
+// the page said so nowhere: the per-actor cells report each class naming no
+// session detector, which is not the same sentence as "nothing here watches your
+// sessions". The owner who answered "Me and my AI sessions" was told nothing.
+test("a plan with no session guard says so, and says why", () => {
+  const root = nodeProject();
+  engine.cmdPlan(root, { _: [], change: [], select: "javascript-typescript/focused-test", provenance: "elicited" });
+  assert.deepEqual(readJson(root, ".jig/plan.json").sessionGuards, []);
+  const md = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
+  assert.match(md, /## No session guard/);
+  assert.ok(md.includes("`javascript-typescript/focused-test`"), "the class with no session lever is not named");
+  assert.match(md, /a `--select` run installs none/);
+
+  // And it stays quiet where it would be false: these authored checks carry
+  // session levers, so this plan does install one.
+  const guarded = nodeProject();
+  planOnly(guarded);
+  assert.ok(readJson(guarded, ".jig/plan.json").sessionGuards.length);
+  assert.doesNotMatch(fs.readFileSync(path.join(guarded, ".jig", "plan.md"), "utf-8"), /## No session guard/);
 });
 
 // ---------------------------------------------------------------------------
@@ -1415,6 +1437,32 @@ test("inventory reports what each guard watches, and counts the matchers rather 
   // it would be a matcher nobody reviewed, arriving through the back door.
   assert.ok(!JSON.stringify(inv).includes(A.PIPED_INSTALLER.detectors[0].params.patterns[0]),
     "the inventory printed a matcher instead of counting it");
+});
+
+// 2.11.0 / C6. Teaching is the owner's answer, and the two things that could
+// lose it are the report that never mentions it and the re-run that overwrites
+// the row. SCOPE, "Does an observing guard teach by default": no.
+test("inventory reports which guards teach, and a re-run carries that answer forward", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true, observe: true });
+  const config = readJson(root, ".jig/config.json");
+  const observing = config.guards.find((g) => g.runner === "PostToolUse");
+  assert.ok(observing, "no PostToolUse guard to teach from");
+
+  // Off unless asked, on every row, however the install went.
+  for (const row of engine.cmdInventory(root).guards) assert.equal(row.teach, false);
+
+  observing.teach = true;
+  fs.writeFileSync(path.join(root, ".jig", "config.json"), JSON.stringify(config, null, 2) + "\n");
+  const inv = engine.cmdInventory(root);
+  assert.equal(inv.guards.find((g) => g.guardId === observing.id).teach, true);
+  assert.equal(inv.guards.find((g) => g.guardId === GUARD).teach, false);
+
+  // A second interview is not where it silently reverts to off.
+  const plan = planOnly(root, { "no-ci": true }, [A.HEURISTIC_ONLY]);
+  const proposed = JSON.parse(readJson(root, ".jig/plan-" + plan.planId + ".json")
+    .changes.find((c) => c.kind === "write-config").content);
+  assert.equal(proposed.guards.find((g) => g.id === observing.id).teach, true);
 });
 
 test("inventory records why each artifact is here, and says where the answer came from", () => {

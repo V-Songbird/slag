@@ -21,6 +21,7 @@ const { spawnSync } = require("child_process");
 
 const engine = require("../scripts/jig.js");
 const lib = require("../hooks/jig-lib.js");
+const admission = require("../scripts/admission.js");
 const A = require("./authored.js");
 
 const TEMPLATE_DIR = path.join(__dirname, "..", "scripts", "templates");
@@ -144,6 +145,31 @@ test("the engine and the runner agree on which runners are hooks", () => {
   assert.deepEqual(engine.HOOK_RUNNERS, lib.HOOK_RUNNERS);
 });
 
+test("the engine, the runner and admission name the same session levers", () => {
+  // Four tables, one fact. A lever added to the engine and forgotten in
+  // `LEVER_TOOLS` reads no tool at runtime, so the check admits and then guards
+  // nothing — which is the silent hole this one line closes.
+  const sessionOf = (table) => Object.entries(table)
+    .filter(([, runner]) => lib.HOOK_RUNNERS.includes(runner))
+    .map(([lever]) => lever).sort();
+  const levers = sessionOf(engine.AUTHORED_RUNNERS);
+  assert.ok(levers.length > 1);
+  assert.deepEqual(Object.keys(lib.LEVER_TOOLS).sort(), levers, "jig-lib reads a different set of session levers");
+  assert.deepEqual(Object.keys(admission.SESSION_KINDS).sort(), levers, "admission proves a different set");
+  assert.deepEqual(sessionOf(A.RUNNER_BY_LEVER), levers, "the test mirror in authored.js drifted from the engine");
+});
+
+test("the engine and the driver agree on which directories the walk skips", () => {
+  // The driver is a standalone template and cannot import the engine, so the
+  // list exists twice. This is what keeps the second copy honest: a cell that
+  // graded a check-driver detector against a stale list would be back to
+  // claiming a lane the driver never reaches.
+  const body = templateOf(path.join(TEMPLATE_DIR, "run.mjs"))
+    .match(/const SKIP_DIRS = new Set\(\[([\s\S]*?)\]\);/);
+  assert.ok(body, "run.mjs no longer declares SKIP_DIRS as a literal set");
+  assert.deepEqual(engine.DRIVER_SKIPS, body[1].match(/"[^"]+"/g).map((s) => JSON.parse(s)));
+});
+
 test("the file names the engine writes are the ones the index and the runner use", () => {
   assert.equal(INDEX.templates.find((t) => t.name === "activation").target,
     engine.STATE_DIR + "/" + engine.ACTIVATION_FILE);
@@ -224,6 +250,141 @@ test("an id no edition carries is a disclosed gap, not a refusal", () => {
   assert.equal(fs.existsSync(path.join(root, ".jig", "config.json")), false, "a class with nothing behind it wired a guard");
 });
 
+// ---------------------------------------------------------------------------
+// jig's own apparatus
+// ---------------------------------------------------------------------------
+//
+// The four files nothing used to watch: the guard config, the check modules,
+// the kill switch and the CI workflow. They are guarded the way everything else
+// is — the model authors a check, the fixture pair admits it, the owner approves
+// it by name — so what these hold is that the authoring story really carries
+// them, and that the one lane which cannot is reported as a gap rather than
+// printed as coverage.
+
+const DISARM_PATTERN = "\"mode\"\\s*:\\s*\"observe\"";
+
+const CONFIG_PAIR = {
+  violation: "{\n  \"guards\": [\n    { \"id\": \"a\", \"mode\": \"observe\" }\n  ]\n}\n",
+  nearMiss: "{\n  \"guards\": [\n    { \"id\": \"a\", \"mode\": \"armed\" }\n  ]\n}\n",
+};
+
+const DENY_DISARM = {
+  reason: "This rewrites .jig/config.json, the file that says which of jig's guards are armed.",
+  alternative: "step the guard down in /jig:review, so the change is named, approved and recorded",
+  override: "say which guard is wrong here and mark its report a false alarm first",
+};
+
+// The shape SKILL.md step 4 hands out: the session lever, scoped to the one file.
+function disarmCheck(extra) {
+  return A.authored({
+    id: "jig-config-disarmed",
+    title: "jig's own guard config rewritten to disarm a guard",
+    detectors: [
+      { lever: "edit-guard", actor: "claude-session", confidence: "deterministic",
+        params: { paths: [".jig/config.json"], patterns: [DISARM_PATTERN],
+          stripComments: false, stripStrings: false } },
+      ...(extra || []),
+    ],
+    fixtures: CONFIG_PAIR,
+    deny: DENY_DISARM,
+  });
+}
+
+// The same check with the driver twin an author reaches for first, which is the
+// one that cannot work.
+const BLIND_DRIVER = { lever: "check-driver", actor: "human-editor", confidence: "deterministic",
+  params: { paths: [".jig/config.json"], patterns: [DISARM_PATTERN],
+    stripComments: false, stripStrings: false } };
+
+test("an edit guard over jig's own config denies the write that disarms it", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [disarmCheck()]);
+  const out = lib.runEvent(root, "PreToolUse", {
+    session_id: "s", tool_name: "Write",
+    tool_input: { file_path: path.join(root, ".jig", "config.json"), content: CONFIG_PAIR.violation },
+  }, () => {});
+  assert.equal(out.jig.decision, "deny");
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /which of jig's guards are armed/);
+});
+
+test("the same guard leaves a config that keeps the guard armed alone", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [disarmCheck()]);
+  const out = lib.runEvent(root, "PreToolUse", {
+    session_id: "s", tool_name: "Write",
+    tool_input: { file_path: path.join(root, ".jig", "config.json"), content: CONFIG_PAIR.nearMiss },
+  }, () => {});
+  assert.equal(out.jig.decision, "pass");
+});
+
+test("a check-driver detector inside a directory the walk skips is a gap, not a DET cell", () => {
+  // Found live: the pair passes, the plan printed DET and named the installed
+  // module, and `run.mjs` reported "No findings." over a `.jig/config.json`
+  // holding the very fixture it was admitted on.
+  const root = nodeProject();
+  const { plan } = install(root, { "no-ci": true }, [disarmCheck([BLIND_DRIVER])]);
+  const row = JSON.parse(fs.readFileSync(path.join(root, ".jig", "plan.json"), "utf-8")).rows[0];
+  assert.equal(row.cells["human-editor"].grade, "GAP");
+  assert.equal(row.cells["human-editor"].artifact, null);
+  assert.equal(row.cells["human-editor"].why, "the check driver never walks .jig/");
+  // The session lever over the same path is untouched — this is about the lane,
+  // not about the check.
+  assert.equal(row.cells["claude-session"].grade, "DET");
+  // And the module is still installed: a blind detector is a disclosed gap, not
+  // a discard, because the same check carries a lever that does work.
+  assert.ok(plan.changes.some((c) => c.path === ".jig/checks/jig-config-disarmed.check.mjs"));
+  assert.equal(driverJson(root, []).out.findings.length, 0);
+});
+
+test("a driver detector the walk never reaches does not clear the host-neutral floor", () => {
+  const cls = { id: "x", detectors: [BLIND_DRIVER] };
+  assert.equal(engine.hostNeutralFloor(cls), false);
+  assert.match(engine.floorNote(cls), /no host-neutral deterministic lever/);
+  // The same detector one directory over is a floor, so this reads the path and
+  // not the lever.
+  const walked = { ...BLIND_DRIVER, params: { ...BLIND_DRIVER.params, paths: ["config/*.json"] } };
+  assert.equal(engine.hostNeutralFloor({ id: "x", detectors: [walked] }), true);
+});
+
+test("only a skipped directory blinds a driver detector, never a file that shares its name", () => {
+  const params = (paths) => ({ lever: "check-driver", params: { paths } });
+  assert.equal(engine.driverBlindDir(params([".jig/config.json"])), ".jig");
+  assert.equal(engine.driverBlindDir(params(["src/vendor/**/*.js"])), "vendor");
+  // A file called `build` at the root is a file the walk reads.
+  assert.equal(engine.driverBlindDir(params(["build"])), null);
+  // A wildcard segment never resolves to a skipped name — the walk removed
+  // those directories before the glob was ever asked.
+  assert.equal(engine.driverBlindDir(params(["**/*.js"])), null);
+  // One reachable glob is enough to give the detector somewhere to look.
+  assert.equal(engine.driverBlindDir(params([".jig/config.json", "src/**/*.ts"])), null);
+  assert.equal(engine.driverBlindDir({ lever: "bash-guard", params: { patterns: ["x"] } }), null);
+});
+
+test("a removal on the check driver is a gap, not a lane, and never the floor", () => {
+  // The driver reads the tree as it is and reports a removal detector skipped on
+  // every run, so a cell naming the installed module would claim a lane nothing
+  // reaches — the same shape `driverBlindDir` names, for the same reason.
+  const removal = (params) => ({ lever: "check-driver", confidence: "deterministic",
+    params: { paths: ["**/*.test.js"], ...params } });
+  assert.equal(engine.driverBlindRemoval(removal({ removed: [A.TEST_COUNT_PATTERN] })), true);
+  // Not when the driver has something else on the same detector to evaluate.
+  assert.equal(engine.driverBlindRemoval(removal({ removed: [A.TEST_COUNT_PATTERN], patterns: ["x"] })), false);
+  assert.equal(engine.driverBlindRemoval({ lever: "edit-guard", params: { removed: ["x"] } }), false);
+
+  const cls = { id: "tests-deleted", detectors: [removal({ removed: [A.TEST_COUNT_PATTERN] })] };
+  assert.equal(engine.hostNeutralFloor(cls), false, "a class nothing evaluates cleared the floor");
+  assert.match(engine.floorNote(cls), /no host-neutral deterministic lever/);
+
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.TESTS_DELETED]);
+  const row = JSON.parse(fs.readFileSync(path.join(root, ".jig", "plan.json"), "utf-8"))
+    .rows.find((r) => r.classId === "tests-deleted");
+  assert.equal(row.cells["human-editor"].grade, "GAP");
+  assert.equal(row.cells["human-editor"].artifact, null);
+  assert.match(row.cells["human-editor"].why, /no earlier version to count against/);
+});
+
 test("a plan with neither a selection nor an authored check is a refusal", () => {
   const root = nodeProject();
   assert.throws(() => engine.cmdPlan(root, { _: [], change: [], select: "  ,  " }),
@@ -244,6 +405,31 @@ test("the generated config passes the runner's own validator, guard for guard", 
     assert.ok(fs.existsSync(path.join(root, ".jig", "checks", guard.check + ".check.mjs")),
       guard.id + " names a check that is not installed");
   }
+});
+
+// 2.11.0 / C6. Teaching is opt-in per guard, and the authored detector is the
+// only place an owner can say so — the key shipped read-only, so the sole route
+// in was hand-editing the file this release's own guards exist to deny.
+const TEACHING_CATCH = A.authored({
+  id: "teaching-catch",
+  title: "A swallowed error, said out loud rather than blocked",
+  detectors: [
+    { lever: "edit-observe-guard", actor: "claude-session", confidence: "deterministic",
+      teach: true, params: { patterns: [A.CATCH_PATTERN] } },
+  ],
+  fixtures: A.EMPTY_CATCH.fixtures,
+  deny: A.DENY_CATCH,
+});
+
+test("a detector authored to teach installs a guard that does, and one that was not does not", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [TEACHING_CATCH, A.EMPTY_CATCH]);
+  const guards = JSON.parse(fs.readFileSync(path.join(root, ".jig", "config.json"), "utf-8")).guards;
+  const row = (id) => guards.find((g) => g.id.startsWith(id));
+  assert.equal(row("teaching-catch").teach, true);
+  assert.equal("teach" in row("empty-catch"), false,
+    "a guard nobody asked to teach was given the key anyway");
+  assert.deepEqual(lib.validateConfig({ schemaVersion: 1, guards }).problems, []);
 });
 
 test("the generated config carries no key that could become a matcher", () => {
@@ -699,6 +885,90 @@ test("the selftest proves a paired-change check from its change-set fixtures alo
   // the report names every file whose pair is missing, not just the first.
   assert.equal(result.hits, 2);
   assert.equal(result.nearMissHits, 0);
+});
+
+// ---------------------------------------------------------------------------
+// The removal kind, through the installed driver
+// ---------------------------------------------------------------------------
+//
+// This driver reads the tree as it is and has no earlier version to compare, so
+// a removal class is a disclosed skip here and is proven from its own fixture
+// pair — which carries the file before an edit and the file after it.
+
+test("a removal class is skipped by a run that has only the tree as it is", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.TESTS_DELETED]);
+  fs.writeFileSync(path.join(root, "src", "a.test.js"), "it('a', () => {});\n");
+  const { status, out } = driverJson(root);
+  assert.deepEqual(out.findings, []);
+  assert.equal(status, 0);
+  assert.equal(out.skipped.length, 1);
+  assert.equal(out.skipped[0].id, "tests-deleted");
+  assert.match(out.skipped[0].why, /only visible between two versions of a file/);
+  // And it does not send the owner to a lane this check does not reach: the
+  // session lane watches a removal through an edit guard, and this module has
+  // none, so nothing anywhere watches it.
+  assert.match(out.skipped[0].why, /carries no session guard either, so nothing watches it/);
+});
+
+test("a removal the session lane does watch is skipped here and says where it is caught", () => {
+  const twinned = A.authored({
+    id: "tests-deleted-twinned",
+    title: "Fewer test cases after the edit than before it",
+    detectors: [
+      { lever: "check-driver", actor: "human-editor", confidence: "heuristic",
+        params: { paths: ["**/*.test.js"], removed: [A.TEST_COUNT_PATTERN] } },
+      { lever: "edit-guard", actor: "claude-session", confidence: "heuristic",
+        params: { paths: ["**/*.test.js"], removed: [A.TEST_COUNT_PATTERN] } },
+    ],
+    fixtures: A.TESTS_DELETED.fixtures,
+    deny: A.TESTS_DELETED.deny,
+  });
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [twinned]);
+  const { out } = driverJson(root);
+  assert.equal(out.skipped[0].id, "tests-deleted-twinned");
+  assert.match(out.skipped[0].why, /this class is watched where the edit happens/);
+});
+
+// A module carrying a removal detector AND something this run evaluates is NOT
+// skipped: `skipped` means the class was not evaluated, and a class reported in
+// both lists at once makes the word mean two things in one run.
+const MIXED_KIND = A.authored({
+  id: "mixed-kind",
+  title: "A focused test, and a case count that went down",
+  detectors: [
+    { lever: "check-driver", actor: "human-editor", confidence: "deterministic",
+      params: { paths: ["**/*.test.js"], patterns: ["\\bit\\.only\\s*\\("] } },
+    { lever: "check-driver", actor: "human-editor", confidence: "heuristic",
+      params: { paths: ["**/*.test.js"], removed: [A.TEST_COUNT_PATTERN] } },
+  ],
+  fixtures: {
+    violation: "it('a', () => {});\nit.only('b', () => {});\n--- after\nit.only('b', () => {});\n",
+    nearMiss: "it('a', () => {});\n--- after\nit('a', () => { expect(1).toBe(1); });\n",
+  },
+  deny: A.TESTS_DELETED.deny,
+});
+
+test("a module the run does evaluate is not also reported skipped for its removal detector", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [MIXED_KIND]);
+  fs.writeFileSync(path.join(root, "src", "a.test.js"), "it.only('a', () => {});\n");
+  const { out } = driverJson(root);
+  assert.deepEqual(out.findings.map((f) => f.classId), ["mixed-kind"]);
+  assert.deepEqual(out.skipped, [], "the class was reported found and skipped in the same run");
+});
+
+test("the selftest proves a removal check from the two halves of its own fixture", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.TESTS_DELETED]);
+  const run = driver(root, ["--selftest", "--json"]);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  const result = JSON.parse(run.stdout).selftest.find((r) => r.id === "tests-deleted");
+  assert.equal(result.caught, true, result && result.why);
+  assert.equal(result.hits, 1);
+  assert.equal(result.nearMissHits, 0);
+  assert.equal(result.seeded, "fixture.test.js");
 });
 
 // ---------------------------------------------------------------------------
@@ -1176,6 +1446,33 @@ test("a guard scoped to a directory is witnessed at a path its own globs match",
   install(root, { "no-ci": true }, [scoped]);
   const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
   const probe = result.probes.find((p) => p.probe === "scoped-catch-edit-observe-guard-0");
+  assert.equal(probe.caught, true, probe && (probe.why || probe.output));
+  assert.equal(result.witnessed, true);
+});
+
+// 2.11.0 / C2: an `edit-guard` runs at PreToolUse, and so does a `bash-guard`.
+// A probe built from the EVENT hands the edit lever a Bash payload carrying its
+// violation as a command, and the close then reports `caught: false` for a guard
+// that works. What to send is the detector's lever's answer.
+test("an edit guard that denies at PreToolUse is witnessed with the edit it refuses", () => {
+  const prevented = A.authored({
+    id: "prevented-catch",
+    title: "A swallowed error, refused before it is written",
+    detectors: [
+      { lever: "edit-guard", actor: "claude-session", confidence: "deterministic",
+        params: { patterns: [A.CATCH_PATTERN], paths: ["src/**/*.js"] } },
+      { lever: "check-driver", actor: "human-editor", confidence: "deterministic",
+        params: { patterns: [A.CATCH_PATTERN], paths: ["src/**/*.js"] } },
+    ],
+    fixtures: A.EMPTY_CATCH.fixtures,
+    deny: A.DENY_CATCH,
+  });
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [prevented]);
+  const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
+  const probe = result.probes.find((p) => p.probe === "prevented-catch-edit-guard-0");
+  assert.equal(probe.event, "PreToolUse");
+  assert.match(probe.command, /"tool_name":"Write"/);
   assert.equal(probe.caught, true, probe && (probe.why || probe.output));
   assert.equal(result.witnessed, true);
 });

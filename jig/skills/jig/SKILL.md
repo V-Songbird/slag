@@ -63,18 +63,39 @@ upgrade it in place first:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" migrate
 ```
 
-`already on the pair shape` is the normal answer on a current install. It is not
-a problem and it is not worth a sentence — read it and move on. Any other
-refusal is real: `migrate` writes nothing unless the whole migration can land,
-and it refuses outright over an artifact somebody edited by hand. Name the file
-it reports and stop there.
+`already on the pair shape` with nothing else on it is the normal answer on a
+current install. It is not a problem and it is not worth a sentence — read it
+and move on. Any other refusal is real: `migrate` writes nothing unless the
+whole migration can land, and it refuses outright over an artifact somebody
+edited by hand. Name the file it reports and stop there.
 
-When it does run, it rewrites every installed check into the violation and
-near-miss pair shape, carries each guard's ledger history forward under its new
-name, and lands as one journaled transaction that `revert` undoes like any
+When the 1.0.1 pass runs, it rewrites every installed check into the violation
+and near-miss pair shape, carries each guard's ledger history forward under its
+new name, and lands as one journaled transaction that `revert` undoes like any
 other. Every rewritten check faces the same admission test an authored one
 faces, so one whose pair does not pass is discarded and reported rather than
 quietly carried over. Say which guards were discarded and why.
+
+A check that cannot be proven takes its guards with it, and `migrate` will not
+remove a guard the owner has not seen. It refuses before it writes anything,
+naming every guard it would drop with its mode and the reason. Put that list to
+the owner as it is — an `[armed]` row is enforcement they are about to lose —
+and only then run `migrate --accept-drops`. There is nothing to repair first:
+the drop is what the pair test decided, and the flag says the list was read.
+
+There is a second pass, and it hands back a plan instead of applying one. An
+install made before 2.11.0 watches edits with `edit-observe-guard`, which denies
+at PostToolUse — after the host has written the file. `migrate` answers such an
+install with `moving`: one change per check, moving each guard to the
+`edit-guard` lever at PreToolUse and re-recording the proof over the rewritten
+module, because the proof it carries binds the lever it would no longer run.
+Nothing is applied. Show the owner what is moving and apply each change by its
+own `--change/--path` pair, exactly as an install item is applied — the modules
+first and the config last, because the one config change carries every moved row
+at once: a guard whose module change is left unapproved names PreToolUse with a
+module that still declares PostToolUse, warns on every call and guards nothing
+until that module lands too. A guard on `refused` cannot move and keeps running
+as it is — say which, and why.
 
 After that, the drift report, the retire offer and the one re-run question
 belong to `/jig:review`. Hand off there and stop, unless the user says they want
@@ -296,7 +317,7 @@ Each authored check carries, in one module:
 - `module` — the check source itself. A check with no module is discarded
   before it is ever run, because there is nothing to install.
 - the detectors, one `detectors` entry each, every entry naming one `lever`.
-  Five levers can be authored and each needs its own shape:
+  Six levers can be authored and each needs its own shape:
 
   - `check-driver` — the deterministic floor, run by `run.mjs` on a human's
     machine, at commit time and in CI. Its `params` take `paths`, `patterns`,
@@ -308,11 +329,22 @@ Each authored check carries, in one module:
     pattern that fires inside a quoted argument is a false positive here.
     `onlyBranches` narrows a `git push` to the branches named, `<default>`
     meaning the repository's own.
-  - `edit-observe-guard` — a PostToolUse guard over an Edit or a Write. Its
-    `params.patterns` are matched against the text going in, blanked by the same
-    two switches the driver uses; `paths` scopes it exactly as it scopes the
-    driver, and `onlyWhenIntroduced` fires only when the edit adds a match it
-    did not replace.
+  - `edit-guard` — a PreToolUse guard over an Edit or a Write, which denies
+    before the host writes the bytes. Its `params.patterns` are matched against
+    the text going in, blanked by the same two switches the driver uses; `paths`
+    scopes it exactly as it scopes the driver, and `onlyWhenIntroduced` fires
+    only when the edit adds a match it did not replace. `params.removed` is the
+    other kind it reads — see "When the mistake is something being deleted". A
+    detector naming both is proven for both, one at a time. This is the edit
+    lever to author.
+  - `edit-observe-guard` — the same guard one event later, at PostToolUse, so
+    the file is already on disk by the time it fires. Never author a new one. It
+    is still run for the installs that carry it: their recorded proof binds this
+    lever, and `jig.js migrate` is what moves such a guard to `edit-guard` and
+    re-records the proof. Only a detector on this lever may set `teach: true`,
+    which is how the owner opts one observing guard into saying its piece in the
+    transcript; the channel exists on PostToolUse alone and is off unless asked
+    for.
   - `ci-workflow` and `tool-rule` — the class is named in the workflow jig
     writes and in the tool rule it proposes. Neither carries patterns of its
     own, so `params` is empty. A `tool-rule` cell reads DET only where the plan
@@ -321,8 +353,8 @@ Each authored check carries, in one module:
     executes is not coverage.
 
   A session guard's fixture pair is read the way that lever reads it: the
-  `bash-guard` pair is one command per fixture, and the `edit-observe-guard`
-  pair is the text of one edit. Admission runs both through the session
+  `bash-guard` pair is one command per fixture, and an edit lever's pair is the
+  text of one edit. Admission runs both through the session
   runner's own evaluation, at a path the detector's own `paths` match — so a
   lever that misses its violation or fires on its near miss discards the whole
   check. Every lever on a check is proven, or none of them ships.
@@ -336,6 +368,55 @@ Each authored check carries, in one module:
 A check that is heuristic by construction may declare `expectedNearMissHits` up
 front. That declaration is disclosed to the user; it is never a way to quiet a
 check that simply does not work.
+
+### When the owner said their AI sessions are the point
+
+Round one, question one. Answered `Me and my AI sessions`, the laziness
+mistakes — a suite narrowed to one case, a warning suppressed, a stub returned
+in place of the work, an error swallowed — are authored as ONE module carrying
+TWO detectors over the same `patterns` and the same `paths`:
+
+- `check-driver`, the committed floor `run.mjs` reads at commit time and in CI.
+- `edit-guard`, those same patterns at PreToolUse with `onlyWhenIntroduced`, so
+  it denies the edit that ADDS the match and says nothing about the one already
+  in the file.
+
+Authored as a driver alone — which is all an edition class carries, so all
+`--select` installs — a mistake of this kind is caught at commit time and in CI
+and never in the session that produced it. The owner reads it in a pre-commit
+failure, hours after the agent moved on, which is the opposite of the answer
+they gave. Adding the session half is authoring, at this step, per mistake.
+
+```json
+{
+  "id": "focused-test",
+  "detectors": [
+    { "lever": "check-driver",
+      "params": { "paths": ["**/*.test.js"], "patterns": ["\\b(?:describe|it|test)\\s*\\.\\s*only\\s*\\("] } },
+    { "lever": "edit-guard",
+      "params": { "paths": ["**/*.test.js"], "patterns": ["\\b(?:describe|it|test)\\s*\\.\\s*only\\s*\\("],
+        "onlyWhenIntroduced": true } }
+  ],
+  "fixtures": {
+    "violation": "it.only('collapses runs of whitespace', () => {});\n",
+    "nearMiss": "it('collapses runs of whitespace', () => {});\n"
+  }
+}
+```
+
+One fixture pair proves both, because admission runs every detector on a check
+against that check's own `violation` and `nearMiss` — the driver's through the
+blanker, the guard's through the session runner — and either lever missing its
+violation or firing on its near miss discards the whole check. Two detectors do
+not need two pairs; they need one pair that is true of both.
+
+Two limits to tell the user:
+
+- The two detectors are one module and one approval, and the proof hash binds
+  both. Moving the patterns of one and not the other is a new check, not an
+  edit — the guard would claim a proof for something it no longer runs.
+- The guard reads one Edit or Write payload. A match that arrives spread over
+  two calls is a disclosed miss; the driver is what catches that one, at commit.
 
 ### When the mistake is two files drifting apart
 
@@ -374,6 +455,100 @@ a change-set fixture needs no index.
 Two things make one of these useless, and both are worth a second look before
 planning: `paths` so wide that every commit trips it, and a `pairedWith` the
 repository never has, which is the same fault wearing a different hat.
+
+### When the mistake is what stopped being there
+
+The deleted test. The assertion taken out of the test that was left. The case
+dropped from a parameterised list. Nothing in the file is wrong — what is wrong
+is what the file no longer has, and no pattern over one text can read that,
+because the deleted line is absent from the text that remains.
+
+For those, the same `check-driver` detector takes `removed` in place of
+`patterns`. It fires when a pattern it names is in the text an edit **replaced**
+more times than in the text that edit **wrote** — a count going down, not a
+shape being present. Write it when the user describes a mistake as something
+disappearing rather than something appearing.
+
+Its fixtures carry both texts, one side per fixture, with `--- after` on a line
+of its own between them. The violation drops the count; the near miss is an edit
+over the same file that keeps it:
+
+```json
+{
+  "detectors": [{ "lever": "edit-guard",
+    "params": { "paths": ["**/*.test.js"], "removed": ["\\b(?:it|test)\\s*\\("] } }],
+  "fixtures": {
+    "violation": "it('a', () => {});\nit('b', () => {});\n--- after\nit('a', () => {});\n",
+    "nearMiss": "it('a', () => {});\n--- after\nit('a', () => { expect(1).toBe(1); });\n"
+  }
+}
+```
+
+Three limits to tell the user before they approve it, because together they
+decide what it is worth:
+
+- The lever is the session one. An `edit-guard` reads an Edit's `old_string`
+  against its `new_string` and sees the deletion; the committed check driver
+  reads the tree as it is, has no earlier version to count against, and reports a
+  removal detector **skipped** on every run. So a removal on `check-driver` is
+  proven by its pair and caught by nothing — the plan grades that cell `GAP` and
+  stops counting it towards the host-neutral floor. Put the removal on the edit
+  lever.
+- A **Write** payload carries no prior text at all, so a whole-file rewrite that
+  drops half the suite never fires it. That is a disclosed miss, not something to
+  work around.
+- Author it to **observe**. A per-call view cannot see the case being added back
+  two calls later, and a deletion is sometimes right — behaviour that genuinely
+  went away takes its tests with it.
+
+### When the mistake is jig itself being switched off
+
+Everything above sits behind four files nothing watches. `.jig/config.json` says
+which guards are armed, `.jig/checks/**` holds what they run, `.jig/off` silences
+the session lane by existing, and the CI workflow is the floor for everyone who
+never runs a session at all. An agent that edits any of them turns the harness
+off, and until the owner reads a report nothing says so.
+
+So round one offers `jig's own guards being switched off` as a standing option
+(references/interview.md). It is offered on every project, because it is about
+jig rather than about a language — and it is only ever **offered**: nothing here
+is authored unless the owner ticked it, and each check is approved by name at
+step 6 like every other write.
+
+Ticked, write these as ordinary authored checks. Nothing about them is special;
+they are levers already described above, pointed at jig:
+
+| What it watches | Lever | The pair |
+| --- | --- | --- |
+| `.jig/config.json` | `edit-guard`, `paths: [".jig/config.json"]`, `stripStrings: false` | violation: a guard row rewritten to `"mode": "observe"`; near miss: the same file with the row still `"armed"` |
+| `.jig/checks/**` | `edit-guard`, `paths: [".jig/checks/*.check.mjs"]` | violation: a module rewritten with `export const detectors = [];`; near miss: the module with its detectors intact |
+| the CI workflow | `edit-guard`, `paths: [".github/workflows/jig.yml"]` | violation: the jig step given `continue-on-error: true` or `if: false`; near miss: the workflow as jig writes it |
+| `.jig/off` | `bash-guard` | violation: `touch .jig/off`; near miss: a command that names no such path |
+
+Five limits to tell the user, because they decide what this set is worth:
+
+- **The config check needs `stripStrings: false`.** Every token in JSON lives
+  inside a string, and the blanker strips string contents by default — so over
+  `.jig/config.json` a pattern for `"mode": "observe"` reads a file of blanks,
+  fires on nothing, and the check is discarded at admission. The other three read
+  source or YAML and take the defaults.
+- **Never give one of these a `check-driver` detector.** The driver's walk skips
+  `.git`, `.jig`, `node_modules`, `dist`, `build`, `out`, `coverage`, `.next`,
+  `.nuxt`, `.svelte-kit`, `.venv`, `venv`, `vendor` and `target`, so a driver
+  detector scoped inside one of them passes its fixture pair and then reads every
+  real file past it. The plan grades such a cell `GAP`, "the check driver never
+  walks `.jig/`", and stops counting it towards the host-neutral floor; a
+  workflow check under `.github/` is not affected and may carry one.
+- `.jig/off` is reachable by `touch`, so the lever that catches it is the Bash
+  one. An `edit-guard` cannot: a `Write` that creates an empty file carries no
+  text for a pattern to read, and a rule that fired on the path alone could not
+  be admitted — its near miss lands at the same path and would fire too.
+- These guards deny at PreToolUse, so they refuse the call rather than report the
+  file afterwards. Nothing catches a change made outside the session — the whole
+  set is a guard on agents, not on people.
+- Editing a check module breaks its proof hash, which already pulls that guard
+  back to observe on the next call. The guard over `.jig/checks/**` is what says
+  so before the byte lands instead of after.
 
 Write the drafted checks to `.jig/authored.json`, as a `checks` array holding
 one object per check, and hand that file to step 5.

@@ -499,7 +499,7 @@ test("release gate: a class nothing host-neutral catches is a reported gap, neve
 // G1 — the fixture pair, over everything shipped
 // ---------------------------------------------------------------------------
 
-test("release gate G1: no check ships whose fixture pair fails — all 141 pairs, six editions", () => {
+test("release gate G1: no check ships whose fixture pair fails — all 147 pairs, six editions", () => {
   const index = editions.loadIndex(PLUGIN_ROOT);
   const failures = [];
   let pairs = 0;
@@ -516,7 +516,7 @@ test("release gate G1: no check ships whose fixture pair fails — all 141 pairs
     }
   }
   assert.deepEqual(failures, [], "a shipped check fires on its own near miss or misses its own violation");
-  assert.equal(pairs, 141, "the six editions ship " + pairs + " pairs and this gate is written for 141");
+  assert.equal(pairs, 147, "the six editions ship " + pairs + " pairs and this gate is written for 147");
 });
 
 // ---------------------------------------------------------------------------

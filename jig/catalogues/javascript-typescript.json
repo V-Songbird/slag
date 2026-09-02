@@ -321,7 +321,7 @@
         "violation": "import { describe, it, expect } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\ndescribe('parseCron', () => {\n  it('rejects a six-field expression with a bad day-of-week', () => {});\n\n  it('normalises @daily to the five-field form', function () {});\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *').minute).toBe('*/5');\n  });\n});\n",
         "nearMiss": "import { describe, it, expect, beforeEach } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\nconst test = () => ({ minute: '0' });\n\ndescribe('parseCron', () => {\n  beforeEach(() => {});\n\n  it('rejects a six-field expression with a bad day-of-week', () => {\n    expect(() => parseCron('0 0 0 0 0 9')).toThrow(/day-of-week/);\n  });\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *')).toStrictEqual(test());\n  });\n});\n"
       },
-      "gapNotes": "Only catches the shell left behind. A test file deleted outright leaves no source to match — that needs a git-diff detector comparing test counts between revisions, which this lever does not have. It also misses a body reduced to a single trivially true assertion such as expect(true).toBe(true); vitest/expect-expect sees an assertion there and passes it. An empty beforeEach/afterEach hook is deliberately not matched, which means a suite gutted by moving its work into a now-empty hook slips through.",
+      "gapNotes": "Only catches the shell left behind. A test deleted outright leaves no source to match, which is what the `test-count-dropped` class in this edition reads instead — it counts `it(` in the text an edit replaced against the text it wrote. It also misses a body reduced to a single trivially true assertion such as expect(true).toBe(true); vitest/expect-expect sees an assertion there and passes it. An empty beforeEach/afterEach hook is deliberately not matched, which means a suite gutted by moving its work into a now-empty hook slips through.",
       "evidence": {
         "tier": "documented",
         "source": "Rule vitest/expect-expect confirmed in the @vitest/eslint-plugin rule list."
@@ -1530,6 +1530,45 @@
       "evidence": {
         "tier": "documented",
         "source": "ESLint core rule eqeqeq and its 'always' option, from the ESLint rules reference."
+      }
+    },
+    {
+      "id": "test-count-dropped",
+      "title": "Fewer test cases after the edit than before it",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Deletes the failing test case and reports the suite green",
+        "Trims a parameterised case list down to the inputs that already pass",
+        "Removes the whole case rather than the assertion inside it, so no empty test body is left to find"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "removed": [
+              "\\b(?:it|test)\\s*\\("
+            ],
+            "paths": [
+              "**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": true
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import { describe, it, expect } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\ndescribe('parseCron', () => {\n  it('rejects a six-field expression with a bad day-of-week', () => {\n    expect(() => parseCron('0 0 0 0 0 9')).toThrow(/day-of-week/);\n  });\n\n  it('normalises @daily to the five-field form', () => {\n    expect(parseCron('@daily').minute).toBe('0');\n  });\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *').minute).toBe('*/5');\n  });\n});\n--- after\nimport { describe, it, expect } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\ndescribe('parseCron', () => {\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *').minute).toBe('*/5');\n  });\n});\n",
+        "nearMiss": "import { describe, it, expect } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\ndescribe('parseCron', () => {\n  it('rejects a six-field expression with a bad day-of-week', () => {\n    expect(parseCron('0 0 0 0 0 9')).toBe(null);\n  });\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *').minute).toBe('*/5');\n  });\n});\n--- after\nimport { describe, it, expect } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\ndescribe('parseCron', () => {\n  it('rejects a six-field expression with a bad day-of-week', () => {\n    expect(() => parseCron('0 0 0 0 0 9')).toThrow(/day-of-week/);\n  });\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *').minute).toBe('*/5');\n  });\n});\n"
+      },
+      "gapNotes": "A removal is not in any file's content — the deleted case is absent from the file that is left, so the committed check driver reports this class skipped on a normal run and proves it only from the fixture pair, which carries the file before the edit and the file after it. Nothing in this catalogue watches it — a catalogue never carries a session guard — so the class ships as a named mistake with a proven pair and no lane, and the plan grades that cell GAP. The lane is an authored `edit-guard` on the same removal rule, which reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a `describe` block is seen, and a Write payload carries none, so a whole-file rewrite that drops a spec file is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right — behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "No tool in the JavaScript and TypeScript ecosystem gates on a drop in test count between two revisions; the runners report what they discovered, never what they stopped discovering. The judgement that a shrinking suite is a defect is jig's own."
       }
     }
   ]

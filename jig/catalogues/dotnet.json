@@ -1361,6 +1361,45 @@
         "tier": "documented",
         "source": "Microsoft Learn code quality rule CA2100 'Review SQL queries for security vulnerabilities'; the rule targets IDbCommand.CommandText built from string arguments."
       }
+    },
+    {
+      "id": "test-count-dropped",
+      "title": "Fewer test cases after the edit than before it",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Deletes the failing test case and reports the suite green",
+        "Trims a parameterised case list down to the inputs that already pass",
+        "Removes the whole case rather than the assertion inside it, so no empty test body is left to find"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "removed": [
+              "\\[\\s*(?:Fact|Theory|TestMethod|Test)\\b"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System;\nusing Xunit;\n\nnamespace Example.Billing.Tests;\n\npublic class InvoiceTests\n{\n    private readonly Invoice _invoice = new();\n\n    [Fact]\n    public void TotalsASingleLine()\n    {\n        Assert.Equal(1200, _invoice.TotalDue(Line.Of(\"seat\", 1200)));\n    }\n\n    [Fact]\n    public void AppliesTheAnnualDiscount()\n    {\n        Assert.Equal(1080, _invoice.TotalDue(Line.Of(\"seat\", 1200), Term.Annual));\n    }\n\n    [Fact]\n    public void RejectsANegativeLine()\n    {\n        Assert.Throws<ArgumentOutOfRangeException>(() => _invoice.TotalDue(Line.Of(\"seat\", -1)));\n    }\n}\n--- after\nusing System;\nusing Xunit;\n\nnamespace Example.Billing.Tests;\n\npublic class InvoiceTests\n{\n    private readonly Invoice _invoice = new();\n\n    [Fact]\n    public void TotalsASingleLine()\n    {\n        Assert.Equal(1200, _invoice.TotalDue(Line.Of(\"seat\", 1200)));\n    }\n}\n",
+        "nearMiss": "using System;\nusing Xunit;\n\nnamespace Example.Billing.Tests;\n\npublic class InvoiceTests\n{\n    private readonly Invoice _invoice = new();\n\n    [Fact]\n    public void TotalsASingleLine()\n    {\n        Assert.Equal(1200, _invoice.TotalDue(Line.Of(\"seat\", 1200)));\n    }\n\n    [Fact]\n    public void RejectsANegativeLine()\n    {\n        Assert.Equal(0, _invoice.TotalDue(Line.Of(\"seat\", -1)));\n    }\n}\n--- after\nusing System;\nusing Xunit;\n\nnamespace Example.Billing.Tests;\n\npublic class InvoiceTests\n{\n    private readonly Invoice _invoice = new();\n\n    [Fact]\n    public void TotalsASingleLine()\n    {\n        Assert.Equal(1200, _invoice.TotalDue(Line.Of(\"seat\", 1200)));\n    }\n\n    [Fact]\n    public void RejectsANegativeLine()\n    {\n        Assert.Throws<ArgumentOutOfRangeException>(() => _invoice.TotalDue(Line.Of(\"seat\", -1)));\n    }\n}\n"
+      },
+      "gapNotes": "A removal is not in any file's content \u2014 the deleted case is absent from the file that is left, so the committed check driver reports this class skipped on a normal run and proves it only from the fixture pair, which carries the file before the edit and the file after it. Nothing in this catalogue watches it — a catalogue never carries a session guard — so the class ships as a named mistake with a proven pair and no lane, and the plan grades that cell GAP. The lane is an authored `edit-guard` on the same removal rule, which reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a test class is seen, and a Write payload carries none, so a whole-file rewrite that drops a test class is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right \u2014 behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "No tool in the .NET ecosystem gates on a drop in test count between two revisions; the runners report what they discovered, never what they stopped discovering. The judgement that a shrinking suite is a defect is jig's own."
+      }
     }
   ]
 }

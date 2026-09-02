@@ -21,12 +21,24 @@ const DISCARDED_FILE = "discarded.json";
 // `check-driver` detectors — so an authored check and a catalogue class go
 // through one admission with one shape, rather than admission carrying a
 // second contract forever.
-function driverUnits(check, id) {
+function driverUnits(check) {
+  return sourceUnits(check, "patterns");
+}
+
+// The removal kind reads the same way a pattern kind does — same language, same
+// blanking, same regular expressions — and differs only in which of the two
+// texts it counts them in. So both are built here off the params key that holds
+// them.
+function removedUnits(check) {
+  return sourceUnits(check, "removed");
+}
+
+function sourceUnits(check, key) {
   const dets = (check.detectors || []).filter((d) => d && d.lever === "check-driver");
   const units = [];
   for (const det of dets) {
     const p = det.params || {};
-    const patterns = (p.patterns || []).filter((s) => typeof s === "string" && s.length);
+    const patterns = (p[key] || []).filter((s) => typeof s === "string" && s.length);
     if (!patterns.length) continue;
     // The fixture is text, not a file on disk, but the blanker reads comment
     // and string syntax off a filename — so the detector's own first path glob
@@ -61,23 +73,51 @@ function pairedUnits(check) {
   return units;
 }
 
-// The two session levers, and the hook runner each is proven under. A session
-// guard is proven by the runner's OWN evaluation — injected, the way the
-// blanker and the glob matcher are — because a second matcher here is exactly
-// what let a bash-guard whose pattern matched nothing ship under a printed
-// proof. A patternless session detector is NOT skipped the way an empty
-// check-driver unit is: an empty driver unit mints no guard row and this one
-// mints an armed guard with a coverage cell, so it comes in as a unit and fails
-// on its own violation like any other lever that catches nothing.
-const SESSION_RUNNERS = { "bash-guard": "PreToolUse", "edit-observe-guard": "PostToolUse" };
+// The session levers, and what each one READS. A session guard is proven by the
+// runner's OWN evaluation — injected, the way the blanker and the glob matcher
+// are — because a second matcher here is exactly what let a bash-guard whose
+// pattern matched nothing ship under a printed proof. A patternless session
+// detector is NOT skipped the way an empty check-driver unit is: an empty driver
+// unit mints no guard row and this one mints an armed guard with a coverage
+// cell, so it comes in as a unit and fails on its own violation like any other
+// lever that catches nothing.
+//
+// The kind is what a fixture pair IS — a command, or the text of one edit — and
+// it is no longer the same question as which event the lever runs on:
+// `edit-guard` and `bash-guard` both run at PreToolUse and read nothing alike.
+const SESSION_KINDS = { "bash-guard": "bash", "edit-guard": "edit", "edit-observe-guard": "edit" };
+
+// What a session detector matches WITH. An edit detector may name both, and each
+// is proven on its own: one evaluation over the whole detector fires on either,
+// so a `removed` rule nothing exercised would ride into an armed guard under the
+// patterns' proof and refuse calls nobody demonstrated.
+const SESSION_PARAMS = ["patterns", "removed"];
 
 function sessionUnits(check) {
   const units = [];
   (check.detectors || []).forEach((det, i) => {
-    const runner = det && SESSION_RUNNERS[det.lever];
+    const kind = det && SESSION_KINDS[det.lever];
+    if (!kind) return;
     // The lever is named the way `adaptAuthoredDetector` names it, so the id a
     // discard reports is the id the plan and the manifest print.
-    if (runner) units.push({ id: det.lever + "-" + i, runner, det });
+    const id = det.lever + "-" + i;
+    const params = det.params || {};
+    const keys = SESSION_PARAMS.filter((k) => Array.isArray(params[k]) && params[k].length);
+    // A matcherless session detector is NOT skipped the way an empty check-driver
+    // unit is: it mints an armed guard with a coverage cell, so it comes in as a
+    // unit and fails on its own violation like any other lever that catches
+    // nothing.
+    if (!keys.length) { units.push({ id, kind, key: null, det }); return; }
+    for (const key of keys) {
+      const only = { ...params };
+      for (const other of SESSION_PARAMS) if (other !== key) delete only[other];
+      units.push({
+        id: keys.length > 1 ? id + " (" + key + ")" : id,
+        kind,
+        key,
+        det: { ...det, params: only },
+      });
+    }
   });
   return units;
 }
@@ -100,12 +140,47 @@ function matchesAny(rel, globs, match) {
   return globs.some((g) => match(g).test(rel));
 }
 
+// The removal fixture, split. A removal is not visible in one file's content —
+// every deleted line is absent from the after text and present in the before, so
+// what a fixture has to carry is both. `--- after` on a line of its own is the
+// fence, and a side without one is not a pair this rule can read: it is thrown
+// on rather than guessed at, because a check admitted over half a fixture would
+// claim coverage nobody demonstrated.
+function fencedHalves(text) {
+  const at = text.search(/^--- after$/m);
+  if (at === -1) return null;
+  const nl = text.indexOf("\n", at);
+  return { before: text.slice(0, at), after: nl === -1 ? "" : text.slice(nl + 1) };
+}
+
+// The removal detector's whole rule, written once so admission and the shipped
+// driver cannot answer it differently: some pattern this detector names is in
+// the before text more times than it is in the after text.
+//
+// `.some()` over the patterns rather than each one in turn, the way the paired
+// rule counts once for its whole unit. A removal detector's patterns are
+// alternative spellings of one declaration — JUnit's `@Test` and a Kotlin test
+// function, `it(` and `test(` — and no single fixture can drop every dialect at
+// once, so per-pattern accounting would make a two-dialect check unwritable.
+function removedFires(units, halves, blank) {
+  return units.some((u) => {
+    const before = blank(halves.before, u.filename, u.opts);
+    const after = blank(halves.after, u.filename, u.opts);
+    return u.patterns.some((p) => countOf(before, p) > countOf(after, p));
+  });
+}
+
+function countOf(text, pattern) {
+  return (text.match(new RegExp(pattern, "g")) || []).length;
+}
+
 // What a passing check has to have fired. One per pattern, plus one for the
 // paired rule if the check carries one — the same total `ownPair` counts up to,
 // because a mismatch between the two would discard every check silently.
-function patternCount(check, id) {
-  return driverUnits(check, id).reduce((n, u) => n + u.patterns.length, 0) +
-    (pairedUnits(check).length ? 1 : 0) + sessionUnits(check).length;
+function patternCount(check) {
+  return driverUnits(check).reduce((n, u) => n + u.patterns.length, 0) +
+    (pairedUnits(check).length ? 1 : 0) + (removedUnits(check).length ? 1 : 0) +
+    sessionUnits(check).length;
 }
 
 function checkId(check) {
@@ -142,10 +217,11 @@ function ownPair(check, blank, match, evaluate) {
     throw new Error(`admission: check "${id}" cannot be tested — no blanker function was injected`);
   }
   const { violation, nearMiss } = fixturesOf(check, id);
-  const units = driverUnits(check, id);
+  const units = driverUnits(check);
   const paired = pairedUnits(check);
+  const removed = removedUnits(check);
   const session = sessionUnits(check);
-  if (!units.length && !paired.length && !session.length) {
+  if (!units.length && !paired.length && !removed.length && !session.length) {
     throw new Error(
       `admission: check "${id}" declares no check-driver patterns, so there is nothing to prove against its fixtures`,
     );
@@ -159,6 +235,18 @@ function ownPair(check, blank, match, evaluate) {
   if (session.length && typeof evaluate !== "function") {
     throw new Error(`admission: check "${id}" carries the session lever(s) ${session.map((u) => u.id).join(", ")} ` +
       "and no session evaluator was injected — it cannot be tested");
+  }
+  // A removal is only visible between two texts, so both halves of the pair have
+  // to carry the fence — whichever lever reads them. The session levers are held
+  // to it too: unfenced, their evaluation sees an empty before and the check
+  // would be discarded under a reason naming the pattern rather than the missing
+  // half of the fixture.
+  if (removed.length || session.some((u) => u.key === "removed")) {
+    for (const [half, text] of [["violation", violation], ["nearMiss", nearMiss]]) {
+      if (fencedHalves(text)) continue;
+      throw new Error(`admission: check "${id}" carries a removal detector and its ${half} fixture has no ` +
+        "`--- after` fence — a removal is only visible between the file before an edit and the file after it");
+    }
   }
 
   let violationHits = 0;
@@ -200,21 +288,44 @@ function ownPair(check, blank, match, evaluate) {
     }
   }
 
+  // The removal half. Each side of the pair is one file before an edit and the
+  // same file after it, and the rule is the difference between the two counts:
+  // the violation deleted something the near miss kept. One unit, one hit, so
+  // the totals stay comparable with the other two kinds.
+  if (removed.length) {
+    const halves = { violation: fencedHalves(violation), nearMiss: fencedHalves(nearMiss) };
+    let onViolation;
+    let onNearMiss;
+    try {
+      onViolation = removedFires(removed, halves.violation, blank);
+      onNearMiss = removedFires(removed, halves.nearMiss, blank);
+    } catch (err) {
+      throw new Error(`admission: check "${id}" has an unusable removal pattern — ${err.message}`);
+    }
+    if (onViolation) violationHits++;
+    else missed.push("removal");
+    if (onNearMiss) {
+      nearMissHits++;
+      falsePositives.push("removal");
+    }
+  }
+
   // The session half. Each lever is run through the hook runner's own
   // evaluation over the same fixture pair, and counts one hit exactly as the
   // paired rule does. A lever that misses its violation or fires on its near
   // miss discards the WHOLE check: a check is one promise, and half a promise
   // printed as coverage is the defect this closes.
   for (const unit of session) {
-    if (evaluate(unit.det, unit.runner, violation)) violationHits++;
+    if (evaluate(unit.det, violation)) violationHits++;
     else missed.push(unit.id);
-    if (evaluate(unit.det, unit.runner, nearMiss)) {
+    if (evaluate(unit.det, nearMiss)) {
       nearMissHits++;
       falsePositives.push(unit.id);
     }
   }
 
-  const total = units.reduce((n, u) => n + u.patterns.length, 0) + (paired.length ? 1 : 0) + session.length;
+  const total = units.reduce((n, u) => n + u.patterns.length, 0) + (paired.length ? 1 : 0) +
+    (removed.length ? 1 : 0) + session.length;
   const passes = violationHits === total && nearMissHits === 0;
   const reasons = [];
   if (missed.length) {
@@ -236,7 +347,11 @@ function ownPair(check, blank, match, evaluate) {
 // somebody's Python, proves nothing about either and would fail at random.
 // The session levers are a third kind and cross the same way: a bash-guard
 // against another bash-guard's near-miss command, an edit guard against another
-// edit guard's near-miss source, never across the two.
+// edit guard's near-miss source, never across the two. The kind is the lever's,
+// not the event's — since 2.11.0 both kinds run at PreToolUse.
+// Removal is a fourth, and crosses only among removal kinds for the same reason
+// the paired kind does: its near miss is a fenced before/after pair, and no
+// other kind's fixture is one.
 function crossNearMiss(checks, blank, match, evaluate) {
   if (!Array.isArray(checks)) throw new Error("admission: crossNearMiss expects an array of checks");
   if (typeof blank !== "function") throw new Error("admission: crossNearMiss needs the blanker function injected");
@@ -244,9 +359,10 @@ function crossNearMiss(checks, blank, match, evaluate) {
   for (const owner of checks) {
     const ownerId = checkId(owner);
     const { nearMiss } = fixturesOf(owner, ownerId);
-    const ownerUnits = driverUnits(owner, ownerId);
+    const ownerUnits = driverUnits(owner);
     const ownerPaired = pairedUnits(owner);
-    const ownerRunners = new Set(sessionUnits(owner).map((u) => u.runner));
+    const ownerHalves = removedUnits(owner).length ? fencedHalves(nearMiss) : null;
+    const ownerKinds = new Set(sessionUnits(owner).map((u) => u.kind));
     for (const runner of checks) {
       const runnerId = checkId(runner);
       if (runnerId === ownerId) continue;
@@ -256,7 +372,7 @@ function crossNearMiss(checks, blank, match, evaluate) {
         // reading it was written for. Only the strip flags come from the
         // reader, because those are its own reading of source.
         const ownerName = ownerUnits[0].filename;
-        for (const unit of driverUnits(runner, runnerId)) {
+        for (const unit of driverUnits(runner)) {
           const blanked = blank(nearMiss, ownerName, unit.opts);
           for (const pattern of unit.patterns) {
             if (fires(blanked, pattern, unit.perLine)) {
@@ -273,6 +389,14 @@ function crossNearMiss(checks, blank, match, evaluate) {
           pairedFires(runnerPaired, changeSet(nearMiss), match)) {
         rows.push({ check: runnerId, foreignCheck: ownerId, pattern: "paired-change" });
       }
+      // And a removal check that reads every edit as a deletion: a pattern the
+      // language sheds on any rewrite drops in count somewhere eventually, and
+      // its own violation cannot show that. Another removal check's near miss —
+      // an edit that deliberately kept the count — is the sample that finds it.
+      const runnerRemoved = removedUnits(runner);
+      if (ownerHalves && runnerRemoved.length && removedFires(runnerRemoved, ownerHalves, blank)) {
+        rows.push({ check: runnerId, foreignCheck: ownerId, pattern: "removal" });
+      }
       // And the session levers. A bash-guard whose pattern matches every command
       // still fires on its own violation and can still dodge its own near miss;
       // somebody else's near-miss command is the only sample it was not
@@ -280,8 +404,8 @@ function crossNearMiss(checks, blank, match, evaluate) {
       // own pair").
       if (typeof evaluate === "function") {
         for (const unit of sessionUnits(runner)) {
-          if (!ownerRunners.has(unit.runner)) continue;
-          if (evaluate(unit.det, unit.runner, nearMiss)) {
+          if (!ownerKinds.has(unit.kind)) continue;
+          if (evaluate(unit.det, nearMiss)) {
             rows.push({ check: runnerId, foreignCheck: ownerId, pattern: unit.id });
           }
         }
@@ -392,7 +516,7 @@ function admit(checks, blank, opts) {
     try {
       expected = declaredNearMissHits(check, id);
       result = ownPair(check, blank, o.match, o.evaluate);
-      total = patternCount(check, id);
+      total = patternCount(check);
     } catch (err) {
       discarded.push({ id, why: err.message });
       continue;
@@ -462,6 +586,9 @@ function proofHash(checkSource, violation, nearMiss) {
 }
 
 module.exports = {
+  SESSION_KINDS,
+  SESSION_PARAMS,
+  fencedHalves,
   ownPair,
   crossNearMiss,
   admit,

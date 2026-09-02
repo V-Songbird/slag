@@ -5,7 +5,7 @@
       "id": "dotnet",
       "displayName": "C# / .NET (dotnet CLI, csproj, NuGet)",
       "file": "dotnet.json",
-      "classCount": 24,
+      "classCount": 25,
       "detect": {
         "files": [
           "*.csproj",
@@ -41,7 +41,7 @@
       "id": "go",
       "displayName": "Go (go modules, go toolchain)",
       "file": "go.json",
-      "classCount": 23,
+      "classCount": 24,
       "detect": {
         "files": [
           "go.mod",
@@ -69,7 +69,7 @@
       "id": "javascript-typescript",
       "displayName": "JavaScript & TypeScript",
       "file": "javascript-typescript.json",
-      "classCount": 25,
+      "classCount": 26,
       "detect": {
         "files": [
           "package.json",
@@ -111,7 +111,7 @@
       "id": "jvm",
       "displayName": "Java & Kotlin (Gradle / Maven)",
       "file": "jvm.json",
-      "classCount": 21,
+      "classCount": 22,
       "detect": {
         "files": [
           "build.gradle.kts",
@@ -143,7 +143,7 @@
       "id": "python",
       "displayName": "Python",
       "file": "python.json",
-      "classCount": 25,
+      "classCount": 26,
       "detect": {
         "files": [
           "pyproject.toml",
@@ -174,7 +174,7 @@
       "id": "rust",
       "displayName": "Rust (cargo / Cargo.toml / workspaces)",
       "file": "rust.json",
-      "classCount": 23,
+      "classCount": 24,
       "detect": {
         "files": [
           "Cargo.toml",

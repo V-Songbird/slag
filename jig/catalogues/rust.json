@@ -1502,6 +1502,45 @@
         "tier": "reasoned",
         "source": "The full Clippy lint index was searched for a dyn Any / downcast lint and none exists; std::any::Any and downcast_ref are documented in the std library reference."
       }
+    },
+    {
+      "id": "test-count-dropped",
+      "title": "Fewer test cases after the edit than before it",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Deletes the failing test case and reports the suite green",
+        "Trims a parameterised case list down to the inputs that already pass",
+        "Removes the whole case rather than the assertion inside it, so no empty test body is left to find"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "removed": [
+              "#\\s*\\[\\s*(?:\\w+::)*test\\s*\\]"
+            ],
+            "paths": [
+              "**/*.rs"
+            ],
+            "stripComments": true,
+            "stripStrings": true
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn totals_a_single_line() {\n        assert_eq!(total_due(&[Line::new(\"seat\", 1200)]), 1200);\n    }\n\n    #[test]\n    fn applies_the_annual_discount() {\n        assert_eq!(total_due_term(&[Line::new(\"seat\", 1200)], \"annual\"), 1080);\n    }\n\n    #[test]\n    fn rejects_a_negative_line() {\n        assert!(total_due_checked(&[Line::new(\"seat\", -1)]).is_err());\n    }\n}\n--- after\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn totals_a_single_line() {\n        assert_eq!(total_due(&[Line::new(\"seat\", 1200)]), 1200);\n    }\n}\n",
+        "nearMiss": "#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn totals_a_single_line() {\n        assert_eq!(total_due(&[Line::new(\"seat\", 1200)]), 1200);\n    }\n\n    #[test]\n    fn rejects_a_negative_line() {\n        assert_eq!(total_due(&[Line::new(\"seat\", -1)]), 0);\n    }\n}\n--- after\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn totals_a_single_line() {\n        assert_eq!(total_due(&[Line::new(\"seat\", 1200)]), 1200);\n    }\n\n    #[test]\n    fn rejects_a_negative_line() {\n        assert!(total_due_checked(&[Line::new(\"seat\", -1)]).is_err());\n    }\n}\n"
+      },
+      "gapNotes": "A removal is not in any file's content \u2014 the deleted case is absent from the file that is left, so the committed check driver reports this class skipped on a normal run and proves it only from the fixture pair, which carries the file before the edit and the file after it. Nothing in this catalogue watches it — a catalogue never carries a session guard — so the class ships as a named mistake with a proven pair and no lane, and the plan grades that cell GAP. The lane is an authored `edit-guard` on the same removal rule, which reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a `mod tests` block is seen, and a Write payload carries none, so a whole-file rewrite that drops a source file is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right \u2014 behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "No tool in the Rust ecosystem gates on a drop in test count between two revisions; the runners report what they discovered, never what they stopped discovering. The judgement that a shrinking suite is a defect is jig's own."
+      }
     }
   ]
 }

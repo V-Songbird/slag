@@ -19,6 +19,7 @@ const RUNNER_BY_LEVER = {
   "ci-workflow": "ci",
   "tool-rule": "ci",
   "bash-guard": "PreToolUse",
+  "edit-guard": "PreToolUse",
   "edit-observe-guard": "PostToolUse",
 };
 
@@ -158,6 +159,33 @@ const DOC_LEFT_BEHIND = authored({
   },
 });
 
+// The removal kind. Its patterns live under `removed` rather than `patterns`,
+// and each fixture carries two texts — the file before an edit and the file
+// after it, fenced by `--- after` — because a deleted test is absent from the
+// text that is left and no pattern over one file can see it. The violation drops
+// two of three cases; the near miss fixes a test body and keeps the count.
+const TEST_COUNT_PATTERN = "\\b(?:it|test)\\s*\\(";
+
+const TESTS_DELETED = authored({
+  id: "tests-deleted",
+  title: "Fewer test cases after the edit than before it",
+  detectors: [
+    { lever: "check-driver", actor: "human-editor", confidence: "heuristic",
+      params: { removed: [TEST_COUNT_PATTERN], paths: ["**/*.test.js"] } },
+  ],
+  fixtures: {
+    violation: "it('a', () => { expect(1).toBe(1); });\nit('b', () => { expect(2).toBe(2); });\n" +
+      "it('c', () => { expect(3).toBe(3); });\n--- after\nit('a', () => { expect(1).toBe(1); });\n",
+    nearMiss: "it('a', () => { expect(1).toBe(0); });\nit('b', () => { expect(2).toBe(2); });\n" +
+      "--- after\nit('a', () => { expect(1).toBe(1); });\nit('b', () => { expect(2).toBe(2); });\n",
+  },
+  deny: {
+    reason: "This edit leaves fewer test cases behind than it found.",
+    alternative: "fix the case that was failing, or say in the commit what behaviour went away with it",
+    override: "name the behaviour the deleted cases covered and where it went",
+  },
+});
+
 // The checks the model wrote, handed to the engine the way the skill hands them
 // over: one file, read by `plan --authored`.
 function writeChecks(root, checks) {
@@ -182,6 +210,7 @@ function installChecks(engine, root, checks, opts) {
 }
 
 module.exports = {
+  RUNNER_BY_LEVER,
   authored,
   writeChecks,
   applyPlan,
@@ -191,8 +220,10 @@ module.exports = {
   EMPTY_CATCH,
   HEURISTIC_ONLY,
   DOC_LEFT_BEHIND,
+  TESTS_DELETED,
   PIPE_PATTERN,
   CATCH_PATTERN,
+  TEST_COUNT_PATTERN,
   DENY_PIPE,
   DENY_CATCH,
 };

@@ -3,14 +3,14 @@
 // The efficacy gate — jig's only honest benchmark.
 //
 // SCOPE, "What replaces the single efficacy headline": per-edition pair results
-// over all 141 pairs, plus the cross-class false-positive count. That is what
+// over all 147 pairs, plus the cross-class false-positive count. That is what
 // this file measures, and the numbers it prints are the ones a release
 // publishes.
 //
 // The old headline — 4 of 4 catches on one Node fixture — measured the four
 // classes jig 1.0.1 could install. It cannot be carried forward: there are no
 // installable-at-v1 classes any more, the catalogue does not gate anything, and
-// six editions ship 141 pairs between them. A score over four of those would be
+// six editions ship 147 pairs between them. A score over four of those would be
 // a smaller claim dressed as the same one.
 //
 // Two numbers, per edition and in total:
@@ -129,10 +129,10 @@ function measure() {
 // The shelf is the shape the score claims to be over
 // ---------------------------------------------------------------------------
 
-test("the benchmark runs over all six editions and all 141 pairs", () => {
+test("the benchmark runs over all six editions and all 147 pairs", () => {
   const { rows, pairs } = measure();
   assert.equal(rows.length, 6);
-  assert.equal(pairs, 141, "the editions ship " + pairs + " pairs and this benchmark is written for 141");
+  assert.equal(pairs, 147, "the editions ship " + pairs + " pairs and this benchmark is written for 147");
   for (const row of rows) {
     assert.ok(row.classes > 0, row.edition + " ships no classes");
     assert.ok(row.driven > 0, row.edition + " has no class with patterns of jig's own to prove");

@@ -42,12 +42,15 @@
 // commit that does not contain it. Both were reproduced. CI and a manual run
 // have nothing staged and keep the walk.
 //
-// A check declares one of two detector kinds. A pattern detector is a regular
+// A check declares one of three detector kinds. A pattern detector is a regular
 // expression over the files a glob names. A paired-change detector names two
 // path sets and reports a staged change that touched the first and nothing in
 // the second — the doc left behind by the module, the migration left behind by
 // the schema. It reads the git index, so it has something to say at commit time
-// and reports itself skipped anywhere nothing is staged.
+// and reports itself skipped anywhere nothing is staged. A removal detector
+// counts what STOPPED being there, which needs a file before an edit and the
+// same file after it; this run reads the tree as it is, so it reports that class
+// skipped and the selftest proves it from the fixture that carries both halves.
 
 import fs from "node:fs";
 import os from "node:os";
@@ -504,6 +507,36 @@ function pairedFindings(ctx, mod, det, changed) {
   return touched.map((rel) => ctx.finding(mod.id, rel, 1, "paired:" + p.pairedWith.join(","), note));
 }
 
+// The third detector kind. A pattern detector asks what is inside one file and
+// a paired-change detector asks what moved together; a removal detector asks
+// what stopped being there, which neither can see, because every deleted line is
+// absent from the file that is left.
+function removedDetectors(mod) {
+  return mod.detectors.filter((det) => det && det.runner === "checks" && det.params &&
+    Array.isArray(det.params.removed) && det.params.removed.length);
+}
+
+// Its fixture is one file before an edit and the same file after it, in one
+// string with `--- after` on a line of its own between them.
+function fencedHalves(text) {
+  const at = text.search(/^--- after$/m);
+  if (at === -1) return null;
+  const nl = text.indexOf("\n", at);
+  return { before: text.slice(0, at), after: nl === -1 ? "" : text.slice(nl + 1) };
+}
+
+// The rule: some pattern the detector names is in the before text more times
+// than in the after text. Both halves are blanked the way the pattern kind
+// blanks a file, at the path this detector's own globs derive, so a declaration
+// that only ever lived in a comment is not a removal.
+function removedHits(det, halves) {
+  const rel = fixturePath(det);
+  const before = blankRegions(halves.before, rel, det.params);
+  const after = blankRegions(halves.after, rel, det.params);
+  const count = (text, p) => (text.match(new RegExp(p, "g")) || []).length;
+  return det.params.removed.some((p) => count(before, p) > count(after, p)) ? 1 : 0;
+}
+
 // The fixture pair is stored inline, so the driver has to invent the path it
 // would have lived under. That path has to satisfy the detector's own globs, or
 // ctx.scan filters the fixture straight back out and every precise check reports
@@ -565,9 +598,31 @@ async function runChecks(root, only, staged) {
     if (mod.broken) { broken.push({ id: mod.id, why: mod.broken }); continue; }
     const mine = driverDetectors(mod);
     const paired = pairedDetectors(mod);
-    if (!mine.length && !paired.length) {
+    const removed = removedDetectors(mod);
+    if (!mine.length && !paired.length && !removed.length) {
       skipped.push({ id: mod.id, why: "no detector this driver runs — it is watched elsewhere", command: null });
       continue;
+    }
+    // A removal needs the file as it was as well as the file as it is, and this
+    // run only has the second. Said out loud rather than counted as clean: a
+    // class nobody could evaluate is not a class that came back with nothing.
+    // Only when the module carries nothing else this run reads. A module with a
+    // pattern detector beside its removal one IS evaluated, and reporting it
+    // skipped as well would make the word mean two things in one run.
+    if (removed.length && !mine.length && !paired.length) {
+      // Where it IS watched, said only when the module carries the lever that
+      // does it. A removal reaches a lane through an edit guard reading one
+      // call's two halves; a module with none is watched nowhere at all, and
+      // pointing the owner at the session lane anyway is a coverage claim.
+      const session = mod.detectors.some((det) => det && det.runner !== "checks" && det.params &&
+        Array.isArray(det.params.removed) && det.params.removed.length);
+      skipped.push({
+        id: mod.id,
+        why: "a removal is only visible between two versions of a file, and this run reads the tree as it is" +
+          (session ? " — this class is watched where the edit happens"
+            : " — and this check carries no session guard either, so nothing watches it"),
+        command: null,
+      });
     }
     const deny = mod.deny || mod.detectors.map((d) => d && d.deny).find(Boolean);
     if (deny && typeof deny.reason === "string" && typeof deny.alternative === "string") {
@@ -608,6 +663,7 @@ async function runSelftest() {
       if (mod.broken) { results.push({ id: mod.id, caught: false, why: mod.broken }); continue; }
       const mine = driverDetectors(mod);
       const paired = pairedDetectors(mod);
+      const removed = removedDetectors(mod);
       const pair = mod.fixtures;
       // A check whose every detector belongs to another lane is not this
       // driver's to prove. The session guards carry their own witnessed close,
@@ -622,7 +678,7 @@ async function runSelftest() {
       // is unproven coverage sitting in the checks directory. Every check jig
       // admits carries its pair inline, so this one was never admitted, and
       // skipping it quietly is the coverage claim the driver must not make.
-      if ((!mine.length && !paired.length) || !pair ||
+      if ((!mine.length && !paired.length && !removed.length) || !pair ||
           typeof pair.violation !== "string" || typeof pair.nearMiss !== "string") {
         results.push({ id: mod.id, caught: false, why: "claims a `checks` detector but carries no fixture pair this driver can run" });
         continue;
@@ -658,6 +714,21 @@ async function runSelftest() {
           if (!seeded) seeded = (det.params.paths || []).join(", ") || null;
           hits += pairedFindings(bare, mod, det, asSet(pair.violation)).length;
           nearMissHits += pairedFindings(bare, mod, det, asSet(pair.nearMiss)).length;
+        }
+      }
+      // A removal fixture is one file before an edit and the same file after it,
+      // fenced in one string. Nothing is written to disk for it either: the thing
+      // under test is the difference between two counts, and both texts are here.
+      if (!failed && removed.length) {
+        const halves = { v: fencedHalves(pair.violation), n: fencedHalves(pair.nearMiss) };
+        if (!halves.v || !halves.n) {
+          failed = "a removal detector's fixture carries no `--- after` fence, so there are no two versions to compare";
+        } else {
+          for (const det of removed) {
+            if (!seeded) seeded = fixturePath(det);
+            hits += removedHits(det, halves.v);
+            nearMissHits += removedHits(det, halves.n);
+          }
         }
       }
       if (failed) { results.push({ id: mod.id, caught: false, why: failed }); continue; }
