@@ -23,11 +23,12 @@ const path = require("path");
 
 const DRIVER = path.join(__dirname, "..", "scripts", "templates", "run.mjs");
 const LIB = path.join(__dirname, "..", "hooks", "jig-lib.js");
+const ENGINE = path.join(__dirname, "..", "scripts", "jig.js");
 
-// The two blocks that must be identical, each named by the exact first and last
-// line of its region. Markers rather than a parser: the bodies contain `}` inside
-// character classes, so brace counting would slice them short and quietly compare
-// less than it claims to.
+// The blocks that must be identical, each named by the exact first and last
+// line of its region and by the pair of files that carry it. Markers rather than
+// a parser: the bodies contain `}` inside character classes, so brace counting
+// would slice them short and quietly compare less than it claims to.
 const BLOCKS = [
   {
     what: "the comment and string blanker",
@@ -38,6 +39,16 @@ const BLOCKS = [
     what: "the glob compiler",
     from: "function globToRegExp(glob) {",
     to: '  return new RegExp("^" + out + ")".repeat(depth) + "$", "i");\n}',
+  },
+  {
+    // The selftest seeds a violation at a path the detector's own globs match.
+    // The driver does it for the check side and `guardProbe` does it for the
+    // guard side, and a probe seeded where the guard does not look reports a
+    // miss the guard never had.
+    what: "the fixture path derivation",
+    files: [DRIVER, ENGINE],
+    from: "function concreteSegment(glob, star) {",
+    to: '  return [...dirs, base].join("/");\n}',
   },
 ];
 
@@ -59,12 +70,13 @@ function slice(file, text, block) {
 }
 
 for (const block of BLOCKS) {
-  test("run.mjs and jig-lib.js carry the same copy of " + block.what, () => {
-    const driver = slice(DRIVER, read(DRIVER), block);
-    const lib = slice(LIB, read(LIB), block);
-    assert.equal(lib, driver,
-      "the check driver and the session guards have drifted apart on " + block.what +
-      " — copy the block from scripts/templates/run.mjs into hooks/jig-lib.js verbatim");
+  const [source, copy] = block.files || [DRIVER, LIB];
+  test("run.mjs and " + path.basename(copy) + " carry the same copy of " + block.what, () => {
+    const original = slice(source, read(source), block);
+    const second = slice(copy, read(copy), block);
+    assert.equal(second, original,
+      "the two copies of " + block.what + " have drifted apart — copy the block from " +
+      path.basename(source) + " into " + path.basename(copy) + " verbatim");
   });
 }
 

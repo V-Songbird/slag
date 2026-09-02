@@ -505,12 +505,13 @@ violation **and** `ledger.linesAfter` exceeds `ledger.linesBefore`. Show the
 runner's own stdout for at least one probe, verbatim, from `probes[].output` —
 "it works" from the thing under test is not evidence.
 
-This now covers the installed toolchain as well. A tool's config is proven by
-planting that tool's own `seed` and running its `verify.argv`: the tool caught
-the violation when the exit code equals `expectedExit`, which is not always 1.
-A passing exec is coverage, not a gap. Most tools cost a build or a runtime that
-a selftest will not spawn, so their probe reports the command instead of running
-it — by design, not by failure.
+The installed toolchain gets a probe too, and jig spawns none of them. A tool's
+config is proven by planting that tool's own `seed` and running its
+`verify.argv`: the tool caught the violation when the exit code equals
+`expectedExit`, which is not always 1. Every toolchain probe therefore comes
+back `ran: false` and hands the owner that command and that expected exit
+instead — by design, not by failure. Read one out and say plainly that nobody
+has run it yet.
 
 **Degrade, never stall.** A probe that reports `ran: false` says why, and
 carries `command` and `expected`. Print both and tell the user what to look for.

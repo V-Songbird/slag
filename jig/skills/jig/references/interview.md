@@ -214,8 +214,9 @@ why the moment that comes back.
 checks run on every push with no plugin and no local node?"
 
 - `Yes (Recommended)` — "One workflow file under `.github/workflows/`, owned
-  by jig, running the committed check driver and the tools you ticked. The
-  floor that holds when everything else is missing."
+  by jig, running the committed check driver and its selftest — not the tools
+  you ticked, which no lane spawns. The floor that holds when everything else
+  is missing."
 - `No` — "Plan with `--no-ci`. The committed checks still run wherever you run
   them."
 

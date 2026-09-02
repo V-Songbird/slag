@@ -49,6 +49,11 @@ means jig refused the guard config outright, so `guards` is empty for that
 reason and not because nothing is installed. Print it verbatim and send the user
 to `/jig:jig`.
 
+`installed: false` is the other reason `guards` can be empty, and it is not the
+same one: there is no `.jig/config.json` here at all — jig was never installed,
+or `revert` took it back out. `why` is the sentence for it. Say that instead of
+showing an empty list, which reads as "everything was retired".
+
 `guards[]`, one row per configured guard. `watches` is the new half and the
 reason this skill exists:
 
@@ -111,11 +116,20 @@ here.
 
 `lanes`, read fresh rather than remembered from the install.
 
-- `lanes.session` — whether anything is armed, and whether anything is observing.
-- `lanes.commit` — the git hook. `runs` is the whole answer; `state` says why
-  when it is false and `fix` is the one thing to do about it.
+- `lanes.session` — whether anything is armed, and whether anything is
+  observing. `off: true` means `.jig/off` is present and NOTHING in this lane
+  runs, whatever the guard rows above say; `offSince` is when the switch went
+  on. Report that before anything else about the guards.
+- `lanes.commit` — the git hook. `runs` says the hook invokes the checks and
+  `executable` says git can actually run it: `false` is a live-looking lane that
+  does nothing, and `null` means win32, where the question does not apply. Both
+  have to hold. `state` says why when `runs` is false and `fix` is the one thing
+  to do about it — print `fix` verbatim, because nothing puts `jig` on a PATH.
 - `lanes.ci` — the workflow, and the floor. A live CI lane is why a dead commit
-  lane is an inconvenience rather than a hole.
+  lane is an inconvenience rather than a hole. `runs` means the workflow still
+  invokes the driver, read from the file; `state` is `live`, `drifted` (it runs,
+  and the file is the owner's now), `unwired` (a workflow that no longer runs
+  the checks) or `absent`.
 
 Report a dead lane in plain terms: what does not run, what still does, and the
 one command that fixes it. Name the fix; never run it. Applying it is an

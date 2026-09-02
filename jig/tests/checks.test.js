@@ -627,6 +627,29 @@ test("the same change with the doc staged beside it is silent", () => {
   assert.equal(status, 0);
 });
 
+// The namespace defect: git names staged files from the repository root, a
+// check's globs are written against the jig root. Below the root the two differ,
+// and before `--relative` this run came back clean while reporting coverage.
+test("a paired check fires for an install below the git root", () => {
+  const repo = tmpDir("nested");
+  git(repo, ["init", "-q"]);
+  git(repo, ["config", "user.email", "suite@example.test"]);
+  git(repo, ["config", "user.name", "suite"]);
+  const root = path.join(repo, "app");
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.writeFileSync(path.join(root, "package.json"), "{ \"private\": true }\n");
+  fs.writeFileSync(path.join(root, "src", "a.ts"), "export const a = 1;\n");
+  install(root, { "no-ci": true }, [A.DOC_LEFT_BEHIND]);
+  const violation = path.join(root, "src", "engine", "solver.ts");
+  fs.mkdirSync(path.dirname(violation), { recursive: true });
+  fs.writeFileSync(violation, "export const solve = () => 1;\n");
+  git(repo, ["add", "--", "app/src/engine/solver.ts"]);
+  const { status, out } = driverJson(root);
+  assert.equal(status, 1);
+  assert.deepEqual(out.findings.map((f) => [f.classId, f.path]),
+    [["doc-left-behind", "src/engine/solver.ts"]]);
+});
+
 test("a change that touches neither side is silent", () => {
   const root = nodeProject();
   install(root, { "no-ci": true }, [A.DOC_LEFT_BEHIND]);
@@ -716,6 +739,31 @@ test("selftest --live watches every installed guard catch its own violation fixt
     assert.match(probe.what, /violation fixture/);
     assert.match(probe.output, /"decision":"deny"/);
   }
+});
+
+// The guard side of the same hazard the driver's own selftest already handles:
+// a guard scoped to a directory is not witnessed by a fixture dropped at the
+// root, and a close that reports `caught: false` for a guard working exactly as
+// installed is the coverage claim inverted.
+test("a guard scoped to a directory is witnessed at a path its own globs match", () => {
+  const scoped = A.authored({
+    id: "scoped-catch",
+    title: "A swallowed error under src only",
+    detectors: [
+      { lever: "edit-observe-guard", actor: "claude-session", confidence: "deterministic",
+        params: { patterns: [A.CATCH_PATTERN], paths: ["src/**/*.js"] } },
+      { lever: "check-driver", actor: "human-editor", confidence: "deterministic",
+        params: { patterns: [A.CATCH_PATTERN], paths: ["src/**/*.js"] } },
+    ],
+    fixtures: A.EMPTY_CATCH.fixtures,
+    deny: A.DENY_CATCH,
+  });
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [scoped]);
+  const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
+  const probe = result.probes.find((p) => p.probe === "scoped-catch-edit-observe-guard-0");
+  assert.equal(probe.caught, true, probe && (probe.why || probe.output));
+  assert.equal(result.witnessed, true);
 });
 
 test("a witnessed catch means a ledger line exists, not just a decision on screen", () => {
@@ -1063,7 +1111,12 @@ test("the unwired doc no longer claims jig cannot do the wiring", () => {
   assert.equal(/which jig never touches/.test(text), false);
   // The route jig can actually take comes first; the manual one is the fallback.
   assert.ok(text.indexOf("Let jig do it") < text.indexOf("Or do it by hand"));
-  assert.match(text, /jig plan --wire-commit/);
+  // The route it names has to be one the owner can actually take. Nothing puts
+  // `jig` on a PATH, so a doc printing `jig plan --wire-commit` was printing a
+  // command that answers "command not found".
+  assert.match(text, /\/jig:jig/);
+  assert.equal(/^\s*jig .*--wire-commit/m.test(text), false,
+    "the activation doc hands out a `jig …` command nothing puts on a PATH");
 });
 
 test("a wiring plan never proposes a guard config, because it would be an empty one", () => {
@@ -1082,4 +1135,257 @@ test("a wiring plan never proposes a guard config, because it would be an empty 
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, ".jig", "config.json"), "utf-8")).guards.length, before,
     "approving the wiring silently disarmed the guards");
   assert.equal(engine.commitLane(root).state, "live");
+});
+
+// ---------------------------------------------------------------------------
+// What the reports say, and whether it is true (2.7.2)
+// ---------------------------------------------------------------------------
+//
+// One story under seven fixes: a report is not allowed to claim a state jig can
+// read and has not read. Each test below is the state, read.
+
+test("the kill switch is the whole answer for the session lane", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  assert.equal(engine.cmdReview(root).lanes.session.runs, true);
+
+  fs.writeFileSync(path.join(root, ".jig", "off"), "");
+  const session = engine.cmdReview(root).lanes.session;
+  // Every hook exits before it reads a guard while this file is there, so a
+  // lane report that read the config and not the file said guards were running
+  // when nothing was.
+  assert.equal(session.runs, false);
+  assert.equal(session.observing, false);
+  assert.equal(session.off, true);
+  assert.match(session.offSince, /^\d{4}-\d\d-\d\dT/);
+  // And inventory, which reads the same lanes.
+  assert.equal(engine.cmdInventory(root).lanes.session.off, true);
+});
+
+test("the CI lane is read from the workflow, not from the workflow file existing", () => {
+  const root = nodeProject();
+  install(root);
+  const wf = path.join(root, ".github", "workflows", "jig.yml");
+  assert.ok(fs.existsSync(wf), "the fixture installed no workflow, so this proves nothing");
+  let ci = engine.cmdReview(root).lanes.ci;
+  assert.equal(ci.runs, true);
+  assert.equal(ci.state, "live");
+  assert.equal(ci.path, ".github/workflows/jig.yml");
+
+  // The owner's now: still jig's workflow, and no longer a file jig can vouch
+  // for line by line. It runs the driver, so the lane runs — and the report
+  // says whose file it is rather than passing it off as jig's.
+  fs.appendFileSync(wf, "\n# tightened by hand\n");
+  ci = engine.cmdInventory(root).lanes.ci;
+  assert.equal(ci.runs, true);
+  assert.equal(ci.state, "drifted");
+
+  // Edited into something that no longer runs the checks. This is the one that
+  // used to report as live coverage from `existsSync` alone.
+  fs.writeFileSync(wf, "name: ci\non: push\njobs:\n  noop:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n");
+  ci = engine.cmdReview(root).lanes.ci;
+  assert.equal(ci.runs, false);
+  assert.equal(ci.state, "unwired");
+
+  fs.rmSync(wf);
+  ci = engine.cmdReview(root).lanes.ci;
+  assert.equal(ci.runs, false);
+  assert.equal(ci.state, "absent");
+  assert.equal(ci.path, null);
+});
+
+test("a guard demoted out of armed is reported as demoted by review and inventory", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const armed = engine.cmdReview(root).guards.find((g) => g.mode === "armed");
+  assert.ok(armed, "the fixture installed no armed guard, so this proves nothing");
+  assert.equal(armed.demoted, null);
+
+  // A second project, because a check is loaded once per process: drifting the
+  // one this process already read would compare the module against itself.
+  const drifted = nodeProject();
+  install(drifted, { "no-ci": true });
+  fs.appendFileSync(path.join(drifted, ".jig", "checks", armed.check + ".check.mjs"), "\n// widened by hand\n");
+  for (const surface of [engine.cmdReview(drifted), engine.cmdInventory(drifted)]) {
+    const row = surface.guards.find((g) => g.guardId === armed.guardId);
+    assert.equal(row.mode, "observe");
+    assert.match(row.demoted, /does not match the check on disk/,
+      "the config still says armed and the surface never said the guard was pulled back");
+  }
+});
+
+test("the git setting's state is read from git, not from a path nothing answers", () => {
+  const root = nodeProject();
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  install(root, { "no-ci": true });
+  const wire = engine.cmdPlan(root, { _: [], change: [], "wire-commit": true });
+  engine.cmdApply(root, { _: [], change: wire.changes.map((c) => c.id), path: wire.changes.map((c) => c.path) });
+  assert.equal(engine.commitLane(root).state, "live");
+
+  const row = engine.cmdInventory(root).artifacts.find((a) => a.path === engine.GIT_SETTING_PATH);
+  // `git:core.hooksPath` is not a file. Asking the disk about it returned null,
+  // and inventory called the live lane `retired`.
+  assert.equal(row.state, "active");
+
+  spawnSync("git", ["config", "--unset", engine.GIT_SETTING], { cwd: root });
+  assert.equal(engine.cmdInventory(root).artifacts.find((a) => a.path === engine.GIT_SETTING_PATH).state, "retired");
+});
+
+test("the hook shim is written executable and the lane says whether git can run it", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const shim = path.join(root, ".jig", "hooks", "pre-commit");
+  if (process.platform === "win32") {
+    // No exec bit here, and a synthesised mode is not an answer — the lane says
+    // "not something this platform can be asked" rather than reporting `false`.
+    assert.equal(engine.commitLane(root).executable, null);
+  } else {
+    assert.notEqual(fs.statSync(shim).mode & 0o111, 0, "git cannot run the hook jig wrote");
+  }
+
+  // The skip leaves a trace. A lane that goes quiet because node is missing and
+  // a lane that never ran are the same silence otherwise.
+  const text = fs.readFileSync(shim, "utf-8");
+  assert.match(text, /node is not on PATH here[^\n]*>&2/);
+  assert.match(text, /lane_log "skipped node-not-on-path"/);
+  assert.match(text, /lane_log "ran"/);
+  assert.match(text, /\.jig\/lane\.log/);
+  // Machine-local, like every other derived record under `.jig/`.
+  assert.match(fs.readFileSync(path.join(root, ".jig", ".gitignore"), "utf-8"), /^lane\.log$/m);
+});
+
+test("review answers plainly where nothing is installed instead of throwing ENOENT", () => {
+  const root = nodeProject();
+  const review = engine.cmdReview(root);
+  assert.equal(review.ok, true);
+  assert.equal(review.installed, false);
+  assert.deepEqual(review.guards, []);
+  assert.match(review.why, /no \.jig\/config\.json/);
+
+  // Both surfaces read one truth. Inventory used to rethrow the raw ENOENT;
+  // now that review answers it, inventory must not answer instead with an empty
+  // guard list and a null problem, which reads as "everything was retired".
+  const inv = engine.cmdInventory(root);
+  assert.equal(inv.installed, false);
+  assert.match(inv.why, /no \.jig\/config\.json/);
+  assert.deepEqual(inv.guards, []);
+
+  // A config that exists and cannot be read is still a refusal: that one IS
+  // broken, and saying "nothing installed" about it would hide the damage.
+  fs.mkdirSync(path.join(root, ".jig"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".jig", "config.json"), "{ not json\n");
+  assert.throws(() => engine.cmdReview(root), /not valid JSON/);
+  const refused = engine.cmdInventory(root);
+  assert.equal(refused.installed, true, "a repository whose config jig refused is installed and broken, not absent");
+  assert.match(refused.guardsProblem, /not valid JSON/);
+  assert.equal(refused.why, null);
+});
+
+test("a selftest over no runnable check exits 1 and says nothing was proven", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  assert.equal(driver(root, ["--selftest"]).status, 0);
+
+  for (const name of fs.readdirSync(path.join(root, ".jig", "checks"))) {
+    if (name.endsWith(".check.mjs")) fs.rmSync(path.join(root, ".jig", "checks", name));
+  }
+  const run = driver(root, ["--selftest"]);
+  // Nothing ran is not the same as nothing failed, and the old report said the
+  // second about the first.
+  assert.equal(run.status, 1);
+  assert.equal(/Every runnable check caught its own violation/.test(run.stdout), false);
+  assert.match(run.stdout, /nothing here is proven/);
+});
+
+test("a plan whose every check was discarded refuses rather than wiring empty lanes", () => {
+  const root = nodeProject();
+  const neverFires = A.authored({
+    id: "never-fires",
+    title: "A check whose pattern does not match its own violation",
+    detectors: [
+      { lever: "check-driver", actor: "human-editor", confidence: "deterministic",
+        params: { patterns: ["zzz-nothing-here"], paths: ["**/*.js"] } },
+    ],
+    fixtures: { violation: "const a = 1;\n", nearMiss: "const b = 2;\n" },
+    deny: A.DENY_CATCH,
+  });
+  // A driver, a hook and a CI workflow over zero check modules is a green lane
+  // over no coverage — the coverage claim SCOPE forbids, made by omission.
+  assert.throws(() => install(root, { "no-ci": true }, [neverFires]),
+    /discarded at admission.*nothing for them to run.*Nothing was planned/s);
+  assert.equal(fs.existsSync(path.join(root, ".jig", "checks", "run.mjs")), false);
+  assert.equal(fs.existsSync(path.join(root, ".github", "workflows", "jig.yml")), false);
+
+  // With a tool ticked the answer is narrower: the lanes have nothing to run
+  // and are dropped, and the linter the owner approved by name is still
+  // installed. Throwing the whole plan away would discard an answer they gave.
+  // Planned rather than applied: applying it would try to spawn npm, which is a
+  // separate refusal on win32 and not what this is about.
+  const withTool = nodeProject({ "package-lock.json": "{ \"lockfileVersion\": 3 }\n" });
+  const plan = engine.cmdPlan(withTool, {
+    _: [], change: [], provenance: "elicited", "no-ci": true, tools: "eslint",
+    authored: A.writeChecks(withTool, [neverFires]),
+  });
+  assert.equal(plan.changes.some((c) => c.path === ".jig/checks/run.mjs"), false,
+    "a driver was planned over zero check modules");
+  assert.ok(plan.changes.some((c) => c.kind === "run-install" && c.id.startsWith("install-eslint")),
+    "the ticked linter was discarded along with the checks");
+  assert.ok(plan.refused.some((r) => /discarded at admission/.test(r)),
+    "the dropped lanes were not disclosed");
+  // And still no guard config: computed from an empty selection it would hold
+  // no guards, and approving it would disarm the repository.
+  assert.equal(plan.changes.some((c) => c.kind === "write-config"), false,
+    "a plan with no coverage proposed a guard config");
+});
+
+// ---------------------------------------------------------------------------
+// What the driver says when it could not do the whole job
+
+test("a walk that hits the file ceiling is disclosed and never exits as a clean pass", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const driverPath = path.join(root, ".jig", "checks", "run.mjs");
+  // The ceiling is 20000 files, and writing 20001 of them per run buys nothing
+  // the constant does not. Substituting a small one is the whole patch: the
+  // truncation path exercised below is the shipped one, byte for byte.
+  const shrunk = fs.readFileSync(driverPath, "utf-8").replace("const MAX_FILES = 20000;", "const MAX_FILES = 3;");
+  assert.match(shrunk, /const MAX_FILES = 3;/, "the driver no longer declares its ceiling where this test patches it");
+  fs.writeFileSync(driverPath, shrunk);
+  for (let i = 0; i < 8; i++) fs.writeFileSync(path.join(root, "f" + i + ".js"), "const a = " + i + ";\n");
+
+  const run = driver(root);
+  assert.equal(run.status, 1, "a partial scan exited 0, which every caller reads as a full pass");
+  assert.match(run.stdout, /PARTIAL {2}the walk stopped at 3 files/);
+  assert.match(run.stdout, /partial scan, not a pass/);
+  assert.equal(/\nNo findings\.\n/.test(run.stdout), false, "a partial scan reported itself clean");
+  assert.equal(driverJson(root).out.truncated, true);
+});
+
+test("a walk that read the whole project says nothing about truncation", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const run = driverJson(root);
+  assert.equal(run.status, 0);
+  assert.equal(run.out.truncated, false);
+  assert.match(driver(root).stdout, /\nNo findings\.\n/);
+});
+
+test("the driver crashing exits 0, says nothing was checked, and leaves a lane-log row", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const driverPath = path.join(root, ".jig", "checks", "run.mjs");
+  // A top-level crash has no natural trigger: every failure the driver expects
+  // — an unreadable checks directory, a module that will not import, a check
+  // that throws — is already caught and reported where it happens. Planting one
+  // is the only way the handler behind all of them is exercised at all.
+  const source = fs.readFileSync(driverPath, "utf-8");
+  const crashing = source.replace("  const out = await runChecks(ROOT, paths);", "  throw new Error(\"planted driver crash\");");
+  assert.notEqual(crashing, source, "the driver no longer runs its checks where this test plants the crash");
+  fs.writeFileSync(driverPath, crashing);
+
+  const run = driver(root);
+  assert.equal(run.status, 0, "a driver that could not run stopped somebody committing");
+  assert.match(run.stderr, /jig checks failed to run, so nothing was checked: planted driver crash/);
+  const lane = fs.readFileSync(path.join(root, ".jig", "lane.log"), "utf-8");
+  assert.match(lane, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ checks crashed planted driver crash$/m);
 });

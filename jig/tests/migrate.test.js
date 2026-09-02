@@ -299,10 +299,16 @@ test("migrate refuses an install it cannot fully read, and writes nothing", () =
   assert.throws(() => migrate.cmdMigrate(notJig), /this is not a jig install/);
 });
 
-test("migrate refuses to run twice, and refuses over a file somebody edited", () => {
+test("migrate answers a second run plainly, and refuses over a file somebody edited", () => {
   const root = install();
   migrate.cmdMigrate(root);
-  assert.throws(() => migrate.cmdMigrate(root), /already on the pair shape/);
+  // "Nothing to upgrade" is migrate's normal answer on a current install, not a
+  // failure: it exits 0 and says so, so a caller cannot read the healthy case
+  // as a broken one.
+  const again = migrate.cmdMigrate(root);
+  assert.equal(again.ok, true);
+  assert.deepEqual(again.migrated, []);
+  assert.match(again.why, /already on the pair shape/);
 
   const edited = install();
   fs.appendFileSync(path.join(edited, ".jig/checks/silent-catch.check.mjs"), "\n// mine now\n");

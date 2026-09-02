@@ -354,9 +354,16 @@ function cmdMigrate(root) {
   // right move after an interrupted one.
   const legacy = guards.some((g) => typeof g.detector === "string") ||
     modules.some((a) => /\bexport const selftest\b/.test(String(readText(root, a.path))));
+  // Not a refusal. "There was nothing to upgrade" is the answer migrate exists
+  // to give on a repository that is already current, and exiting 1 on it made
+  // every caller treat the healthy case as a failure.
   if (!legacy) {
-    throw expected("this install is already on the pair shape — every guard names an installed check and no check" +
-      " carries a 1.0.1 selftest. Nothing was written.");
+    return {
+      ok: true,
+      migrated: [],
+      why: "this install is already on the pair shape — every guard names an installed check and no check" +
+        " carries a 1.0.1 selftest. Nothing was written.",
+    };
   }
 
   // jig will not write over a file it does not own, and a file jig installed

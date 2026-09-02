@@ -631,7 +631,12 @@ test("review reports which lanes actually run, and the one fix for a dead one", 
   assert.equal(lanes.ci.runs, false);
   assert.equal(lanes.commit.runs, false);
   assert.equal(lanes.commit.state, "no-hook");
-  assert.equal(lanes.commit.fix, "jig plan --wire-commit");
+  // The fix has to be runnable, and it has to be the WHOLE fix. Nothing puts
+  // `jig` on a PATH, so it names the skill and this script by its own path —
+  // pinned entire, because a second invocation appended to it would be a second
+  // thing to run and nothing here would notice.
+  assert.equal(lanes.commit.fix, "ask /jig:jig to wire the commit lane, or run: node " +
+    path.join(__dirname, "..", "scripts", "jig.js").replace(/\\/g, "/") + " plan --wire-commit");
   assert.equal(lanes.session.observing, true);
 
   // A wiring that goes quiet later is reported later. This is the whole reason

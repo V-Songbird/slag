@@ -512,10 +512,35 @@ function globToRegExp(glob) {
   return new RegExp("^" + out + ")".repeat(depth) + "$", "i");
 }
 
+// A hook payload names the file the way the host does: absolute, and on win32
+// backslashed behind a drive letter. A `paths` glob and a zone glob are both
+// written repo-relative, so the path is made repo-relative ONCE, in `runEvent`,
+// which is the only place holding the root. Matching the tail of the path
+// instead would let a directory ABOVE the checkout satisfy a repo-relative
+// glob — a repo cloned to `/src/vendor/app` would have every guard disarmed by
+// an observe zone of `vendor/**` — and that is a zone widening itself past what
+// the owner named. A path outside the root keeps its own spelling and matches
+// no repo-relative glob, which is the truth about it.
+function repoRelative(root, filePath) {
+  if (!filePath) return "";
+  const p = String(filePath).replace(/\\/g, "/");
+  const rel = path.relative(root, path.resolve(root, p)).split(path.sep).join("/");
+  return rel && rel !== ".." && !rel.startsWith("../") && !path.isAbsolute(rel) ? rel : p;
+}
+
+// The one matching rule both path-scoped levers read, and the same rule
+// `matchesAny` in `scripts/templates/run.mjs` applies to the same `paths`
+// field: the whole repo-relative path, anchored, never a suffix of it. Two
+// answers to one field would put a would-deny in the ledger for a file the
+// check driver considers out of scope.
+function matchesPathGlobs(globs, rel) {
+  if (!rel) return false;
+  return globs.some((g) => typeof g === "string" && globToRegExp(g).test(rel));
+}
+
 function zoneForcesObserve(zones, filePath) {
   if (!isObject(zones) || !Array.isArray(zones.observe) || !filePath) return false;
-  const rel = String(filePath).replace(/\\/g, "/");
-  return zones.observe.some((g) => typeof g === "string" && globToRegExp(g).test(rel));
+  return matchesPathGlobs(zones.observe, filePath);
 }
 
 // evidence: { proof, deny, falsePositive } — the hash computed from the check
@@ -588,11 +613,34 @@ function ledgerStats(root) {
 // Bash call is exactly the standing tax jig promised not to be. A push with no
 // branch named goes to the current one, which is unknowable here — so it stays
 // in scope, and over-matching in observe mode costs a ledger line.
+// The `--opt=value` spelling puts the value inside the token, where the
+// leading-dash filter already drops it. Only the separated spelling matters.
+const PUSH_VALUE_OPTS = ["-o", "--push-option", "--receive-pack", "--exec", "--repo"];
+
 function pushBranch(command) {
   const m = /\bgit\s+push\b([^\n]*)/.exec(command);
   if (!m) return null;
-  const words = m[1].trim().split(/\s+/).filter((w) => w && !w.startsWith("-"));
-  return words.length >= 2 ? words[1] : null;
+  const tokens = m[1].trim().split(/\s+/).filter((w) => w);
+  const words = [];
+  for (let i = 0; i < tokens.length; i++) {
+    // Every `git push` option that takes its value as the NEXT word. That word
+    // is a bare token in argv exactly the way the refspec is, so dropping only
+    // the flag would leave the value standing where the remote belongs and
+    // shift the branch out of reach — which reads as out of scope, and an armed
+    // guard passes the push it was installed to stop.
+    if (PUSH_VALUE_OPTS.includes(tokens[i])) { i++; continue; }
+    if (!tokens[i].startsWith("-")) words.push(tokens[i]);
+  }
+  return words.length >= 2 ? refspecBranch(words[1]) : null;
+}
+
+// `main`, `HEAD:main`, `+main`, `+HEAD:main`, `:main` and `refs/heads/main` are
+// the same push. The destination is the last `:`-separated part; the delete
+// form `:main` has an empty source, so the other side names the branch.
+function refspecBranch(refspec) {
+  const parts = refspec.replace(/^\+/, "").split(":");
+  const dest = parts[parts.length - 1] || parts[0];
+  return dest.replace(/^refs\/heads\//, "");
 }
 
 function branchInScope(command, onlyBranches, config) {
@@ -602,12 +650,30 @@ function branchInScope(command, onlyBranches, config) {
   return named === null || wanted.includes(named);
 }
 
-function evalBash(det, payload, config) {
+// A pattern is data the check carries, and data can be wrong: a source that
+// will not compile throws out of the loop, past every guard still queued behind
+// it, and out to the runner — which fails the whole call open. One bad pattern
+// would take the healthy armed guards on that event with it. Compiling here
+// contains it to the pattern that is broken: it is skipped, named on `failed`
+// so its own guard records the gap, and everything else still evaluates. This
+// is containment, not ReDoS protection — a pattern that compiles and then runs
+// for ever is a different problem and is not addressed here.
+function compilePattern(source, flags, failed) {
+  try {
+    return new RegExp(source, flags);
+  } catch {
+    if (!failed.includes(source)) failed.push(source);
+    return null;
+  }
+}
+
+function evalBash(det, payload, config, failed) {
   const params = det.params || {};
   const command = String((payload.tool_input && payload.tool_input.command) || "");
   if (!command) return null;
   for (const source of params.patterns || []) {
-    if (!new RegExp(source).test(command)) continue;
+    const re = compilePattern(source, "", failed);
+    if (!re || !re.test(command)) continue;
     if (Array.isArray(params.onlyBranches) && !branchInScope(command, params.onlyBranches, config)) continue;
     return source;
   }
@@ -620,10 +686,15 @@ function evalBash(det, payload, config) {
 // as introduced — an over-match that is a ledger line and never a block.
 // Both sides are blanked before matching, so a shape that lives only in a
 // comment, a string, or a regular expression is not an introduction.
-function evalEdit(det, payload) {
+function evalEdit(det, payload, failed, rel) {
   const params = det.params || {};
   const input = payload.tool_input || {};
-  const rel = typeof input.file_path === "string" ? input.file_path : "";
+  // `paths` scopes the check that owns this detector, and the check driver has
+  // always honoured it. It scopes the guard the same way. Absent or empty means
+  // everywhere, which is what every guard authored before this meant. Out of
+  // scope is a pass and never a would-deny: a guard that does not apply here
+  // has caught nothing, and a ledger row saying otherwise is a coverage claim.
+  if (Array.isArray(params.paths) && params.paths.length && !matchesPathGlobs(params.paths, rel)) return null;
   const after = String(input.new_string !== undefined ? input.new_string : (input.content || ""));
   const before = String(input.old_string || "");
   if (!after) return null;
@@ -638,9 +709,11 @@ function evalEdit(det, payload) {
   const cleanAfter = blankRegions(after, rel, opts);
   const cleanBefore = before ? blankRegions(before, rel, opts) : "";
   for (const source of params.patterns || []) {
-    const hits = (cleanAfter.match(new RegExp(source, "g")) || []).length;
+    const re = compilePattern(source, "g", failed);
+    if (!re) continue;
+    const hits = (cleanAfter.match(re) || []).length;
     if (!hits) continue;
-    if (params.onlyWhenIntroduced && hits <= (cleanBefore.match(new RegExp(source, "g")) || []).length) continue;
+    if (params.onlyWhenIntroduced && hits <= (cleanBefore.match(re) || []).length) continue;
     return source;
   }
   return null;
@@ -650,9 +723,21 @@ function evalEdit(det, payload) {
 // or null. The PATTERN is what gets recorded, never the text it matched — the
 // ledger is a record of which guard fired, and copying a line of the user's
 // source into a log file is not that.
-function evaluateGuard(dets, event, payload, config) {
+//
+// `failed` collects the patterns that would not compile, so the caller can say
+// so on the guard's own row. Optional: a caller with nothing to record passes
+// nothing and the bad patterns are still skipped rather than thrown.
+//
+// `rel` is the payload's file made repo-relative by the caller that holds the
+// root. A caller with no root falls back to the payload's own spelling, which
+// matches no repo-relative glob unless it already is one.
+function evaluateGuard(dets, event, payload, config, failed, rel) {
+  const bad = failed || [];
+  const file = rel === undefined
+    ? String((payload.tool_input || {}).file_path || "").replace(/\\/g, "/")
+    : rel;
   for (const det of dets) {
-    const matched = event === "PreToolUse" ? evalBash(det, payload, config) : evalEdit(det, payload);
+    const matched = event === "PreToolUse" ? evalBash(det, payload, config, bad) : evalEdit(det, payload, bad, file);
     if (matched) return { det, matched };
   }
   return null;
@@ -697,6 +782,10 @@ function runEvent(root, event, payload, warn) {
     tool: typeof payload.tool_name === "string" ? payload.tool_name : null,
     path: typeof input.file_path === "string" ? input.file_path : null,
   };
+  // The host names the file its own way; every glob jig matches against it is
+  // repo-relative. This is the only place that holds the root, so this is where
+  // the two are put in one namespace. The ledger keeps the host's spelling.
+  const rel = repoRelative(root, base.path);
 
   const read = readConfig(root);
   const check = read.problems.length ? { problems: read.problems, warnings: [], guards: [] }
@@ -742,10 +831,11 @@ function runEvent(root, event, payload, warn) {
       continue;
     }
 
-    const hit = evaluateGuard(dets, event, payload, read.config);
+    const failed = [];
+    const hit = evaluateGuard(dets, event, payload, read.config, failed, rel);
     const det = hit ? hit.det : dets[0];
     const s = stats[guard.id];
-    const eff = effectiveState(guard, read.config, base.path, {
+    const eff = effectiveState(guard, read.config, rel, {
       // The proof is hashed only for a guard that asked to arm. An observing
       // guard needs the check's patterns and nothing else.
       proof: guard.mode === "armed" ? checkProof(record) : null,
@@ -756,10 +846,25 @@ function runEvent(root, event, payload, warn) {
     // exactly one door: effectiveState said armed, which means the deny reply,
     // the recorded proof, the zone and the false-positive record all held.
     const decision = hit ? (eff.mode === "armed" ? "deny" : "would-deny") : "pass";
+    // A guard the owner armed and the gate pulled back to observe is a coverage
+    // gap nothing else shows: the config still reads `armed`. Said once, out
+    // loud, and recorded on the row so review and inventory report it too.
+    const demoted = guard.mode === "armed" && eff.mode !== "armed" ? eff.why : null;
+    if (demoted) warn("jig: " + guard.id + " is armed in the config but ran as observe — " + demoted);
+    // A pattern that will not compile is a hole in this guard and in nothing
+    // else. Said out loud and put on the row, because a guard that quietly
+    // stopped watching part of what it names is a coverage claim jig has not
+    // earned.
+    if (failed.length) {
+      warn("jig: " + guard.id + " skipped a pattern that will not compile — " + failed.join(", "));
+    }
     appendLedger(root, ledgerRow(base, {
       actor: det.actor || record.mod.actor || null, guardId: guard.id, classId: guard.classId,
       decision, matched: hit ? hit.matched : null, mode: eff.mode, durMs: durMs(),
-      rest: { confidence: det.confidence || record.mod.confidence || null },
+      rest: {
+        confidence: det.confidence || record.mod.confidence || null, demoted,
+        patternsFailed: failed.length ? failed : null,
+      },
     }));
     results.push({
       guardId: guard.id, classId: guard.classId, decision,

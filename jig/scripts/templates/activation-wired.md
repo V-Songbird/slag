@@ -21,8 +21,8 @@ prints what it found.
 `core.hooksPath` moves **every** hook, not just `pre-commit`. Anything that was
 sitting in `.git/hooks` no longer runs.
 
-It applies to your clone only. A teammate who wants the same thing runs
-`jig plan --wire-commit` in theirs.
+It applies to your clone only. A teammate who wants the same thing asks
+`/jig:jig` to wire the commit lane in theirs.
 
 ## Turning it off
 
@@ -30,8 +30,8 @@ It applies to your clone only. A teammate who wants the same thing runs
 git config --unset core.hooksPath
 ```
 
-Or `jig revert`, which puts the setting back exactly as it was along with
-everything else jig wrote.
+Or ask `/jig:jig` to revert, which puts the setting back exactly as it was
+along with everything else jig wrote.
 
 ## One thing that can go wrong
 

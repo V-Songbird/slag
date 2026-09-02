@@ -249,6 +249,46 @@ test("revert --all unwinds a whole install and says so when there is nothing lef
   assert.match(again.note, /nothing to revert/);
 });
 
+// A real install applies change by change, and every apply rewrites the
+// manifest — so one path collects several journalled writes. The drift check
+// used to ask the disk about all of them, which made write N+1 look like an
+// owner edit of write N and made `revert --all` refuse every plain install.
+test("revert --all unwinds a path several applies rewrote, without calling jig's own writes an edit", () => {
+  const root = tmpProject({});
+  const before = seedFixture(root, "crlf.json", ".jig/config.json");
+  for (const [id, mode] of [["c1", "observe"], ["c2", "armed"], ["c3", "block"]]) {
+    draft(root, [{ id, kind: "write-config", path: ".jig/config.json", content: '{"mode":"' + mode + '"}\n' }]);
+    apply(root, [id]);
+  }
+
+  const back = engine.cmdRevert(root, { _: [], change: [], all: true });
+  assert.equal(back.reverted.length, 3);
+  assert.deepEqual(fs.readFileSync(path.join(root, ".jig", "config.json")), before, "byte-identical");
+});
+
+test("the refusal still fires on a hand-edited path, and names it once", () => {
+  const root = tmpProject({});
+  seedFixture(root, "crlf.json", ".jig/config.json");
+  for (const [id, mode] of [["d1", "observe"], ["d2", "armed"]]) {
+    draft(root, [{ id, kind: "write-config", path: ".jig/config.json", content: '{"mode":"' + mode + '"}\n' }]);
+    apply(root, [id]);
+  }
+  draft(root, [{ id: "d3", kind: "write-side-file", path: ".jig/checks/run.mjs", content: "export const ok = 1;\n" }]);
+  apply(root, ["d3"]);
+
+  const mine = Buffer.from('{"mode":"armed","zone":"src"}\r\n', "utf8");
+  fs.writeFileSync(path.join(root, ".jig", "config.json"), mine);
+
+  let message = "";
+  assert.throws(() => engine.cmdRevert(root, { _: [], change: [], all: true }), (err) => {
+    message = err.message;
+    return /changed after jig wrote it/.test(err.message);
+  });
+  assert.equal(message.match(/\.jig\/config\.json/g).length, 1, "named once, not once per journalled write");
+  assert.equal(/run\.mjs/.test(message), false, "the untouched path is not dragged into the refusal");
+  assert.deepEqual(fs.readFileSync(path.join(root, ".jig", "config.json")), mine, "nothing was restored");
+});
+
 // ---------------------------------------------------------------------------
 // The one git setting
 // ---------------------------------------------------------------------------
@@ -578,6 +618,52 @@ test("the state directory jig creates keeps its own machine-local files out of g
   const ignore = fs.readFileSync(path.join(root, ".jig", ".gitignore"), "utf8");
   assert.match(ignore, /journal\.jsonl/);
   assert.match(ignore, /preimages\//);
+});
+
+test("the generated ignore list covers every derived .jig file, not just the journal", () => {
+  const root = tmpProject({});
+  draft(root, [{ id: "c1", kind: "write-side-file", path: ".jig/checks/run.mjs", content: "export const ok = 1;\n" }]);
+  apply(root, ["c1"]);
+  const lines = fs.readFileSync(path.join(root, ".jig", ".gitignore"), "utf8").split(/\r?\n/);
+  for (const derived of ["plan.md", "plan.json", "plan-*.json", "backlog.json", "discarded.json",
+    "authored.json", "ledger.jsonl", "profile.json", "off", "lane.log"]) {
+    assert.ok(lines.includes(derived), derived + " is not ignored");
+  }
+  // The install itself is committed — never ignored.
+  for (const kept of ["config.json", "manifest.json", "checks/", "hooks/", "activation.md",
+    "proposed-permissions.json"]) {
+    assert.equal(lines.includes(kept), false, kept + " must stay committable");
+  }
+});
+
+test("a .jig/.gitignore that already exists is extended, not rewritten", () => {
+  const root = tmpProject({});
+  fs.mkdirSync(path.join(root, ".jig"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".jig", ".gitignore"), "# mine\njournal.jsonl\nscratch/\n");
+  draft(root, [{ id: "c1", kind: "write-side-file", path: ".jig/checks/run.mjs", content: "export const ok = 1;\n" }]);
+  apply(root, ["c1"]);
+  const ignore = fs.readFileSync(path.join(root, ".jig", ".gitignore"), "utf8");
+  assert.match(ignore, /^# mine$/m);
+  assert.match(ignore, /^scratch\/$/m);
+  assert.match(ignore, /^plan-\*\.json$/m);
+  // The line the owner already had is not duplicated.
+  assert.equal(ignore.split(/\r?\n/).filter((l) => l === "journal.jsonl").length, 1);
+});
+
+test("a line the owner un-ignored is not put back by appending it again", () => {
+  const root = tmpProject({});
+  fs.mkdirSync(path.join(root, ".jig"), { recursive: true });
+  // The last matching pattern wins in git, so appending `plan.json` under this
+  // reverses the owner's edit — silently, which is the one thing jig may not do.
+  fs.writeFileSync(path.join(root, ".jig", ".gitignore"), "!plan.json\n!off\n");
+  draft(root, [{ id: "c1", kind: "write-side-file", path: ".jig/checks/run.mjs", content: "export const ok = 1;\n" }]);
+  apply(root, ["c1"]);
+  const lines = fs.readFileSync(path.join(root, ".jig", ".gitignore"), "utf8").split(/\r?\n/);
+  assert.equal(lines.includes("plan.json"), false, "jig re-ignored a file the owner un-ignored");
+  assert.equal(lines.includes("off"), false, "jig re-ignored a file the owner un-ignored");
+  // Everything they did not answer for is still added.
+  assert.ok(lines.includes("plan-*.json"));
+  assert.ok(lines.includes("journal.jsonl"));
 });
 
 // ---------------------------------------------------------------------------

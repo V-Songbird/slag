@@ -3,13 +3,13 @@
   "templates": [
     {
       "name": "check-driver",
-      "version": "1.1.0",
+      "version": "1.3.1",
       "file": "run.mjs",
       "target": ".jig/checks/run.mjs",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "4ed09965b0858406e07fff9fce7f2f31ff3cd08fc596c5a9cb6011c15f0e32bc"
+      "sha256": "fa63f4298a761e40dfe57a974837566bf073b9e664c3979915800e9f1ef682f5"
     },
     {
       "name": "ci-workflow",
@@ -23,43 +23,43 @@
     },
     {
       "name": "activation",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "file": "activation.md",
       "target": ".jig/activation.md",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "f9d4d18185efc37451786d5462bab1f97188b30d7e61fc669de0ebec98028b1c"
+      "sha256": "9f74301e740f1d753499147cc4a962c45638351601e2f2a54491d6b53edda9a5"
     },
     {
       "name": "activation-woven",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "file": "activation-woven.md",
       "target": ".jig/activation.md",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "0618f2126e423ff9ad6868b9a0d895ed66ee7230acb4fb9f4698c73fb3ee5f86"
+      "sha256": "29cdea01fcde5865dc0e5244b3dc01a228abcc18569a145a8e49ede78b7bb237"
     },
     {
       "name": "activation-wired",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "file": "activation-wired.md",
       "target": ".jig/activation.md",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "e70a507058fafde0a186cb7b2efc20c3feedf5f8b44bb3fed4ebac525be6731e"
+      "sha256": "7d53dc2ca7245d334025611045d2df0443941086ed471db0a92f4b34b3c63fc3"
     },
     {
       "name": "hook-shim",
-      "version": "1.0.1",
+      "version": "1.1.0",
       "file": "hook-pre-commit.sh",
       "target": ".jig/hooks/pre-commit",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "a2b082884b2fd0592f4d6440497645520da210dc85aa3d3ce956df651b526396"
+      "sha256": "0a84268ff1f7f8af80d3011f2e4b6acdecf45200e24bf1141f691754467f75db"
     }
   ]
 }

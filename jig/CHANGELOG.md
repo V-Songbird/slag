@@ -4,6 +4,28 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.7.2] — 2026-09-02
+
+### Fixed
+
+- `jig revert --all` refused to run on an ordinary install. Every approval rewrites jig's own manifest, and the safety check that looks for files you edited by hand was comparing each of those writes against the file as it stands now — so jig kept finding its own later work and calling it your edit. The only way through was `--force`, which is the one that throws away edits. It now asks the question once per file, against the newest write jig made to it. A file you really did edit still stops the revert, and still says which one.
+- A guard scoped to `src/**` was blocking edits anywhere in the repository. The session lever read the pattern but not the list of files it was pointed at, so a guard you wrote for your source denied a write to your docs. Both spellings of a path — the absolute one your host sends and the relative one you wrote — now resolve to the same thing, on the guard's scope and on the observe zones alike. Out of scope is a plain pass, not a suppressed block.
+- An armed force-push guard let `git push --force origin HEAD:main` through, along with `+main`, `:main` and `refs/heads/main`. It was reading the argument as if it were a bare branch name. It now reads a refspec.
+- One check with a pattern that will not compile switched off every guard for that call, healthy ones included. A pattern that will not compile is now skipped on its own and reported, and the guards beside it still run.
+- A scan that stopped at the 20,000-file limit reported a clean pass. It now says it was truncated and exits non-zero, because a partial scan is not a clean project.
+- A check driver that crashes no longer blocks your commit. It writes the reason to stderr and to `.jig/lane.log` and gets out of the way. A check that reports a finding, and a check that will not load, both still exit 1.
+- Paired checks never fired on a repository where jig is installed below the git root. The staged file names came back relative to the repository and the patterns were written relative to the install, so the two never met — while the selftest passed, because it needs no index.
+
+### Changed
+
+- The reports stop saying things that are not true. `.jig/off` now silences the lane report as well as the guards, with the time it went quiet. A guard that dropped to observing says why, on the ledger row and on stderr, instead of changing mode in silence. The commit-lane setting is read from git rather than looked for as a file, so a live lane stops being reported as retired. The commit hook is written executable and says when it ran and when it skipped. The CI lane is reported from the workflow's own drift state rather than from the file existing.
+- A checks directory with nothing runnable in it used to report that every check caught its own violation. It now fails, and a plan that has no coverage behind it refuses to write the driver, the hook and the workflow at all rather than leaving you a green CI job over nothing.
+- `/jig:review` on a repository where nothing is installed says so instead of crashing. `jig migrate` exits 0 on its normal answer — that an install is already on the current shape — instead of reporting it as a failure.
+- Every command jig prints is one you can actually run. `jig plan --wire-commit` was in three places and on nobody's PATH.
+- jig's own working files — the plans, the backlog, the discard report — are added to `.jig/.gitignore` so they stop being committed. The README now names the six things under `.jig/` that are meant to be committed. jig only ever adds a missing line to that file and never rewrites one you edited.
+- The benchmark figures in the README are now asserted by the test suite, so a number that drifts fails the build instead of ageing quietly.
+- Four passages that described behaviour jig does not have — what CI runs, what the install proves about your linter, what `--quick` decides — now describe what it does.
+
 ## [2.7.1] — 2026-08-29
 
 ### Fixed

@@ -40,6 +40,11 @@ which runs the migration, and stop.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" review
 ```
 
+`installed: false` is the whole report. There is no `.jig/config.json` here — jig
+was never installed, or `revert` took it back out — so there is no activity to
+read. Say `why` and stop; offer `/jig:jig` to install. Do not report the empty
+`guards` list as guards that never fired.
+
 `guards[]` carries one row per installed guard:
 
 - `fired` — times it matched. `wavedOff` — false positives recorded.
@@ -50,21 +55,33 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" review
 - `mode` — `armed` (it blocks) or `observe` (it records and lets the call
   through). `why` states what put it there; print it verbatim, because
   paraphrasing an honest limit blurs it.
+- `demoted` — non-null means the config says `armed` and the guard is running as
+  `observe` anyway: drift, a stale proof, a standing false positive, a zone. The
+  owner cannot see that gap anywhere else, so report it beside `problem` rather
+  than leaving `mode` to imply somebody chose observe.
 - `provenance` — how the row was chosen. An `assumed` row is a default the owner
   never saw, and it is labelled as one wherever it is reported.
 
 `lanes` carries the three places the checks can run, read fresh on every review
 rather than remembered from the install:
 
-- `lanes.session` — the guards above, inside a Claude session.
+- `lanes.session` — the guards above, inside a Claude session. `off: true` means
+  `.jig/off` is present and NOTHING in this lane runs, whatever the guard rows
+  say; `offSince` is when the switch went on. Report that before anything else.
 - `lanes.commit` — the git hook. `runs` is the whole answer; `state` says why
-  when it is false, and `fix` is the one thing to do about it.
+  when it is false, and `fix` is the one thing to do about it. `executable` is
+  whether git can run the hook at all — `false` is a live-looking lane that does
+  nothing, and `null` means win32, where the question does not apply.
 - `lanes.ci` — the workflow. This is the floor, and it is the reason a dead
-  commit lane is an inconvenience rather than a hole.
+  commit lane is an inconvenience rather than a hole. `runs` is read from the
+  workflow rather than from the file being there: `state` `unwired` is a
+  workflow that no longer invokes the driver, and `drifted` is one that still
+  does under edits jig cannot vouch for.
 
 Report a dead lane in plain terms: what does not run, what still does, and the
-one command that fixes it. Offer the fix; never run it unasked. A `fix` of
-`jig plan --wire-commit` is an approved, reversible change like any other — send
+one command that fixes it. Offer the fix; never run it unasked. Print `fix`
+verbatim — it names the real invocation, and nothing puts `jig` on a PATH.
+Wiring the commit lane is an approved, reversible change like any other — send
 the user to `/jig:jig` to apply it rather than applying it here.
 
 Show the guard rows as three groups: fired, never fired, waved off. Then say

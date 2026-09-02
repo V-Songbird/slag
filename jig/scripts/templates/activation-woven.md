@@ -20,9 +20,9 @@ Remove jig's line from your pre-commit hook. It is the one that runs
 `.jig/checks/run.mjs`, and it carries jig's marker comment so it is easy to
 find.
 
-Or `jig revert`, which takes the line back out along with everything else jig
-wrote. Your hook is restored byte for byte from the copy jig kept before it
-wrote anything.
+Or ask `/jig:jig` to revert, which takes the line back out along with
+everything else jig wrote. Your hook is restored byte for byte from the copy
+jig kept before it wrote anything.
 
 ## One thing that can go wrong
 

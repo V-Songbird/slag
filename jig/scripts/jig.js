@@ -76,6 +76,13 @@ const sectionsLib = require("./sections.js");
 
 const PLUGIN_ROOT = path.dirname(__dirname);
 
+// The one fix every surface offers for a dead commit lane, in the two forms an
+// owner can actually run. Nothing puts jig on a PATH, so a report that handed
+// out `jig plan --wire-commit` handed out a command that answers "command not
+// found" — it is either the skill that offers it, or this script by its path.
+const WIRE_COMMIT_FIX = "ask /jig:jig to wire the commit lane, or run: node " +
+  toPosix(__filename) + " plan --wire-commit";
+
 // Additive-only rule: every jig schema ships at 1 and only ever
 // gains fields. Reading a plan stamped higher is a refusal rather than a guess,
 // because a field this build cannot see could be the one that made the write
@@ -425,11 +432,23 @@ function verifyWritten(root, rel) {
 function ensureStateDir(root) {
   const dir = statePath(root);
   fs.mkdirSync(dir, { recursive: true });
-  // Written once, by us, because the journal and the pre-images can carry
-  // verbatim contents of files the user never meant to commit.
+  // Written by us, because the journal and the pre-images carry verbatim
+  // contents of files the user never meant to commit, and everything else named
+  // here is derived or per-machine. A stale committed plan is what mints the
+  // "defined by 2 plans" refusal. Missing lines are APPENDED to a list that
+  // already exists: jig extends an ignore file, it never rewrites or narrows one.
   const ignore = path.join(dir, ".gitignore");
-  if (!fs.existsSync(ignore)) {
-    fs.writeFileSync(ignore, [JOURNAL_FILE, PREIMAGE_DIR + "/", "ledger.jsonl", "profile.json", "off"].join("\n") + "\n");
+  const want = [JOURNAL_FILE, PREIMAGE_DIR + "/", "ledger.jsonl", "profile.json", "off", "lane.log",
+    "plan.md", "plan.json", "plan-*.json", "backlog.json", "discarded.json", "authored.json"];
+  const had = fs.existsSync(ignore) ? fs.readFileSync(ignore, "utf8") : "";
+  const present = had.split(/\r?\n/).map((line) => line.trim());
+  // A line the owner explicitly UN-ignored is an answer they gave, and the last
+  // matching pattern wins in git — so appending `plan.json` under their
+  // `!plan.json` would quietly reverse it. Already there, or already negated,
+  // is already answered.
+  const missing = want.filter((line) => !present.includes(line) && !present.includes("!" + line));
+  if (missing.length) {
+    fs.appendFileSync(ignore, (had === "" || had.endsWith("\n") ? "" : "\n") + missing.join("\n") + "\n");
   }
   return dir;
 }
@@ -792,6 +811,13 @@ function journalledWrite(root, ctx, change, bytes) {
   });
   fs.mkdirSync(path.dirname(full), { recursive: true });
   fs.writeFileSync(full, bytes);
+  // Git will not run a hook it cannot execute, and a shim written 0644 is a
+  // commit lane that reports live and does nothing. The bit is set here rather
+  // than left to the owner because jig wrote the file. win32 has no exec bit;
+  // the chmod is a no-op there and the lane report says so instead of guessing.
+  if (change.path.startsWith(STATE_DIR + "/hooks/")) {
+    try { fs.chmodSync(full, 0o755); } catch { /* fail open: an unset bit is reported, never fatal */ }
+  }
   const check = verifyWritten(root, change.path);
   appendJournal(root, {
     event: "outcome", tx: ctx.tx, plan: ctx.plan, change: change.id, path: change.path,
@@ -1275,6 +1301,15 @@ function readManifest(root) {
   return record;
 }
 
+// The one artifact that is not a file. `git:core.hooksPath` is a pseudo-path
+// nothing on disk answers, so every reader that asks the disk about it gets
+// `null` and calls a live setting retired. Ask git instead — the same reader
+// `revert` already asked, now in one place.
+function settingBytes(root) {
+  const value = gitConfig(root, GIT_SETTING);
+  return value === null ? null : Buffer.from(value, "utf8");
+}
+
 // `state` is measured here rather than stored, for the same reason the journal
 // is replayed rather than updated: a field somebody has to remember to write
 // is a field that goes stale.
@@ -1285,7 +1320,7 @@ function readManifest(root) {
 // schema check, never a fingerprint.
 function manifestStates(root, manifest) {
   return manifest.artifacts.map((a) => {
-    const buf = readIfExists(path.join(root, a.path));
+    const buf = a.path === GIT_SETTING_PATH ? settingBytes(root) : readIfExists(path.join(root, a.path));
     if (buf === null) return { ...a, state: "retired" };
     if (a.ownership === "schema") return { ...a, state: "active" };
     return { ...a, state: hashBytes(buf) === a.hash ? "active" : "drifted" };
@@ -1763,7 +1798,7 @@ function draftFromTemplates(root, opts, checks) {
     const lane = commitLane(root);
     if (lane.state !== "live") {
       throw expected("commit-time checks do not run here yet, so " + STATE_DIR + "/" + ACTIVATION_FILE +
-        " already says the right thing. `jig plan --wire-commit` is what turns them on.");
+        " already says the right thing. " + WIRE_COMMIT_FIX + " — that is what turns them on.");
     }
     const entry = byName.get(face);
     const current = readIfExists(path.join(root, STATE_DIR, ACTIVATION_FILE));
@@ -1777,8 +1812,27 @@ function draftFromTemplates(root, opts, checks) {
   // plans define, which `apply` refuses by design. The only file such a plan
   // touches is the activation doc, and only to keep it in step with the lane.
   const wiringOnly = !asked.length && !authoredChecks.length;
-  const wanted = wiringOnly ? [face] : ["check-driver", face, "hook-shim"];
-  if (!wiringOnly && !opts["no-ci"]) wanted.push("ci-workflow");
+  // A driver with nothing under it finds nothing by construction, and a CI
+  // workflow that runs it is a green lane over no coverage at all. When every
+  // check a plan carried was discarded at admission there is nothing left to
+  // run, so the lanes are not emitted: an install that claims a commit and a CI
+  // lane must have something for them to check.
+  const noCoverage = !wiringOnly && !selection.length;
+  if (noCoverage) {
+    const why = "every check this plan carried was discarded at admission, so no driver, hook or CI workflow" +
+      " is proposed — there would be nothing for them to run:\n  - " +
+      admissionResult.discarded.map((d) => d.id + ": " + d.why).join("\n  - ");
+    // A ticked linter or type checker is coverage of its own, approved by name.
+    // Throwing the whole plan away because an unrelated check failed admission
+    // would discard an install the owner did give an answer for; the lanes are
+    // what has nothing behind them, and only they are dropped.
+    if (!(typeof opts.tools === "string" && opts.tools.trim())) {
+      throw expected(why + "\nNothing was planned.");
+    }
+    refused.push(why);
+  }
+  const wanted = wiringOnly ? [face] : noCoverage ? [] : ["check-driver", face, "hook-shim"];
+  if (!wiringOnly && !noCoverage && !opts["no-ci"]) wanted.push("ci-workflow");
   for (const name of wanted) {
     const entry = byName.get(name);
     if (!entry) continue;
@@ -1908,14 +1962,14 @@ function draftFromTemplates(root, opts, checks) {
   // The two computed artifacts ride the same path as the copied ones: same
   // change kinds, same occupancy rule, same journal.
   //
-  // Both are computed FROM THE SELECTION, so a wiring plan — which carries no
-  // selection by definition — would compute a guard config holding no guards
-  // and propose it over the real one. Approving a plan that only claimed to
-  // point git at a hook would silently disarm every guard in the repository,
-  // which is the exact thing SCOPE says jig must never do, arriving through
-  // jig's own approval flow. A plan that proposes no coverage proposes no
-  // config.
-  if (!wiringOnly) {
+  // Both are computed FROM THE SELECTION, so a plan with no selection — a
+  // wiring plan by definition, or one whose every check was discarded — would
+  // compute a guard config holding no guards and propose it over the real one.
+  // Approving a plan that only claimed to point git at a hook, or to install a
+  // linter, would silently disarm every guard in the repository, which is the
+  // exact thing SCOPE says jig must never do, arriving through jig's own
+  // approval flow. A plan that proposes no coverage proposes no config.
+  if (!wiringOnly && !noCoverage) {
     const config = configFromSelection(classes, provenance, mode);
     add({ name: "config", version: "1.0.0", target: STATE_DIR + "/" + CONFIG_FILE, kind: "write-config", ownership: "schema" },
       JSON.stringify(config, null, 2) + "\n", selection);
@@ -2892,7 +2946,7 @@ function proposalNotes(root, results) {
           "\n  " + STATE_DIR + "/" + ACTIVATION_FILE + " has the same line for other kinds of hook."
         : "\n  jig wrote a ready-made hook at " + lane.shim + ". One command tells git to use it:" +
           "\n    git config " + GIT_SETTING + " " + STATE_DIR + "/hooks" +
-          "\n  Run `jig plan --wire-commit` instead and jig proposes that as an approved, reversible change." +
+          "\n  Or have jig propose that as an approved, reversible change instead: " + WIRE_COMMIT_FIX +
           "\n  " + STATE_DIR + "/" + ACTIVATION_FILE + " explains both routes and what each costs.") +
       "\n  Skipping this costs you nothing except finding out later. CI still stops the merge.");
   }
@@ -2961,12 +3015,18 @@ function cmdRevert(root, opts) {
   // restoring the pre-image would throw that away. Refuse by default, name the
   // file, and make --force the explicit way to say "yes, discard it".
   if (!opts.force) {
+    // One question per path, asked of the newest live write for it — `live` is
+    // newest first, so that is the first row a path appears in. An older write
+    // to the same path was superseded by jig, not by the owner: every apply
+    // rewrites the manifest, and asking the disk about write N after write N+1
+    // landed made jig accuse itself of being a human edit.
+    const asked = new Set();
     const drifted = live.filter(({ w }) => {
+      if (asked.has(w.path)) return false;
+      asked.add(w.path);
       // Same question for the setting, asked of git instead of the disk: is the
       // value still the one jig left there, or did somebody move it since.
-      const now = w.path === GIT_SETTING_PATH
-        ? (() => { const v = gitConfig(root, GIT_SETTING); return v === null ? null : Buffer.from(v, "utf8"); })()
-        : readIfExists(path.join(root, w.path));
+      const now = w.path === GIT_SETTING_PATH ? settingBytes(root) : readIfExists(path.join(root, w.path));
       return now === null ? w.hashAfter !== null : hashBytes(now) !== w.hashAfter;
     });
     if (drifted.length) {
@@ -3027,19 +3087,56 @@ const DRIVER_PATH = STATE_DIR + "/checks/run.mjs";
 // no probe table in here any more — a table keyed on class names could only
 // ever witness the four classes jig 1.0.1 shipped, and a witnessed close that
 // cannot see an authored check is not a close at all.
+// The fixture path derivation, hand-copied from `scripts/templates/run.mjs`.
+// That file is ESM text jig byte-copies into somebody's repository, so this one
+// cannot import it; `tests/blanker-drift.test.js` holds the two copies to the
+// letter. Every glob segment collapses to a concrete one, so the seeded path
+// satisfies the detector's own first glob.
+function concreteSegment(glob, star) {
+  let out = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*") {
+      out += star;
+      while (glob[i + 1] === "*") i++;
+    } else if (c === "?") {
+      out += "x";
+    } else if (c === "{") {
+      const end = glob.indexOf("}", i);
+      const body = end === -1 ? glob.slice(i + 1) : glob.slice(i + 1, end);
+      out += body.split(",")[0];
+      i = end === -1 ? glob.length : end;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+function fixturePath(det) {
+  const glob = (det.params.paths || [])[0] || "fixture.txt";
+  const segments = glob.split("/");
+  const base = concreteSegment(segments.pop(), "fixture");
+  const dirs = segments
+    .filter((seg) => seg !== "**" && seg !== "")
+    .map((seg) => concreteSegment(seg, "fx"));
+  return [...dirs, base].join("/");
+}
+
 function guardProbe(guard, record) {
   const mod = record.mod || {};
   const violation = mod.fixtures && mod.fixtures.violation;
   if (typeof violation !== "string" || !violation.trim()) return null;
   const what = "the violation fixture `" + guard.check + "` was admitted on";
   if (guard.runner === "PreToolUse") return { event: "PreToolUse", tool: "Bash", input: { command: violation }, what };
-  // The blanker reads comment and string syntax off a filename, so the seeded
-  // path takes its extension from the detector's own first path glob — the same
-  // derivation admission used when it proved this fixture.
+  // The blanker reads comment and string syntax off a filename, and the guard
+  // reads its own `paths` off it too, so the seeded path is derived from the
+  // detector's own first glob rather than dropped at the root: a probe outside
+  // a directory-scoped guard's globs reports `caught: false` for a guard doing
+  // exactly what it was installed to do.
   const det = (Array.isArray(mod.detectors) ? mod.detectors : []).find((d) => d && d.runner === guard.runner) || {};
-  const glob = ((det.params && det.params.paths) || ["x.txt"])[0];
-  const ext = (String(glob).match(/\.[A-Za-z0-9]+$/) || [".txt"])[0];
-  return { event: "PostToolUse", tool: "Write", input: { file_path: "seeded" + ext, content: violation }, what };
+  const file_path = fixturePath({ params: det.params || {} });
+  return { event: "PostToolUse", tool: "Write", input: { file_path, content: violation }, what };
 }
 
 function ledgerLines(root) {
@@ -3098,10 +3195,10 @@ function runDriverProbe(root, live) {
   return { ...base, ran: true, caught: run.status === 0, exitCode: run.status, output: (run.stdout || "").trim() };
 }
 
-// One probe per installed toolchain side-file. Only the eslint probe is ever
-// spawned live — it takes its seeded violation on stdin and its exit code is
-// the whole verdict. The others cost a build (tsc) or a JVM (detekt), so they
-// degrade to the exact command and the expected outcome, never a stall.
+// One probe per installed toolchain side-file. None of them is spawned: a
+// linter, a type checker or a test runner costs a build (tsc) or a JVM
+// (detekt), and jig does not run somebody's toolchain behind a selftest. Every
+// probe degrades to the exact command and the expected exit code, never a stall.
 function runToolchainProbes(root, live) {
   let artifacts = [];
   try {
@@ -3510,8 +3607,21 @@ function commitLane(root) {
     // advice can all read the same ones.
     shim: toPosix(STATE_DIR + "/hooks/pre-commit"),
     shimExists: fs.existsSync(path.join(root, STATE_DIR, "hooks", "pre-commit")),
+    // Whether git can actually execute the hook it is pointed at. `null` means
+    // the question does not apply here rather than "no": win32 has no exec bit
+    // and the mode node reports for it is synthesised, so a `false` there would
+    // be a report of a problem nobody has.
+    executable: body === null || process.platform === "win32" ? null : isExecutable(full),
     state: runsChecks ? "live" : body !== null ? "hook-without-jig" : "no-hook",
   };
+}
+
+function isExecutable(full) {
+  try {
+    return (fs.statSync(full).mode & 0o111) !== 0;
+  } catch {
+    return null;
+  }
 }
 
 function governanceFacts(root, rules, hooks) {
@@ -3852,6 +3962,22 @@ function installedChecks(root) {
 }
 
 function cmdReview(root) {
+  // A repository jig never touched, and one `revert` put back, are the same
+  // repository: there is no config, and "what have the guards caught" has the
+  // plain answer "nothing is installed". Throwing a raw ENOENT at that question
+  // told the owner their install was broken when it was simply gone. A config
+  // that exists and cannot be read is still a refusal — that one IS broken.
+  if (!fs.existsSync(statePath(root, CONFIG_FILE))) {
+    return {
+      ok: true,
+      schemaVersion: SCHEMA_VERSION,
+      installed: false,
+      why: "there is no " + STATE_DIR + "/" + CONFIG_FILE + " here, so no guards are installed",
+      guards: [],
+      lanes: lanesOf(root, []),
+      ledger: { file: STATE_DIR + "/" + LEDGER_FILE, lines: ledgerLines(root) },
+    };
+  }
   const { lib, config, guards } = configuredGuards(root);
   const stats = lib.ledgerStats(root);
   const rows = guards.map((g) => {
@@ -3879,6 +4005,10 @@ function cmdReview(root) {
       problem: e.problem,
       mode: now.mode,
       why: now.why,
+      // The config says armed and the gate says observe. That gap is the one
+      // thing a reader of this row cannot see anywhere else — the config is not
+      // in front of them — so it is its own field rather than two to compare.
+      demoted: (g.mode || "observe") === "armed" && now.mode !== "armed" ? now.why : null,
       armable: ifArmed.mode === "armed",
       barrier: ifArmed.mode === "armed" ? null : ifArmed.why,
     };
@@ -3886,6 +4016,7 @@ function cmdReview(root) {
   return {
     ok: true,
     schemaVersion: SCHEMA_VERSION,
+    installed: true,
     guards: rows,
     lanes: lanesOf(root, rows),
     ledger: { file: STATE_DIR + "/" + LEDGER_FILE, lines: ledgerLines(root) },
@@ -3900,21 +4031,61 @@ function cmdReview(root) {
 // the config still owes it.
 function lanesOf(root, rows) {
   const lane = commitLane(root);
-  const ci = fs.existsSync(path.join(root, ".github", "workflows", "jig.yml"));
+  const ci = ciLane(root);
+  // The kill switch is the whole answer for the session lane. Every hook exits
+  // before it reads anything while `.jig/off` is there, so a report that read
+  // the config and not the file said the guards were running when nothing was.
+  const off = readIfExists(path.join(root, STATE_DIR, "off")) !== null;
+  let offSince = null;
+  if (off) {
+    try { offSince = fs.statSync(path.join(root, STATE_DIR, "off")).mtime.toISOString(); } catch { /* an unreadable mtime is not a reason to hide the switch */ }
+  }
   return {
-    session: { runs: rows.some((r) => r.mode === "armed"), observing: rows.some((r) => r.mode === "observe") },
+    session: off
+      ? { runs: false, observing: false, off: true, offSince }
+      : { runs: rows.some((r) => r.mode === "armed"), observing: rows.some((r) => r.mode === "observe"), off: false, offSince: null },
     commit: {
       runs: lane.state === "live",
       state: lane.state,
       path: lane.path,
+      // Read from the file rather than assumed from the write: git runs a hook
+      // it can execute, and nothing else.
+      executable: lane.executable,
       // The one thing to do about it, named here so every surface that
       // reports the gap offers the same fix.
       fix: lane.state === "live" ? null
         : lane.state === "hook-without-jig"
           ? "add jig's line to " + lane.path + ": " + ACTIVATION.sh.line
-          : "jig plan --wire-commit",
+          : WIRE_COMMIT_FIX,
     },
-    ci: { runs: ci, path: ci ? ".github/workflows/jig.yml" : null },
+    ci,
+  };
+}
+
+// The workflow file being there is not the CI lane. A file jig wrote and
+// somebody later rewrote, and a file jig never wrote at all, both used to read
+// as live coverage from `existsSync` alone. jig already knows better: the
+// `ci-workflow` artifact carries a measured drift state, and the driver line is
+// readable as text — the same way `commitLane` reads the hook, and for the same
+// reason. No YAML parser: jig does not take a dependency to read its own
+// template back, and whether the workflow's triggers still fire is a question
+// only `gh` could answer, which a report does not get to make a network call
+// for.
+function ciLane(root) {
+  const rel = ".github/workflows/jig.yml";
+  const buf = readIfExists(path.join(root, rel));
+  if (buf === null) return { runs: false, state: "absent", path: null };
+  const runsChecks = stripBom(buf.toString("utf8")).includes(STATE_DIR + "/checks/run.mjs");
+  let artifact = null;
+  try {
+    artifact = manifestStates(root, readManifest(root)).find((a) => a.path === rel) || null;
+  } catch { /* an unreadable manifest is not a reason to hide the lane */ }
+  return {
+    // A workflow that still invokes the driver runs the checks however it came
+    // to say so; one that does not is the lane this defect called live.
+    runs: runsChecks,
+    state: !runsChecks ? "unwired" : artifact && artifact.state === "drifted" ? "drifted" : "live",
+    path: rel,
   };
 }
 
@@ -3963,6 +4134,11 @@ function cmdInventory(root) {
     ok: true,
     schemaVersion: SCHEMA_VERSION,
     guards: review ? review.guards : [],
+    // Both surfaces read one truth: `false` means there is no guard config here
+    // at all, so the empty list above is "nothing is installed" rather than
+    // "every guard was retired". `why` is `cmdReview`'s own sentence for it.
+    installed: guardsProblem !== null || (review ? review.installed !== false : false),
+    why: review && review.installed === false ? review.why : null,
     // Non-null means no guard below is being reported. Say it first: a silent
     // empty list reads as "nothing installed", which is the opposite of what a
     // config jig refused actually means.

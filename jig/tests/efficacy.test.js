@@ -31,6 +31,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("fs");
 const path = require("path");
 
 const editions = require("../scripts/editions.js");
@@ -136,6 +137,30 @@ test("the benchmark runs over all six editions and all 141 pairs", () => {
     assert.ok(row.classes > 0, row.edition + " ships no classes");
     assert.ok(row.driven > 0, row.edition + " has no class with patterns of jig's own to prove");
   }
+});
+
+// ---------------------------------------------------------------------------
+// The published score is the measured score
+// ---------------------------------------------------------------------------
+
+// The README's benchmark table is the one coverage claim jig makes in public,
+// and it was hand-copied. A cell reads its number off the table so a figure that
+// drifts fails here instead of ageing quietly in the prose.
+function cell(readme, label) {
+  const row = readme.split("\n").find((line) => line.startsWith("| " + label + " |"));
+  assert.ok(row, "the README benchmark table has no row for " + JSON.stringify(label));
+  const cells = row.split("|").map((c) => c.replace(/\*/g, "").trim());
+  return cells[2];
+}
+
+test("the README benchmark table publishes the figures this suite measures", () => {
+  const { rows, pairs, cross } = measure();
+  const readme = fs.readFileSync(path.join(PLUGIN_ROOT, "README.md"), "utf8");
+  const driven = rows.reduce((n, r) => n + r.driven, 0);
+
+  assert.equal(cell(readme, "Checks jig runs, each passing its own pair"), driven + " of " + driven);
+  assert.equal(cell(readme, "Mistake classes across the six editions"), String(pairs));
+  assert.equal(cell(readme, "Cross-sample hits, disclosed"), String(cross.length));
 });
 
 // ---------------------------------------------------------------------------

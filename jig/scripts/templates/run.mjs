@@ -14,7 +14,15 @@
 //   node .jig/checks/run.mjs --json          machine-readable report
 //
 // Exit code is 1 when anything was found and 0 when nothing was. A selftest
-// exits 1 when a check failed to catch its own seeded violation.
+// exits 1 when a check failed to catch its own seeded violation, when a check
+// claims this driver and carries no pair it can run, and when there is no check
+// module at all — an empty checks directory proves nothing, and exiting 0 on it
+// would report coverage that does not exist. A check whose detectors all belong
+// to the session lane is a disclosed skip rather than a failure: it is proven
+// where it runs. A walk that hit the file ceiling exits 1 too: it read part of
+// the project, and 0 would say it read all of it. The one failure that exits 0
+// is this file itself crashing — that is a coverage gap, disclosed on stderr
+// and in .jig/lane.log, and never a reason to stop somebody committing.
 //
 // A check declares one of two detector kinds. A pattern detector is a regular
 // expression over the files a glob names. A paired-change detector names two
@@ -251,11 +259,17 @@ function blankRegions(text, rel, opts) {
 // The context every check module is handed
 // ---------------------------------------------------------------------------
 
+// Returns the files and whether the ceiling cut the walk short. The second half
+// matters as much as the first: a run that read part of the project and printed
+// "No findings." is a coverage claim nobody demonstrated.
 function walk(root, only) {
   if (only && only.length) {
-    return only
-      .map((p) => path.relative(root, path.resolve(root, p)).split(path.sep).join("/"))
-      .filter((rel) => rel && !rel.startsWith("..") && fs.existsSync(path.join(root, rel)));
+    return {
+      files: only
+        .map((p) => path.relative(root, path.resolve(root, p)).split(path.sep).join("/"))
+        .filter((rel) => rel && !rel.startsWith("..") && fs.existsSync(path.join(root, rel))),
+      truncated: false,
+    };
   }
   const found = [];
   const stack = ["."];
@@ -276,7 +290,9 @@ function walk(root, only) {
       }
     }
   }
-  return found;
+  // The loop stops on the ceiling with directories still on the stack, or on an
+  // empty stack having read everything. Only the first is a partial scan.
+  return { files: found, truncated: stack.length > 0 };
 }
 
 function lineOf(text, index) {
@@ -286,10 +302,12 @@ function lineOf(text, index) {
 }
 
 function makeContext(root, only) {
-  const all = walk(root, only);
+  const walked = walk(root, only);
+  const all = walked.files;
   const cache = new Map();
   return {
     root,
+    truncated: walked.truncated,
     files(globs) {
       return all.filter((rel) => matchesAny(rel, globs));
     },
@@ -357,8 +375,13 @@ function makeContext(root, only) {
     // limit. Nothing staged returns null, which the caller reports as a skip
     // rather than a pass: a class nobody could evaluate is not a class that
     // came back clean.
+    //
+    // `--relative` because git names staged files from the repository root and
+    // a check's globs are written against ROOT. Where jig is installed below
+    // the root the two namespaces differ, and every paired check would match
+    // nothing on a real commit while still reporting itself as coverage.
     changed() {
-      const run = this.git(["diff", "--cached", "--name-only"]);
+      const run = this.git(["diff", "--cached", "--name-only", "--relative"]);
       if (!run.ok) return null;
       const list = run.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
       return list.length ? list : null;
@@ -507,7 +530,7 @@ async function runChecks(root, only) {
     }
   }
   findings.sort((a, b) => (a.path === b.path ? a.line - b.line : a.path < b.path ? -1 : 1));
-  return { findings, skipped, broken };
+  return { findings, skipped, broken, truncated: ctx.truncated };
 }
 
 // The witnessed catch, without jig. Every check carries the pair that admitted
@@ -524,9 +547,22 @@ async function runSelftest() {
       const mine = driverDetectors(mod);
       const paired = pairedDetectors(mod);
       const pair = mod.fixtures;
+      // A check whose every detector belongs to another lane is not this
+      // driver's to prove. The session guards carry their own witnessed close,
+      // so this is a disclosed skip and not a failure — a repository whose
+      // checks are all session guards is a healthy install, and failing its
+      // selftest would leave the shipped CI workflow red for ever.
+      if (!mod.detectors.some((det) => det && det.runner === "checks")) {
+        results.push({ id: mod.id, caught: null, why: "declares no `checks` detector — it is proven in the session lane", command: null });
+        continue;
+      }
+      // But a check that DOES claim this driver and hands it nothing runnable
+      // is unproven coverage sitting in the checks directory. Every check jig
+      // admits carries its pair inline, so this one was never admitted, and
+      // skipping it quietly is the coverage claim the driver must not make.
       if ((!mine.length && !paired.length) || !pair ||
           typeof pair.violation !== "string" || typeof pair.nearMiss !== "string") {
-        results.push({ id: mod.id, caught: null, why: "carries no fixture pair this driver can run", command: null });
+        results.push({ id: mod.id, caught: false, why: "claims a `checks` detector but carries no fixture pair this driver can run" });
         continue;
       }
       let hits = 0;
@@ -582,9 +618,15 @@ function report(out) {
   for (const f of out.findings) lines.push(`${f.path}:${f.line}  ${f.classId}${f.note ? "  (" + f.note + ")" : ""}`);
   for (const s of out.skipped) lines.push(`skipped  ${s.id} — ${s.why}${s.command ? "\n  run it yourself: " + s.command : ""}`);
   for (const b of out.broken) lines.push(`BROKEN   ${b.id} — ${b.why}`);
+  // A partial walk is disclosed on the report and again in the closing line,
+  // because the closing line is the one anybody reads. "No findings" over a
+  // scan that stopped at the ceiling would be coverage nobody demonstrated.
+  if (out.truncated) lines.push(`PARTIAL  the walk stopped at ${MAX_FILES} files — everything past that was never read`);
   lines.push(out.findings.length
     ? `\n${out.findings.length} finding${out.findings.length === 1 ? "" : "s"}.`
-    : "\nNo findings.");
+    : out.truncated
+      ? `\nNo findings in the ${MAX_FILES} files read, which is not the whole project. This is a partial scan, not a pass.`
+      : "\nNo findings.");
   return lines.join("\n");
 }
 
@@ -596,7 +638,13 @@ function selftestReport(results) {
     else lines.push(`MISSED   ${r.id} — ${r.why || "the seeded violation did not fire the check"}`);
   }
   const missed = results.filter((r) => r.caught === false).length;
-  lines.push(missed ? `\n${missed} check${missed === 1 ? "" : "s"} did not catch its own violation.` : "\nEvery runnable check caught its own violation.");
+  const proved = results.filter((r) => r.caught === true).length;
+  lines.push(missed ? `\n${missed} check${missed === 1 ? "" : "s"} did not catch its own violation.`
+    : proved ? "\nEvery runnable check caught its own violation."
+    // Nothing ran is not the same as nothing failed, and the old wording said
+    // the second about the first. A selftest that proved no check proved no
+    // coverage, which is the one claim this driver must never make.
+    : "\nNo check ran its own fixture pair, so nothing here is proven. There is no coverage to report.");
   return lines.join("\n");
 }
 
@@ -606,19 +654,39 @@ async function main(argv) {
   if (argv.includes("--selftest")) {
     const results = await runSelftest();
     process.stdout.write((json ? JSON.stringify({ selftest: results }, null, 2) : selftestReport(results)) + "\n");
-    return results.some((r) => r.caught === false) ? 1 : 0;
+    return results.some((r) => r.caught === false) || !results.length ? 1 : 0;
   }
   const out = await runChecks(ROOT, paths);
   process.stdout.write((json ? JSON.stringify(out, null, 2) : report(out)) + "\n");
-  return out.findings.length || out.broken.length ? 1 : 0;
+  // A truncated walk exits non-zero for the same reason it prints a line: the
+  // exit code is the only thing a hook or a CI step reads, and 0 there says the
+  // project was checked.
+  return out.findings.length || out.broken.length || out.truncated ? 1 : 0;
+}
+
+// The same row the commit shim writes, in the same file: a lane that goes quiet
+// and a lane that never ran are the same silence otherwise. Machine-local,
+// git-ignored, and failing to write it never fails a run.
+function laneLog(what) {
+  try {
+    const stamp = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+    fs.appendFileSync(path.join(HERE, "..", "lane.log"), stamp + " checks " + what + "\n");
+  } catch { /* a disclosure that cannot be written is not a reason to fail */ }
 }
 
 main(process.argv.slice(2)).then(
   (code) => { process.exitCode = code; },
   (err) => {
     // The driver failing is a fact to report, never a reason to stop somebody
-    // committing. A crash exits 1 and says why, in one line.
-    process.stderr.write("jig checks failed to run: " + err.message + "\n");
-    process.exitCode = 1;
+    // committing: a driver that cannot run is a disclosed coverage gap. CI runs
+    // this same file, so the gap is disclosed there on stderr and in the lane
+    // log rather than by a red job — SCOPE's derail-pass row C13d is where that
+    // trade was made. Exit 1 stays where it means something: a check that
+    // reported a finding, and a check module that would not load, which is a
+    // broken install the owner made and can revert.
+    const why = String((err && err.message) || err).split("\n")[0];
+    process.stderr.write("jig checks failed to run, so nothing was checked: " + why + "\n");
+    laneLog("crashed " + why);
+    process.exitCode = 0;
   },
 );

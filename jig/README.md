@@ -72,7 +72,7 @@ Takes effect next session. Nothing to configure — the interview is the configu
 | You want to… | Command |
 | --- | --- |
 | Set up guardrails, interview included | `/jig:jig` |
-| Set them up with one review and no questions | `/jig:jig --quick` |
+| Set them up with one review and no questions, every value an assumed default labelled as one | `/jig:jig --quick` |
 | Scaffold a new project and guard it from line one | `/jig:jig` in the empty folder |
 | See what the guards caught, and which checks are actually running | `/jig:review` |
 | Put a noisy guard back to watching | `/jig:review` |
@@ -108,7 +108,8 @@ One engine that journals every write, a committed check script that owes jig not
 - Several tools often share one config file — `pyproject.toml`, `.editorconfig`, `Cargo.toml`, `Directory.Build.props`, `build.gradle.kts`. jig writes that file once with every tool's settings in it, and tells you about any setting two tools disagreed on. Where the shared file is one it can't safely compose, or one you already own, it writes none of it and hands you the exact snippet instead.
 - Rules are the exception, not the habit. The one jig writes points your sessions at the governance docs nothing referenced, under its own `jig-` name and a small hard byte cap — because every session pays to carry prose.
 - Working with another AI tool too? On request jig keeps one clearly-fenced block in `AGENTS.md` pointing it at the same checks. Your own text in that file is never touched.
-- Kill switch: create a file named `.jig/off` and every guard goes silent.
+- Commit the install, not the workings. Six things under `.jig/` are meant to be committed — `config.json`, `manifest.json`, `checks/`, `hooks/`, `activation.md` and `proposed-permissions.json` — so a teammate who clones the repository gets the same checks and the same guards. Everything else there is derived or specific to your machine, and jig writes a `.jig/.gitignore` naming it. jig only ever adds a missing line to that file; it never rewrites one you edited.
+- Kill switch: create a file named `.jig/off` and every guard goes silent. It silences the session guards; the committed checks, the commit hook and the CI workflow never read it and go on running.
 
 ## License
 

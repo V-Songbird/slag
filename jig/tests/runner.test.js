@@ -63,6 +63,60 @@ const FOCUSED_TEST = A.authored({
   },
 });
 
+// The same catch shape, scoped to one tree. `paths` is the field the check
+// driver has always read; these tests are what makes the session guard read it
+// too, so a guard installed for `src/**/*.js` stops firing on `docs/notes.js`.
+const SCOPED_CATCH = A.authored({
+  id: "scoped-catch",
+  title: "A swallowed error under src only",
+  detectors: [
+    { lever: "edit-observe-guard", actor: "claude-session", confidence: "deterministic",
+      params: { patterns: [A.CATCH_PATTERN], paths: ["src/**/*.js"] } },
+  ],
+  fixtures: A.EMPTY_CATCH.fixtures,
+  deny: A.DENY_CATCH,
+});
+
+// A Bash guard whose params carry `paths` anyway. A Bash call names no file, so
+// the field must not reach it — scoping a command by a path it does not have
+// would silence the guard entirely.
+const SCOPED_PIPE = A.authored({
+  id: "scoped-pipe",
+  title: "A piped installer, with a path glob that does not apply",
+  detectors: [
+    { lever: "bash-guard", actor: "claude-session", confidence: "deterministic",
+      params: { patterns: [A.PIPE_PATTERN], paths: ["src/**/*.sh"] } },
+  ],
+  fixtures: A.PIPED_INSTALLER.fixtures,
+  deny: A.DENY_PIPE,
+});
+
+// A check carrying a pattern that will not compile. `(` is a real regular
+// expression source right up to the moment `new RegExp` reads it, which is what
+// makes it data rather than a syntax error anybody would have caught: the
+// module parses, the fixtures hash, the proof matches, and the guard installs.
+const BAD_BASH_PATTERN = A.authored({
+  id: "bad-bash-pattern",
+  title: "A bash check whose pattern will not compile",
+  detectors: [
+    { lever: "bash-guard", actor: "claude-session", confidence: "deterministic",
+      params: { patterns: ["("] } },
+  ],
+  fixtures: A.PIPED_INSTALLER.fixtures,
+  deny: A.DENY_PIPE,
+});
+
+const BAD_EDIT_PATTERN = A.authored({
+  id: "bad-edit-pattern",
+  title: "An edit check whose pattern will not compile",
+  detectors: [
+    { lever: "edit-observe-guard", actor: "claude-session", confidence: "deterministic",
+      params: { patterns: ["("] } },
+  ],
+  fixtures: A.EMPTY_CATCH.fixtures,
+  deny: A.DENY_CATCH,
+});
+
 const roots = [];
 
 function tmpRoot() {
@@ -371,6 +425,65 @@ test("force-push is scoped to the default branch and excludes --force-with-lease
   assert.deepEqual(ledger(root).map((r) => r.decision), ["would-deny", "would-deny", "pass", "pass"]);
 });
 
+// Every ordinary spelling of the same push. Before the refspec was normalised
+// each of these read as a branch called `HEAD:main` or `+main`, so an armed
+// guard over `main` let the push through.
+test("a force push over the default branch is caught in every refspec spelling", () => {
+  const spellings = [
+    "git push --force origin main",
+    "git push --force origin HEAD:main",
+    "git push --force origin +main",
+    "git push --force origin +HEAD:main",
+    "git push --force origin :main",
+    "git push --force origin refs/heads/main",
+    "git push --force origin +refs/heads/main",
+    "git push --force -o ci.skip origin main",
+    "git push --force origin --push-option=ci.skip HEAD:main",
+  ];
+  const root = guarded([FORCE_PUSH]);
+  for (const command of spellings) run(root, "PreToolUse", bash(command));
+  assert.deepEqual(ledger(root).map((r) => r.decision), spellings.map(() => "would-deny"));
+});
+
+test("normalising the refspec does not widen the guard past its branch", () => {
+  const root = guarded([FORCE_PUSH]);
+  for (const command of [
+    "git push --force origin HEAD:scratch",
+    "git push --force origin +refs/heads/scratch",
+    "git push --force -o ci.skip origin scratch",
+  ]) run(root, "PreToolUse", bash(command));
+  assert.deepEqual(ledger(root).map((r) => r.decision), ["pass", "pass", "pass"]);
+});
+
+test("pushBranch reads the destination out of a refspec", () => {
+  for (const [command, branch] of [
+    ["git push origin main", "main"],
+    ["git push origin HEAD:main", "main"],
+    ["git push origin +main", "main"],
+    ["git push origin +HEAD:main", "main"],
+    ["git push origin :main", "main"],
+    ["git push origin refs/heads/main", "main"],
+    ["git push -o ci.skip origin main", "main"],
+    ["git push origin main:", "main"],
+    ["git push --force", null],
+    ["git push -o ci.skip origin", null],
+    // `-o` is not the only option whose value is the next word. Each of these
+    // leaves one bare token in argv, and skipping the flag alone would read
+    // that value as the remote and the remote as the branch.
+    ["git push --receive-pack /usr/bin/git-receive-pack --force origin main", "main"],
+    ["git push --exec /usr/bin/git-receive-pack --force origin main", "main"],
+    ["git push --repo upstream --force origin main", "main"],
+    ["git push --receive-pack=/usr/bin/git-receive-pack --force origin main", "main"],
+  ]) assert.equal(lib.pushBranch(command), branch, command);
+});
+
+test("an armed force-push guard is not dodged by an option that takes a value", () => {
+  const root = guarded([FORCE_PUSH], { mode: "armed" });
+  const out = JSON.parse(run(root, "PreToolUse",
+    bash("git push --receive-pack /usr/bin/git-receive-pack --force origin main")).stdout);
+  assert.equal(out.jig.decision, "deny", "a separated option value shifted the refspec out of scope");
+});
+
 test("the default branch set is configurable without touching a pattern", () => {
   const root = guarded([FORCE_PUSH], { config: { defaultBranches: ["trunk"] } });
   run(root, "PreToolUse", bash("git push --force origin trunk"));
@@ -440,6 +553,86 @@ test("an edit that moves a violation out of a string into code is an introductio
   const root = guarded([FOCUSED_TEST]);
   run(root, "PostToolUse", edit("a.test.js", 'const s = "it.only(";', "it.only('now real', () => {});"));
   assert.equal(ledger(root)[0].decision, "would-deny");
+});
+
+// ---------------------------------------------------------------------------
+// The scope a check already declared
+
+test("a guard scoped by paths passes on a file outside them", () => {
+  const root = guarded([SCOPED_CATCH]);
+  run(root, "PostToolUse", write("docs/notes.js", "try { x(); } catch {}"));
+  const rows = ledger(root);
+  assert.equal(rows[0].decision, "pass", "an out-of-scope edit was recorded as a catch");
+  assert.equal(rows[0].matched, null);
+});
+
+test("the same guard fires on a file inside them", () => {
+  const root = guarded([SCOPED_CATCH]);
+  run(root, "PostToolUse", write("src/lib/a.js", "try { x(); } catch {}"));
+  assert.equal(ledger(root)[0].decision, "would-deny");
+});
+
+test("the host names the file absolutely, and on win32 with backslashes", () => {
+  const root = guarded([SCOPED_CATCH]);
+  const slash = root.replace(/\\/g, "/");
+  run(root, "PostToolUse", write(slash + "/src/lib/a.js", "try { x(); } catch {}"));
+  run(root, "PostToolUse", write(slash.replace(/\//g, "\\") + "\\src\\lib\\a.js", "try { x(); } catch {}"));
+  run(root, "PostToolUse", write(slash + "/docs/notes.js", "try { x(); } catch {}"));
+  assert.deepEqual(ledger(root).map((r) => r.decision), ["would-deny", "would-deny", "pass"]);
+});
+
+// The two halves of the same rule: a repo-relative glob is anchored at the
+// repository root, not at any separator that happens to precede it. Matching a
+// TAIL of the path instead reads a directory named like the glob at any depth —
+// and above the checkout too, so a repository cloned under a `vendor` directory
+// has every armed guard in it disarmed by an observe zone the owner wrote for
+// its own `vendor/`.
+test("a guard scoped by paths ignores a directory of the same name deeper in", () => {
+  const root = guarded([SCOPED_CATCH]);
+  run(root, "PostToolUse", write("vendor/src/lib/a.js", "try { x(); } catch {}"));
+  const rows = ledger(root);
+  assert.equal(rows[0].decision, "pass", "a path glob matched a tail of the path rather than the whole of it");
+  assert.equal(rows[0].matched, null);
+});
+
+test("an observe zone disarms the directory it names and no other of that name", () => {
+  const root = guarded([A.EMPTY_CATCH], { mode: "armed", config: { zones: { observe: ["docs/**"] } } });
+  const inZone = JSON.parse(run(root, "PostToolUse",
+    write("docs/notes.js", "try { x(); } catch {}")).stdout);
+  assert.equal(inZone.jig.guards[0].mode, "observe");
+  const outside = JSON.parse(run(root, "PostToolUse",
+    write("src/docs/notes.js", "try { x(); } catch {}")).stdout);
+  assert.equal(outside.jig.guards[0].mode, "armed",
+    "a zone named for one directory pulled an armed guard to observe in another of that name");
+  assert.equal(outside.jig.decision, "deny");
+});
+
+test("a guard whose check names no paths still matches everywhere", () => {
+  const root = guarded([A.EMPTY_CATCH]);
+  run(root, "PostToolUse", write("docs/notes.js", "try { x(); } catch {}"));
+  run(root, "PostToolUse", write("anywhere/at/all.js", "try { x(); } catch {}"));
+  assert.deepEqual(ledger(root).map((r) => r.decision), ["would-deny", "would-deny"]);
+});
+
+test("an armed scoped guard refuses nothing outside its own paths", () => {
+  const root = guarded([SCOPED_CATCH], { mode: "armed" });
+  const out = JSON.parse(run(root, "PostToolUse", write("docs/notes.js", "try { x(); } catch {}")).stdout);
+  assert.equal(out.jig.decision, "pass");
+  assert.equal(out.decision, undefined, "an out-of-scope edit was blocked");
+});
+
+test("paths never reaches a Bash call, which names no file at all", () => {
+  const root = guarded([SCOPED_PIPE]);
+  run(root, "PreToolUse", PIPE_CALL);
+  assert.equal(ledger(root)[0].decision, "would-deny");
+});
+
+test("an observe zone reads an absolute path the same way a scope glob does", () => {
+  const root = guarded([A.EMPTY_CATCH], { mode: "armed", config: { zones: { observe: ["docs/**"] } } });
+  const out = JSON.parse(run(root, "PostToolUse",
+    write(root.replace(/\//g, "\\") + "\\docs\\notes.js", "try { x(); } catch {}")).stdout);
+  assert.equal(out.jig.decision, "would-deny");
+  assert.equal(out.jig.guards[0].mode, "observe");
 });
 
 test("a PreToolUse guard never runs on a PostToolUse event", () => {
@@ -602,6 +795,28 @@ test("editing the check under an armed guard drops it back to observe", () => {
   assert.equal(emitted.jig.decision, "would-deny");
 });
 
+// The demotion the owner cannot see anywhere else: the config still reads
+// `armed`, and every surface that only echoed `mode` reported an observing
+// guard as though observe was what somebody asked for.
+test("a guard demoted out of armed says so on stderr and records why on its row", () => {
+  const root = guarded([A.PIPED_INSTALLER], { mode: "armed" });
+  fs.appendFileSync(path.join(root, ".jig", "checks", "piped-installer.check.mjs"),
+    "\n// a teammate widened this\n");
+  const out = run(root, "PreToolUse", PIPE_CALL);
+  assert.match(out.stderr, /g-piped-installer is armed in the config but ran as observe/);
+  assert.match(out.stderr, /does not match the check on disk/);
+  const row = ledger(root).at(-1);
+  assert.equal(row.mode, "observe");
+  assert.match(row.demoted, /does not match the check on disk/);
+});
+
+test("a guard nobody armed is not reported as demoted", () => {
+  const root = guarded([A.PIPED_INSTALLER], { mode: "observe" });
+  const out = run(root, "PreToolUse", PIPE_CALL);
+  assert.equal(/ran as observe/.test(out.stderr), false);
+  assert.equal(ledger(root).at(-1).demoted, null);
+});
+
 test("a standing false positive holds an armed guard in observe until it is cleared", () => {
   const root = guarded([A.PIPED_INSTALLER], { mode: "armed" });
   const file = path.join(root, ".jig", "ledger.jsonl");
@@ -633,4 +848,45 @@ test("a check shipping an incomplete deny triple can never arm, whatever the con
   const emitted = JSON.parse(run(root, "PreToolUse", PIPE_CALL).stdout);
   assert.deepEqual(Object.keys(emitted), ["jig"]);
   assert.equal(emitted.jig.decision, "would-deny");
+});
+
+// ---------------------------------------------------------------------------
+// A pattern that will not compile
+//
+// Containment, one guard wide. An uncompilable pattern used to throw out of the
+// guard loop and reach the runner's own catch, which fails the whole call open:
+// every guard queued behind the bad one was skipped, armed ones included, and
+// the only trace was a single line about the runner. The pattern is skipped
+// now, its own guard says so and records it, and the rest of the event runs.
+
+test("a bash pattern that will not compile is skipped and the armed guard behind it still denies", () => {
+  const root = guarded([BAD_BASH_PATTERN, A.PIPED_INSTALLER], { mode: "armed" });
+  const out = run(root, "PreToolUse", PIPE_CALL);
+  assert.equal(out.status, 0);
+  const emitted = JSON.parse(out.stdout);
+  assert.equal(emitted.jig.decision, "deny", "the healthy armed guard behind the bad pattern never ran");
+  assert.equal(emitted.hookSpecificOutput.permissionDecision, "deny");
+  assert.equal(emitted.jig.guards.length, 2);
+  assert.match(out.stderr, /g-bad-bash-pattern skipped a pattern that will not compile/);
+  assert.equal(/runner failed open/.test(out.stderr), false, "the throw reached the runner");
+  const rows = ledger(root);
+  const bad = rows.find((r) => r.guardId === "g-bad-bash-pattern");
+  assert.equal(bad.decision, "pass");
+  assert.deepEqual(bad.patternsFailed, ["("], "the guard did not record which pattern it could not run");
+  assert.equal(rows.find((r) => r.guardId === "g-piped-installer").decision, "deny");
+});
+
+test("an edit pattern that will not compile is contained the same way", () => {
+  const root = guarded([BAD_EDIT_PATTERN, A.EMPTY_CATCH], { mode: "armed" });
+  const out = run(root, "PostToolUse", write("a.js", "try { risky(); } catch {}"));
+  assert.equal(out.status, 0);
+  assert.equal(JSON.parse(out.stdout).jig.decision, "deny");
+  const bad = ledger(root).find((r) => r.guardId === "g-bad-edit-pattern");
+  assert.deepEqual(bad.patternsFailed, ["("]);
+});
+
+test("a guard whose every pattern compiles records none as failed", () => {
+  const root = guarded([A.PIPED_INSTALLER], { mode: "armed" });
+  run(root, "PreToolUse", PIPE_CALL);
+  assert.equal(ledger(root)[0].patternsFailed, null);
 });

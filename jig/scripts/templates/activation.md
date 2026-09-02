@@ -16,12 +16,14 @@ do that for you, as a change you approve like any other.
 
 ## Let jig do it
 
-```sh
-jig plan --wire-commit
+Ask for it in Claude Code:
+
+```
+/jig:jig wire the commit lane
 ```
 
-You approve it by name, and `jig revert` puts the setting back exactly as it
-was. jig writes no file inside `.git/`; it sets one git setting, the same one
+You approve it by name, and jig's own revert puts the setting back exactly as
+it was. jig writes no file inside `.git/`; it sets one git setting, the same one
 you would set by hand below.
 
 If you already have a pre-commit hook of your own, this refuses rather than
