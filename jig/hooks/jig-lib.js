@@ -462,11 +462,17 @@ function denyOf(mod, det) {
 // thinks the guard is wrong needs the command rather than a search. jig's plan
 // renders through this same function, so the owner approves the exact string
 // that ships.
-function denyText(guardId, deny) {
+// `hasDriver` adds one sentence pointing at the harness: the deny reply is
+// jig's only channel to the model and it fires after the fact, so the refusal
+// is also the one place worth saying what to run next. Gated on the driver
+// existing — an install with guards and no `run.mjs` would otherwise name a
+// file that is not there.
+function denyText(guardId, deny, hasDriver) {
   return "[jig guard " + guardId + "] " + deny.reason +
     " Instead: " + deny.alternative +
-    " To override: " + deny.override +
-    ". (false alarm? /jig:review fp " + guardId + ")";
+    " To override: " + deny.override + "." +
+    (hasDriver ? " Before calling this work done, run: node .jig/checks/run.mjs." : "") +
+    " (false alarm? /jig:review fp " + guardId + ")";
 }
 
 // What binds a proof to the check it proves: the module as installed plus both
@@ -936,7 +942,7 @@ function runEvent(root, event, payload, warn) {
   // to arm a guard whose check ships an incomplete triple, so a deny that
   // reaches here always carries reason, alternative and override.
   if (deny) {
-    const reason = denyText(denyGuard, deny);
+    const reason = denyText(denyGuard, deny, fs.existsSync(statePath(root, CHECKS_DIR, "run.mjs")));
     if (event === "PreToolUse") {
       out.hookSpecificOutput = {
         hookEventName: "PreToolUse",

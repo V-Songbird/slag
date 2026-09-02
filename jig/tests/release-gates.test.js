@@ -275,6 +275,7 @@ const RECORDS = [
   { rel: ".jig/plan.json", versioned: true },
   { rel: ".jig/backlog.json", versioned: true },
   { rel: ".jig/discarded.json", versioned: true },
+  { rel: ".jig/verify.json", versioned: true },
   { rel: ".jig/proposed-permissions.json", versioned: false,
     why: "a printed proposal jig never reads back, so nothing reads a version off it" },
   { rel: ".jig/journal.jsonl", versioned: false,
@@ -285,7 +286,12 @@ const RECORDS = [
 ];
 
 function fullyInstalled() {
-  const root = tmpProject({ "package.json": "{ \"private\": true }\n", "src/index.js": "module.exports = 1;\n" });
+  // The test script is what makes this install write a lane list: the scan reads
+  // it, and where no test runner was ticked it IS the test-runner entry.
+  const root = tmpProject({
+    "package.json": "{ \"private\": true, \"scripts\": { \"test\": \"node --test\" } }\n",
+    "src/index.js": "module.exports = 1;\n",
+  });
   engine.cmdScan(root, { _: [], change: [] });
   install(root);
   engine.cmdSelftest(root, { _: [], change: [], live: true });

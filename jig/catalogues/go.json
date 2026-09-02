@@ -9,6 +9,12 @@
       "sample": null,
       "hint": "A go.mod names the module, and only you can choose that name. Run `go mod init <module path>` here, then re-run jig."
     },
+    "ignore": [
+      "/bin/",
+      "*.exe",
+      "*.test",
+      "coverage.out"
+    ],
     "files": [
       "go.mod",
       "go.sum",

@@ -235,6 +235,180 @@ test("skipping the CI workflow drops the CI column rather than quietly keeping t
   assert.match(cell.why, /writes no ci-workflow artifact for empty-catch/);
 });
 
+// DERAIL-PASS defect 15, the cell it was seen through: a `--select` install with
+// eslint ticked printed `DET eslint.config.mjs` for a CI job that ran the check
+// driver and nothing else. The config is half the answer; the other half is a
+// lane that runs the tool.
+const TOOL_RULE = { actor: "human-ci", lever: "tool-rule", runner: "ci", confidence: "deterministic",
+  params: { tool: "eslint", rule: "vitest/no-focused-tests" } };
+
+function toolPlan(changes) {
+  return [{ id: "toolchain-eslint", path: "eslint.config.mjs", template: { name: "toolchain-eslint" },
+    classIds: ["synthetic-class"] }, ...(changes || [])];
+}
+
+function laneChange(entries) {
+  return { id: "verify", path: ".jig/verify.json", kind: "write-side-file",
+    content: JSON.stringify({ schemaVersion: 1, entries }) };
+}
+
+test("a tool config with no lane running the tool is GAP, and the gap names the tool", () => {
+  const cls = synthetic({ detectors: [TOOL_RULE] });
+  const cell = engine.matrixRow(cls, "elicited", toolPlan(), []).cells["human-ci"];
+  assert.equal(cell.grade, "GAP");
+  assert.equal(cell.artifact, null);
+  assert.equal(cell.why, "no lane runs eslint");
+});
+
+test("a lane entry with no tool config is GAP too — both halves or nothing", () => {
+  const cls = synthetic({ detectors: [TOOL_RULE] });
+  const changes = [laneChange([{ id: "eslint", argv: ["npx", "eslint", "."], expectedExit: 0, paths: [], lanes: ["ci"] }])];
+  const cell = engine.matrixRow(cls, "elicited", changes, []).cells["human-ci"];
+  assert.equal(cell.grade, "GAP");
+  assert.equal(cell.why, "no lane runs eslint");
+});
+
+test("a lane that runs another tool does not cover this one", () => {
+  const cls = synthetic({ detectors: [TOOL_RULE] });
+  const changes = toolPlan([laneChange([{ id: "vitest", argv: ["npx", "vitest", "run"], expectedExit: 0, paths: [], lanes: ["ci"] }])]);
+  assert.equal(engine.matrixRow(cls, "elicited", changes, []).cells["human-ci"].grade, "GAP");
+});
+
+test("a tool that only runs at commit time does not fill the CI cell", () => {
+  // `tool-rule` is the CI lever by definition, and the column is `human-ci`. An
+  // owner who took the commit lane and declined the workflow has the tool
+  // running — somewhere this column does not speak for.
+  const cls = synthetic({ detectors: [TOOL_RULE] });
+  const changes = toolPlan([laneChange([{ id: "eslint", argv: ["npx", "eslint", "."], expectedExit: 0, paths: [], lanes: ["commit"] }])]);
+  const cell = engine.matrixRow(cls, "elicited", changes, []).cells["human-ci"];
+  assert.equal(cell.grade, "GAP");
+  assert.equal(cell.why, "no lane runs eslint");
+});
+
+test("the config and a lane entry together are what read DET", () => {
+  const cls = synthetic({ detectors: [TOOL_RULE] });
+  const changes = toolPlan([laneChange([{ id: "eslint", argv: ["npx", "eslint", "."], expectedExit: 0, paths: [], lanes: ["ci"] }])]);
+  const cell = engine.matrixRow(cls, "elicited", changes, []).cells["human-ci"];
+  assert.equal(cell.grade, "DET");
+  assert.equal(cell.artifact, "eslint.config.mjs");
+  assert.equal(cell.why, null);
+});
+
+test("an unreadable lane list is read as no lane at all, never as coverage", () => {
+  const cls = synthetic({ detectors: [TOOL_RULE] });
+  const torn = { id: "verify", path: ".jig/verify.json", kind: "write-side-file", content: "{ not json" };
+  assert.equal(engine.proposedVerifyEntries("{ not json"), null);
+  assert.equal(engine.matrixRow(cls, "elicited", toolPlan([torn]), []).cells["human-ci"].grade, "GAP");
+});
+
+test("a real plan that ticks a tool covers the CI cell, and one that skips CI does not", () => {
+  const root = nodeProject();
+  planOnly(root, { select: "javascript-typescript/focused-test", edition: "javascript-typescript",
+    "package-manager": "npm", tools: "eslint" });
+  const covered = readJson(root, ".jig/plan.json").rows
+    .find((r) => r.classId === "javascript-typescript/focused-test").cells["human-ci"];
+  assert.equal(covered.grade, "DET");
+  assert.equal(covered.artifact, "eslint.config.mjs");
+
+  const bare = nodeProject();
+  planOnly(bare, { select: "javascript-typescript/focused-test", edition: "javascript-typescript",
+    "package-manager": "npm", tools: "eslint", "no-ci": true });
+  const gap = readJson(bare, ".jig/plan.json").rows
+    .find((r) => r.classId === "javascript-typescript/focused-test").cells["human-ci"];
+  assert.equal(gap.grade, "GAP");
+  assert.equal(gap.why, "no lane runs eslint");
+  assert.equal(fs.existsSync(path.join(bare, ".jig", "verify.json")), false);
+});
+
+test("the lane list is approved one at a time, and names what will run", () => {
+  const root = nodeProject();
+  planOnly(root, { select: "javascript-typescript/focused-test", edition: "javascript-typescript",
+    "package-manager": "npm", tools: "eslint" });
+  const row = readJson(root, ".jig/plan.json").artifacts.find((a) => a.path === ".jig/verify.json");
+  assert.equal(row.tier, "item");
+  assert.match(row.why, /names what the lanes run — eslint — and a non-zero exit/);
+  const item = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8").split("Approve one at a time")[1];
+  assert.ok(item.includes("`.jig/verify.json`"), "the lane list is not on the item-tier list");
+});
+
+// The 2.7.1 lesson, one release later: a second interview is about what to ADD.
+// Computing the whole file from this run's ticked tools alone would take the
+// linter out of CI because the second interview was about the type checker.
+// Planned and applied without the installs themselves: applying a `run-install`
+// change spawns a package manager, and none of these claims is about npm.
+function installWithTools(root, tools) {
+  const plan = planOnly(root, { select: "javascript-typescript/focused-test", edition: "javascript-typescript",
+    "package-manager": "npm", tools });
+  // By id, never by position: the plan files are named for their own content
+  // hash, so the order they list in says nothing about which came last.
+  const payload = engine.planFiles(root).map(engine.readPlan).find((p) => p.planId === plan.planId);
+  const keep = payload.changes.filter((c) => c.kind !== "run-install");
+  engine.cmdApply(root, { _: [], change: keep.map((c) => c.id), path: keep.map((c) => c.path) });
+  return payload;
+}
+
+test("a second plan carries the installed lane entries forward and adds the new one", () => {
+  const root = nodeProject();
+  installWithTools(root, "vitest");
+  const payload = installWithTools(root, "eslint");
+  const entries = JSON.parse(payload.changes.find((c) => c.path === ".jig/verify.json").content).entries;
+  assert.deepEqual(entries.map((e) => e.id), ["vitest", "eslint"]);
+  // And the workflow keeps the step that runs the carried one.
+  const yml = payload.changes.find((c) => c.path === ".github/workflows/jig.yml").content;
+  assert.match(yml, /--verify --lane ci --entry vitest/);
+  assert.match(yml, /--verify --lane ci --entry eslint/);
+  // And the reason recorded on the row says which half is new — the same
+  // sentence `inventory` reads back as why the file is here.
+  assert.match(payload.changes.find((c) => c.path === ".jig/verify.json").rationale,
+    /what the ci lane runs: eslint — carried forward: vitest/);
+});
+
+test("a plan that ticks no tool proposes no lane list over the installed one", () => {
+  const root = nodeProject();
+  installWithTools(root, "eslint");
+  const before = fs.readFileSync(path.join(root, ".jig", "verify.json"), "utf-8");
+  const plan = planOnly(root);
+  assert.equal(plan.changes.some((c) => c.path === ".jig/verify.json"), false,
+    "a plan with no tools proposed a lane list anyway");
+  assert.equal(fs.readFileSync(path.join(root, ".jig", "verify.json"), "utf-8"), before);
+});
+
+// The same 2.7.1 lesson, on the file the entries feed rather than on the entries.
+// A re-plan that ticks nothing still rewrites the workflow, and rendering its
+// steps from this run's empty list took the linter out of CI while
+// `.jig/verify.json` went on saying the ci lane runs it.
+test("a re-plan that ticks no tool keeps the installed tools' CI steps", () => {
+  const root = nodeProject();
+  installWithTools(root, "eslint");
+  const again = planOnly(root);
+  const payload = engine.planFiles(root).map(engine.readPlan).find((p) => p.planId === again.planId);
+  const yml = payload.changes.find((c) => c.path === ".github/workflows/jig.yml");
+  assert.ok(yml, "the re-plan proposed no workflow at all");
+  assert.match(yml.content, /--verify --lane ci --entry eslint/,
+    "the re-planned workflow dropped the step .jig/verify.json still says the ci lane runs");
+  // And the file those steps read is untouched, so the two never disagree.
+  assert.equal(payload.changes.some((c) => c.path === ".jig/verify.json"), false);
+});
+
+// `--verify-commit` is the whole opt-in commit lane, and until now deleting the
+// one line that reads it left the suite green.
+test("--verify-commit is what puts an entry in the commit lane, and nothing else does", () => {
+  const laneList = (opts) => {
+    const root = nodeProject();
+    const plan = planOnly(root, { select: "javascript-typescript/focused-test", edition: "javascript-typescript",
+      "package-manager": "npm", tools: "eslint", ...opts });
+    const payload = engine.planFiles(root).map(engine.readPlan).find((p) => p.planId === plan.planId);
+    const change = payload.changes.find((c) => c.path === ".jig/verify.json");
+    return { entries: JSON.parse(change.content).entries, why: change.rationale };
+  };
+  assert.deepEqual(laneList({}).entries[0].lanes, ["ci"]);
+
+  const opted = laneList({ "verify-commit": true });
+  assert.deepEqual(opted.entries[0].lanes, ["ci", "commit"]);
+  assert.match(opted.why, /ci and commit lanes/,
+    "the consent line does not say the commit lane is being wired");
+});
+
 test("a detector that can be wrong reads PROB carrying the kind of doubt, never a number", () => {
   const root = nodeProject();
   planOnly(root, { "no-ci": true }, [A.HEURISTIC_ONLY]);

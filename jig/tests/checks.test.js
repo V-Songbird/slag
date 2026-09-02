@@ -701,6 +701,112 @@ test("the selftest proves a paired-change check from its change-set fixtures alo
   assert.equal(result.nearMissHits, 0);
 });
 
+// ---------------------------------------------------------------------------
+// `--staged`: the lane that gates the repository reads what enters it
+// ---------------------------------------------------------------------------
+//
+// A commit carries the index. The pathless walk reads the working tree, and at
+// commit time those are two different projects — both directions were
+// reproduced live before this was written. A violation staged and then edited
+// back out of the file landed in HEAD under "No findings.", and a violation
+// left in the file but never staged blocked a commit that did not contain it.
+
+// The divergence every test below is about: what git will commit, and what is
+// on disk at the moment the hook runs.
+function stagedThenEdited(root, rel, staged, onDisk) {
+  stage(root, { [rel]: staged });
+  fs.writeFileSync(path.join(root, rel), onDisk);
+}
+
+test("a violation staged behind a clean working copy is a finding", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  stagedThenEdited(root, "src/bad.js", A.EMPTY_CATCH.fixtures.violation, A.EMPTY_CATCH.fixtures.nearMiss);
+  const { status, out } = driverJson(root, ["--staged"]);
+  assert.equal(status, 1);
+  assert.deepEqual(out.findings.map((f) => [f.classId, f.path, f.line]), [["empty-catch", "src/bad.js", 4]]);
+});
+
+test("a violation the commit does not carry blocks nothing", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  stagedThenEdited(root, "src/ok.js", A.EMPTY_CATCH.fixtures.nearMiss, A.EMPTY_CATCH.fixtures.violation);
+  const { status, out } = driverJson(root, ["--staged"]);
+  assert.deepEqual(out.findings, []);
+  assert.equal(status, 0);
+});
+
+// The other half of the same decision: CI and a manual run have nothing staged,
+// so the walk is the only reading that means anything there and stays untouched.
+test("without --staged the driver still reads the working tree, index or no index", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  stagedThenEdited(root, "src/ok.js", A.EMPTY_CATCH.fixtures.nearMiss, A.EMPTY_CATCH.fixtures.violation);
+  const { status, out } = driverJson(root);
+  assert.equal(status, 1);
+  assert.deepEqual(out.findings.map((f) => f.path), ["src/ok.js"]);
+});
+
+// The same namespace defect the paired kind hit: git names staged paths from
+// the repository root, the driver's globs are written against ROOT. `--relative`
+// on the list and `:./path` on the read keep both in the one namespace.
+test("the staged read finds a violation for an install below the git root", () => {
+  const repo = tmpDir("staged-nested");
+  git(repo, ["init", "-q"]);
+  git(repo, ["config", "user.email", "suite@example.test"]);
+  git(repo, ["config", "user.name", "suite"]);
+  const root = path.join(repo, "app");
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.writeFileSync(path.join(root, "package.json"), "{ \"private\": true }\n");
+  fs.writeFileSync(path.join(root, "src", "a.ts"), "export const a = 1;\n");
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  fs.writeFileSync(path.join(root, "src", "bad.js"), A.EMPTY_CATCH.fixtures.violation);
+  git(repo, ["add", "--", "app/src/bad.js"]);
+  fs.writeFileSync(path.join(root, "src", "bad.js"), A.EMPTY_CATCH.fixtures.nearMiss);
+  const { status, out } = driverJson(root, ["--staged"]);
+  assert.equal(status, 1);
+  assert.deepEqual(out.findings.map((f) => [f.classId, f.path]), [["empty-catch", "src/bad.js"]]);
+});
+
+// `.jig/checks/` is committed on purpose, so a normal commit stages files the
+// walk has always refused to read. The staged reading refuses them too — a
+// check pointed at the fixture inside its own module reports itself.
+test("the staged read skips the directories the walk skips", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  fs.writeFileSync(path.join(root, ".jig", "sample.js"), A.EMPTY_CATCH.fixtures.violation);
+  stage(root, { "src/ok.js": A.EMPTY_CATCH.fixtures.nearMiss });
+  git(root, ["add", "-f", "--", ".jig/sample.js"]);
+  const { status, out } = driverJson(root, ["--staged"]);
+  assert.deepEqual(out.findings, []);
+  assert.equal(status, 0);
+});
+
+// A git that will not answer reads nothing, and reading nothing is not a pass.
+// `--staged` used to turn every such environment — no git on the hook's PATH, a
+// cwd outside the work tree, a GIT_INDEX_FILE nobody expected — into "No
+// findings." and exit 0, which is the commit lane rubber-stamping the commit it
+// was installed to gate.
+test("a --staged run whose git cannot answer is a partial scan, not a pass", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  fs.writeFileSync(path.join(root, "src", "bad.js"), A.EMPTY_CATCH.fixtures.violation);
+  // No `git init` here, so `git diff --cached` exits non-zero in this tree.
+  const walked = driver(root, []);
+  assert.equal(walked.status, 1, "the fixture is not a violation the walk finds");
+  const { status, out } = driverJson(root, ["--staged"]);
+  assert.equal(status, 1, "a --staged run that read nothing reported itself clean");
+  assert.equal(out.truncated, true);
+  assert.match(out.partial, /git could not list the staged files/);
+  assert.equal(/\nNo findings\.\n/.test(driver(root, ["--staged"]).stdout), false,
+    "a --staged run that read nothing printed a clean bill of health");
+});
+
+test("the commit shim runs the driver over the staged bytes", () => {
+  const shim = templateOf(path.join(TEMPLATE_DIR, "hook-pre-commit.sh"));
+  assert.match(shim, /node \.jig\/checks\/run\.mjs --staged \|\| exit 1/);
+});
+
 test("a check module that will not load is reported and the others still run", () => {
   const root = nodeProject();
   install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
@@ -733,8 +839,176 @@ test("the driver skips its own state directory and node_modules", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The lanes run the real work
+// ---------------------------------------------------------------------------
+//
+// DERAIL-PASS defect 15: jig installed a linter, a type checker and a test
+// runner and no lane spawned any of them. `.jig/verify.json` is the lane, and
+// these are the claims it has to hold: it runs what it names, it is an argv and
+// never a shell command line, a tool it cannot start is a gap rather than a
+// pass, and a lane nobody put an entry in fails nothing.
+
+function writeVerify(root, entries) {
+  fs.mkdirSync(path.join(root, ".jig"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".jig", "verify.json"),
+    JSON.stringify({ schemaVersion: 1, entries }, null, 2) + "\n");
+}
+
+test("the driver runs what a lane names and passes on the exit code it expected", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  writeVerify(root, [
+    { id: "clean", argv: [process.execPath, "--version"], expectedExit: 0, paths: [], lanes: ["ci"] },
+  ]);
+  const run = driver(root, ["--verify", "--lane", "ci"]);
+  assert.equal(run.status, 0);
+  assert.match(run.stdout, /ok {7}clean/);
+  assert.match(run.stdout, /Every command the ci lane names passed/);
+});
+
+test("a lane command that exits on anything else fails the lane and shows its output", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  writeVerify(root, [
+    { id: "linter", argv: [process.execPath, "-e", "console.log('3 problems'); process.exit(3)"],
+      expectedExit: 0, paths: [], lanes: ["ci"] },
+  ]);
+  const run = driver(root, ["--verify", "--lane", "ci"]);
+  assert.equal(run.status, 1);
+  assert.match(run.stdout, /FAILED {3}linter/);
+  assert.match(run.stdout, /exited 3, expected 0/);
+  assert.match(run.stdout, /3 problems/);
+});
+
+test("a tool the lane cannot start is a gap, never a pass", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  writeVerify(root, [
+    { id: "ghosted", argv: ["jig-no-such-tool-9x71"], expectedExit: 0, paths: [], lanes: ["ci"] },
+  ]);
+  const run = driver(root, ["--verify", "--lane", "ci"]);
+  assert.equal(run.status, 1);
+  assert.match(run.stdout, /NOT RUN {2}ghosted/);
+  assert.match(run.stdout, /could not run jig-no-such-tool-9x71/);
+});
+
+test("a lane entry is an argv, and no shell ever reads it", () => {
+  // SCOPE's derail pass keeps the no-shell stance: the redirection below is an
+  // argument to node, not an instruction to a shell, so nothing is written.
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  writeVerify(root, [
+    { id: "redirect", argv: [process.execPath, "-e", "process.exit(0)", ">", "owned.txt"],
+      expectedExit: 0, paths: [], lanes: ["ci"] },
+  ]);
+  const out = driverJson(root, ["--verify", "--lane", "ci"]).out.verify.results[0];
+  // Ran, and ran with the redirection still an argument: an entry that never
+  // started would leave `owned.txt` absent too, and prove nothing about shells.
+  assert.equal(out.ran, true, "the entry never started, so nothing here is about a shell");
+  assert.equal(out.passed, true);
+  assert.equal(fs.existsSync(path.join(root, "owned.txt")), false, "a lane entry reached a shell");
+});
+
+// DERAIL-PASS N7, the lane half. Every shipped JS lane argv starts with `npx`,
+// which on Windows is a batch shim Node will not start without a shell — and
+// this driver opens none. The engine learned to run the shim's own JS entry;
+// until the driver did too, every `--verify-commit` install blocked every commit
+// on Windows with three NOT RUN lines nobody could act on.
+test("a lane entry behind a batch shim is run through its own JS entry", { skip: process.platform !== "win32" }, () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const shims = path.join(root, "shims");
+  const entry = path.join(shims, "node_modules", "npm", "bin", "npx-cli.js");
+  fs.mkdirSync(path.dirname(entry), { recursive: true });
+  fs.writeFileSync(path.join(shims, "npx.cmd"), "@echo off\r\n");
+  fs.writeFileSync(entry, "process.exit(process.argv[2] === 'ran' ? 0 : 3);\n");
+  writeVerify(root, [
+    { id: "shimmed", argv: ["npx", "ran"], expectedExit: 0, paths: [], lanes: ["commit"] },
+  ]);
+  const run = spawnSync(process.execPath, [path.join(root, ".jig", "checks", "run.mjs"), "--verify", "--lane", "commit", "--json"],
+    { cwd: root, encoding: "utf-8", windowsHide: true, env: { ...process.env, PATH: shims } });
+  const result = JSON.parse(run.stdout).verify.results[0];
+  assert.equal(result.ran, true, "the driver could not start npx, so the commit lane blocks every commit: " + result.why);
+  assert.equal(result.passed, true);
+  assert.equal(run.status, 0);
+});
+
+test("only the entries naming this lane run in it", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  writeVerify(root, [
+    { id: "ci-only", argv: [process.execPath, "--version"], expectedExit: 0, paths: [], lanes: ["ci"] },
+    { id: "both", argv: [process.execPath, "--version"], expectedExit: 0, paths: [], lanes: ["ci", "commit"] },
+  ]);
+  const commit = driverJson(root, ["--verify", "--lane", "commit"]);
+  assert.deepEqual(commit.out.verify.results.map((r) => r.id), ["both"]);
+  assert.equal(commit.status, 0);
+  const ci = driverJson(root, ["--verify", "--lane", "ci"]);
+  assert.deepEqual(ci.out.verify.results.map((r) => r.id), ["ci-only", "both"]);
+});
+
+test("a lane nobody put an entry in runs nothing and fails nothing", () => {
+  // The commit lane is opt-in: the shim asks for it on every commit, and until
+  // an entry names it the answer is that nothing was verified.
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  assert.equal(fs.existsSync(path.join(root, ".jig", "verify.json")), false);
+  const run = driver(root, ["--verify", "--lane", "commit"]);
+  assert.equal(run.status, 0);
+  assert.match(run.stdout, /No entry names the commit lane/);
+});
+
+test("a CI step whose entry has gone from the file proves nothing, and says so", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  writeVerify(root, [
+    { id: "kept", argv: [process.execPath, "--version"], expectedExit: 0, paths: [], lanes: ["ci"] },
+  ]);
+  const run = driver(root, ["--verify", "--lane", "ci", "--entry", "dropped"]);
+  assert.equal(run.status, 1);
+  assert.match(run.stdout, /Nothing named dropped runs in the ci lane/);
+});
+
+// Planned but not applied where a tool install is in it: applying one runs a
+// package manager, and a suite that installs eslint to prove a workflow step
+// would be testing npm.
+function planWithTools(root, tools, opts) {
+  engine.cmdPlan(root, {
+    _: [], change: [], authored: A.writeChecks(root, CHECKS), provenance: "elicited",
+    edition: "javascript-typescript", "package-manager": "npm", tools, ...(opts || {}),
+  });
+  return engine.readPlan(engine.planFiles(root)[0]);
+}
+
+test("the commit shim asks for the commit lane, and the workflow asks for the CI one", () => {
+  const root = nodeProject();
+  const payload = planWithTools(root, "eslint");
+  const shim = payload.changes.find((c) => c.path === ".jig/hooks/pre-commit");
+  assert.match(shim.content, /run\.mjs --verify --lane commit/);
+  const yml = payload.changes.find((c) => c.path === ".github/workflows/jig.yml").content;
+  assert.match(yml, /- name: run eslint, the way \.jig\/verify\.json names it/);
+  assert.match(yml, /run: node \.jig\/checks\/run\.mjs --verify --lane ci --entry eslint/);
+});
+
+test("the lane list is written, approved by name, and taken back out by revert", () => {
+  const root = nodeProject();
+  const payload = planWithTools(root, "eslint");
+  const entry = payload.changes.find((c) => c.path === ".jig/verify.json");
+  assert.equal(JSON.parse(entry.content).entries[0].id, "eslint");
+  // Everything but the install, which would spawn npm.
+  const keep = payload.changes.filter((c) => c.kind !== "run-install");
+  engine.cmdApply(root, { _: [], change: keep.map((c) => c.id), path: keep.map((c) => c.path) });
+  const rel = path.join(root, ".jig", "verify.json");
+  assert.equal(JSON.parse(fs.readFileSync(rel, "utf-8")).entries[0].id, "eslint");
+  assert.equal(engine.readManifest(root).artifacts.find((a) => a.path === ".jig/verify.json").template.name, "verify");
+  engine.cmdRevert(root, { _: [], change: [], all: true });
+  assert.equal(fs.existsSync(rel), false, "revert left the lane list behind");
+});
+
+// ---------------------------------------------------------------------------
 // The witnessed catch
 // ---------------------------------------------------------------------------
+
 
 test("selftest --live watches every installed guard catch its own violation fixture", () => {
   const root = nodeProject();
@@ -777,6 +1051,47 @@ test("a guard scoped to a directory is witnessed at a path its own globs match",
   const probe = result.probes.find((p) => p.probe === "scoped-catch-edit-observe-guard-0");
   assert.equal(probe.caught, true, probe && (probe.why || probe.output));
   assert.equal(result.witnessed, true);
+});
+
+// DERAIL-PASS defect 14: the "Me — solo" persona, and slag itself. A check with
+// no session detector installs no guard, so a close that only counted guard
+// probes reported `witnessed: false` for a correct install — jig calling its own
+// coverage unproven, which is the coverage claim inverted.
+const DRIVER_ONLY = A.authored({
+  id: "driver-only",
+  title: "A swallowed error, watched by the checks lane alone",
+  detectors: [
+    { lever: "check-driver", actor: "human-editor", confidence: "deterministic",
+      params: { patterns: [A.CATCH_PATTERN], paths: ["src/**/*.js"] } },
+  ],
+  fixtures: A.EMPTY_CATCH.fixtures,
+  deny: A.DENY_CATCH,
+});
+
+test("a checks-only install is witnessed by its own check driver", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [DRIVER_ONLY]);
+  const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
+  assert.deepEqual(result.probes.filter((p) => p.kind === "guard"), [],
+    "the fixture installed a guard, so this test is no longer about a checks-only install");
+  assert.equal(result.probes.find((p) => p.kind === "checks").caught, true);
+  assert.equal(result.witnessed, true, JSON.stringify(result.notes));
+  // Witnessed still means a ledger line, not a decision on screen.
+  assert.ok(result.ledger.linesAfter > result.ledger.linesBefore);
+  const rows = fs.readFileSync(path.join(root, ".jig", "ledger.jsonl"), "utf-8")
+    .split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+  assert.deepEqual(rows.map((r) => [r.tool, r.decision]), [["check-driver", "verified"]]);
+});
+
+test("a repository that has guards still has to see one of them fire", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
+  assert.ok(result.probes.some((p) => p.kind === "guard"));
+  const rows = fs.readFileSync(path.join(root, ".jig", "ledger.jsonl"), "utf-8")
+    .split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+  assert.equal(rows.some((r) => r.tool === "check-driver"), false,
+    "the driver ledgered a witness in a repository whose guards are the coverage");
 });
 
 test("a witnessed catch means a ledger line exists, not just a decision on screen", () => {
@@ -846,6 +1161,36 @@ test("a missing check driver degrades to the exact command, and the guards still
   assert.equal(driverProbe.command, "node .jig/checks/run.mjs --selftest");
   assert.equal(result.witnessed, true);
   assert.ok(result.notes.some((n) => n.includes("node .jig/checks/run.mjs --selftest")));
+});
+
+// The commit lane, executed rather than described. The shim is started the way
+// git starts it, over a violation staged in a throwaway clone, so `hookRan`,
+// `nodeFound` and `blocked` are three facts rather than three hopes.
+test("the commit-lane probe execs the shim in a throwaway clone and reports what it saw", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
+  const probe = result.probes.find((p) => p.kind === "commit-lane");
+  assert.ok(probe, "no commit-lane probe ran for the installed shim");
+  if (probe.ran !== true) {
+    // Degrade, never stall: a machine with no git, or one whose git predates
+    // `hook run`, still gets the command and the thing to look for. Those are
+    // the only two excuses — anything else and the probe never executed at all,
+    // which is the whole thing this test exists to catch.
+    assert.match(probe.why, /git could not be spawned|git init|no `hook run` subcommand/,
+      "the commit-lane probe reported ran: false for a reason it never disclosed: " + probe.why);
+    assert.ok(probe.command.includes("hook run pre-commit"));
+    return;
+  }
+  assert.equal(probe.hookRan, true);
+  assert.equal(probe.nodeFound, true);
+  assert.equal(probe.blocked, true, "the shim let a staged violation through: " + probe.output);
+  assert.equal(probe.exitCode, 1);
+  assert.match(probe.staged, /own violation fixture/);
+  // The clone is where the staging happened: the violation never lands in the
+  // project, and neither does the lane row the shim writes.
+  assert.equal(fs.existsSync(path.join(root, probe.staged.split(" — ")[0])), false);
+  assert.equal(fs.existsSync(path.join(root, ".jig", "lane.log")), false);
 });
 
 test("only the guards actually installed are probed", () => {
@@ -995,6 +1340,24 @@ test("a tool config is proven by the tool's own verify run, named with its expec
   assert.ok(probe.seed, "the probe names no seeded violation to plant");
   assert.match(probe.why, /does not spawn/);
   assert.ok(result.notes.some((n) => n.includes("toolchain-eslint")));
+});
+
+// DERAIL-PASS defect 13: the close used to hand the owner a command and call
+// that a probe. It still hands over the command — but only for a tool this run
+// did not name, and the flag that names one is printed with it.
+test("a toolchain probe says which flag would spawn the tool, and spawns nothing without it", () => {
+  const root = nodeProject({
+    "package.json": "{ \"private\": true, \"devDependencies\": { \"eslint\": \"^9.0.0\" } }\n",
+    "package-lock.json": "{ \"lockfileVersion\": 3 }\n",
+  });
+  install(root, { "no-ci": true, tools: "eslint" });
+  const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
+  const probe = result.probes.find((p) => p.probe === "toolchain-eslint");
+  assert.equal(probe.ran, false);
+  assert.equal(probe.caught, undefined);
+  assert.match(probe.why, /--toolchain eslint/);
+  // Nothing spawned means nothing planted, and no seed directory left over.
+  assert.equal(fs.existsSync(path.join(root, ".jig", "selftest")), false);
 });
 
 test("a repository with no installed tool config gets no toolchain probe at all", () => {
@@ -1412,7 +1775,8 @@ test("the driver crashing exits 0, says nothing was checked, and leaves a lane-l
   // that throws — is already caught and reported where it happens. Planting one
   // is the only way the handler behind all of them is exercised at all.
   const source = fs.readFileSync(driverPath, "utf-8");
-  const crashing = source.replace("  const out = await runChecks(ROOT, paths);", "  throw new Error(\"planted driver crash\");");
+  const crashing = source.replace("  const out = await runChecks(ROOT, paths, argv.includes(\"--staged\"));",
+    "  throw new Error(\"planted driver crash\");");
   assert.notEqual(crashing, source, "the driver no longer runs its checks where this test plants the crash");
   fs.writeFileSync(driverPath, crashing);
 

@@ -780,6 +780,25 @@ test("a deny names the guard that refused and how to report it as a false alarm"
   assert.ok(reason.endsWith("(false alarm? /jig:review fp " + guardId + ")"), reason);
 });
 
+// 2.9.0 / C7: the deny reply is jig's only channel to the model and it fires
+// after the fact, so it is also the one place worth naming the driver — but
+// only where there is one to name.
+test("a deny points at the check driver when the install has one", () => {
+  const root = guarded([A.PIPED_INSTALLER], { mode: "armed" });
+  fs.mkdirSync(path.join(root, ".jig", "checks"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".jig", "checks", "run.mjs"), "// driver\n");
+  const emitted = JSON.parse(run(root, "PreToolUse", PIPE_CALL).stdout);
+  assert.match(emitted.hookSpecificOutput.permissionDecisionReason,
+    /Before calling this work done, run: node \.jig\/checks\/run\.mjs\./);
+});
+
+test("a deny from an install with no driver never names one", () => {
+  const root = guarded([A.PIPED_INSTALLER], { mode: "armed" });
+  assert.equal(fs.existsSync(path.join(root, ".jig", "checks", "run.mjs")), false);
+  const emitted = JSON.parse(run(root, "PreToolUse", PIPE_CALL).stdout);
+  assert.equal(emitted.hookSpecificOutput.permissionDecisionReason.includes("run.mjs"), false);
+});
+
 test("an armed edit guard blocks a PostToolUse write with the same three-part reason", () => {
   const root = guarded([A.EMPTY_CATCH], { mode: "armed" });
   const out = run(root, "PostToolUse", edit("a.js", "risky();", "try { risky(); } catch {}"));

@@ -27,14 +27,17 @@
 //      merge that silently picked a winner would be the same bug in a new
 //      place.
 //
-// Three families of file follow those rules, not one. A section file is the
+// Four families of file follow those rules, not one. A section file is the
 // original. An MSBuild property file (`Directory.Build.props`) is the same
 // shape wearing angle brackets: a `<PropertyGroup>` is a block and each child
 // element is a key. A Gradle build script (`build.gradle.kts`) is the same
 // shape again: `plugins { … }` is a block and each statement inside it is an
 // entry, with assignments keyed and everything else deduplicated by its text.
+// A JSON manifest (`package.json`) is the shape stated outright: a top-level
+// object member is a block and its own members are keys, which is what lets a
+// starter and three tools' `scripts` land in one file.
 // Each family gets a reader and a renderer; `merge` itself is one function and
-// rule 3 is enforced in one place for all three.
+// rule 3 is enforced in one place for all four.
 //
 // Composition never touches a file the project already owns — the caller hands
 // those back as snippets before it gets here — so every body merged below is
@@ -309,6 +312,52 @@ function renderKotlin(preamble, blocks) {
 }
 
 // ---------------------------------------------------------------------------
+// JSON manifests — `package.json`
+
+// The one family with a real grammar, and it composes because the grammar has
+// a parser in the standard library: nothing here guesses at a shape the way a
+// line reader has to. A top-level object member is a block and its own members
+// are the keys, so `scripts` merges exactly as `[tool.ruff]` does — which is
+// what puts the starter's `name` and each tool's `lint`, `typecheck` and `test`
+// in one `package.json` instead of the last writer's alone.
+//
+// A value is carried as its own JSON text, so rule 3 compares two values the
+// same way it compares two `key = value` lines, and a nested object moves whole.
+function readJson(text) {
+  let value;
+  try {
+    value = JSON.parse(String(text || ""));
+  } catch (err) {
+    throw expected("sections cannot compose a body that is not JSON (" + err.message + ")");
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw expected("sections composes a JSON object, and this body is " + JSON.stringify(value));
+  }
+  const preamble = [];
+  const blocks = [];
+  for (const [key, member] of Object.entries(value)) {
+    if (member !== null && typeof member === "object" && !Array.isArray(member)) {
+      const block = blockIn(blocks, { header: key, entries: [] });
+      for (const [k, v] of Object.entries(member)) block.entries.push({ key: k, lines: [JSON.stringify(v)] });
+      continue;
+    }
+    preamble.push({ key, lines: [JSON.stringify(member)] });
+  }
+  return { preamble, blocks };
+}
+
+function renderJson(preamble, blocks) {
+  const out = {};
+  for (const entry of preamble) out[entry.key] = JSON.parse(entry.lines[0]);
+  for (const block of blocks) {
+    const member = {};
+    for (const entry of block.entries) member[entry.key] = JSON.parse(entry.lines[0]);
+    out[block.header] = member;
+  }
+  return JSON.stringify(out, null, 2).split("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Which reader a path gets
 
 const MERGEABLE = new Set([".toml", ".editorconfig", ".ini", ".cfg"]);
@@ -319,14 +368,15 @@ function isSectionFile(base) {
   return dot > 0 && MERGEABLE.has(base.slice(dot).toLowerCase());
 }
 
-// Everything with a real grammar and no fixed shape — `go.mod`, `package.json`
-// — is absent on purpose. A half-parser writing somebody's build file is worse
-// than no feature; the three below earn their place by being declarative, and
-// by every body they see being one jig itself shipped.
+// A grammar with no fixed shape and no parser to lean on — `go.mod` — is absent
+// on purpose. A half-parser writing somebody's build file is worse than no
+// feature; the four below earn their place by being declarative or parseable,
+// and by every body they see being one jig itself shipped.
 const FORMATS = [
   { claims: isSectionFile, read: readSections, render: renderSections },
   { claims: (base) => /\.(props|targets)$/i.test(base), read: readMsbuild, render: renderMsbuild },
   { claims: (base) => /\.gradle(\.kts)?$/i.test(base), read: readKotlin, render: renderKotlin },
+  { claims: (base) => /\.json$/i.test(base), read: readJson, render: renderJson },
 ];
 
 // The basename is what decides, not the extension alone: `.editorconfig` has no

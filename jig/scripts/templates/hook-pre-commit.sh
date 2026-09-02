@@ -21,4 +21,17 @@ if ! command -v node >/dev/null 2>&1; then
   exit 0
 fi
 lane_log "ran"
-node .jig/checks/run.mjs || exit 1
+# `--staged`, because a commit carries the index and not the working tree. The
+# pathless walk this used to run reads the files on disk, which at commit time
+# is a different project: a violation staged and then edited back out lands in
+# HEAD unchecked, and a violation left in the file but never staged blocks a
+# commit that does not contain it. CI and a manual run keep the walk.
+node .jig/checks/run.mjs --staged || exit 1
+# The opt-in half. `.jig/verify.json` names the linter, type checker and test
+# runner the owner ticked; only an entry that names the `commit` lane runs here,
+# and nothing names it unless the owner asked for it when the plan was made — a
+# full type-check on every commit is a cost they choose. No file, no second node
+# start: a commit that opted into nothing pays nothing.
+if [ -f .jig/verify.json ]; then
+  node .jig/checks/run.mjs --verify --lane commit || exit 1
+fi

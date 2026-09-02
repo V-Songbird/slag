@@ -214,11 +214,22 @@ why the moment that comes back.
 checks run on every push with no plugin and no local node?"
 
 - `Yes (Recommended)` — "One workflow file under `.github/workflows/`, owned
-  by jig, running the committed check driver and its selftest — not the tools
-  you ticked, which no lane spawns. The floor that holds when everything else
-  is missing."
+  by jig, running the committed check driver, its selftest, and one step per
+  tool you ticked — each one the exact command in `.jig/verify.json`. Where you
+  ticked no test runner and your `package.json` already has a `test` script,
+  that script is a step too. The floor that holds when everything else is
+  missing."
 - `No` — "Plan with `--no-ci`. The committed checks still run wherever you run
-  them."
+  them, and no lane runs the tools."
+
+**Question seven-a**, header `"Commit tools"`, only when the user ticked a tool
+at question six: "Should the linter, type checker and test runner also run when
+you commit, or only in CI?"
+
+- `Only in CI (Recommended)` — "A full type-check on every commit costs seconds
+  every time. The commit hook still runs the committed checks."
+- `At commit too` — "Pass `--verify-commit`. The same commands run from the
+  pre-commit hook, and a red one stops the commit."
 
 **Question seven-b**, header `"Hook weave"`, only when the scan found a
 committed pre-commit: "Your pre-commit hook is committed at `<path>`. Weave

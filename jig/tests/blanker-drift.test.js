@@ -24,6 +24,7 @@ const path = require("path");
 const DRIVER = path.join(__dirname, "..", "scripts", "templates", "run.mjs");
 const LIB = path.join(__dirname, "..", "hooks", "jig-lib.js");
 const ENGINE = path.join(__dirname, "..", "scripts", "jig.js");
+const TOOLCHAIN = path.join(__dirname, "..", "scripts", "toolchain.js");
 
 // The blocks that must be identical, each named by the exact first and last
 // line of its region and by the pair of files that carry it. Markers rather than
@@ -49,6 +50,16 @@ const BLOCKS = [
     files: [DRIVER, ENGINE],
     from: "function concreteSegment(glob, star) {",
     to: '  return [...dirs, base].join("/");\n}',
+  },
+  {
+    // The lanes run the same argv the installer runs, and on Windows `npx` is a
+    // batch shim neither of them may open a shell for. The engine learned the
+    // route first; the driver carries the second copy because it imports
+    // nothing outside node's own standard library.
+    what: "the shell-free argv rewrite",
+    files: [DRIVER, TOOLCHAIN],
+    from: "function windowsShim(name) {",
+    to: "  return [process.execPath, entry, ...argv.slice(1)];\n}",
   },
 ];
 

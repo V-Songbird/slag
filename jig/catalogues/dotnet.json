@@ -9,6 +9,11 @@
       "sample": "<!-- Starter project file. Rename it and its assembly before you publish it.\n     It builds as a library, so it compiles with no source files in it yet;\n     add <OutputType>Exe</OutputType> when you write an entry point. -->\n<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net9.0</TargetFramework>\n    <RootNamespace>App</RootNamespace>\n    <AssemblyName>App</AssemblyName>\n  </PropertyGroup>\n\n</Project>\n",
       "hint": null
     },
+    "ignore": [
+      "bin/",
+      "obj/",
+      "*.user"
+    ],
     "files": [
       "*.csproj",
       "*.sln",

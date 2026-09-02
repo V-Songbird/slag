@@ -9,8 +9,12 @@
 //
 //   node .jig/checks/run.mjs                 walk the project and check it
 //   node .jig/checks/run.mjs <path> [...]    check exactly these paths
+//   node .jig/checks/run.mjs --staged        check the staged bytes instead
 //   node .jig/checks/run.mjs --selftest      seed one violation per check and
 //                                            prove each check catches its own
+//   node .jig/checks/run.mjs --verify --lane <ci|commit> [--entry <id>]
+//                                            run the linter, type checker and
+//                                            test runner that lane names
 //   node .jig/checks/run.mjs --json          machine-readable report
 //
 // Exit code is 1 when anything was found and 0 when nothing was. A selftest
@@ -23,6 +27,18 @@
 // the project, and 0 would say it read all of it. The one failure that exits 0
 // is this file itself crashing — that is a coverage gap, disclosed on stderr
 // and in .jig/lane.log, and never a reason to stop somebody committing.
+//
+// A `--verify` run exits 1 when a command the lane names exited on anything but
+// the code the entry expects, and when the lane could not start one at all. A
+// lane with no entry in it ran nothing and exits 0 — the commit lane is opt-in,
+// and a lane nobody asked for must not start failing commits.
+//
+// `--staged` is the commit lane's reading and nobody else's. A commit carries
+// the index, not the working tree, and at commit time those are two different
+// projects: a violation staged and then edited back out of the file lands in
+// HEAD unchecked, and a violation sitting in the file but never staged blocks a
+// commit that does not contain it. Both were reproduced. CI and a manual run
+// have nothing staged and keep the walk.
 //
 // A check declares one of two detector kinds. A pattern detector is a regular
 // expression over the files a glob names. A paired-change detector names two
@@ -301,20 +317,56 @@ function lineOf(text, index) {
   return line;
 }
 
-function makeContext(root, only) {
-  const walked = walk(root, only);
+// One git reader for everything here. Argv, never a string a shell reads, and a
+// non-zero exit is null rather than an exception: a repository git will not
+// answer for is a run with nothing staged, not a crash.
+function gitOut(root, args) {
+  const run = spawnSync("git", args, { cwd: root, encoding: "utf-8", windowsHide: true });
+  return run.error || run.status !== 0 ? null : run.stdout;
+}
+
+// The staged file list. `--relative` for the same reason `changed()` uses it:
+// git names paths from the repository root and a check's globs are written
+// against ROOT, and below the root the two namespaces differ. `--diff-filter`
+// drops deletions, which have no staged content left to read. SKIP_DIRS applies
+// here as it does to the walk — staging a check module must not point the check
+// at the fixture inside it.
+// null, not an empty list, when git will not answer: an index nobody could read
+// and an index with nothing in it are the same silence otherwise, and reporting
+// the second for the first is a commit lane that rubber-stamps everything.
+function stagedFiles(root) {
+  const out = gitOut(root, ["diff", "--cached", "--name-only", "--relative", "--diff-filter=ACMR"]);
+  if (out === null) return null;
+  return out.split("\n").map((s) => s.trim()).filter(Boolean)
+    .filter((rel) => !rel.split("/").some((seg) => SKIP_DIRS.has(seg)));
+}
+
+function makeContext(root, only, staged) {
+  const list = staged ? stagedFiles(root) : null;
+  // A git that will not answer is a partial scan exactly like a walk that hit
+  // the ceiling, and it exits non-zero for the same reason: 0 is the only thing
+  // a hook reads, and there it says the project was checked.
+  const walked = staged
+    ? { files: list || [], truncated: list === null,
+      why: "git could not list the staged files, so nothing in this commit was read" }
+    : { ...walk(root, only), why: `the walk stopped at ${MAX_FILES} files — everything past that was never read` };
   const all = walked.files;
   const cache = new Map();
   return {
     root,
     truncated: walked.truncated,
+    partial: walked.truncated ? walked.why : null,
     files(globs) {
       return all.filter((rel) => matchesAny(rel, globs));
     },
     read(rel) {
       if (!cache.has(rel)) {
         try {
-          cache.set(rel, fs.readFileSync(path.join(root, rel), "utf-8").replace(/^﻿/, ""));
+          // `:./path` is git's spelling for "this path in the index, named
+          // relative to here" — the namespace the staged list came back in.
+          const text = staged ? gitOut(root, ["show", ":./" + rel])
+            : fs.readFileSync(path.join(root, rel), "utf-8");
+          cache.set(rel, text === null ? null : text.replace(/^﻿/, ""));
         } catch {
           cache.set(rel, null);
         }
@@ -363,9 +415,8 @@ function makeContext(root, only) {
       return { classId, path: rel, line, pattern, note: note || null };
     },
     git(args) {
-      const run = spawnSync("git", args, { cwd: root, encoding: "utf-8", windowsHide: true });
-      if (run.error || run.status !== 0) return { ok: false, stdout: "" };
-      return { ok: true, stdout: run.stdout };
+      const stdout = gitOut(root, args);
+      return stdout === null ? { ok: false, stdout: "" } : { ok: true, stdout };
     },
     // The staged change set, and what a paired-change detector reads.
     //
@@ -495,8 +546,8 @@ function fixturePath(det) {
 // The two runs
 // ---------------------------------------------------------------------------
 
-async function runChecks(root, only) {
-  const ctx = makeContext(root, only);
+async function runChecks(root, only, staged) {
+  const ctx = makeContext(root, only, staged);
   const findings = [];
   const skipped = [];
   const broken = [];
@@ -539,7 +590,7 @@ async function runChecks(root, only) {
     }
   }
   findings.sort((a, b) => (a.path === b.path ? a.line - b.line : a.path < b.path ? -1 : 1));
-  return { findings, skipped, broken, denies, truncated: ctx.truncated };
+  return { findings, skipped, broken, denies, truncated: ctx.truncated, partial: ctx.partial };
 }
 
 // The witnessed catch, without jig. Every check carries the pair that admitted
@@ -619,6 +670,136 @@ async function runSelftest() {
 }
 
 // ---------------------------------------------------------------------------
+// The lane verification
+// ---------------------------------------------------------------------------
+//
+// A linter, a type checker and a test runner are only coverage where something
+// runs them. `.jig/verify.json` is the list of what runs and where: one entry
+// per tool the owner ticked, carrying the argv, the exit code a clean run has,
+// the paths the tool speaks for, and the lanes that run it.
+//
+// Every entry is an argv spawned with no shell — the same stance the installer
+// takes, and for the same reason: a string a shell reads is a string somebody
+// can put a second command in. A file that is missing, unreadable or names no
+// entry for this lane runs nothing and exits 0, because the commit lane is
+// opt-in and a lane nobody asked for must not start failing commits.
+
+function readVerifyEntries() {
+  let record;
+  try {
+    record = JSON.parse(fs.readFileSync(path.join(HERE, "..", "verify.json"), "utf-8").replace(/^﻿/, ""));
+  } catch {
+    return [];
+  }
+  const rows = record && Array.isArray(record.entries) ? record.entries : [];
+  return rows.filter((e) => e && typeof e.id === "string" && Array.isArray(e.argv) && e.argv.length &&
+    e.argv.every((a) => typeof a === "string" && a) && Array.isArray(e.lanes));
+}
+
+function flagValue(argv, name) {
+  const at = argv.indexOf(name);
+  return at === -1 || !argv[at + 1] || argv[at + 1].startsWith("--") ? null : argv[at + 1];
+}
+
+// Where an executable name resolves to a `.cmd` or `.bat` on this machine.
+// Returns the resolved path, or null on any platform and for any name where
+// that is not the story — including when the tool is genuinely absent.
+function windowsShim(name) {
+  if (process.platform !== "win32") return null;
+  if (/\.(cmd|bat)$/i.test(name)) return name;
+  for (const dir of String(process.env.PATH || "").split(path.delimiter).filter(Boolean)) {
+    for (const ext of [".cmd", ".bat"]) {
+      const full = path.join(dir, name + ext);
+      try {
+        if (fs.statSync(full).isFile()) return full;
+      } catch { /* a PATH entry that is not there is not this function's problem */ }
+    }
+  }
+  return null;
+}
+
+// The JS the `.cmd` shim would have handed to node, per manager, resolved
+// beside the shim itself. A machine with fnm or nvm has one of these per node
+// version; the one that answers to `npm` on this PATH is the one whose shim was
+// just found, so the neighbour is the right copy and a PATH search is not.
+const NODE_CLI_ENTRIES = {
+  npm: "node_modules/npm/bin/npm-cli.js",
+  npx: "node_modules/npm/bin/npx-cli.js",
+  pnpm: "node_modules/pnpm/bin/pnpm.cjs",
+  yarn: "node_modules/yarn/bin/yarn.js",
+};
+
+// The same command with no shim in it, or null when there is no such route.
+// npm, pnpm and yarn are Node programs wearing a `.cmd` hat: the shim's whole
+// job is to find node and hand it the script named here, and jig already IS a
+// node that can do that. So the batch shim is never the route (SCOPE, the
+// derail pass) and no shell is needed for the managers the owner's own platform
+// installs everything through. Nothing else is rewritten — a batch file with no
+// JS behind it needs cmd.exe, and jig opens no shell.
+function shellFreeArgv(argv) {
+  const rel = NODE_CLI_ENTRIES[String(argv[0]).replace(/\.(cmd|bat)$/i, "").toLowerCase()];
+  if (!rel) return null;
+  // Absolute only: `windowsShim` hands a bare `.cmd` name straight back, and
+  // resolving the entry beside that would read a `node_modules` in whatever
+  // directory jig happens to be run from rather than the manager's own.
+  const shim = windowsShim(argv[0]);
+  if (!shim || !path.isAbsolute(shim)) return null;
+  const entry = path.join(path.dirname(shim), ...rel.split("/"));
+  if (!fs.existsSync(entry)) return null;
+  return [process.execPath, entry, ...argv.slice(1)];
+}
+
+function runVerify(lane, only) {
+  const entries = readVerifyEntries()
+    .filter((e) => e.lanes.includes(lane) && (only === null || e.id === only));
+  const results = [];
+  for (const entry of entries) {
+    const expectedExit = Number.isInteger(entry.expectedExit) ? entry.expectedExit : 0;
+    // Every shipped JS argv starts with `npx`, which on Windows is a batch shim
+    // Node will not start without a shell — and this driver opens none. So the
+    // shim's own JS entry is run directly, exactly as the installer does it.
+    // Without this the whole lane came back NOT RUN on Windows, and a wired
+    // commit lane blocked every commit on that machine.
+    const spawnable = shellFreeArgv(entry.argv) || entry.argv;
+    const run = spawnSync(spawnable[0], spawnable.slice(1), {
+      cwd: ROOT, shell: false, windowsHide: true, encoding: "utf-8", maxBuffer: 8 * 1024 * 1024,
+    });
+    const command = entry.argv.join(" ");
+    if (run.error) {
+      // A tool the lane cannot start is a gap, never a pass: this lane claims to
+      // run it, and reporting nothing would be the coverage claim the driver
+      // must not make.
+      results.push({ id: entry.id, command, ran: false, passed: false, why: "could not run " + entry.argv[0] +
+        " (" + (run.error.code || run.error.message) + ")" });
+      continue;
+    }
+    results.push({
+      id: entry.id, command, ran: true, code: run.status, expectedExit,
+      passed: run.status === expectedExit,
+      output: ((run.stdout || "") + (run.stderr || "")).trim(),
+    });
+  }
+  return { lane, entry: only, requested: entries.length, results };
+}
+
+function verifyReport(out) {
+  const lines = [];
+  for (const r of out.results) {
+    if (r.passed) lines.push(`ok       ${r.id} — ${r.command} exited ${r.code}`);
+    else if (!r.ran) lines.push(`NOT RUN  ${r.id} — ${r.why}\n  command: ${r.command}`);
+    else lines.push(`FAILED   ${r.id} — ${r.command} exited ${r.code}, expected ${r.expectedExit}` +
+      (r.output ? "\n" + r.output : ""));
+  }
+  const failed = out.results.filter((r) => !r.passed).length;
+  if (failed) lines.push(`\n${failed} of ${out.results.length} did not pass in the ${out.lane} lane.`);
+  else if (out.results.length) lines.push(`\nEvery command the ${out.lane} lane names passed.`);
+  else if (out.entry) lines.push(`\nNothing named ${out.entry} runs in the ${out.lane} lane — .jig/verify.json` +
+    ` no longer carries that entry, so this step proves nothing.`);
+  else lines.push(`\nNo entry names the ${out.lane} lane, so nothing was verified.`);
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Reporting
 // ---------------------------------------------------------------------------
 
@@ -637,11 +818,11 @@ function report(out) {
   // A partial walk is disclosed on the report and again in the closing line,
   // because the closing line is the one anybody reads. "No findings" over a
   // scan that stopped at the ceiling would be coverage nobody demonstrated.
-  if (out.truncated) lines.push(`PARTIAL  the walk stopped at ${MAX_FILES} files — everything past that was never read`);
+  if (out.partial) lines.push(`PARTIAL  ${out.partial}`);
   lines.push(out.findings.length
     ? `\n${out.findings.length} finding${out.findings.length === 1 ? "" : "s"}.`
-    : out.truncated
-      ? `\nNo findings in the ${MAX_FILES} files read, which is not the whole project. This is a partial scan, not a pass.`
+    : out.partial
+      ? "\nNo findings in what was read, which is not the whole project. This is a partial scan, not a pass."
       : "\nNo findings.");
   return lines.join("\n");
 }
@@ -667,12 +848,21 @@ function selftestReport(results) {
 async function main(argv) {
   const json = argv.includes("--json");
   const paths = argv.filter((a) => !a.startsWith("--"));
+  if (argv.includes("--verify")) {
+    const out = runVerify(flagValue(argv, "--lane") || "ci", flagValue(argv, "--entry"));
+    process.stdout.write((json ? JSON.stringify({ verify: out }, null, 2) : verifyReport(out)) + "\n");
+    // A step that named one entry and found none is a lane that lost the tool it
+    // claims to run — exit 1. A lane nobody put an entry in ran nothing and says
+    // so, which is the opt-in case and exits 0.
+    if (out.entry && !out.results.length) return 1;
+    return out.results.some((r) => !r.passed) ? 1 : 0;
+  }
   if (argv.includes("--selftest")) {
     const results = await runSelftest();
     process.stdout.write((json ? JSON.stringify({ selftest: results }, null, 2) : selftestReport(results)) + "\n");
     return results.some((r) => r.caught === false) || !results.length ? 1 : 0;
   }
-  const out = await runChecks(ROOT, paths);
+  const out = await runChecks(ROOT, paths, argv.includes("--staged"));
   process.stdout.write((json ? JSON.stringify(out, null, 2) : report(out)) + "\n");
   // A truncated walk exits non-zero for the same reason it prints a line: the
   // exit code is the only thing a hook or a CI step reads, and 0 there says the

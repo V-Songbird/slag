@@ -164,6 +164,12 @@ A starter carries a placeholder name and a comment saying to rename it. It is
 not an application template and must never be described as one — say what it
 is, and leave choosing a template to the owner.
 
+A starter also brings the two files a project is red without: the script each
+ticked tool's CI step calls, composed into the manifest beside the starter's own
+members, and a root `.gitignore` of what that ecosystem never commits. Both are
+changes on the plan approved by name, and a folder that already has a
+`.gitignore` keeps it.
+
 On a truly empty folder nothing detects, so **the interview supplies what the
 scan could not** and its answers ride two flags on every later command:
 
@@ -254,7 +260,11 @@ Every row is one named item: `role` and `why`, `installKind` (`package`,
 `scaffold`, `builtin` or `audit` — a scaffold command and a package install are
 not the same act, so do not describe them the same way), `install` and
 `uninstall` keyed by package manager, `configPath` and `configSample` (the exact
-bytes it would write), `wiring`, `ciStep`, `seed` and `verify`.
+bytes it would write), `wiring`, `ciStep`, `seed` and `verify`. `verify.argv` is
+what the lanes run: the plan writes it into `.jig/verify.json` with the exit code
+a clean run has, and the CI workflow gains a step per entry. `ciStep` is the
+edition's hand-written CI line for a project that wires its own workflow — it is
+text to show somebody who asks, and nothing jig ever runs.
 
 Put the proposal to the user as a multi-select, one line per tool: what it is
 for, the command that would run under this project's package manager, and the
@@ -305,7 +315,10 @@ Each authored check carries, in one module:
     did not replace.
   - `ci-workflow` and `tool-rule` — the class is named in the workflow jig
     writes and in the tool rule it proposes. Neither carries patterns of its
-    own, so `params` is empty.
+    own, so `params` is empty. A `tool-rule` cell reads DET only where the plan
+    writes the tool's config AND a lane in `.jig/verify.json` runs the tool;
+    otherwise it reads GAP, "no lane runs \<tool\>". A rule in a config nobody
+    executes is not coverage.
 
   A session guard's fixture pair is read the way that lever reads it: the
   `bash-guard` pair is one command per fixture, and the `edit-observe-guard`
@@ -411,8 +424,10 @@ asked, so pass every one the user said yes to:**
 | `--weave-precommit` | agreed to let jig put its one line into the pre-commit hook their repository already commits. The scan lists the hosts under `guardrails.precommit`, and a repo with none refuses rather than creating one |
 | `--wire-commit` | agreed to let jig point git at the hook it wrote, by setting `core.hooksPath` to `.jig/hooks`. Run it as its own `plan` AFTER the install, because the hook has to exist before git can be pointed at it. It refuses when the lane already runs, and refuses rather than hiding a pre-commit hook the owner wrote |
 | `--refresh-activation` | is in a repository whose commit lane already runs while `.jig/activation.md` still reads as though it does not. It proposes that one file and nothing else, and refuses when the lane is dead or the file is already right |
+| `--verify-commit` | asked at question seven-a for the tools they ticked to run at commit time as well as in CI. Every lane entry in `.jig/verify.json` then names the `commit` lane too, and the pre-commit shim runs them. Without it the shim asks for that lane on every commit and finds nothing in it, which is what makes this the owner's choice rather than a cost jig imposes |
 | `--wire-governance` | agreed to wire the orphaned governance documents the scan found. It writes one computed pointer rule, `.claude/rules/jig-governance.md` |
 | `--agents-region` | said another AI tool reads this repository, so `AGENTS.md` should carry a fenced block pointing at the same checks |
+| `--checks-rule` | wants the same standing brief in front of a Claude Code session, which never reads `AGENTS.md`. It writes one rule, `.claude/rules/jig-checks.md`, from the same selection as the region |
 
 Provenance is the weakest thing that fed the selection, and it stays
 load-bearing: it is how the plan states which rows the owner actually chose.
@@ -545,24 +560,47 @@ the ledger has grown a line proving it.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" selftest --live
 ```
 
-Read `witnessed`. It is `true` only when a guard probe caught its synthetic
-violation **and** `ledger.linesAfter` exceeds `ledger.linesBefore`. Show the
-runner's own stdout for at least one probe, verbatim, from `probes[].output` —
-"it works" from the thing under test is not evidence.
+Read `witnessed`. It is `true` only when something caught its synthetic
+violation **and** `ledger.linesAfter` exceeds `ledger.linesBefore`. Where guards
+are installed, that something is a guard probe. Where none is — a checks-only
+install, which is a whole persona — the check driver's own catch is the witness,
+because it is that install's entire surface. Show the runner's own stdout for at
+least one probe, verbatim, from `probes[].output` — "it works" from the thing
+under test is not evidence.
 
-The installed toolchain gets a probe too, and jig spawns none of them. A tool's
-config is proven by planting that tool's own `seed` and running its
-`verify.argv`: the tool caught the violation when the exit code equals
-`expectedExit`, which is not always 1. Every toolchain probe therefore comes
-back `ran: false` and hands the owner that command and that expected exit
-instead — by design, not by failure. Read one out and say plainly that nobody
-has run it yet.
+The commit lane is executed, not described: `commit-lane` copies the install into
+a throwaway clone, stages a check's own violation fixture, and starts the shim
+the way git starts it. Read `hookRan`, `nodeFound` and `blocked`. `nodeFound:
+false` is the disclosed skip — node behind fnm, nvm or volta is not on the hook's
+PATH — and it means the commit lane passes everything through on this machine.
+Say so; CI is still the floor.
+
+The installed toolchain is proven by planting that tool's own `seed` and running
+its `verify.argv`: the tool caught the violation when the exit code equals
+`expectedExit`, which is not always 1. jig does not spawn a tool the run did not
+name, because a type check or a test run costs a build — so name them:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" selftest --live --toolchain eslint,typescript
+```
+
+Each named tool reports `verdict: verified` or `unverified`, and `baseline:
+clean` or `red` from a second run with no seed planted. A `red` baseline is the
+disclosure that matters: the repository was already failing its own linter before
+jig planted anything, and that is the owner's to hear before any of the rest. It
+is also never a catch — a tool that went red over a tree that was already red
+reads `unverified` whatever its exit code was, because the seed proved nothing.
+A tool jig cannot start comes back `cannotRun: true` — `./gradlew` on Windows is
+`gradlew.bat`, which needs `cmd.exe`, and jig opens no shell — and that is never
+a pass. Read the command out and say plainly that nothing was proven for it.
+`npm`, `npx`, `pnpm` and `yarn` are not that case: they are Node programs behind
+a `.cmd`, and jig runs their JS entry with `process.execPath` instead.
 
 **Degrade, never stall.** A probe that reports `ran: false` says why, and
 carries `command` and `expected`. Print both and tell the user what to look for.
 Print `notes` too. The close never aborts because a tool could not run.
 
-**`witnessed: false` is never passed over.** Say which half failed — no guard
+**`witnessed: false` is never passed over.** Say which half failed — nothing
 caught its probe, or the ledger did not grow — name the probe, and call the
 install unwitnessed at step 9.
 

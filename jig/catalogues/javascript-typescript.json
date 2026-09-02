@@ -9,6 +9,13 @@
       "sample": "{\n  \"name\": \"example-app\",\n  \"version\": \"0.1.0\",\n  \"private\": true,\n  \"type\": \"module\"\n}\n",
       "hint": null
     },
+    "ignore": [
+      "node_modules/",
+      "dist/",
+      "coverage/",
+      "*.tsbuildinfo",
+      ".env"
+    ],
     "files": [
       "package.json",
       "tsconfig.json",
@@ -50,20 +57,20 @@
       "role": "linter",
       "why": "The only tool that sees test-suite intent (focused tests, missing assertions), suppression comments and unresolvable imports; with typescript-eslint's type-aware configs it also sees floating promises the type checker happily accepts.",
       "install": {
-        "npm": "npm install --save-dev eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
-        "pnpm": "pnpm add -D eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
-        "yarn": "yarn add -D eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
-        "bun": "bun add -d eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin"
+        "npm": "npm install --save-dev eslint @eslint/js typescript typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
+        "pnpm": "pnpm add -D eslint @eslint/js typescript typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
+        "yarn": "yarn add -D eslint @eslint/js typescript typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
+        "bun": "bun add -d eslint @eslint/js typescript typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin"
       },
       "installKind": "package",
       "uninstall": {
-        "npm": "npm uninstall eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
-        "pnpm": "pnpm remove eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
-        "yarn": "yarn remove eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
-        "bun": "bun remove eslint @eslint/js typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin"
+        "npm": "npm uninstall eslint @eslint/js typescript typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
+        "pnpm": "pnpm remove eslint @eslint/js typescript typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
+        "yarn": "yarn remove eslint @eslint/js typescript typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin",
+        "bun": "bun remove eslint @eslint/js typescript typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin"
       },
       "configPath": "eslint.config.mjs",
-      "configSample": "import js from '@eslint/js';\nimport { defineConfig, globalIgnores } from 'eslint/config';\nimport tseslint from 'typescript-eslint';\nimport { importX } from 'eslint-plugin-import-x';\nimport n from 'eslint-plugin-n';\nimport security from 'eslint-plugin-security';\nimport vitest from '@vitest/eslint-plugin';\n\nexport default defineConfig([\n  globalIgnores(['dist/**', 'coverage/**', 'node_modules/**']),\n  {\n    files: ['**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],\n    extends: [\n      js.configs.recommended,\n      tseslint.configs.strictTypeChecked,\n      importX.flatConfigs.recommended,\n      importX.flatConfigs.typescript,\n      security.configs.recommended,\n    ],\n    plugins: { n },\n    languageOptions: {\n      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },\n    },\n    rules: {\n      'eqeqeq': ['error', 'always'],\n      'no-console': ['error', { allow: ['error', 'warn'] }],\n      'no-debugger': 'error',\n      'no-eval': 'error',\n      'no-implied-eval': 'error',\n      'no-empty': ['error', { allowEmptyCatch: false }],\n      'no-unused-vars': 'off',\n      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],\n      '@typescript-eslint/no-explicit-any': 'error',\n      '@typescript-eslint/no-non-null-assertion': 'error',\n      '@typescript-eslint/no-floating-promises': 'error',\n      '@typescript-eslint/no-misused-promises': 'error',\n      '@typescript-eslint/ban-ts-comment': ['error', { 'ts-expect-error': 'allow-with-description' }],\n      '@typescript-eslint/only-throw-error': 'error',\n      '@typescript-eslint/switch-exhaustiveness-check': 'error',\n      'import-x/no-unresolved': 'error',\n      'import-x/no-extraneous-dependencies': 'error',\n      'import-x/no-cycle': 'error',\n      'n/no-process-exit': 'error',\n    },\n  },\n  {\n    files: ['**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],\n    plugins: { vitest },\n    rules: {\n      ...vitest.configs.recommended.rules,\n      'vitest/no-focused-tests': 'error',\n      'vitest/no-disabled-tests': 'error',\n      'vitest/no-commented-out-tests': 'error',\n      'vitest/expect-expect': 'error',\n      'vitest/no-conditional-expect': 'error',\n      'vitest/no-identical-title': 'error',\n      'vitest/no-standalone-expect': 'error',\n    },\n  },\n]);\n",
+      "configSample": "import js from '@eslint/js';\nimport { defineConfig, globalIgnores } from 'eslint/config';\nimport tseslint from 'typescript-eslint';\nimport { importX } from 'eslint-plugin-import-x';\nimport n from 'eslint-plugin-n';\nimport security from 'eslint-plugin-security';\nimport vitest from '@vitest/eslint-plugin';\n\nexport default defineConfig([\n  globalIgnores(['dist/**', 'coverage/**', 'node_modules/**', '.jig/**', '*.config.{js,mjs,cjs,ts,mts,cts}']),\n  {\n    files: ['**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],\n    extends: [\n      js.configs.recommended,\n      tseslint.configs.strictTypeChecked,\n      importX.flatConfigs.recommended,\n      importX.flatConfigs.typescript,\n      security.configs.recommended,\n    ],\n    plugins: { n },\n    languageOptions: {\n      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },\n    },\n    rules: {\n      'eqeqeq': ['error', 'always'],\n      'no-console': ['error', { allow: ['error', 'warn'] }],\n      'no-debugger': 'error',\n      'no-eval': 'error',\n      'no-implied-eval': 'error',\n      'no-empty': ['error', { allowEmptyCatch: false }],\n      'no-unused-vars': 'off',\n      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],\n      '@typescript-eslint/no-explicit-any': 'error',\n      '@typescript-eslint/no-non-null-assertion': 'error',\n      '@typescript-eslint/no-floating-promises': 'error',\n      '@typescript-eslint/no-misused-promises': 'error',\n      '@typescript-eslint/ban-ts-comment': ['error', { 'ts-expect-error': 'allow-with-description' }],\n      '@typescript-eslint/only-throw-error': 'error',\n      '@typescript-eslint/switch-exhaustiveness-check': 'error',\n      'import-x/no-unresolved': 'error',\n      'import-x/no-extraneous-dependencies': 'error',\n      'import-x/no-cycle': 'error',\n      'n/no-process-exit': 'error',\n    },\n  },\n  {\n    files: ['**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],\n    plugins: { vitest },\n    rules: {\n      ...vitest.configs.recommended.rules,\n      'vitest/no-focused-tests': 'error',\n      'vitest/no-disabled-tests': 'error',\n      'vitest/no-commented-out-tests': 'error',\n      'vitest/expect-expect': 'error',\n      'vitest/no-conditional-expect': 'error',\n      'vitest/no-identical-title': 'error',\n      'vitest/no-standalone-expect': 'error',\n    },\n  },\n]);\n",
       "wiring": "\"lint\": \"eslint . --max-warnings 0 --report-unused-disable-directives\"",
       "ciStep": "npm run lint",
       "verify": {

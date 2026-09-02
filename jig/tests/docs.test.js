@@ -44,16 +44,22 @@ test("the interview's CI answer promises only what the CI workflow actually runs
   assert.match(yes, /selftest/, "the CI answer does not name the selftest the workflow runs");
 });
 
-test("the witnessed close does not claim a toolchain probe is ever spawned", () => {
-  // The engine's own assertion is in checks.test.js: every toolchain probe
-  // comes back `ran: false`. This is the sentence that has to agree with it.
+test("the witnessed close names the flag that spawns a tool, and says none is spawned without it", () => {
+  // Roadmap 207 made the toolchain probe real: it spawns the tool the run names
+  // and nothing else. The engine's own assertions are in checks.test.js and
+  // toolchain.test.js; these are the sentences that have to agree with them.
   const skill = read("skills", "jig", "SKILL.md");
   const close = skill.slice(skill.indexOf("## 8. Witnessed close"), skill.indexOf("## 9. Close"));
   assert.ok(close.includes("Witnessed close"), "section 8 is gone from SKILL.md");
   assert.doesNotMatch(close, /Most tools/,
-    "the close claims only *most* tools go unspawned; the engine spawns none");
-  assert.match(close, /spawns none of them|does not spawn/,
-    "the close does not say that jig spawns no tool from a selftest");
+    "the close claims only *most* tools go unspawned; the engine spawns the named ones and no others");
+  // The old regex matched the old sentence too ("jig spawns none of them"),
+  // which is the opposite claim, so it pinned nothing about this release.
+  assert.match(close, /does not spawn a tool the run did not\s+name/,
+    "the close does not say that a tool the run did not name goes unspawned");
+  assert.match(close, /--toolchain/, "the close does not name the flag that spawns a tool");
+  assert.match(close, /cannotRun/,
+    "the close does not name the field a tool jig cannot start comes back with");
   assert.match(close, /ran: false/, "the close does not name the field the model has to read");
 });
 
@@ -166,4 +172,16 @@ test("the item tier is asked as an enumerated multi-select, and applied one pair
   assert.match(consent, /label is the change id/, "the option label is not the change id");
   assert.match(consent, /--change <id> --path <rel>/,
     "the multi-select no longer says the token stays one pair per ticked id");
+});
+
+// Question seven is where CI is agreed to, and the CI lane runs the project's
+// own `test` script where no test runner was ticked (DERAIL-PASS N8). Prose that
+// left that out was jig substituting a default for an answer the owner never
+// gave — which SCOPE forbids whatever the plan later names.
+test("the interview's CI answer names the project's own test script as a lane step", () => {
+  const interview = read("skills", "jig", "references", "interview.md");
+  const answer = interview.slice(interview.indexOf("**Question seven**, header `\"CI floor\"`"));
+  const yes = answer.slice(0, answer.indexOf("- `No`"));
+  assert.match(yes, /`test` script/,
+    "the CI answer never mentions the test script the lane list adds when no test runner is ticked");
 });

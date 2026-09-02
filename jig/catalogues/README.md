@@ -54,7 +54,7 @@ driver and the runner. Nothing in an edition gates an install — catalogues inf
 
 ```
 { schemaVersion: 4, edition, displayName, researchedOn,
-  detect:    { manifest: { path, sample, hint }, files, extensions, commentSyntax, packageManagers },
+  detect:    { manifest: { path, sample, hint }, ignore, files, extensions, commentSyntax, packageManagers },
   toolchain: [{ id, role, why, installKind, install, uninstall, configPath, configSample,
                 wiring, ciStep, seed: { path, sample },
                 verify: { argv, expected, expectedExit } }],
@@ -78,13 +78,18 @@ composes the first five (`scripts/sections.js`) and writes none of the rest, han
 snippet instead. An edition author does not have to mark any of this: what matters is that
 `configSample` is the tool's own part of that file and nothing else's.
 
-Composition covers three declarative families and stops there: section files, MSBuild property
-files, and Gradle build scripts. `go.mod` is deliberately outside it, and so is any format whose
+Composition covers four families and stops there: section files, MSBuild property files, Gradle
+build scripts, and JSON manifests — the last because JSON has a parser in the standard library, so
+nothing there is guessed at. `go.mod` is deliberately outside it, and so is any format whose
 grammar lets a sample mean different things in different places — a half-parser writing somebody's
-build file is worse than no feature. Two things keep the three honest. Composition is never reached
+build file is worse than no feature. Two things keep the four honest. Composition is never reached
 for a file the project already owns, so every body merged is one this catalogue shipped; and release
 gate G5 composes every shared path in every edition and fails if a single line of any sample is
 lost or if two tools dispute one key.
+
+`detect.ignore` is what a project in this ecosystem never commits — `node_modules/`, `target/`,
+`__pycache__/`. jig composes a root `.gitignore` from it when it scaffolds a starter, and writes
+nothing when the folder already has one.
 
 `seed` is one file: `path` is where it goes, `sample` is what it contains. It is a violation the
 tool is expected to catch, so it belongs to the tool rather than to a class, and it is written

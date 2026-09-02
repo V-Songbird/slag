@@ -9,6 +9,10 @@
       "sample": "# Starter crate file. Rename the package before you publish it.\n[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\nrust-version = \"1.85\"\n\n[dependencies]\n",
       "hint": null
     },
+    "ignore": [
+      "/target/",
+      "**/*.rs.bk"
+    ],
     "files": [
       "Cargo.toml",
       "Cargo.lock",

@@ -181,6 +181,35 @@ test("every shipped edition loads and matches its declared class count", () => {
   }
 });
 
+test("every shipped edition states what its projects never commit", () => {
+  for (const row of index.editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    const ignore = edition.detect.ignore;
+    assert.ok(Array.isArray(ignore) && ignore.length, row.id + " states no detect.ignore");
+    for (const line of ignore) {
+      assert.equal(typeof line, "string", row.id + " ignore entry is not a string");
+      assert.equal(line.trim(), line, row.id + " ignore entry is padded: " + JSON.stringify(line));
+      assert.ok(line !== "", row.id + " ignore entry is empty");
+    }
+  }
+});
+
+// The lint config jig ships is the first thing it runs on a fresh project, and
+// it used to lint `.jig/checks/*.mjs` — files jig itself had just written, none
+// of them in the tsconfig — and fail on a clean tree.
+test("the eslint sample ignores jig's own files and installs the typescript its config needs", () => {
+  const js = editions.loadEdition(PLUGIN_ROOT, "javascript-typescript");
+  const eslint = js.toolchain.find((t) => t.id === "eslint");
+  assert.match(eslint.configSample, /'\.jig\/\*\*'/, eslint.configSample);
+  assert.match(eslint.configSample, /'\*\.config\.\{js,mjs,cjs,ts,mts,cts\}'/, eslint.configSample);
+  // typescript-eslint resolves types through the typescript package, so a
+  // ticked linter with no ticked type checker was red the moment it ran.
+  for (const manager of Object.keys(eslint.install)) {
+    assert.match(eslint.install[manager], /\btypescript\b/, manager + " install");
+    assert.match(eslint.uninstall[manager], /\btypescript\b/, manager + " uninstall");
+  }
+});
+
 test("loadEdition refuses an unknown id and lists what it has", () => {
   assert.throws(() => editions.loadEdition(PLUGIN_ROOT, "cobol"), /no edition `cobol`.*python/s);
 });
@@ -431,4 +460,48 @@ test("quickSelection selects nothing when the whole ranking is another edition's
   const quick = editions.quickSelection({ editions: [] }, { usable: true, fallback: null, ranking });
   assert.deepEqual(quick.classes, []);
   assert.equal(quick.basis, "catalogue", "an empty scoped ranking was still reported as evidence");
+});
+
+// ---------------------------------------------------------------------------
+// The seed and the config that has to see it (2.9.0)
+// ---------------------------------------------------------------------------
+
+// The witnessed close plants a tool's own seed and runs the tool over it. A
+// config that ignores where the seed lands makes that proof impossible: every
+// JavaScript install ledgered `unverified` because eslint's `globalIgnores`
+// named `.jig/**` and the probe planted under `.jig/selftest/`. The seed goes
+// at the edition's stated path now, and these are the two shipped configs that
+// have to keep looking there.
+const JS = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, "catalogues", "javascript-typescript.json"), "utf-8"));
+const jsTool = (id) => JS.toolchain.find((t) => t.id === id);
+
+test("eslint's shipped ignore list does not cover the tree its own seed lands in", () => {
+  const eslint = jsTool("eslint");
+  const ignores = /globalIgnores\(\[([^\]]*)\]\)/.exec(eslint.configSample);
+  assert.ok(ignores, "the eslint sample no longer calls globalIgnores, so this test reads nothing");
+  const dir = eslint.seed.path.split("/")[0];
+  for (const glob of ignores[1].split(",").map((s) => s.trim().replace(/^'|'$/g, "")).filter(Boolean)) {
+    assert.notEqual(glob.split("/")[0], dir,
+      "eslint ignores " + glob + ", which is where its own seed " + eslint.seed.path + " is planted");
+  }
+});
+
+test("tsconfig's shipped include covers the tree the typescript seed lands in", () => {
+  const ts = jsTool("typescript");
+  const include = /"include"\s*:\s*\[([^\]]*)\]/.exec(ts.configSample);
+  assert.ok(include, "the tsconfig sample no longer carries an include, so this test reads nothing");
+  const dirs = include[1].split(",").map((s) => s.trim().replace(/^"|"$/g, "")).filter(Boolean);
+  assert.ok(dirs.includes(ts.seed.path.split("/")[0]),
+    "tsc compiles " + dirs.join(", ") + " and the seed is at " + ts.seed.path + ", so it is never read");
+});
+
+// The seed's whole point is to be seen by the project's own tool, and no shipped
+// tool reads a jig state directory.
+test("no shipped seed is planted inside jig's own state directory", () => {
+  for (const file of fs.readdirSync(path.join(PLUGIN_ROOT, "catalogues")).filter((f) => f.endsWith(".json"))) {
+    const cat = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, "catalogues", file), "utf-8"));
+    for (const tool of cat.toolchain || []) {
+      assert.equal(/^\.jig(\/|$)/.test(tool.seed.path), false, file + "/" + tool.id + " seeds under .jig/");
+    }
+  }
 });

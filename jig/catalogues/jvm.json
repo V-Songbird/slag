@@ -15,6 +15,12 @@
       },
       "hint": null
     },
+    "ignore": [
+      "build/",
+      ".gradle/",
+      "target/",
+      "*.class"
+    ],
     "files": [
       "build.gradle.kts",
       "build.gradle",

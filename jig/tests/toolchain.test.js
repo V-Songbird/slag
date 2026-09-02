@@ -154,6 +154,25 @@ test("an item carries the command, the config, the wiring and the way back out",
   assert.deepEqual([...item.uninstallArgv], ["python", "-m", "pip", "uninstall", "-y", "ruff"]);
 });
 
+test("an item carries the tool's CI step, so the route that only configures a tool keeps it", () => {
+  const root = tmpProject({});
+  const [item] = toolchain.proposeInstalls(root, edition("javascript-typescript"), ["eslint"], "npm");
+  assert.equal(item.ciStep, "npm run lint");
+  // Every shipped tool states one, so the field is never absent on an item —
+  // a reader can tell "no CI step" from "this item does not carry them".
+  for (const row of shippedEditions()) {
+    for (const tool of row.edition.toolchain || []) {
+      const manager = Object.keys(tool.install || {})[0];
+      if (!manager || !(row.edition.detect.packageManagers || []).includes(manager)) continue;
+      let proposed;
+      try {
+        proposed = toolchain.proposeInstalls(root, row.edition, [tool.id], manager)[0];
+      } catch { continue; } // a tool jig refuses to offer has its own gate above
+      assert.equal(typeof proposed.ciStep, "string", row.id + "/" + tool.id + " reached an item with no CI step");
+    }
+  }
+});
+
 test("an item is frozen, so nothing can edit the command between approval and run", () => {
   const root = tmpProject({});
   const [item] = toolchain.proposeInstalls(root, edition("python"), ["ruff"], "pip");
@@ -366,6 +385,75 @@ test("a package manager that is not on the machine is an error a human can act o
 });
 
 // ---------------------------------------------------------------------------
+// DERAIL-PASS defect 16 — the shim on the owner's own platform
+// ---------------------------------------------------------------------------
+//
+// Windows + fnm: every JS install exited 1 because `npm` is a `.cmd` and jig
+// opens no shell. The managers are Node programs, so jig can be the node the
+// shim would have found — and nothing else is rewritten, because a batch file
+// with no JS behind it still needs cmd.exe (SCOPE, the derail pass).
+
+// A shim directory laid out the way npm, pnpm and yarn lay theirs out: the
+// `.cmd` beside the `node_modules` copy it would have handed to node.
+function shimDir(name, entryRel) {
+  const dir = tmpProject({});
+  fs.writeFileSync(path.join(dir, name + ".cmd"), "@echo off\r\n");
+  const entry = path.join(dir, ...entryRel.split("/"));
+  fs.mkdirSync(path.dirname(entry), { recursive: true });
+  fs.writeFileSync(entry, "process.stdout.write('cli\\n');\n");
+  return { dir, entry };
+}
+
+function withPath(dir, fn) {
+  const had = process.env.PATH;
+  process.env.PATH = dir;
+  try { return fn(); } finally { process.env.PATH = had; }
+}
+
+test("a manager behind a batch shim is run through its own JS entry, never through a shell", { skip: process.platform !== "win32" }, () => {
+  for (const [name, rel] of Object.entries({
+    npm: "node_modules/npm/bin/npm-cli.js",
+    npx: "node_modules/npm/bin/npx-cli.js",
+    pnpm: "node_modules/pnpm/bin/pnpm.cjs",
+    yarn: "node_modules/yarn/bin/yarn.js",
+  })) {
+    const { dir, entry } = shimDir(name, rel);
+    const argv = withPath(dir, () => toolchain.shellFreeArgv([name, "install", "--save-dev", "x"]));
+    assert.deepEqual(argv, [process.execPath, entry, "install", "--save-dev", "x"],
+      name + " still routes through its batch shim");
+  }
+});
+
+test("only the managers with a JS entry are rewritten — nothing else gets a route", { skip: process.platform !== "win32" }, () => {
+  // A shim with no JS beside it is still a shim, and the refusal stands.
+  const bare = tmpProject({});
+  fs.writeFileSync(path.join(bare, "npm.cmd"), "@echo off\r\n");
+  assert.equal(withPath(bare, () => toolchain.shellFreeArgv(["npm", "install"])), null);
+  // And a manager that is not one of the three is never guessed at.
+  const { dir } = shimDir("gradle", "node_modules/npm/bin/npm-cli.js");
+  assert.equal(withPath(dir, () => toolchain.shellFreeArgv(["gradle", "wrapper"])), null);
+});
+
+test("nothing is rewritten off Windows: npm there is a script node already runs", { skip: process.platform === "win32" }, () => {
+  assert.equal(toolchain.shellFreeArgv(["npm", "install", "x"]), null);
+});
+
+test("the Gradle wrapper on win32 is refused with the batch line to run by hand", { skip: process.platform !== "win32" }, () => {
+  const root = tmpProject(SCRIPTS);
+  const item = runnableItem({ command: "./gradlew --no-daemon check", argv: ["./gradlew", "--no-daemon", "check"] });
+  assert.throws(
+    () => toolchain.runInstall(root, item, { id: item.id, command: item.command }),
+    (err) => {
+      assert.equal(err.expected, true);
+      assert.match(err.message, /only\s+cmd\.exe can start/);
+      assert.match(err.message, /gradlew\.bat --no-daemon check/);
+      assert.doesNotMatch(err.message, /Install \.\/gradlew and re-run/);
+      return true;
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
 // execVerify
 // ---------------------------------------------------------------------------
 
@@ -448,6 +536,118 @@ test("every shipped edition carries a seed and an exit code execVerify can read"
   }
 });
 
+// ---------------------------------------------------------------------------
+// execBaseline, and the probe that puts it in front of the seeded run
+// ---------------------------------------------------------------------------
+
+test("execBaseline runs the same argv with nothing planted and reports a clean tree", () => {
+  const root = tmpProject({ "verify.js": VERIFY_SCRIPT });
+  assert.deepEqual(toolchain.execBaseline(root, seededTool()),
+    { ran: true, code: 0, timedOut: false, baseline: "clean" });
+  // Nothing planted means nothing planted: a baseline that seeded the tree
+  // would be the seeded run under another name.
+  assert.deepEqual(listing(root), ["verify.js"]);
+});
+
+test("a repository already failing its own linter is disclosed as red, not counted as a catch", () => {
+  const root = tmpProject({ "verify.js": VERIFY_SCRIPT, "proof/pkg/seed.txt": "already broken\n" });
+  const baseline = toolchain.execBaseline(root, seededTool());
+  assert.equal(baseline.baseline, "red");
+  assert.equal(baseline.code, 1);
+});
+
+test("execBaseline refuses rather than reporting a clean tree it never saw", () => {
+  const root = tmpProject({});
+  assert.throws(() => toolchain.execBaseline(root, seededTool({ verify: { argv: ["jig-absent-tool"], expectedExit: 1 } })),
+    /could not run "jig-absent-tool" to take seeded's baseline/);
+});
+
+// The probe plants at the path the edition states, at the project root, so the
+// stand-in tool looks there — the same place a real linter looks when it walks
+// the tree its own config points it at. Nested under `.jig/` it was outside
+// every shipped config's reach and no tool ever saw a seed.
+const PROBE_SCRIPT = "const fs = require('fs');\n" +
+  "process.exit(fs.existsSync('pkg/seed.txt') ? 1 : 0);\n";
+
+// The whole point of roadmap 207: the close spawns the tool instead of telling
+// the owner to.
+test("a toolchain probe runs the tool over a journaled seed and comes back verified", () => {
+  const root = tmpProject({ "verify.js": PROBE_SCRIPT });
+  const probe = engine.execToolchainProbe(root, seededTool(), { probe: "toolchain-seeded", kind: "toolchain" });
+  assert.equal(probe.ran, true);
+  assert.equal(probe.caught, true);
+  assert.equal(probe.verdict, "verified");
+  assert.equal(probe.code, 1);
+  assert.equal(probe.baseline, "clean");
+  assert.equal(probe.baselineExit, 0);
+
+  // The seed is gone — the file and the directory the planting made for it —
+  // and the journal holds both halves of its life.
+  assert.deepEqual(listing(root).filter((f) => !f.startsWith(".jig/")), ["verify.js"]);
+  const rows = fs.readFileSync(path.join(root, ".jig", "journal.jsonl"), "utf8")
+    .split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+  assert.deepEqual(rows.map((r) => r.event), ["seed", "seed-removed"]);
+  for (const row of rows) {
+    assert.equal(row.tool, "seeded");
+    assert.equal(row.path, "pkg/seed.txt");
+  }
+  // A seed row names no change, so the transaction replay never sees it as a
+  // write anybody has to undo.
+  assert.equal(rows.some((r) => r.change), false);
+});
+
+// SCOPE step 8: a repository that was already failing its own linter is
+// disclosed as `baseline: red` rather than counted as a catch. The seeded run
+// exits non-zero there for the reason the baseline did, and the seed proved
+// nothing at all.
+test("a catch over a red baseline is not a verified tool", () => {
+  // The stand-in fails on anything under `pkg/` at all, so this tree is red
+  // before jig plants a thing and stays red for the same reason afterwards.
+  const root = tmpProject({
+    "verify.js": "const fs = require('fs');\nprocess.exit(fs.existsSync('pkg') ? 1 : 0);\n",
+    "pkg/already.txt": "",
+  });
+  const probe = engine.execToolchainProbe(root, seededTool(), { probe: "toolchain-seeded", kind: "toolchain" });
+  assert.equal(probe.baseline, "red");
+  assert.equal(probe.caught, true, "the exit code is still the fact it always was");
+  assert.equal(probe.verdict, "unverified",
+    "a tool ledgered `verified` off a tree that was red before the seed landed");
+});
+
+test("a tool that misses its own seed comes back unverified, never silently passed", () => {
+  const root = tmpProject({ "verify.js": "process.exit(0);\n" });
+  const probe = engine.execToolchainProbe(root, seededTool(), { probe: "toolchain-seeded", kind: "toolchain" });
+  assert.equal(probe.ran, true);
+  assert.equal(probe.caught, false);
+  assert.equal(probe.verdict, "unverified");
+  assert.equal(fs.existsSync(path.join(root, ".jig", "selftest")), false);
+});
+
+// DERAIL-PASS defect 13, the Windows half: `npx` is a batch shim there and jig
+// opens no shell, so it cannot be started at all. A close that skipped it would
+// be reporting a pass for a proof nobody ran.
+test("a batch-shim argv is `cannot run` with the command printed, never skipped as a pass", () => {
+  const root = tmpProject({});
+  const probe = engine.execToolchainProbe(root, seededTool({ verify: { argv: ["jig-absent-tool.cmd"], expectedExit: 1 } }),
+    { probe: "toolchain-seeded", kind: "toolchain", command: "jig-absent-tool.cmd" });
+  assert.equal(probe.ran, false);
+  assert.equal(probe.cannotRun, true);
+  assert.equal(probe.caught, undefined, "a tool that never started was reported as having caught something");
+  assert.equal(probe.command, "jig-absent-tool.cmd", "the probe dropped the command the owner has to run by hand");
+  if (process.platform === "win32") assert.match(probe.why, /Windows batch shim/);
+});
+
+test("a tool jig cannot start is `cannot run`, and no seed is left behind for it", () => {
+  const root = tmpProject({});
+  const probe = engine.execToolchainProbe(root, seededTool({ verify: { argv: ["jig-absent-tool"], expectedExit: 1 } }),
+    { probe: "toolchain-seeded", kind: "toolchain", command: "jig-absent-tool" });
+  assert.equal(probe.ran, false);
+  assert.equal(probe.cannotRun, true);
+  assert.equal(probe.caught, undefined, "a tool that never ran was reported as having caught something");
+  assert.match(probe.why, /could not run/);
+  assert.equal(fs.existsSync(path.join(root, ".jig", "selftest")), false);
+});
+
 // `execVerify` decides a catch on the exit code alone: `caught` is true when the
 // run's status is one of `expectedExit`. A tool that declares 0 therefore
 // "catches" its planted seed on every run, including the runs where it saw
@@ -472,4 +672,157 @@ test("no shipped tool declares a catch it would report as success", () => {
   }
   assert.deepEqual(vacuous.sort(), Object.keys(CANNOT_WITNESS).sort(),
     "a tool whose catch is exit 0 proves nothing — fix it, or name it in CANNOT_WITNESS with why");
+});
+
+// ---------------------------------------------------------------------------
+// The lane entries
+// ---------------------------------------------------------------------------
+//
+// DERAIL-PASS defect 15: `ciStep` was carried by all 37 tools and read by
+// nothing, so a ticked linter ran in no lane at all. The entries below are what
+// a lane runs, and every claim about them is mechanical: the argv is the tool's
+// own, the expected exit is the one a CLEAN run has rather than the one a catch
+// has, and the parser is the installer's — no shell, either side.
+
+const engine = require("../scripts/jig.js");
+
+function tickedRow(id, role, ed) {
+  return { item: { id, role, edition: ed || "javascript-typescript" } };
+}
+
+test("parseCommand is exported, so an install and a lane entry meet one parser", () => {
+  assert.deepEqual(toolchain.parseCommand("npx eslint .", "x"), ["npx", "eslint", "."]);
+  assert.throws(() => toolchain.parseCommand("eslint . && tsc", "the lane entry"),
+    /contains the shell character/);
+});
+
+test("a lane entry carries the tool's own argv and the exit code a clean run has", () => {
+  const js = edition("javascript-typescript");
+  const { entries } = engine.verifyEntriesFor([js], [tickedRow("eslint", "linter")], ["ci"], null);
+  assert.deepEqual(entries.length, 1);
+  const row = entries[0];
+  assert.equal(row.id, "eslint");
+  const tool = js.toolchain.find((t) => t.id === "eslint");
+  assert.deepEqual(row.argv, tool.verify.argv);
+  // The tool's own expectedExit is the code that means CAUGHT over a planted
+  // violation. A lane wants the tool clean, which is 0 — the two are different
+  // questions and this is the one the lane asks.
+  assert.equal(tool.verify.expectedExit, 1);
+  assert.equal(row.expectedExit, 0);
+  assert.deepEqual(row.lanes, ["ci"]);
+  assert.ok(row.paths.includes("**/*.ts"), "the entry does not say which files the tool speaks for");
+});
+
+test("every shipped tool's verify argv survives the no-shell parser", () => {
+  // The lane can only run what `parseCommand` accepts, so a tool whose verify
+  // command needs a shell would be a tool the matrix must never call covered.
+  for (const row of shippedEditions()) {
+    const items = row.edition.toolchain.map((t) => tickedRow(t.id, t.role, row.edition.edition));
+    const { entries, refused } = engine.verifyEntriesFor([row.edition], items, ["ci"], null);
+    assert.deepEqual(refused, [], row.id + " carries a verify command no lane can run");
+    assert.equal(entries.length, row.edition.toolchain.length, row.id);
+  }
+});
+
+test("a verify command that needs a shell is refused onto the page, never run", () => {
+  const ed = { edition: "made-up", detect: { extensions: [".x"] },
+    toolchain: [{ id: "shelly", role: "linter", verify: { argv: ["lint", "&&", "test"], expectedExit: 1 } }] };
+  const { entries, refused } = engine.verifyEntriesFor([ed], [tickedRow("shelly", "linter", "made-up")], ["ci"], null);
+  assert.deepEqual(entries, []);
+  assert.equal(refused.length, 1);
+  assert.match(refused[0], /shelly's verify command contains the shell character/);
+});
+
+test("the project's own test script is the test-runner entry when no test runner was ticked", () => {
+  const js = edition("javascript-typescript");
+  const { entries } = engine.verifyEntriesFor([js], [tickedRow("eslint", "linter")], ["ci", "commit"], "node --test");
+  const mine = entries.find((e) => e.id === "test-script");
+  assert.deepEqual(mine.argv, ["node", "--test"]);
+  assert.equal(mine.expectedExit, 0);
+  assert.deepEqual(mine.lanes, ["ci", "commit"]);
+});
+
+test("a ticked test runner is the test-runner entry, and the script does not double it", () => {
+  const js = edition("javascript-typescript");
+  const { entries } = engine.verifyEntriesFor([js], [tickedRow("vitest", "test-runner")], ["ci"], "npm test");
+  assert.deepEqual(entries.map((e) => e.id), ["vitest"]);
+});
+
+test("a test script that needs a shell is refused rather than half-run", () => {
+  const js = edition("javascript-typescript");
+  const { entries, refused } = engine.verifyEntriesFor([js], [], ["ci"], "jest && eslint .");
+  assert.deepEqual(entries, []);
+  assert.match(refused[0], /the project's own test script contains the shell character/);
+});
+
+// ---------------------------------------------------------------------------
+// DERAIL-PASS defect 16, the other two halves
+// ---------------------------------------------------------------------------
+//
+// The owner installs by hand — which on Windows was the only route there was —
+// and re-runs. The tool comes back config-only, and the wiring line and the CI
+// step the plan printed have to survive that route or the tool is configured
+// and nothing ever runs it. Then: a change the engine refused before it wrote a
+// byte has to be finished, not `interrupted` for ever in `status`.
+
+test("a tool already on the machine keeps its wiring and its CI step through the config-only route", () => {
+  const root = tmpProject({
+    "package.json": "{\n  \"private\": true,\n  \"devDependencies\": { \"eslint\": \"^9.0.0\" }\n}\n",
+    "package-lock.json": "{ \"lockfileVersion\": 3 }\n",
+  });
+  const plan = engine.cmdPlan(root, {
+    _: [], change: [], provenance: "elicited", "no-ci": true,
+    edition: "javascript-typescript", select: "javascript-typescript/focused-test", tools: "eslint",
+  });
+  const row = plan.toolchain.items.find((t) => t.id === "eslint");
+  assert.equal(row.present, true, "eslint is declared in the manifest and did not read as present");
+  assert.equal(row.ciStep, "npm run lint");
+
+  const payload = engine.planFiles(root).map(engine.readPlan).find((p) => p.planId === plan.planId);
+  const change = payload.changes.find((c) => c.path === "eslint.config.mjs");
+  assert.equal(change.kind, "write-side-file", "a tool already here was proposed as an install");
+  assert.equal(change.tool, "eslint");
+  assert.match(change.wiring, /"lint":/);
+  assert.equal(change.ciStep, "npm run lint");
+
+  const md = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
+  assert.ok(md.includes("- CI step: `npm run lint`"), "the CI step is not on the page the owner approves from");
+});
+
+test("an install refused at apply time is finished, not `interrupted` for ever", () => {
+  const root = tmpProject({ "package.json": "{\n  \"private\": true\n}\n" });
+  const item = {
+    id: "absentlint",
+    role: "linter",
+    edition: "javascript-typescript",
+    installKind: "package",
+    packageManager: "npm",
+    command: "jig-absent-manager install absentlint",
+    argv: ["jig-absent-manager", "install", "absentlint"],
+    configPath: "absentlint.config.json",
+    configBody: "{}\n",
+    wiring: null,
+    ciStep: null,
+    uninstallCommand: "jig-absent-manager uninstall absentlint",
+    uninstallArgv: ["jig-absent-manager", "uninstall", "absentlint"],
+    timeoutMs: 20000,
+  };
+  fs.writeFileSync(path.join(root, "draft.json"), JSON.stringify({
+    changes: [{ id: "install-absentlint", kind: "run-install", path: item.configPath, install: item }],
+  }));
+  const plan = engine.cmdPlan(root, { _: [], change: [], from: "draft.json" });
+  assert.throws(
+    () => engine.cmdApply(root, { _: [], change: [plan.changes[0].id], path: [item.configPath] }),
+    /could not run "jig-absent-manager"/,
+  );
+
+  const status = engine.cmdStatus(root);
+  const change = status.changes.find((c) => c.id === plan.changes[0].id);
+  assert.equal(change.state, "refused");
+  assert.deepEqual(status.open, [], "a change that never ran is still listed as open work");
+
+  // And a full revert has nothing to say about it, rather than leaving it
+  // behind: there is no write to restore, because there was no write.
+  assert.deepEqual(engine.cmdRevert(root, { _: [], change: [], all: true }).reverted, []);
+  assert.equal(engine.cmdStatus(root).changes.find((c) => c.id === plan.changes[0].id).state, "refused");
 });

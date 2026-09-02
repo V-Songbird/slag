@@ -3,23 +3,23 @@
   "templates": [
     {
       "name": "check-driver",
-      "version": "1.4.0",
+      "version": "1.7.0",
       "file": "run.mjs",
       "target": ".jig/checks/run.mjs",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "7f43515084910bb9ae0041a814130703a64752a13181103af87a1b9d6815bd8e"
+      "sha256": "ab25ed336fa8c67328553293a4dcaaceb154fa39025dc19ea5271f0a904e8ba3"
     },
     {
       "name": "ci-workflow",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "file": "jig.yml",
       "target": ".github/workflows/jig.yml",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "6f9f432595baa91e42cafcc13e4647592c4d773bea91fa1862e7fb41229e4cdc"
+      "sha256": "1a615aeedabf68f4c6a8c81e2d09cdcf82452fcf96d2cfbc86c82bf620e1e8fd"
     },
     {
       "name": "activation",
@@ -53,13 +53,13 @@
     },
     {
       "name": "hook-shim",
-      "version": "1.1.0",
+      "version": "1.3.0",
       "file": "hook-pre-commit.sh",
       "target": ".jig/hooks/pre-commit",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "0a84268ff1f7f8af80d3011f2e4b6acdecf45200e24bf1141f691754467f75db"
+      "sha256": "48de28adf5a23af25b4c765c8c9e86f9fe03d6e975c1ad4aa81a7d3fcfc6cbf1"
     }
   ]
 }

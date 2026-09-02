@@ -366,6 +366,11 @@ function proposeInstalls(projectRoot, edition, toolIds, packageManager) {
       configPath: tool.configPath,
       configBody: tool.configSample,
       wiring: nonEmptyString(tool.wiring) ? tool.wiring : null,
+      // The item is the whole tool, and CI is part of it. Carried here so the
+      // route that installs a tool and the route that only configures one hand
+      // back the same thing — a tool the owner installed by hand still has a
+      // step somebody has to run.
+      ciStep: nonEmptyString(tool.ciStep) ? tool.ciStep : null,
       uninstallCommand,
       uninstallArgv: uninstallArgv ? Object.freeze(uninstallArgv) : null,
       timeoutMs: INSTALL_TIMEOUT_MS,
@@ -413,8 +418,52 @@ function windowsShim(name) {
   return null;
 }
 
+// The JS the `.cmd` shim would have handed to node, per manager, resolved
+// beside the shim itself. A machine with fnm or nvm has one of these per node
+// version; the one that answers to `npm` on this PATH is the one whose shim was
+// just found, so the neighbour is the right copy and a PATH search is not.
+const NODE_CLI_ENTRIES = {
+  npm: "node_modules/npm/bin/npm-cli.js",
+  npx: "node_modules/npm/bin/npx-cli.js",
+  pnpm: "node_modules/pnpm/bin/pnpm.cjs",
+  yarn: "node_modules/yarn/bin/yarn.js",
+};
+
+// The same command with no shim in it, or null when there is no such route.
+// npm, pnpm and yarn are Node programs wearing a `.cmd` hat: the shim's whole
+// job is to find node and hand it the script named here, and jig already IS a
+// node that can do that. So the batch shim is never the route (SCOPE, the
+// derail pass) and no shell is needed for the managers the owner's own platform
+// installs everything through. Nothing else is rewritten — a batch file with no
+// JS behind it needs cmd.exe, and jig opens no shell.
+function shellFreeArgv(argv) {
+  const rel = NODE_CLI_ENTRIES[String(argv[0]).replace(/\.(cmd|bat)$/i, "").toLowerCase()];
+  if (!rel) return null;
+  // Absolute only: `windowsShim` hands a bare `.cmd` name straight back, and
+  // resolving the entry beside that would read a `node_modules` in whatever
+  // directory jig happens to be run from rather than the manager's own.
+  const shim = windowsShim(argv[0]);
+  if (!shim || !path.isAbsolute(shim)) return null;
+  const entry = path.join(path.dirname(shim), ...rel.split("/"));
+  if (!fs.existsSync(entry)) return null;
+  return [process.execPath, entry, ...argv.slice(1)];
+}
+
+// The Windows half of a wrapper script, spelled out. `./gradlew` is a shell
+// script and what Windows has beside it is `gradlew.bat`, which only cmd.exe
+// can start — a shell, so the answer is no (SCOPE, the derail pass). The
+// refusal names the exact line to run by hand rather than routing around the
+// stance, on the same footing as the batch-shim refusal above.
+function wrapperTwin(argv) {
+  if (process.platform !== "win32") return null;
+  const m = /^\.[\\/](.+)$/.exec(String(argv[0]));
+  if (!m || /\.(cmd|bat)$/i.test(m[1])) return null;
+  return [m[1] + ".bat", ...argv.slice(1)].join(" ");
+}
+
 function runArgv(root, item, argv, command, timeoutMs) {
-  const run = spawnSync(argv[0], argv.slice(1), {
+  const spawnable = shellFreeArgv(argv) || argv;
+  const run = spawnSync(spawnable[0], spawnable.slice(1), {
     cwd: root, shell: false, windowsHide: true, encoding: "utf8", timeout: timeoutMs, maxBuffer: MAX_OUTPUT_BYTES,
   });
 
@@ -426,14 +475,20 @@ function runArgv(root, item, argv, command, timeoutMs) {
   if (run.error) {
     // No error channel exists in the return shape, and a silent { ran: false }
     // would leave the caller guessing at a failure it has to act on.
+    const byHand = wrapperTwin(argv);
+    if (byHand) {
+      throw refuse(argv[0] + " is a shell script, and the Windows half of that wrapper is a batch file only" +
+        " cmd.exe can start. jig runs every command without a shell and will not open one:\n  " + byHand +
+        "\nRun that line yourself in this folder and re-run jig. Every other change in the plan applies normally.");
+    }
     const shim = windowsShim(argv[0]);
     if (shim) {
-      // The Windows case, and the old message got it wrong: it told somebody to
-      // install a tool that is already installed. `npm`, `pnpm` and `yarn` are
-      // `.cmd` batch shims there, and since the 2024 argument-injection fix
-      // Node refuses to start one without a shell. jig does not open a shell,
-      // so this is a real limit — stated as one rather than dressed up as a
-      // missing tool.
+      // A batch shim with no JS entry beside it — `shellFreeArgv` already took
+      // every route there was. The old message got this wrong: it told somebody
+      // to install a tool that is already installed. Node has refused to start
+      // a `.cmd` without a shell since the 2024 argument-injection fix, jig does
+      // not open one, so this is a real limit — stated as one rather than
+      // dressed up as a missing tool.
       throw refuse(argv[0] + " is a Windows batch shim (" + shim + ") and jig runs every command without a" +
         " shell, so it cannot start this one:\n  " + command +
         "\nRun that line yourself in this folder and re-run jig: it probes for the tool and will find it" +
@@ -507,7 +562,8 @@ function execVerify(projectRoot, tool, seedDir) {
   // cwd is the project root, not the seed directory: the proof is worth
   // something only if the tool reads the project's own configuration while it
   // looks at the planted violation.
-  const run = spawnSync(argv[0], argv.slice(1), {
+  const spawnable = shellFreeArgv(argv) || argv;
+  const run = spawnSync(spawnable[0], spawnable.slice(1), {
     cwd: root, shell: false, windowsHide: true, encoding: "utf8", timeout: VERIFY_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES,
   });
   if (run.error && run.error.code !== "ETIMEDOUT") {
@@ -522,10 +578,46 @@ function execVerify(projectRoot, tool, seedDir) {
   };
 }
 
+// The same argv with nothing planted. A repository that was already failing its
+// own linter reads every seeded proof as a catch, and the owner would be told
+// the config works when what they have is a red tree. Baseline and proof are
+// two runs because one exit code cannot tell them apart.
+function execBaseline(projectRoot, tool) {
+  const root = requireRoot(projectRoot);
+  requireTool(tool);
+  const argv = verifyExecutable(tool);
+  const spawnable = shellFreeArgv(argv) || argv;
+  const run = spawnSync(spawnable[0], spawnable.slice(1), {
+    cwd: root, shell: false, windowsHide: true, encoding: "utf8", timeout: VERIFY_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES,
+  });
+  const timedOut = !!(run.error && run.error.code === "ETIMEDOUT");
+  if (run.error && !timedOut) {
+    throw refuse("could not run " + JSON.stringify(argv[0]) + " to take " + tool.id + "'s baseline (" +
+      run.error.code + ": " + run.error.message + "). Install it before asking jig to prove it.");
+  }
+  const code = run.status === undefined ? null : run.status;
+  // A run that hung has not shown the tree clean, so it is red like any other
+  // non-zero answer — with `timedOut` beside it, because the two deserve
+  // different words from whoever reads this.
+  return { ran: true, code, timedOut, baseline: code === 0 ? "clean" : "red" };
+}
+
 module.exports = {
+  // Exported for the lane entries in `.jig/verify.json`: a command a lane runs
+  // goes through the same trust boundary as a command an install runs, so there
+  // is one parser and one refusal for both.
+  parseCommand,
   presence,
   pickPackageManager,
   proposeInstalls,
   runInstall,
   execVerify,
+  execBaseline,
+  // Exported for the witnessed close: a batch shim jig cannot start is a
+  // "cannot run", and the close has to say so before it plants a seed for a
+  // proof that could never happen.
+  windowsShim,
+  // Exported beside it, because the close has to ask both questions in that
+  // order: a shim jig can run through node is not a "cannot run" at all.
+  shellFreeArgv,
 };

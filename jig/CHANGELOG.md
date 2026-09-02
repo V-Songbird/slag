@@ -4,6 +4,24 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.9.0] — 2026-09-02
+
+### Added
+
+- The linter, type checker and test runner jig installs now actually run. Until now jig set them up and no lane ever started them, while the coverage table said they were covered. Each tool you tick gets an entry in a new `.jig/verify.json` — the exact command and the exit code a clean run has — and CI gains one step per entry. You can ask for them at commit time too, per tool, because a full type-check on every commit is a cost you should choose rather than inherit.
+- The coverage table stops claiming a tool is covered because its config file exists. A cell reads as covered only when both the config and a lane that runs the tool are there; otherwise it says "no lane runs eslint", and names it.
+- The install's closing demonstration runs your tools instead of describing them. It plants a violation the tool should catch, runs the tool, and reports what happened — and it runs the tool once more over your untouched project first, so a repository that was already failing its own linter is disclosed rather than counted as proof. Where a command genuinely cannot be started, it says so and prints the command, instead of skipping quietly.
+- A project with only committed checks and no session guards can be witnessed at last. The close counted guard demonstrations only, so the simplest install jig offers reported that nothing had been proven.
+- The commit lane is demonstrated too: jig runs the hook in a throwaway clone and reports whether it ran, whether it found node, and whether it blocked.
+- On request, jig writes `.claude/rules/jig-checks.md` — a short standing note pointing your Claude Code sessions at the same checks the `AGENTS.md` region points other tools at. Opt-in, approved by name, and reverted like any other file.
+
+### Fixed
+
+- The commit hook checked your working tree while git commits your index. Staging a bad file and then restoring a clean copy of it got the bad one committed; staging a clean file and then breaking the worktree copy blocked a commit that did not contain the problem. It reads the staged bytes now. CI and manual runs still walk the disk, which is correct — nothing is staged there.
+- `npm`, `pnpm` and `yarn` installs failed on Windows with a version manager. jig runs every command without a shell, and on Windows these arrive as batch shims, which need one. It now runs their own JavaScript entry point directly, so the install goes through and no shell is opened. Gradle on Windows is refused instead, with the command printed for you to run: `gradlew.bat` genuinely needs a shell, and opening one is not a trade jig makes.
+- An install jig refused stayed listed as interrupted for ever, including after a full revert. It now settles as refused.
+- A new JavaScript project was red on line one. The starter had no `scripts` and no root `.gitignore`, and the shipped eslint sample linted jig's own files and its own config. Several tools' `scripts` now compose into one `package.json` on the same first-writer-wins rule the shared config files already use, with any disputed key reported. Installs run in an order that makes sense — a scaffold before the package that needs it — rather than alphabetically by id.
+
 ## [2.8.0] — 2026-09-02
 
 ### Fixed

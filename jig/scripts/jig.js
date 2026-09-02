@@ -36,9 +36,12 @@
 //                                            writes nothing, ever
 //   node jig.js revert --change <id> | --tx <id> | --all [--force]
 //                                            restore journalled pre-images
-//   node jig.js selftest [--live]            probe every installed guard with a
-//                                            synthetic violation and show the
-//                                            catch; --live actually runs them
+//   node jig.js selftest [--live]            probe every installed guard, the
+//        [--toolchain <ids>]                 check driver and the commit lane
+//                                            with a synthetic violation and show
+//                                            the catch; --live actually runs
+//                                            them, and --toolchain names the
+//                                            installed tools it may spawn
 //   node jig.js migrate                      rewrite a 1.0.1 install into the
 //                                            shape this engine reads, as one
 //                                            journalled transaction
@@ -130,14 +133,30 @@ const AGENTS_BEGIN = "<!-- jig:begin — jig owns what sits between these marker
 const AGENTS_END = "<!-- jig:end -->";
 const AGENTS_BUDGET_BYTES = 32768;
 
-function agentsRegionText(selection) {
-  return AGENTS_BEGIN + "\n\n" +
-    "jig guards this repository. Before calling any work done, run:\n\n" +
+// The standing brief, in the one wording both harness channels carry. A Codex
+// session reads AGENTS.md and a Claude Code session reads `.claude/rules/`, so
+// jig has two hosts for the same sentences — and a brief that said two
+// different things in the two files would be two coverage claims, one of them
+// wrong. Both are computed from the same selection, and neither is written
+// without approval.
+// `ci` is the plan's own answer, not an assumption: `--no-ci` writes no workflow
+// and gives no entry a `ci` lane, and always-loaded prose naming a lane the plan
+// did not write is the coverage claim this document forbids.
+function harnessBriefText(selection, ci) {
+  return "jig guards this repository. Before calling any work done, run:\n\n" +
     "    node .jig/checks/run.mjs\n\n" +
     "It exits non-zero on: " + selection.join(", ") + ".\n" +
+    (ci
+      ? "CI runs that walk, then --selftest, then one --verify --lane ci step per\n" +
+        "tool the install wired — the linter, the type checker, the test runner.\n"
+      : "No CI workflow was installed, so nothing runs that walk for you.\n") +
+    "The commit lane, where it is wired, reads the staged bytes instead.\n" +
     "Never delete or focus a test to make a suite pass — fix it, or skip it\n" +
-    "visibly and say so. The coverage matrix is at .jig/plan.md.\n\n" +
-    AGENTS_END + "\n";
+    "visibly and say so. The coverage matrix is at .jig/plan.md.\n";
+}
+
+function agentsRegionText(selection, ci) {
+  return AGENTS_BEGIN + "\n\n" + harnessBriefText(selection, ci) + "\n" + AGENTS_END + "\n";
 }
 
 // write-settings is additionally gated behind the permissions probe series
@@ -443,7 +462,11 @@ function ensureStateDir(root) {
   // already exists: jig extends an ignore file, it never rewrites or narrows one.
   const ignore = path.join(dir, ".gitignore");
   const want = [JOURNAL_FILE, PREIMAGE_DIR + "/", "ledger.jsonl", "profile.json", "off", "lane.log",
-    "plan.md", "plan.json", "plan-*.json", "backlog.json", "discarded.json", "authored.json"];
+    "plan.md", "plan.json", "plan-*.json", "backlog.json", "discarded.json", "authored.json",
+    // Where a `selftest --toolchain` run plants its seed. The directory is
+    // removed the moment the tool has answered; the line is here for the run
+    // that was killed between the two journal rows.
+    "selftest/"];
   const had = fs.existsSync(ignore) ? fs.readFileSync(ignore, "utf8") : "";
   const present = had.split(/\r?\n/).map((line) => line.trim());
   // A line the owner explicitly UN-ignored is an answer they gave, and the last
@@ -550,8 +573,13 @@ function replayJournal(rows) {
 function changeState(c) {
   const writes = [...c.writes.values()];
   if (!writes.length) return "empty";
-  if (writes.some((w) => !w.written && !w.restored)) return "interrupted";
   if (writes.every((w) => w.restored)) return "reverted";
+  // Refused before a byte landed: the command never ran and never will under
+  // this id, so the change is finished. `interrupted` kept it in `status`'s
+  // open list for ever, and nothing — not even `revert --all` — could take it
+  // out, because there was no write to restore.
+  if (c.rejected && writes.every((w) => !w.written)) return "refused";
+  if (writes.some((w) => !w.written && !w.restored)) return "interrupted";
   return "applied";
 }
 
@@ -709,6 +737,12 @@ function planFromDraft(draft, root) {
       // The proof is what the manifest records, so a hand-edited config cannot
       // claim a proof it does not have (SCOPE, "What binds a proof").
       install: raw.kind === "run-install" ? raw.install : undefined,
+      // The rest of a config-only tool item. A tool the owner installed by hand
+      // still has a wiring line and a CI step; dropping them here is what made
+      // the manual-install follow-up hand back bare config.
+      tool: typeof raw.tool === "string" ? raw.tool : undefined,
+      wiring: typeof raw.wiring === "string" ? raw.wiring : undefined,
+      ciStep: typeof raw.ciStep === "string" ? raw.ciStep : undefined,
       proof: /^[0-9a-f]{64}$/.test(String(raw.proof)) ? raw.proof : undefined,
       marker: raw.kind === "include-line" ? raw.marker : undefined,
       anchor: raw.kind === "include-line" && typeof raw.anchor === "string" ? raw.anchor : undefined,
@@ -749,7 +783,19 @@ function planFromDraft(draft, root) {
   // manager needs the project file to exist before it has anywhere to record a
   // dependency, and on a project jig is scaffolding that file is one of these
   // changes rather than something that was already on disk.
-  const rank = (c) => (c.kind === "run-install" ? 1 : 0);
+  //
+  // Inside the installs the KIND decides, not the id. A scaffold command writes
+  // the files the rest then run: ordering `checkstyle` before `gradle` put
+  // `./gradlew checkstyleMain` ahead of the `gradle wrapper` that creates
+  // `gradlew`, so the first install of a greenfield JVM project ran a script
+  // that did not exist yet. An installKind no edition states sorts last, where
+  // it can depend on everything and nothing depends on it.
+  const INSTALL_ORDER = ["scaffold", "package", "builtin", "audit"];
+  const rank = (c) => {
+    if (c.kind !== "run-install") return 0;
+    const at = INSTALL_ORDER.indexOf(c.install && c.install.installKind);
+    return 1 + (at < 0 ? INSTALL_ORDER.length : at);
+  };
   changes.sort((a, b) => rank(a) - rank(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   // A content hash, not a clock: the same draft over the same tree plans to the
   // same id, so a re-run is recognisable as the same plan.
@@ -975,7 +1021,22 @@ function applyInstall(root, ctx, change) {
 
   // The approval is the item's own id and its command character for character.
   // Both come off the plan the owner read; nothing here re-assembles either.
-  const run = toolchainLib.runInstall(root, item, { id: item.id, command: item.command });
+  let run;
+  try {
+    run = toolchainLib.runInstall(root, item, { id: item.id, command: item.command });
+  } catch (err) {
+    // A refusal is the end of this change, not a pause in it. Without this row
+    // the intents above stay unmatched for ever: `status` reported the change
+    // `interrupted` — open work somebody still had to finish — and `revert`
+    // could not clear it, because a write that never happened is not a write
+    // revert restores.
+    if (err.expected) {
+      appendJournal(root, {
+        event: "reject", tx: ctx.tx, plan: ctx.plan, change: change.id, path: change.path, cause: "install-refused",
+      });
+    }
+    throw err;
+  }
 
   for (const rel of touched) {
     const after = readIfExists(path.join(root, rel));
@@ -1189,6 +1250,10 @@ const CONFIG_FILE = "config.json";
 const MANIFEST_FILE = "manifest.json";
 const PERMISSIONS_FILE = "proposed-permissions.json";
 const ACTIVATION_FILE = "activation.md";
+// What each lane runs besides the check driver: the linter, the type checker and
+// the test runner the owner ticked. Part of the install a teammate clones, like
+// the config and the checks — CI reads it, so it is committed and never ignored.
+const VERIFY_FILE = "verify.json";
 // The one line that makes a committed pre-commit hook run the checks, per host.
 // It lives in `catalogues/shared.json` so the wiring and the editions ship as
 // one body of data rather than half data and half constant.
@@ -1529,6 +1594,88 @@ function permissionsProposal(classes) {
   };
 }
 
+// What the lanes run besides the check driver (SCOPE's derail pass, N8). jig
+// installed a linter, a type checker and a test runner and no lane spawned any
+// of them, while the matrix printed DET for the config file — a coverage claim
+// resting on a file nobody executes. These entries are that lane, stated as
+// data: one row per ticked tool, carrying the argv, the exit code a clean run
+// has, the paths the tool speaks for and the lanes that run it.
+//
+// The argv goes through the installer's own `parseCommand`, so a command a lane
+// runs meets the same trust boundary as a command an install runs: no shell, and
+// a metacharacter is a refusal rather than something to quote around. The tool's
+// own `verify.expectedExit` is the code that means CAUGHT over a planted
+// violation, so it is not the code a lane wants — a lane wants the tool clean,
+// which is 0.
+function verifyEntriesFor(loaded, items, lanes, testScript) {
+  const entries = [];
+  const refused = [];
+  const roles = new Set();
+  const extensionsOf = (editionId) => {
+    const edition = loaded.find((e) => e.edition === editionId);
+    const exts = (edition && edition.detect && edition.detect.extensions) || [];
+    return exts.map((ext) => "**/*" + ext);
+  };
+  for (const row of items) {
+    const tool = toolchainToolFor(loaded, row.item.id);
+    const argv = tool && tool.verify && Array.isArray(tool.verify.argv) ? tool.verify.argv : null;
+    if (!argv) continue;
+    let parsed;
+    try {
+      parsed = toolchainLib.parseCommand(argv.join(" "), row.item.id + "'s verify command");
+    } catch (err) {
+      if (!err.expected) throw err;
+      refused.push(err.message);
+      continue;
+    }
+    if (row.item.role) roles.add(row.item.role);
+    entries.push({ id: row.item.id, argv: parsed, expectedExit: 0, paths: extensionsOf(row.item.edition), lanes });
+  }
+  // The scan already read `package.json`'s test script, and until now nothing
+  // did anything with it. Where the owner ticked no test runner, it IS the test
+  // runner this project has — so it feeds the entry rather than sitting in a
+  // profile as a fact nobody uses.
+  if (typeof testScript === "string" && testScript.trim() && !roles.has("test-runner")) {
+    try {
+      entries.push({
+        id: "test-script", argv: toolchainLib.parseCommand(testScript, "the project's own test script"),
+        expectedExit: 0, paths: [], lanes,
+      });
+    } catch (err) {
+      if (!err.expected) throw err;
+      refused.push(err.message);
+    }
+  }
+  return { entries, refused };
+}
+
+// The lane face of any plan, on the same rule `configFace` follows and for the
+// same reason: a re-run is an interview about what to ADD, and writing the whole
+// file from this run's ticked tools alone would take the linter out of CI
+// because the second interview was about the type checker. Installed entries are
+// carried verbatim; an id this plan computes is replaced by the new one, which
+// is how a changed argv reaches the lane.
+function verifyFace(root, entries) {
+  const raw = readIfExists(path.join(root, STATE_DIR, VERIFY_FILE));
+  const installed = (raw === null ? null : proposedVerifyEntries(raw.toString("utf8"))) || [];
+  const now = new Map(entries.map((e) => [e.id, e]));
+  const carried = installed.filter((e) => typeof e.id === "string" && !now.has(e.id));
+  return {
+    entries: [...carried, ...entries],
+    carried: carried.map((e) => e.id),
+    added: entries.map((e) => e.id),
+  };
+}
+
+// One step per CI-lane entry, appended to the workflow template. One step and
+// not one command: a job that ran three tools and went red has to say WHICH one
+// went red, and a step name is the only thing GitHub's own summary shows.
+function ciVerifySteps(entries) {
+  return entries.filter((e) => Array.isArray(e.lanes) && e.lanes.includes("ci")).map((e) =>
+    "      - name: run " + e.id + ", the way " + STATE_DIR + "/" + VERIFY_FILE + " names it\n" +
+    "        run: node " + STATE_DIR + "/checks/run.mjs --verify --lane ci --entry " + e.id + "\n").join("");
+}
+
 // ---------------------------------------------------------------------------
 // Draft from templates
 // ---------------------------------------------------------------------------
@@ -1718,7 +1865,34 @@ function greenfieldEditions(root, loaded, manager) {
 // module file rather than a file to lay down, and the module path is the
 // owner's to choose — writing one over somebody's module would be the same bug
 // wearing a fix. `sections.mergeable` is the whole list of what composes.
+//
+// A tool's `wiring` is prose in five editions — a Makefile target, a Gradle
+// task — and in the JS edition it is the `package.json` member itself,
+// `"lint": "eslint ."`. Only the second shape is composed, and it is tested for
+// rather than assumed: a starter with no `scripts` is a project whose own CI
+// step has nothing to call, and prose grafted into a manifest is a half-parser
+// writing somebody's build file.
+function scriptBody(wiring) {
+  if (typeof wiring !== "string" || !wiring.trimStart().startsWith("\"")) return null;
+  let scripts;
+  try {
+    scripts = JSON.parse("{" + wiring + "}");
+  } catch {
+    return null;
+  }
+  if (!isObject(scripts) || !Object.values(scripts).every((v) => typeof v === "string")) return null;
+  return JSON.stringify({ scripts }, null, 2) + "\n";
+}
+
 function composeConfigs(items, manifests) {
+  // The scripts an edition's tools need in its own manifest, one part each and
+  // in the order the tools were proposed, so first-writer-wins is the order the
+  // owner read.
+  const scriptParts = (manifest) => items
+    .filter((row) => row.item.edition === manifest.edition)
+    .map((row) => ({ source: row.item.id, body: scriptBody(row.item.wiring) }))
+    .filter((part) => part.body !== null);
+
   const byPath = new Map();
   for (const row of items) {
     const rel = toPosix(row.item.configPath);
@@ -1782,7 +1956,10 @@ function composeConfigs(items, manifests) {
     if (!shared) continue;
 
     const parts = [];
-    if (starter) parts.push({ source: "the starter " + rel + " jig writes", body: starter.sample });
+    if (starter) {
+      parts.push({ source: "the starter " + rel + " jig writes", body: starter.sample });
+      parts.push(...scriptParts(starter));
+    }
     for (const row of rows) {
       composed.add(row.item.id);
       parts.push({ source: row.item.id, body: row.item.configBody });
@@ -1798,7 +1975,14 @@ function composeConfigs(items, manifests) {
     if (!m.path || !m.sample) continue;
     const rel = toPosix(m.path);
     if (writes.some((w) => w.path === rel) || byPath.has(rel)) continue;
-    writes.push({ path: rel, body: m.sample, sources: ["the starter " + rel + " jig writes"] });
+    const parts = [{ source: "the starter " + rel + " jig writes", body: m.sample }, ...scriptParts(m)];
+    if (parts.length === 1 || !sectionsLib.mergeable(rel)) {
+      writes.push({ path: rel, body: m.sample, sources: [parts[0].source] });
+      continue;
+    }
+    const merged = sectionsLib.merge(parts, rel);
+    conflicts.push(...merged.conflicts);
+    writes.push({ path: rel, body: merged.body, sources: parts.map((p) => p.source) });
   }
   return { writes, notes, conflicts, composed };
 }
@@ -1919,6 +2103,42 @@ function draftFromTemplates(root, opts, checks) {
     });
   };
 
+  // The toolchain is resolved before the lanes are written, because the lanes
+  // now carry it: the CI workflow gains a step per tool and the plan writes the
+  // entries those steps read. Nothing is pushed onto `refused` here — that
+  // happens where it always did, further down, so the page reads in the same
+  // order it always has.
+  const toolchain = toolchainProposal(root, loaded, opts, states);
+  // A project that does not exist yet cannot be installed into, so a tool for an
+  // edition with no project file here is not a tool any lane runs either.
+  const greenfield = greenfieldEditions(root, loaded, toolchain.packageManager);
+  const blocked = new Set(greenfield.filter((m) => !m.sample).map((m) => m.edition));
+  const usable = toolchain.items.filter((row) => !blocked.has(row.item.edition));
+
+  // Which lanes exist to run a tool in. CI unless the owner declined the
+  // workflow; the commit lane only when they asked for it, because a full
+  // type-check on every commit is a cost they choose (SCOPE's derail pass, N8).
+  const verifyLanes = [];
+  if (!opts["no-ci"]) verifyLanes.push("ci");
+  if (opts["verify-commit"]) verifyLanes.push("commit");
+  let stack = null;
+  try {
+    stack = readProfile(root).profile.stack || null;
+  } catch {
+    // No scan here yet. The tools the owner ticked are still the lane; the
+    // project's own test script is the half only the scan can see.
+  }
+  const verify = verifyLanes.length
+    ? verifyEntriesFor(loaded, usable, verifyLanes, stack && stack.testScript)
+    : { entries: [], refused: [] };
+  // What the file will hold: what this plan computed, over what is already
+  // installed. A re-run adds a lane entry; it never quietly takes one away.
+  // Always over the installed list, even when this run ticked nothing: the
+  // workflow's steps are rendered from these entries, and short-circuiting on
+  // an empty computed list wrote a jig.yml with the linter's step gone while
+  // `.jig/verify.json` still said the ci lane runs it.
+  const verifyFile = verifyFace(root, verify.entries);
+
   // The driver and the wiring around it. There is no per-class check template
   // any more: the model authors every check and the fixture pair admits it, so
   // the only check modules this plan writes are the admitted ones below.
@@ -1965,7 +2185,22 @@ function draftFromTemplates(root, opts, checks) {
   for (const name of wanted) {
     const entry = byName.get(name);
     if (!entry) continue;
-    add(entry, templateBody(entry), entry.classId ? [entry.classId] : selection);
+    // The workflow is the one artifact that is not a byte copy: it gains a step
+    // per tool the CI lane runs, so the job that says the checks passed is the
+    // job that ran the linter, the type checker and the test runner too.
+    add(entry, name === "ci-workflow" ? templateBody(entry) + ciVerifySteps(verifyFile.entries) : templateBody(entry),
+      entry.classId ? [entry.classId] : selection);
+  }
+  // What those steps read. Item tier: a non-zero exit from anything in it fails
+  // somebody's build, which is the whole point of it being here.
+  // `added`, not `entries`: a plan that ticked no tool carries the installed
+  // list forward for the workflow's sake and proposes no write over it.
+  if (!wiringOnly && !noCoverage && verifyFile.added.length) {
+    add({ name: "verify", version: "1.0.0", target: STATE_DIR + "/" + VERIFY_FILE, kind: "write-side-file", ownership: "schema" },
+      JSON.stringify({ schemaVersion: SCHEMA_VERSION, entries: verifyFile.entries }, null, 2) + "\n", selection,
+      "what the " + verifyLanes.join(" and ") + " lane" + (verifyLanes.length === 1 ? "" : "s") + " run" +
+        (verifyLanes.length === 1 ? "s" : "") + ": " + verifyFile.added.join(", ") +
+        (verifyFile.carried.length ? " — carried forward: " + verifyFile.carried.join(", ") : ""));
   }
 
   // Every admitted check is one module file carrying its own fixtures inline,
@@ -1992,25 +2227,25 @@ function draftFromTemplates(root, opts, checks) {
   // The toolchain (SCOPE step 3). One item per tool: a tool the machine does
   // not carry is an install the owner approves by name, a tool it already
   // carries is only its config. Either way the id is the same, so `revert`
-  // undoes the tool whole.
-  const toolchain = toolchainProposal(root, loaded, opts, states);
+  // undoes the tool whole. Resolved above, where the lanes could read it;
+  // refused here, where the page has always read it.
   refused.push(...toolchain.refused);
+  // A verify command jig cannot run without a shell is a lane entry jig does not
+  // write. Said out loud rather than dropped: the tool still installs, and the
+  // matrix reports the cell it can no longer claim.
+  refused.push(...verify.refused);
 
   // A project that does not exist yet cannot be installed into. Where the
   // edition can hand over a starter project file, jig writes it and the run
   // continues; where only the owner can name the thing — a Go module path, a
   // Gradle template — the edition says so and every install for it is refused
   // with that sentence rather than run into a folder with no project in it.
-  const greenfield = greenfieldEditions(root, loaded, toolchain.packageManager);
-  const blocked = new Set();
   for (const m of greenfield) {
     if (m.sample) continue;
-    blocked.add(m.edition);
     // Once per edition, not once per tool. The owner has one thing to do and
     // reading it six times would not make it any clearer.
     refused.push("there is no " + m.edition + " project here yet, so nothing can install into it. " + m.hint);
   }
-  const usable = toolchain.items.filter((row) => !blocked.has(row.item.edition));
 
   // Every edition's project file, so composition knows which paths belong to
   // the project rather than to a tool — but the starter text only where there
@@ -2034,6 +2269,23 @@ function draftFromTemplates(root, opts, checks) {
   const manifests = loaded
     .map((e) => editionsLib.manifestFor(e, toolchain.packageManager))
     .map((m) => (starting.has(m.edition) ? m : { ...m, sample: null }));
+
+  // A starter with no `.gitignore` is a first commit carrying `node_modules/`
+  // or `target/`, and the checks jig runs straight afterwards read every file
+  // in it. The lines are the edition's own — a repository that already has a
+  // `.gitignore` keeps it, because occupancy refuses the write like any other.
+  const ignoreLines = [];
+  for (const edition of loaded) {
+    if (!starting.has(edition.edition)) continue;
+    const list = (Array.isArray(edition.detect.ignore) ? edition.detect.ignore : [])
+      .filter((line) => typeof line === "string" && line.trim() && !ignoreLines.includes(line));
+    if (list.length) ignoreLines.push("# " + edition.edition, ...list);
+  }
+  if (ignoreLines.length) {
+    add({ name: "gitignore", version: "1.0.0", target: ".gitignore", kind: "write-side-file", ownership: "file" },
+      ignoreLines.join("\n") + "\n", selection,
+      "what a " + [...starting].join(" and ") + " project never commits");
+  }
 
   const configs = composeConfigs(usable, manifests);
   for (const write of configs.writes) {
@@ -2072,6 +2324,14 @@ function draftFromTemplates(root, opts, checks) {
         provenance,
         template: { name: "toolchain-" + item.id, version: item.edition || "1.0.0" },
         rationale: item.id + " is already here (" + row.how + ") — this is its config, no install",
+        // The rest of the tool, carried on the config-only change too. A tool
+        // installed by hand — which on Windows is every JS tool, until 2.9.0
+        // fixed the shim — used to arrive as bare config: the `lint` script and
+        // the CI step the plan printed had nowhere to be read back from, so the
+        // tool was configured and nothing ever ran it.
+        tool: item.id,
+        wiring: item.wiring,
+        ciStep: item.ciStep,
       });
       continue;
     }
@@ -2117,7 +2377,7 @@ function draftFromTemplates(root, opts, checks) {
   // The Codex region (0.5.0): computed from the selection, marker-fenced,
   // capped by the loadability ceiling at apply time. Explicit request only.
   if (opts["agents-region"]) {
-    const content = agentsRegionText(selection);
+    const content = agentsRegionText(selection, !opts["no-ci"]);
     changes.push({
       id: changeId("agents-region", content),
       kind: "write-agents-region",
@@ -2128,6 +2388,27 @@ function draftFromTemplates(root, opts, checks) {
       provenance,
       template: { name: "agents-region", version: "1.0.0" },
       rationale: "point Codex sessions at the committed checks",
+    });
+  }
+  // The same brief for the other host (2.9.0). A Claude Code session never
+  // reads AGENTS.md, so the region leaves the agent jig actually runs beside
+  // with no standing instruction at all — only the deny reply, which arrives
+  // after the tool call. Opt-in and item tier like every other file outside
+  // `.jig/`, because it is always-loaded prose the owner has to want.
+  if (opts["checks-rule"]) {
+    const content = "# jig's checks\n\n" + harnessBriefText(selection, !opts["no-ci"]) +
+      "\n<!-- " + PROSE_EVIDENCE_MARK + " — the harness brief, computed from the selection." +
+      " evidence: reasoned, claude-opus-5 2026-09 -->\n";
+    changes.push({
+      id: changeId("jig-checks", content),
+      kind: "write-rule",
+      path: ".claude/rules/jig-checks.md",
+      content,
+      classIds: selection,
+      ownership: "file",
+      provenance,
+      template: { name: "jig-checks", version: "1.0.0" },
+      rationale: "point every Claude Code session at the committed checks",
     });
   }
   // The pre-commit weave: one line into a hook file the repository already
@@ -2362,6 +2643,32 @@ function detectorCeiling(det) {
   return lever && lever.probabilistic ? "unmeasured" : det.confidence;
 }
 
+// The lane entries a change would leave on disk, or null when the change carries
+// no readable list. Null is not "no entries" — the same rule `proposedGuards`
+// draws for the config, for the same reason.
+function proposedVerifyEntries(content) {
+  if (typeof content !== "string") return null;
+  let record = null;
+  try {
+    record = JSON.parse(stripBom(content));
+  } catch {
+    return null;
+  }
+  if (!isObject(record) || !Array.isArray(record.entries)) return null;
+  return record.entries.filter((e) => isObject(e));
+}
+
+// Whether this plan puts the tool in the CI lane — the lane a `tool-rule`
+// detector runs in, by the lever's own definition. Read off the plan's own
+// changes, like every other cell input: a matrix cell that trusted a
+// `verify.json` already on disk would claim coverage from a file this plan is
+// not writing.
+function verifiesTool(changes, tool) {
+  const hit = changes.find((c) => toPosix(c.path) === STATE_DIR + "/" + VERIFY_FILE);
+  const entries = hit ? proposedVerifyEntries(hit.content) : null;
+  return !!entries && entries.some((e) => e.id === tool && Array.isArray(e.lanes) && e.lanes.includes("ci"));
+}
+
 // Which artifact does the catching, read off the plan's own changes so a cell
 // can never name a file this plan does not write. A hook detector names its
 // guard row in the generated config, which is the id the ledger will carry.
@@ -2393,10 +2700,16 @@ function detectorArtifact(cls, det, index, changes, guards) {
     // A tool rule catches nothing until the tool itself is in the plan. The
     // install and the config-only item carry the same tool id, so one lookup
     // covers both.
+    //
+    // And a config is not a lane. Until 2.9.0 this cell read DET off the config
+    // file alone, so the matrix printed `DET eslint.config.mjs` for a CI job
+    // that ran the check driver and nothing else — a rule nobody executes,
+    // named after a file. Both halves or nothing: the config the plan writes,
+    // and an entry in `.jig/verify.json` that a lane actually runs.
     const tool = det.params && det.params.tool;
     const hit = changes.find((c) => c.template &&
       (c.template.name === "toolchain-" + tool || c.template.name === "install-" + tool));
-    return hit ? hit.path : null;
+    return hit && verifiesTool(changes, tool) ? hit.path : null;
   }
   if (det.lever === "agents-region") {
     const hit = changes.find((c) => c.kind === "write-agents-region");
@@ -2419,7 +2732,13 @@ function detectorCell(cls, det, index, provenance, changes, guards) {
       : "this detector names a lever `" + det.lever + "` this build does not run";
   } else if (artifact === null) {
     grade = "GAP";
-    why = "this plan writes no " + det.lever + " artifact for " + cls.id;
+    // A tool rule is the one lever whose gap is about a lane rather than a file.
+    // Naming the artifact it "writes no" would send the owner looking for a
+    // config that is often already there; what is missing is something running
+    // the tool.
+    why = det.lever === "tool-rule"
+      ? "no lane runs " + ((det.params && det.params.tool) || det.lever)
+      : "this plan writes no " + det.lever + " artifact for " + cls.id;
   }
   return {
     grade,
@@ -2567,6 +2886,17 @@ function consentFor(change, guards, installed) {
   if (toPosix(change.path) === STATE_DIR + "/hooks/pre-commit") {
     return { tier: "item", why: "is the hook git runs at commit time, so it decides whether a commit is checked at all" };
   }
+  // The lane list. Every command in it runs on somebody's machine or in
+  // somebody's CI job, and a non-zero exit from any of them fails their build —
+  // which is not "reports only" by any reading.
+  if (toPosix(change.path) === STATE_DIR + "/" + VERIFY_FILE) {
+    const named = (proposedVerifyEntries(change.content) || []).map((e) => e.id);
+    return {
+      tier: "item",
+      why: "names what the lanes run" + (named.length ? " — " + named.join(", ") : "") +
+        " — and a non-zero exit from any of them fails the build",
+    };
+  }
   // SCOPE, "Which consent tier is an authored check": item. The check driver
   // and CI both run it, so it can fail somebody's build — and it is the thing
   // the owner is really approving when they approve coverage.
@@ -2635,6 +2965,7 @@ function toolchainRow(row) {
     uninstall: item.uninstallCommand,
     configPath: item.configPath,
     wiring: item.wiring,
+    ciStep: item.ciStep,
     // Set when this project already carries the tool's config file and jig did
     // not write it. The tool is still installable; its config is not jig's to
     // lay down.
@@ -2642,7 +2973,7 @@ function toolchainRow(row) {
   };
 }
 
-function buildReview(payload, generated) {
+function buildReview(payload, generated, root) {
   const { selection, classes, provenance, refused, toolchain, discarded, discardedFile, editions } = generated;
   const mode = generated.mode || DEFAULT_INSTALL_MODE;
 
@@ -2672,9 +3003,14 @@ function buildReview(payload, generated) {
       if (deny) denyByGuard.set(cls.id + "-" + det.id, deny);
     }
   }
+  // The harness sentence is gated on the driver, so the preview asks the same
+  // question the hook will: is there a `run.mjs` — one this plan writes, or one
+  // an earlier install already left behind.
+  const hasDriver = payload.changes.some((c) => c.template && c.template.name === "check-driver") ||
+    fs.existsSync(path.join(root, STATE_DIR, "checks", "run.mjs"));
   const denyReplies = guards
     .filter((g) => denyByGuard.has(g.id))
-    .map((g) => ({ guardId: g.id, text: require("../hooks/jig-lib.js").denyText(g.id, denyByGuard.get(g.id)) }));
+    .map((g) => ({ guardId: g.id, text: require("../hooks/jig-lib.js").denyText(g.id, denyByGuard.get(g.id), hasDriver) }));
 
   const review = {
     schemaVersion: SCHEMA_VERSION,
@@ -2792,6 +3128,7 @@ function renderReviewMd(review, backlog) {
         (t.present ? "already here (" + t.how + (t.version ? " " + t.version : "") + "), config only" : "`" + t.command + "`"));
       out.push("  - config: `" + t.configPath + "`");
       if (t.wiring) out.push("  - wiring: " + t.wiring);
+      if (t.ciStep) out.push("  - CI step: `" + t.ciStep + "`");
       out.push("  - undo: " + (t.uninstall ? "`" + t.uninstall + "`" : "nothing to uninstall — jig only writes its config"));
     }
     out.push("");
@@ -2955,7 +3292,7 @@ function cmdPlan(root, opts) {
   // Built after the draft is canonical. A hand-written draft has no selection
   // behind it and gets no review surface, for the same reason it gets no
   // manifest: neither would be a record of anything jig decided.
-  const built = generated ? buildReview(payload, generated) : null;
+  const built = generated ? buildReview(payload, generated, root) : null;
 
   ensureStateDir(root);
   const rel = STATE_DIR + "/plan-" + payload.planId + ".json";
@@ -3455,11 +3792,83 @@ function runDriverProbe(root, live) {
   return { ...base, ran: true, caught: run.status === 0, exitCode: run.status, output: (run.stdout || "").trim() };
 }
 
-// One probe per installed toolchain side-file. None of them is spawned: a
-// linter, a type checker or a test runner costs a build (tsc) or a JVM
-// (detekt), and jig does not run somebody's toolchain behind a selftest. Every
-// probe degrades to the exact command and the expected exit code, never a stall.
-function runToolchainProbes(root, live) {
+// One tool proven, start to finish: the baseline first, then the seeded run.
+// The seed is jig's own bytes in the owner's tree, so it is journaled going in
+// and journaled coming out — a crash between the two rows leaves a line naming
+// the file it left behind rather than a mystery under `.jig/`.
+function execToolchainProbe(root, tool, base) {
+  // The shim is only a dead end when there is no JS entry beside it. `npx` has
+  // one, so the JS toolchain is provable on Windows; `./gradlew` does not, and
+  // stays a stated limit rather than a skip that reads as a pass.
+  const shim = toolchainLib.shellFreeArgv(tool.verify.argv) ? null : toolchainLib.windowsShim(tool.verify.argv[0]);
+  if (shim) {
+    // Never a skip that reads as a pass. The tool is installed; jig opens no
+    // shell, and Node will not start a batch shim without one. That is a limit
+    // stated as one, with the command to run by hand printed beside it.
+    return { ...base, ran: false, cannotRun: true,
+      why: tool.verify.argv[0] + " is a Windows batch shim (" + shim + ") and jig runs every command without" +
+        " a shell, so it cannot start this one. Nothing was proven and nothing passed — run it yourself" };
+  }
+  let baseline;
+  try {
+    baseline = toolchainLib.execBaseline(root, tool);
+  } catch (err) {
+    if (!err.expected) throw err;
+    return { ...base, ran: false, cannotRun: true, why: err.message };
+  }
+  // The seed goes where the edition says, at the project root, because that is
+  // the only place the project's own tool looks. Nested under `.jig/` it was
+  // outside every shipped config's reach — eslint's `globalIgnores` names
+  // `.jig/**` and tsconfig's `include` names `src` and `tests` — so the tool
+  // exited 0 over a violation it never read and every JavaScript install
+  // ledgered `unverified`. `execVerify` refuses rather than writes over a path
+  // the project already owns, so a seed named after a manifest is a disclosed
+  // "cannot plant" instead of a clobbered `Cargo.toml`.
+  const seeded = toPosix((tool.seed && tool.seed.path) || "");
+  const tx = hashBytes(Buffer.from(seeded + "|" + new Date().toISOString(), "utf8")).slice(0, 12);
+  appendJournal(root, { event: "seed", tx, tool: tool.id, path: seeded });
+  try {
+    const proof = toolchainLib.execVerify(root, tool, ".");
+    return {
+      ...base, ran: true, caught: proof.caught, code: proof.code,
+      // A repository whose baseline is already red fails the seeded run for the
+      // reason it failed the baseline, and the seed proved nothing. SCOPE step
+      // 8: that is disclosed as `baseline: red`, never counted as a catch.
+      verdict: proof.caught && baseline.baseline === "clean" ? "verified" : "unverified",
+      baseline: baseline.baseline, baselineExit: baseline.code,
+    };
+  } catch (err) {
+    if (!err.expected) throw err;
+    return { ...base, ran: false, why: err.message, baseline: baseline.baseline, baselineExit: baseline.code };
+  } finally {
+    removeSeed(root, seeded);
+    appendJournal(root, { event: "seed-removed", tx, tool: tool.id, path: seeded });
+  }
+}
+
+// The seed file and every directory the planting created for it, and nothing
+// else: `rmdirSync` refuses a directory with anything left in it, so a `src`
+// the project already had survives and a `tests` jig made goes with the seed.
+function removeSeed(root, rel) {
+  fs.rmSync(path.join(root, rel), { force: true });
+  let dir = path.dirname(path.join(root, rel));
+  while (dir !== root && dir.startsWith(root)) {
+    try {
+      fs.rmdirSync(dir);
+    } catch {
+      return;
+    }
+    dir = path.dirname(dir);
+  }
+}
+
+// One probe per installed toolchain side-file, and the one place jig starts
+// somebody's linter. It is opt-in per tool — `selftest --live --toolchain <ids>`
+// — because a type check or a test run costs a build (tsc) or a JVM (detekt),
+// and a close that silently spent three minutes is a close nobody runs. A tool
+// this run did not name degrades to the exact command and the expected exit
+// code, never a stall.
+function runToolchainProbes(root, live, wanted) {
   let artifacts = [];
   try {
     artifacts = readManifest(root).artifacts.filter((a) =>
@@ -3485,10 +3894,9 @@ function runToolchainProbes(root, live) {
     const tool = toolchainToolFor(loaded, toolId);
     if (!tool || !tool.verify || !Array.isArray(tool.verify.argv)) continue;
     // The proof of a tool config is the tool's own verify run over a seeded
-    // violation, and its expected exit code is machine-readable now — but jig
-    // does not spawn somebody's linter, type checker or test runner behind a
-    // selftest. It says exactly what to run and what a catch looks like.
-    out.push({
+    // violation, and its expected exit code is machine-readable — which is not
+    // always 1.
+    const base = {
       probe: "toolchain-" + tool.id,
       kind: "toolchain",
       artifact: artifact.path,
@@ -3496,13 +3904,117 @@ function runToolchainProbes(root, live) {
       expectedExit: tool.verify.expectedExit,
       expected: tool.verify.expected,
       seed: tool.seed ? tool.seed.path : null,
-      ran: false,
-      why: live
-        ? "jig does not spawn " + tool.id + " from a selftest — plant " + (tool.seed ? "`" + tool.seed.path + "`" : "a violation") + " and run it yourself"
-        : "selftest was not run with --live",
-    });
+    };
+    if (!live) {
+      out.push({ ...base, ran: false, why: "selftest was not run with --live" });
+      continue;
+    }
+    if (!wanted.has(tool.id) && !wanted.has("all")) {
+      out.push({ ...base, ran: false,
+        why: "jig does not spawn " + tool.id + " unless the run names it — re-run with --toolchain " + tool.id });
+      continue;
+    }
+    out.push(execToolchainProbe(root, tool, base));
   }
   return out;
+}
+
+// The violation the commit-lane clone stages: the first installed check's own
+// fixture, at a path its own globs match — the same derivation the guard probes
+// use, for the same reason.
+function stagedSeed(root, lib) {
+  let names = [];
+  try {
+    names = fs.readdirSync(path.join(root, STATE_DIR, "checks")).filter((f) => f.endsWith(".check.mjs")).sort();
+  } catch {
+    return null;
+  }
+  for (const file of names) {
+    const record = lib.loadCheck(root, file.replace(/\.check\.mjs$/, ""));
+    const mod = record.mod || {};
+    const violation = mod.fixtures && mod.fixtures.violation;
+    const det = (Array.isArray(mod.detectors) ? mod.detectors : []).find((d) => d && d.runner === "checks");
+    if (!det || typeof violation !== "string" || !violation.trim()) continue;
+    return { path: fixturePath({ params: det.params || {} }), content: violation, check: mod.id || file };
+  }
+  return null;
+}
+
+// The commit lane, executed instead of described. The shim is a shell script git
+// runs in an environment nobody controls — fnm, nvm and volta all put node on a
+// PATH a hook does not always inherit — so the only honest report is what
+// happens when it runs. It runs over a throwaway clone of the install: the real
+// repository's index is not this probe's to stage into, and the shim appends a
+// row to `.jig/lane.log` down every path it takes.
+//
+// `git hook run` and not `sh`: git starts a hook through its own shell, which on
+// Windows is the one git ships and nothing on PATH. Running the shim any other
+// way would prove a lane nobody has.
+function runCommitLaneProbe(root, live, lib) {
+  const rel = STATE_DIR + "/hooks/pre-commit";
+  const base = {
+    probe: "commit-lane", kind: "commit-lane",
+    command: "git -c core.hooksPath=" + STATE_DIR + "/hooks hook run pre-commit" +
+      "   (over a staged violation, in a throwaway clone of the install)",
+    expected: "the shim runs, finds node on PATH, and exits non-zero on the staged violation",
+  };
+  if (!fs.existsSync(path.join(root, rel))) return { ...base, ran: false, why: rel + " is not installed here" };
+  if (!live) return { ...base, ran: false, why: "selftest was not run with --live" };
+  const seed = stagedSeed(root, lib);
+  if (!seed) {
+    return { ...base, ran: false,
+      why: "no installed check carries a `checks` detector with a violation fixture the clone could stage" };
+  }
+
+  const clone = fs.mkdtempSync(path.join(os.tmpdir(), "jig-lane-"));
+  try {
+    // The install as a teammate cloning the repository would get it, minus
+    // `verify.json`: a clone has no dependencies installed, so the opt-in lane
+    // would report a linter that is not there as a blocked commit.
+    fs.cpSync(path.join(root, STATE_DIR, "checks"), path.join(clone, STATE_DIR, "checks"), { recursive: true });
+    fs.mkdirSync(path.join(clone, STATE_DIR, "hooks"), { recursive: true });
+    fs.copyFileSync(path.join(root, rel), path.join(clone, rel));
+    const config = readIfExists(path.join(root, STATE_DIR, CONFIG_FILE));
+    if (config !== null) fs.writeFileSync(path.join(clone, STATE_DIR, CONFIG_FILE), config);
+    fs.mkdirSync(path.dirname(path.join(clone, seed.path)), { recursive: true });
+    fs.writeFileSync(path.join(clone, seed.path), seed.content);
+    for (const argv of [["init", "-q"], ["add", "-A"]]) {
+      const r = spawnSync("git", argv, { cwd: clone, encoding: "utf-8", windowsHide: true });
+      if (r.error || r.status !== 0) {
+        return { ...base, ran: false,
+          why: "git " + argv.join(" ") + " failed in the clone (" +
+            (r.error ? r.error.message : (r.stderr || "").trim() || "exit " + r.status) + ")" };
+      }
+    }
+    const run = spawnSync("git", ["-c", "core.hooksPath=" + STATE_DIR + "/hooks", "hook", "run", "pre-commit"],
+      { cwd: clone, encoding: "utf-8", windowsHide: true });
+    if (run.error) return { ...base, ran: false, why: "git could not be spawned to run the shim (" + run.error.message + ")" };
+    const output = ((run.stdout || "") + (run.stderr || "")).trim();
+    // `git hook run` landed in git 2.36. An older git cannot start the hook the
+    // way git starts it, and guessing at a shell instead would prove a lane
+    // nobody has.
+    if (/is not a git command/.test(output)) {
+      return { ...base, ran: false, why: "this git has no `hook run` subcommand (it arrived in git 2.36), so jig cannot start the shim the way git does" };
+    }
+    const laneLog = readIfExists(path.join(clone, STATE_DIR, "lane.log"));
+    const rows = (laneLog === null ? "" : laneLog.toString("utf8")).split("\n").map((l) => l.trim()).filter(Boolean);
+    // The skip is the disclosed hazard, so it is read from both places the shim
+    // states it: its own lane row and the line it prints to stderr.
+    const skipped = rows.some((l) => /skipped node-not-on-path$/.test(l)) || /node is not on PATH here/.test(output);
+    return {
+      ...base, ran: true,
+      hookRan: run.status !== null,
+      nodeFound: !skipped,
+      blocked: run.status !== 0,
+      caught: run.status !== 0,
+      exitCode: run.status,
+      staged: seed.path + " — " + seed.check + "'s own violation fixture",
+      laneLog: rows,
+      output,
+    };
+  } finally {
+    fs.rmSync(clone, { recursive: true, force: true });
+  }
 }
 
 function cmdSelftest(root, opts) {
@@ -3532,7 +4044,32 @@ function cmdSelftest(root, opts) {
     probes.push(runProbe(root, guard.id, probe, live));
   }
   probes.push(runDriverProbe(root, live));
-  probes.push(...runToolchainProbes(root, live));
+  probes.push(runCommitLaneProbe(root, live, lib));
+  // `--toolchain <ids>` names the tools this run may spawn. The flag on its own
+  // is `true` from parseArgs and means all of them: somebody who typed it asked
+  // for the tools.
+  probes.push(...runToolchainProbes(root, live, new Set(
+    typeof opts.toolchain === "string" ? opts.toolchain.split(",").map((s) => s.trim()).filter(Boolean)
+      : opts.toolchain === true ? ["all"] : [])));
+
+  // The proof rows. A guard probe writes its own line through the runner; these
+  // do not, and a close that cannot point at a ledger line has witnessed
+  // nothing. Every toolchain proof is ledgered per tool, and the driver probe is
+  // ledgered where it is the only witness there is — a checks-only install has
+  // no guard, and reporting one unwitnessed for ever is the coverage claim
+  // inverted: jig calling a correct install unproven.
+  for (const p of probes) {
+    if (p.ran !== true) continue;
+    if (p.kind !== "toolchain" && !(p.kind === "checks" && !guards.length)) continue;
+    lib.appendLedger(root, {
+      session: "jig-selftest", actor: "jig", guardId: null, classId: null, mode: null,
+      // The verdict, not the raw exit code: a toolchain probe over a red
+      // baseline caught nothing it planted, and the ledger is the line the
+      // close points at.
+      decision: (p.verdict || (p.caught === true ? "verified" : "unverified")),
+      tool: p.probe, matched: null, path: null, durMs: 0,
+    });
+  }
 
   const after = ledgerLines(root);
   const caught = probes.filter((p) => p.caught === true);
@@ -3548,9 +4085,13 @@ function cmdSelftest(root, opts) {
   return {
     ok: true,
     live,
-    // The exit criterion, stated as a fact rather than a hope: a guard was seen
-    // catching something AND the ledger grew a line proving it.
-    witnessed: caught.some((p) => p.kind === "guard") && after > before,
+    // The exit criterion, stated as a fact rather than a hope: something was
+    // seen catching something AND the ledger grew a line proving it. A guard
+    // where there are guards; the check driver where there are none, because
+    // that install's whole surface is the driver and a repository with guards
+    // still has to see one of them fire.
+    witnessed: (caught.some((p) => p.kind === "guard") ||
+      (!guards.length && caught.some((p) => p.kind === "checks"))) && after > before,
     ledger: { file: STATE_DIR + "/" + LEDGER_FILE, linesBefore: before, linesAfter: after },
     probes,
     notes,
@@ -4695,7 +5236,7 @@ function main(argv) {
 
 module.exports = {
   SCHEMA_VERSION, STATE_DIR, JOURNAL_FILE, PREIMAGE_DIR, PROFILE_FILE,
-  CONFIG_FILE, MANIFEST_FILE, PERMISSIONS_FILE, ACTIVATION_FILE, LEDGER_FILE, HOOK_RUNNERS,
+  CONFIG_FILE, MANIFEST_FILE, PERMISSIONS_FILE, ACTIVATION_FILE, VERIFY_FILE, LEDGER_FILE, HOOK_RUNNERS,
   PLAN_MD_FILE, PLAN_JSON_FILE, BACKLOG_FILE, AVAILABLE_NOW, CELL_RANK, CONSENT_TIERS,
   ACTORS, LEVERS, PLUGIN_ROOT, GIT_DIR, GIT_SETTING, GIT_SETTING_PATH, commitLane,
   leverOf, leverAvailable, toolchainFacts, toolchainToolFor, RELEASE_ORDER,
@@ -4706,6 +5247,7 @@ module.exports = {
   PROFILE_KEYS, FILE_SLOTS, HOOK_SLOTS, RULE_FILES,
   CHANGE_KINDS, INSTALLABLE_KINDS, KIND_TARGETS, VALIDATORS, PROSE_BUDGET_BYTES, probeGreen,
   OWNERSHIPS, PROVENANCES, DEFAULT_INSTALL_MODE, installMode, TEMPLATE_DIR, guardProbe, fixturePath,
+  execToolchainProbe,
   applyStyle, detectStyle, hasBom, stripBom, hashBytes,
   resolveInsideRoot, resolveWritePath, targetProblem, isEngineOwned,
   formatOf, verifyByFor, verifyWritten,
@@ -4714,6 +5256,7 @@ module.exports = {
   cmdReview, cmdInventory, cmdArm, cmdDisarm, cmdFp, cmdRerun, cmdRetire,
   activationFace,
   templateIndex, templateBody, draftFromTemplates, configFromSelection, permissionsProposal,
+  verifyEntriesFor, verifyFace, ciVerifySteps, proposedVerifyEntries, verifiesTool,
   readManifest, manifestStates, occupancyProblem,
   matcherMatches, hookRows, collectHooks, nodeOnPath, stackFacts, ruleCorpus, conflictPreflight, readProfile,
   cmdScan, cmdToolchain, cmdAdmit, cmdPlan, cmdApply, cmdStatus, cmdRevert, cmdSelftest, main,

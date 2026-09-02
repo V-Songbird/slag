@@ -61,14 +61,15 @@ function bodyOf(root, plan, rel) {
 // ---------------------------------------------------------------------------
 // mergeable
 
-test("mergeable names the three declarative families and nothing with a free grammar", () => {
+test("mergeable names the four families and nothing with a free grammar", () => {
   const yes = [
     "pyproject.toml", "Cargo.toml", ".editorconfig", "a/b/setup.cfg", "tox.ini",
     "Directory.Build.props", "a/b/Directory.Build.targets",
     "build.gradle.kts", "app/build.gradle",
+    "package.json", "a/b/tsconfig.json",
   ];
   for (const rel of yes) assert.equal(sections.mergeable(rel), true, rel + " is one jig composes");
-  for (const no of ["go.mod", "package.json", "Main.kt", "", null]) {
+  for (const no of ["go.mod", "Main.kt", "", null]) {
     assert.equal(sections.mergeable(no), false, String(no) + " is not one jig composes");
   }
 });
@@ -214,6 +215,48 @@ test("merge carries a nested Gradle block whole and keys the assignments inside 
     { key: conflicts[0].key, keptFrom: conflicts[0].keptFrom, droppedFrom: conflicts[0].droppedFrom },
     { key: "ignoreFailures", keptFrom: "gradle", droppedFrom: "errorprone" },
   );
+});
+
+// ---------------------------------------------------------------------------
+// merge — JSON manifests
+
+test("merge folds every tool's script into one package.json scripts block", () => {
+  const { body, conflicts } = sections.merge([
+    { source: "the starter", body: '{ "name": "app", "type": "module" }' },
+    { source: "eslint", body: '{ "scripts": { "lint": "eslint ." } }' },
+    { source: "vitest", body: '{ "scripts": { "test": "vitest run" } }' },
+  ], "package.json");
+  assert.deepEqual(conflicts, []);
+  const parsed = JSON.parse(body);
+  assert.deepEqual(parsed, { name: "app", type: "module", scripts: { lint: "eslint .", test: "vitest run" } });
+  assert.equal(body.match(/"scripts"/g).length, 1, "one scripts block, not one per tool");
+  assert.ok(body.endsWith("}\n"), JSON.stringify(body.slice(-4)));
+});
+
+test("merge keeps the first script for a name two tools claim and reports the dispute", () => {
+  const { body, conflicts } = sections.merge([
+    { source: "vitest", body: '{ "scripts": { "test": "vitest run" } }' },
+    { source: "other", body: '{ "scripts": { "test": "node --test" } }' },
+  ], "package.json");
+  assert.equal(JSON.parse(body).scripts.test, "vitest run");
+  assert.equal(conflicts.length, 1);
+  assert.deepEqual(
+    { key: conflicts[0].key, keptFrom: conflicts[0].keptFrom, droppedFrom: conflicts[0].droppedFrom, path: conflicts[0].path },
+    { key: "test", keptFrom: "vitest", droppedFrom: "other", path: "package.json" },
+  );
+});
+
+test("merge carries a JSON array and a nested object whole, and refuses a body that is not JSON", () => {
+  const { body } = sections.merge([
+    { source: "one", body: '{ "files": ["dist"], "exports": { "." : { "import": "./a.js" } } }' },
+    { source: "two", body: '{ "exports": { "./b": "./b.js" } }' },
+  ], "package.json");
+  assert.deepEqual(JSON.parse(body), {
+    files: ["dist"],
+    exports: { ".": { import: "./a.js" }, "./b": "./b.js" },
+  });
+  assert.throws(() => sections.merge([{ source: "x", body: "not json" }], "package.json"), /not JSON/);
+  assert.throws(() => sections.merge([{ source: "x", body: "[1]" }], "package.json"), /composes a JSON object/);
 });
 
 // ---------------------------------------------------------------------------
@@ -369,6 +412,72 @@ test("two jvm tools sharing build.gradle.kts produce one script Gradle would acc
   assert.equal(body.match(/^ *java$/gm).length, 1, "the plugin both tools ask for is applied once");
   assert.ok(body.includes('errorprone("com.google.errorprone:error_prone_core:2.42.0")'), body);
   assert.ok(body.includes("options.errorprone {"), body);
+});
+
+// ---------------------------------------------------------------------------
+// A starter that is green on line one
+
+test("a greenfield JS starter carries the script every tool's CI step calls", () => {
+  const root = project({});
+  const plan = planOf(root, {
+    edition: "javascript-typescript", "package-manager": "npm",
+    tools: "eslint,typescript,vitest", select: "javascript-typescript/skipped-test",
+  });
+  const writes = plan.changes.filter((c) => c.path === "package.json" && c.kind === "write-side-file");
+  assert.equal(writes.length, 1, "one write for the manifest: " + pathsOf(plan).join(", "));
+  assert.deepEqual(plan.configConflicts, []);
+
+  // The defect: the starter was the sample verbatim, so `npm run lint` — the CI
+  // step jig planned in the same breath — had nothing to call.
+  const manifest = JSON.parse(bodyOf(root, plan, "package.json"));
+  assert.equal(manifest.name, "example-app", "the starter's own members survive composition");
+  assert.deepEqual(manifest.scripts, {
+    lint: "eslint . --max-warnings 0 --report-unused-disable-directives",
+    typecheck: "tsc --noEmit",
+    test: "vitest run --coverage",
+  });
+});
+
+test("a starter gets the edition's .gitignore, and a folder that has one keeps it", () => {
+  const root = project({});
+  const plan = planOf(root, {
+    edition: "javascript-typescript", "package-manager": "npm",
+    tools: "eslint", select: "javascript-typescript/skipped-test",
+  });
+  const body = bodyOf(root, plan, ".gitignore");
+  assert.match(body, /^# javascript-typescript$/m, body);
+  for (const line of ["node_modules/", "dist/", "coverage/"]) assert.ok(body.includes(line), body);
+
+  // Somebody else's file, and the same rule every other write obeys.
+  const held = project({ ".gitignore": "*.log\n" });
+  const second = planOf(held, {
+    edition: "javascript-typescript", "package-manager": "npm",
+    tools: "eslint", select: "javascript-typescript/skipped-test",
+  });
+  assert.equal(pathsOf(second).includes(".gitignore"), false, pathsOf(second).join(", "));
+  assert.ok(second.refused.some((r) => r.includes(".gitignore already exists")),
+    JSON.stringify(second.refused));
+  assert.equal(fs.readFileSync(path.join(held, ".gitignore"), "utf8"), "*.log\n");
+});
+
+test("installs run in installKind order, so the scaffold that writes gradlew runs first", () => {
+  const root = project({});
+  const plan = planOf(root, {
+    edition: "jvm", "package-manager": "gradle",
+    tools: "gradle,checkstyle,pmd,errorprone", select: "jvm/swallowed-exception",
+  });
+  // The install item lives in the plan FILE; the summary carries ids and paths.
+  const written = JSON.parse(fs.readFileSync(path.join(root, plan.plan), "utf8"));
+  const installs = written.changes.filter((c) => c.kind === "run-install");
+  const commands = installs.map((c) => c.install.command);
+  const wrapper = commands.findIndex((cmd) => cmd.startsWith("gradle wrapper"));
+  assert.ok(wrapper >= 0, commands.join(" | "));
+  // Ordered by id, `./gradlew checkstyleMain` came first and ran a script the
+  // wrapper had not written yet.
+  for (const [i, cmd] of commands.entries()) {
+    if (cmd.startsWith("./gradlew")) assert.ok(wrapper < i, cmd + " runs before the wrapper exists");
+  }
+  assert.deepEqual(installs.map((c) => c.install.installKind), ["scaffold", "audit", "audit", "audit"]);
 });
 
 test("a shared file jig cannot compose is written by nobody and handed back as snippets", () => {
