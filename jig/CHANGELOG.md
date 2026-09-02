@@ -4,6 +4,21 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.10.0] — 2026-09-02
+
+### Added
+
+- A test run now leaves a record. Until now a session that ran your tests and a session that only said it had left jig with identical evidence, so "the tests pass" was not contradictable by anything jig held. When a Bash call runs one of the commands in `.jig/verify.json`, jig records that it ran and whether it passed — the entry's id, the outcome, and nothing else. The command text never reaches the ledger.
+- At the end of a turn, one line, and only when it is worth saying: how many edits have landed under a tool's files since the last green run of that tool, or that there has never been one. It never blocks and it cannot block — it hands the session a sentence and gets out of the way. A repository with no lane entries reads nothing, spawns nothing and says nothing.
+- `/jig:review` and `/jig:inventory` show the last green run for each thing your lanes verify, so "nothing here has been seen to run them" is a fact you can look up rather than a suspicion.
+- What the commit hook catches now reaches the ledger, so a guard that has only ever fired at commit time stops looking like one that has never fired. Two of jig's three lanes used to write nothing anywhere. The append can never fail a commit: if it cannot be written, the commit goes through.
+- `fired` has a denominator. A guard that fired four times out of four calls and one that fired four times out of four thousand used to read the same. Reports now show the split between what was denied and what would have been denied, the number of calls each guard was actually run on, and when it last fired. A guard whose check will not load is reported as never having run, rather than as having caught nothing.
+- `/jig:review` gains a month-later view: what has been committed since the install, by every lane and every teammate, and which classes started or stopped appearing. It is mined from your history rather than from jig's own ledger, and it says plainly that the attribution is best-effort.
+
+### Known limit
+
+- The failure half of the verification record depends on a hook event nothing here has yet tested against a live host. Where a failing run reports its exit code, jig reads it and records the run as red regardless. Where it does not, and the host does not raise the failure event either, a red run would be recorded green. This is written down in `SCOPE.md` rather than assumed away, and probing it is the next piece of work on this.
+
 ## [2.9.0] — 2026-09-02
 
 ### Added

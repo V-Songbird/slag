@@ -1064,6 +1064,31 @@ test("an observing guard reports that nobody asked it to arm, and arming is offe
   assert.equal(row.armable, true);
   assert.equal(row.barrier, null);
   assert.equal(row.fired, 0);
+  // A quiet guard has to say how many calls it was quiet over, or "never fired"
+  // is a number with nothing under it.
+  assert.equal(row.evaluated, 0);
+  assert.equal(row.denied, 0);
+  assert.equal(row.wouldDeny, 0);
+  assert.equal(row.lastFired, null);
+});
+
+test("the review row divides what a guard caught by what it was run on", () => {
+  const root = armProject();
+  const rows = [
+    { ts: "2026-09-01T00:00:00.000Z", guardId: GUARD, decision: "pass" },
+    { ts: "2026-09-01T00:00:01.000Z", guardId: GUARD, decision: "pass" },
+    { ts: "2026-09-01T00:00:02.000Z", guardId: GUARD, decision: "would-deny" },
+  ];
+  fs.appendFileSync(path.join(root, ".jig", "ledger.jsonl"),
+    rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  const row = engine.cmdReview(root).guards.find((g) => g.guardId === GUARD);
+  assert.equal(row.fired, 1);
+  assert.equal(row.evaluated, 3, "one catch in three calls reported without the three");
+  // The guard is observing, so the catch it made cost nothing — that is the
+  // half of `fired` the report never separated.
+  assert.equal(row.wouldDeny, 1);
+  assert.equal(row.denied, 0);
+  assert.equal(row.lastFired, "2026-09-01T00:00:02.000Z");
 });
 
 test("arming is a journaled config change, and the review agrees afterwards", () => {
@@ -1338,6 +1363,10 @@ test("rerun reports drift, the firing record, the quiet guards and the backlog i
   assert.ok(report.neverFired.includes("empty-catch-edit-observe-guard-0"));
   assert.equal(report.neverFired.includes(GUARD), false, "a fired guard was called dead");
   assert.ok(report.backlog.length > 0);
+  // A fixture is not a git repository, so there is nothing to mine — the
+  // section is present and null, never missing and never invented.
+  assert.equal("sinceInstall" in report, true, "rerun said nothing about what happened since the install");
+  assert.equal(report.sinceInstall, null);
 });
 
 test("retiring a guard plans and stops, then lands as a journaled config change the ledger survives", () => {

@@ -55,7 +55,18 @@ read. Say `why` and stop; offer `/jig:jig` to install. Do not report the empty
 
 `guards[]` carries one row per installed guard:
 
-- `fired` — times it matched. `wavedOff` — false positives recorded.
+- `fired` — times it matched, out of `evaluated` calls it was run on. Report the
+  pair, never `fired` alone: four catches in four calls and four in four
+  thousand are different guards. `denied` and `wouldDeny` split `fired` by what
+  the guard was allowed to do — a `wouldDeny` count is coverage the user is not
+  getting yet. `lastFired` is when the last catch was, or `null`; a guard that
+  fired only long ago is as much a retirement candidate as one that never did.
+  `wavedOff` — false positives recorded.
+- `otherLanes` — catches of this guard's class at COMMIT time, where the check
+  runs with no guard and no denominator, which is why it is not part of `fired`.
+  A guard with `fired: 0` and a non-zero `otherLanes` is not a quiet guard: its
+  class is being caught, in the lane that stops the commit. Never offer it for
+  retirement.
   `pendingWaveOff` — a wave-off the user raised and never approved the change
   for. The guard is still doing whatever its config says, which is not what
   somebody who ran `fp` and walked away expects: say so, and offer the token
@@ -96,13 +107,28 @@ verbatim — it names the real invocation, and nothing puts `jig` on a PATH.
 Wiring the commit lane is an approved, reversible change like any other — send
 the user to `/jig:jig` to apply it rather than applying it here.
 
+`verify` is one row per lane entry, and `lastGreen` is the last time jig
+WITNESSED that command run green inside a Claude session — a timestamp, or
+`null` for one no session here has ever been seen to pass. Report it beside the
+lanes. It is the one fact in this report that contradicts a claim rather than
+recording a catch, and `null` does not mean the tests fail: it means no session
+here has been seen to run them. A repository whose CI runs the suite on every
+push reads `null` too, so say which claim it answers.
+
+`ledger.lines` is how far the ledger has grown. It is never compacted — deleting
+rows deletes the evidence a wave-off is undone from — so this number only goes
+up, and it is the one signal the user has that it is getting large. Report it
+once, plainly, at the end of this section.
+
 Show the guard rows as three groups: fired, never fired, waved off. Then say
 what each group means:
 
 - **Fired** — working, unless the user says otherwise. Ask whether any of the
   reports were wrong.
 - **Never fired** — a guard that has sat quiet through many sessions is a
-  candidate for retirement, not pride. Say so plainly.
+  candidate for retirement, not pride. Say so plainly. A guard with a non-zero
+  `otherLanes` does not belong in this group at all: its class is being caught
+  at commit time.
 - **Waved off** — a guard the user has already contradicted. Repeated wave-offs
   on one guard mean the check is miscalibrated; retiring it is the honest move.
 
@@ -188,14 +214,37 @@ Show `drifted` — files jig installed that have changed since — alongside
 silently: a file the user edited is the user's file, and the journal still holds
 the pre-image if they want it back.
 
+Then `sinceInstall`, which is the only part of this report that comes from git
+rather than from jig's own hooks — so it covers every lane and every teammate,
+not just the agent sessions the ledger saw. Print it whenever it is non-null:
+
+- `commits` since `since` (the install date), split by `actors` into human and
+  agent. `attribution` is the caveat that goes with that split; say it out loud
+  the way the ranking already does, because an author line and a Co-Authored-By
+  trailer are all git carries.
+- `byClass` — for each class this repository's diffs still show, the hits
+  `before` the install and `after` it. A class whose `after` outruns its
+  `before` is one the repository kept producing and nobody covered. Lead the
+  offer below with it.
+- `truncated: true` means the content window `byClass` was built from does not
+  reach back to the install, so `before` is a floor and not a count. Say so
+  rather than reading the drop as progress. An EMPTY `byClass` with
+  `truncated: true` means nothing was mined at all — never report that as a
+  repository where no class is still occurring.
+
+`null` is not a finding: it means there is nothing to mine here — no install
+date, not a git repository, or git would not run.
+
 Then ask ONE `AskUserQuestion`, and do exactly the chosen one:
 
 - **Retire the dead** — `retire <guardId>` for each never-fired guard the user
   confirms, then the `apply` it hands back.
 - **Quiet the noisy** — `disarm <guardId>` for each guard the wave-offs
   indict, then the `apply` it hands back.
-- **Cover something new** — hand off to `/jig:jig`, which authors and proves the
-  new checks.
+- **Cover something new** — name the `backlog` rows the command already
+  computed (`classId` — `reason`), a class `sinceInstall.byClass` shows still
+  climbing first, then hand off to `/jig:jig`, which authors and proves the new
+  checks. Never invent a class that is not in `backlog`.
 - **Nothing, just the report** — stop here.
 
 One pass, then done; no follow-up menus. The kill switch for everything at once

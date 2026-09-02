@@ -25,7 +25,9 @@ const path = require("path");
 // The engine owns the shared vocabulary: the schema version every jig artifact
 // ships at and the directory they all live in. Re-declaring either here is how
 // they would drift apart.
-const { SCHEMA_VERSION, STATE_DIR, stripBom, fixturePath } = require("../scripts/jig.js");
+const {
+  SCHEMA_VERSION, STATE_DIR, VERIFY_FILE, stripBom, fixturePath, proposedVerifyEntries,
+} = require("../scripts/jig.js");
 // The one function that says what binds a proof to the check it proves. A
 // second copy of that hashing rule here would be a second answer to the
 // question admission already answered.
@@ -41,6 +43,14 @@ const CHECKS_DIR = "checks";
 // point by editing a JSON file.
 const HOOK_RUNNERS = ["PreToolUse", "PostToolUse"];
 const EVENT_TOOLS = { PreToolUse: ["Bash"], PostToolUse: ["Edit", "Write"] };
+
+// The events the runner dispatches, which is deliberately wider than the set a
+// guard may name. The three added here carry no guard and can carry none: two
+// witness a verification run, one reads those rows back at the completion
+// moment. Keeping them out of HOOK_RUNNERS is what stops a hand-edited config
+// naming `runner: "Stop"` and inventing an execution point nothing proves.
+const STOP_EVENTS = ["Stop", "SubagentStop"];
+const HOOK_EVENTS = [...HOOK_RUNNERS, "PostToolUseFailure", ...STOP_EVENTS];
 
 // The mode a guard takes when its own row asks for nothing. Observe is a
 // choice the owner makes, never a probation a guard serves (SCOPE, "Does the
@@ -601,6 +611,29 @@ function effectiveState(guard, config, filePath, evidence) {
 // tracked separately so a review can say a wave-off was raised and never
 // settled. `fired` is carried for the review surface, which reports what each
 // guard has done.
+//
+// `fired` alone is a numerator with nothing under it: four catches out of four
+// calls and four out of four thousand read identically. Every evaluated guard
+// leaves a row on every call, pass included, so `evaluated` is that denominator
+// and it costs nothing new — it is counted in the pass this function already
+// makes. `denied` and `wouldDeny` split it by what the guard was allowed to do,
+// and `lastFired` is the most recent catch by the row's own timestamp, not its
+// position, because more than one lane appends here.
+//
+// The cost this leaves standing: the ledger is never compacted (SCOPE,
+// Reporting — deleting rows deletes the evidence a wave-off is undone from), so
+// this pass is linear in the ledger and grows for the life of the repository.
+// Nothing here reads the file a second time to pay for the denominator, and
+// `ledger.lines` on every review report is the growth the owner acts on.
+//
+// The commit lane writes rows with the class it caught and no guard id — the
+// check driver runs no guard. Those are keyed under `CLASS_KEY` instead, where
+// nothing keyed by guard id can collide with them: a class that has only ever
+// fired at commit time used to read as one that had never fired, and folding
+// its catches into a guard's own `fired` would have put a lane with no
+// denominator inside one that has.
+const CLASS_KEY = "class:";
+
 function ledgerStats(root) {
   let lines = [];
   try {
@@ -613,9 +646,12 @@ function ledgerStats(root) {
   for (const line of lines) {
     let row;
     try { row = JSON.parse(line); } catch { continue; }
-    if (!row.guardId) continue;
-    const s = stats[row.guardId] || (stats[row.guardId] = {
+    const key = row.guardId ||
+      (typeof row.lane === "string" && typeof row.classId === "string" ? CLASS_KEY + row.classId : null);
+    if (!key) continue;
+    const s = stats[key] || (stats[key] = {
       standingFalsePositive: false, pendingFalsePositive: false, falsePositives: 0, fired: 0,
+      denied: 0, wouldDeny: 0, evaluated: 0, lastFired: null,
     });
     if (row.decision === "false-positive") {
       s.falsePositives++;
@@ -628,6 +664,15 @@ function ledgerStats(root) {
       s.pendingFalsePositive = false;
     } else if (row.decision === "would-deny" || row.decision === "deny") {
       s.fired++;
+      s.evaluated++;
+      if (row.decision === "deny") s.denied++; else s.wouldDeny++;
+      if (typeof row.ts === "string" && (s.lastFired === null || row.ts > s.lastFired)) s.lastFired = row.ts;
+    } else if (row.decision === "pass" && row.check !== "unusable") {
+      // A guard whose check will not load leaves a pass row on every call and
+      // evaluates nothing. Counting those would report "caught 0 out of 4
+      // looks" for a guard that never looked once — a denominator describing
+      // coverage nobody had, on the row `problem` separately calls broken.
+      s.evaluated++;
     }
   }
   return stats;
@@ -824,6 +869,224 @@ function ledgerRow(base, extra) {
 }
 
 // ---------------------------------------------------------------------------
+// Proof of verification
+// ---------------------------------------------------------------------------
+//
+// The headline gap this plugin exists to close: a session that ran the tests
+// and a session that only said it did used to leave identical traces, so "the
+// tests pass" was contradictable by nothing jig holds.
+//
+// Two halves that must not blur. A Bash call running a command
+// `.jig/verify.json` names is EVIDENCE — it leaves a row, and pass and fail
+// split on WHICH event fired, because that is the signal the host documents. A
+// Stop is additionalContext ONLY: SCOPE's derail pass answers "May the Stop
+// hook exit 2" with a No, since a block at Stop has no fixture pair behind it.
+//
+// Both halves fail open. A row that cannot be appended and a `git status` that
+// will not run are disclosed, never a reason to hold a tool call or a stop.
+
+function isWitnessEvent(event, tool) {
+  // PostToolUseFailure is registered for Bash alone, so it is a witness however
+  // the payload names its tool. PostToolUse carries the edit guards too, and
+  // only the Bash half of it is a witness — a guard must never evaluate here.
+  return event === "PostToolUseFailure" || (event === "PostToolUse" && tool === "Bash");
+}
+
+// The lane entries as installed, or none. Read through the engine's own reader
+// so the file has one interpretation: a second parse here would be a second
+// answer to what counts as an entry.
+function verifyEntries(root) {
+  let raw;
+  try {
+    raw = fs.readFileSync(statePath(root, VERIFY_FILE), "utf-8");
+  } catch {
+    return [];
+  }
+  return proposedVerifyEntries(raw) || [];
+}
+
+// The entry this command IS, or null. Shell-word split and then matched whole:
+// a witness says this exact argv ran, not that something resembling it did.
+// A command carrying a pipe, a redirect or a second statement splits into words
+// no entry equals, which is the right answer — an entry names one program with
+// its arguments, and jig runs it with no shell for that reason.
+function verifyEntryFor(entries, command) {
+  const argv = String(command || "").trim().split(/\s+/).filter(Boolean);
+  if (!argv.length) return null;
+  return entries.find((e) => Array.isArray(e.argv) && e.argv.length === argv.length &&
+    e.argv.every((word, i) => word === argv[i])) || null;
+}
+
+// Recorded only where the payload carries one. The hooks doc documents the
+// pass/fail split as which event fired and states no exit-code field, so an
+// absent code is the normal case — and a code jig guessed at would be a number
+// nobody measured in a file the review surface reads back as fact.
+function exitCodeOf(payload) {
+  const res = payload && payload.tool_response;
+  if (!isObject(res)) return null;
+  for (const key of ["exit_code", "exitCode"]) {
+    if (Number.isInteger(res[key])) return res[key];
+  }
+  return null;
+}
+
+// The verification rows, in the order they were written. Its own reader rather
+// than a field on `ledgerStats`: those stats are keyed by guardId and a witness
+// row carries none, which is also what keeps a test run out of the arming model.
+//
+// The cost of that second reader, stated plainly because C9 asked for it rather
+// than for compaction: this is a second full-file pass over a ledger that never
+// rotates, paid on every review, every inventory, and every Stop that has a
+// lane entry to check. A repository with no `.jig/verify.json` pays neither —
+// `stopContext` returns before it reaches here.
+function verifyRows(root) {
+  let lines = [];
+  try {
+    lines = fs.readFileSync(statePath(root, LEDGER_FILE), "utf-8").split("\n").filter((l) => l.trim());
+  } catch {
+    return [];
+  }
+  const rows = [];
+  for (const line of lines) {
+    let row;
+    try { row = JSON.parse(line); } catch { continue; }
+    if (typeof row.verify === "string" && (row.decision === "verified" || row.decision === "verify-failed")) {
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
+// The last green run per entry id. Pure, and taken from the row's own timestamp
+// rather than its position, because the ledger is appended to by more than one
+// lane and only the timestamp orders them.
+function lastGreenRuns(rows) {
+  const last = new Map();
+  for (const row of rows) {
+    if (row.decision !== "verified" || typeof row.ts !== "string") continue;
+    const prev = last.get(row.verify);
+    if (!prev || prev < row.ts) last.set(row.verify, row.ts);
+  }
+  return last;
+}
+
+// The one line the completion moment gets, or null when there is nothing true
+// to say. Pure: the rows, the entries and the changed paths all arrive as
+// arguments, so the tests walk it without a repository.
+//
+// It over-reads in the safe direction on purpose. An edit the last green run
+// already covered still counts, so the worst case is a line telling somebody to
+// re-run tests they ran a minute ago — printed beside the timestamp of that run
+// so they can see it. The reverse, staying quiet about edits nothing verified,
+// is the silence this whole thing exists to end.
+function staleVerification(rows, entries, changedPaths) {
+  const green = lastGreenRuns(rows);
+  for (const entry of entries) {
+    if (!entry || typeof entry.id !== "string") continue;
+    const globs = Array.isArray(entry.paths) && entry.paths.length ? entry.paths : null;
+    const hits = globs ? changedPaths.filter((p) => matchesPathGlobs(globs, p)) : changedPaths;
+    if (!hits.length) continue;
+    const at = green.get(entry.id) || null;
+    return "jig: " + hits.length + " edit" + (hits.length === 1 ? "" : "s") + " under " +
+      (globs ? globs.join(", ") : "this repository") +
+      (at ? " since the last green run of " + entry.id + " (" + at + ")."
+          : ", and no green run of " + entry.id + " is recorded.");
+  }
+  return null;
+}
+
+// `XY <path>`, or `XY <old> -> <new>` for a rename — the destination is the path
+// that exists now. git quotes a path with unusual bytes in it; the quotes come
+// off so a glob sees the same spelling every other reader of a path does.
+function porcelainPath(line) {
+  let rel = line.slice(3);
+  const arrow = rel.indexOf(" -> ");
+  if (arrow !== -1) rel = rel.slice(arrow + 4);
+  return rel.trim().replace(/^"|"$/g, "");
+}
+
+// One subprocess, at Stop only. Nothing else in this file starts one — a spawn
+// on every tool call is the standing tax jig promised not to be — and the
+// completion moment is one turn, not one call. Null means git could not answer,
+// which is a disclosed gap rather than an empty working tree.
+function changedPaths(root) {
+  const { spawnSync } = require("child_process");
+  // `-uall` because git collapses an untracked directory to `src/`, and a path
+  // glob written for `src/**/*.js` matches nothing in that. A whole new
+  // directory of unverified source is exactly the case worth naming, so it has
+  // to arrive as files. Ignored paths are still ignored, which is what keeps
+  // this off `node_modules`.
+  const run = spawnSync("git", ["status", "--porcelain", "-uall"], {
+    cwd: root, shell: false, windowsHide: true, encoding: "utf-8", maxBuffer: 4 * 1024 * 1024,
+  });
+  if (run.error || run.status !== 0) return null;
+  return String(run.stdout || "").split("\n").filter((l) => l.trim()).map(porcelainPath).filter(Boolean);
+}
+
+// The evidence half. No guard is consulted and none can be: this returns before
+// the config is read at all.
+function witness(root, event, base, payload, warn) {
+  const entry = verifyEntryFor(verifyEntries(root), (payload.tool_input || {}).command);
+  if (!entry) return { jig: { event, decision: "pass", verify: null } };
+  const exitCode = exitCodeOf(payload);
+  // Which event fired is the documented signal and stays the answer wherever
+  // the payload carries no code. A code it DID carry outranks it: a row reading
+  // `verified` beside `exitCode: 1` is a coverage claim contradicted by its own
+  // evidence, and a host that routes a failing command to PostToolUse would
+  // otherwise make every red run green on jig's headline surface. The entry's
+  // own `expectedExit` is what green means for it (SCOPE, "What counts as
+  // caught for a non-zero exit"), because a tool that catches by exiting
+  // non-zero has not failed when it does.
+  const expected = Number.isInteger(entry.expectedExit) ? entry.expectedExit : 0;
+  const passed = exitCode === null ? event === "PostToolUse" : exitCode === expected;
+  try {
+    appendLedger(root, ledgerRow(base, {
+      actor: "claude-session", guardId: null, classId: null,
+      decision: passed ? "verified" : "verify-failed", matched: null, durMs: 0,
+      rest: { verify: entry.id, event, exitCode },
+    }));
+  } catch (err) {
+    // A row that will not append is a gap in the evidence and never a reason to
+    // touch the tool call that produced it.
+    warn("jig: the " + entry.id + " run was not recorded (" + err.message + ")");
+  }
+  return { jig: { event, decision: "pass", verify: { entry: entry.id, passed, exitCode } } };
+}
+
+// The completion moment. One line of additionalContext and nothing else — no
+// decision, no exit 2, no guard.
+function stopContext(root, event, base, warn) {
+  let line = null;
+  let problem = null;
+  try {
+    // Nothing to verify, nothing to say — and nothing to pay for saying it.
+    // Reached before the spawn on purpose: a repository with no lane entries
+    // would otherwise run `git status` and read the whole ledger once per turn
+    // for the life of the repository, and fail open loudly on every one of them
+    // where git cannot answer.
+    const entries = verifyEntries(root);
+    if (!entries.length) return { jig: { event, decision: "pass", stale: null } };
+    const changed = changedPaths(root);
+    if (changed === null) problem = "git status could not be read here";
+    else line = staleVerification(verifyRows(root), entries, changed);
+  } catch (err) {
+    problem = err.message;
+  }
+  if (problem) {
+    warn("jig: no verification check at this stop — " + problem);
+    try {
+      appendLedger(root, ledgerRow(base, {
+        actor: "jig", guardId: null, classId: null, decision: "pass", matched: null,
+        durMs: 0, rest: { stop: event, failedOpen: problem },
+      }));
+    } catch { /* a ledger that will not append is not a reason to hold a stop */ }
+  }
+  const out = { jig: { event, decision: "pass", stale: line } };
+  if (line) out.hookSpecificOutput = { hookEventName: event, additionalContext: line };
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // One event, start to finish
 // ---------------------------------------------------------------------------
 
@@ -834,6 +1097,12 @@ function runEvent(root, event, payload, warn) {
     tool: typeof payload.tool_name === "string" ? payload.tool_name : null,
     path: typeof input.file_path === "string" ? input.file_path : null,
   };
+  // The two events that witness a verification run, and the two that read those
+  // rows back, are answered before the config is even opened. That is what makes
+  // "guards never evaluate on these events" mechanical rather than promised.
+  if (isWitnessEvent(event, base.tool)) return witness(root, event, base, payload, warn);
+  if (STOP_EVENTS.includes(event)) return stopContext(root, event, base, warn);
+
   // The host names the file its own way; every glob jig matches against it is
   // repo-relative. This is the only place that holds the root, so this is where
   // the two are put in one namespace. The ledger keeps the host's spelling.
@@ -958,13 +1227,16 @@ function runEvent(root, event, payload, warn) {
 }
 
 module.exports = {
-  HOOK_RUNNERS, EVENT_TOOLS, DEFAULT_MODE, CONFIG_KEYS, CONFIG_MODES, GUARD_KEYS, MATCHER_KEYS,
+  HOOK_RUNNERS, HOOK_EVENTS, STOP_EVENTS,
+  EVENT_TOOLS, DEFAULT_MODE, CONFIG_KEYS, CONFIG_MODES, GUARD_KEYS, MATCHER_KEYS,
   DEFAULT_BRANCHES, PROVENANCES, DENY_PARTS,
   CONFIG_FILE, LEDGER_FILE, OFF_FILE, CHECKS_DIR,
   statePath, isOff, isConfigured, readInput,
   readConfig, validateConfig,
   loadCheck, sessionDetectors, denyOf, denyText, checkProof,
   blankRegions, globToRegExp, pushBranch, branchInScope, evaluateGuard, evalSessionDetector,
-  effectiveState, ledgerStats, zoneForcesObserve,
+  effectiveState, ledgerStats, CLASS_KEY, zoneForcesObserve,
   appendLedger, runEvent,
+  isWitnessEvent, verifyEntries, verifyEntryFor, exitCodeOf,
+  verifyRows, lastGreenRuns, staleVerification, porcelainPath, changedPaths,
 };

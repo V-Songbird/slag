@@ -26,7 +26,13 @@ lane_log "ran"
 # is a different project: a violation staged and then edited back out lands in
 # HEAD unchecked, and a violation left in the file but never staged blocks a
 # commit that does not contain it. CI and a manual run keep the walk.
-node .jig/checks/run.mjs --staged || exit 1
+#
+# `--ledger commit` because a catch at commit time used to leave no record
+# anywhere: review read the session lane alone, and a class that had only ever
+# fired here looked like one that had never fired. The rows carry the class, the
+# file and the line and never the source, and a row that will not append is a
+# disclosed miss rather than a failed commit.
+node .jig/checks/run.mjs --staged --ledger commit || exit 1
 # The opt-in half. `.jig/verify.json` names the linter, type checker and test
 # runner the owner ticked; only an entry that names the `commit` lane runs here,
 # and nothing names it unless the owner asked for it when the plan was made — a

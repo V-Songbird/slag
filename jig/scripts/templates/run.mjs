@@ -10,6 +10,8 @@
 //   node .jig/checks/run.mjs                 walk the project and check it
 //   node .jig/checks/run.mjs <path> [...]    check exactly these paths
 //   node .jig/checks/run.mjs --staged        check the staged bytes instead
+//   node .jig/checks/run.mjs --ledger commit record what was found in the
+//                                            ledger, under that lane's name
 //   node .jig/checks/run.mjs --selftest      seed one violation per check and
 //                                            prove each check catches its own
 //   node .jig/checks/run.mjs --verify --lane <ci|commit> [--entry <id>]
@@ -847,7 +849,11 @@ function selftestReport(results) {
 
 async function main(argv) {
   const json = argv.includes("--json");
-  const paths = argv.filter((a) => !a.startsWith("--"));
+  const ledger = flagValue(argv, "--ledger");
+  // The lane name is a value, not a path to check. Without the second clause
+  // `--ledger commit` would scope the whole run to a file called `commit`,
+  // which exists nowhere — a lane that checked nothing and said so cleanly.
+  const paths = argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ledger");
   if (argv.includes("--verify")) {
     const out = runVerify(flagValue(argv, "--lane") || "ci", flagValue(argv, "--entry"));
     process.stdout.write((json ? JSON.stringify({ verify: out }, null, 2) : verifyReport(out)) + "\n");
@@ -863,11 +869,38 @@ async function main(argv) {
     return results.some((r) => r.caught === false) || !results.length ? 1 : 0;
   }
   const out = await runChecks(ROOT, paths, argv.includes("--staged"));
+  if (ledger) ledgerFindings(ledger, out.findings);
   process.stdout.write((json ? JSON.stringify(out, null, 2) : report(out)) + "\n");
   // A truncated walk exits non-zero for the same reason it prints a line: the
   // exit code is the only thing a hook or a CI step reads, and 0 there says the
   // project was checked.
   return out.findings.length || out.broken.length || out.truncated ? 1 : 0;
+}
+
+// One row per finding, in the ledger the session lane already writes. Only a
+// lane that names itself writes here: a manual run stays the read-only thing
+// the activation doc promises, and only the shim passes the flag.
+//
+// Class facts and nothing else — the class that spoke, the file and the line.
+// Never the pattern that fired and never the matched text: a matcher or a line
+// of somebody's source, sitting in a record a report reads back, is a thing
+// that gets pasted somewhere without review. The finding already carries the
+// pattern for the person reading the report; the ledger is not that reader.
+//
+// `deny` and `armed` because the commit lane has one mode: a finding here exits
+// 1 and the shim stops the commit. There is no observe half to distinguish.
+//
+// Wrapped whole, and deliberately silent. A ledger row that will not append is
+// a missing piece of evidence, never a reason to fail somebody's commit.
+function ledgerFindings(lane, findings) {
+  try {
+    const ts = new Date().toISOString();
+    const rows = findings.map((f) => JSON.stringify({
+      ts, lane, session: null, actor: null, guardId: null, classId: f.classId,
+      mode: "armed", decision: "deny", tool: null, matched: null, path: f.path, line: f.line,
+    }) + "\n").join("");
+    if (rows) fs.appendFileSync(path.join(HERE, "..", "ledger.jsonl"), rows);
+  } catch { /* evidence that cannot be written is not a reason to block */ }
 }
 
 // The same row the commit shim writes, in the same file: a lane that goes quiet

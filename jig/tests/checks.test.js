@@ -804,7 +804,134 @@ test("a --staged run whose git cannot answer is a partial scan, not a pass", () 
 
 test("the commit shim runs the driver over the staged bytes", () => {
   const shim = templateOf(path.join(TEMPLATE_DIR, "hook-pre-commit.sh"));
-  assert.match(shim, /node \.jig\/checks\/run\.mjs --staged \|\| exit 1/);
+  assert.match(shim, /node \.jig\/checks\/run\.mjs --staged --ledger commit \|\| exit 1/);
+});
+
+// ---------------------------------------------------------------------------
+// `--ledger`: the lane that catches something leaves a record of it
+// ---------------------------------------------------------------------------
+//
+// The session lane ledgers every call. The commit lane used to catch a
+// violation, stop the commit and write nothing anywhere, so `/jig:review` read
+// one lane out of three and a class that had only ever fired at commit time was
+// indistinguishable from one that had never fired.
+
+function ledgerRows(root) {
+  const file = path.join(root, ".jig", "ledger.jsonl");
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, "utf-8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+}
+
+test("a commit-lane run records the class, the file and the line it caught", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  stagedThenEdited(root, "src/bad.js", A.EMPTY_CATCH.fixtures.violation, A.EMPTY_CATCH.fixtures.nearMiss);
+  assert.equal(driver(root, ["--staged", "--ledger", "commit"]).status, 1);
+  const rows = ledgerRows(root);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].lane, "commit");
+  assert.equal(rows[0].classId, "empty-catch");
+  assert.equal(rows[0].path, "src/bad.js");
+  assert.equal(rows[0].line, 4);
+  // The commit lane has one mode: the driver exits 1 and the shim stops the
+  // commit. A row that read `would-deny` would describe a lane that does not
+  // exist here.
+  assert.equal(rows[0].decision, "deny");
+  assert.equal(rows[0].mode, "armed");
+  assert.match(rows[0].ts, /^\d{4}-\d\d-\d\dT/);
+  // No guard row named this class, so the row carries the one identity it has.
+  // Inventing a guard id would put a line in review's guard table for something
+  // the config never named.
+  assert.equal(rows[0].guardId, null);
+});
+
+test("a ledgered row carries no pattern and no line of the source it read", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  seedViolations(root);
+  driver(root, ["--ledger", "commit"]);
+  const text = fs.readFileSync(path.join(root, ".jig", "ledger.jsonl"), "utf-8");
+  assert.ok(text.trim(), "the run recorded nothing at all");
+  // Both halves of what SCOPE keeps out of the ledger: the matcher and the
+  // source. Either one, rendered into a report somebody reads back, is text
+  // that gets pasted into a file without review.
+  const pattern = A.EMPTY_CATCH.detectors.find((d) => d.lever === "check-driver").params.patterns[0];
+  assert.equal(text.includes(pattern), false, "the ledger carries the pattern that fired");
+  for (const word of ["seeded", "risky"]) {
+    assert.equal(text.includes(word), false, "the ledger carries a line of the source it read");
+  }
+  for (const row of ledgerRows(root)) assert.equal(row.matched, null);
+});
+
+test("the lane name is not read as a path to check", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  seedViolations(root);
+  // Without the flag's value being taken out of the path list, this run scopes
+  // itself to a file called `commit`, finds nothing and exits 0 — a lane that
+  // checked nothing and reported a clean bill of health.
+  const { status, out } = driverJson(root, ["--ledger", "commit"]);
+  assert.equal(status, 1);
+  assert.deepEqual(out.findings.map((f) => f.path), ["src/bad.js"]);
+});
+
+test("a run that names no lane writes nothing", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  seedViolations(root);
+  // The positive control first: a ledger that can never be written is also a
+  // ledger no hand run wrote to, and this test would pass for that reason.
+  assert.equal(driver(root, ["--ledger", "commit"]).status, 1);
+  const written = ledgerRows(root).length;
+  assert.ok(written > 0, "the lane run recorded nothing, so the silence below proves nothing");
+  assert.equal(driver(root, []).status, 1);
+  // The activation note promises a hand run "writes no files and changes
+  // nothing", and only the shim passes the flag.
+  assert.equal(ledgerRows(root).length, written);
+});
+
+// The rows are only worth writing if something reads them back. Before the
+// review surface keyed them by class, a class the commit lane caught every day
+// was reported as one that had never fired — and offered for retirement on that
+// count. Driven end to end, so the driver's row shape and the reader's are
+// pinned to each other rather than to a comment.
+test("a class the commit lane caught is not a guard that never fired", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  const quiet = engine.cmdReview(root);
+  assert.equal(quiet.guards.length, 1);
+  assert.equal(quiet.guards[0].otherLanes, 0);
+  assert.deepEqual(engine.cmdRerun(root).neverFired, [quiet.guards[0].guardId]);
+
+  stagedThenEdited(root, "src/bad.js", A.EMPTY_CATCH.fixtures.violation, A.EMPTY_CATCH.fixtures.nearMiss);
+  assert.equal(driver(root, ["--staged", "--ledger", "commit"]).status, 1);
+
+  const after = engine.cmdReview(root);
+  assert.equal(after.guards[0].otherLanes, 1, "the commit-lane catch reached no reporting surface");
+  // The session lane's own numbers are untouched: that lane has a denominator
+  // and the commit lane has none, so the two never merge.
+  assert.equal(after.guards[0].fired, 0);
+  assert.equal(after.guards[0].evaluated, 0);
+  assert.deepEqual(engine.cmdRerun(root).neverFired, []);
+});
+
+test("a ledger that cannot be appended to does not fail the commit", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  seedViolations(root);
+  // Any append error would do; a directory where the file goes is the one that
+  // reproduces on every platform.
+  fs.mkdirSync(path.join(root, ".jig", "ledger.jsonl"));
+  const run = driver(root, ["--ledger", "commit"]);
+  assert.equal(run.status, 1, "the run died instead of reporting its finding: " + run.stderr);
+  assert.match(run.stdout, /src\/bad\.js:\d+ {2}empty-catch/);
+  assert.doesNotMatch(run.stderr, /failed to run/);
+});
+
+test("the driver writes the ledger the runner reads", () => {
+  assert.match(templateOf(path.join(TEMPLATE_DIR, "run.mjs")),
+    new RegExp("\"\\.\\.\", \"" + lib.LEDGER_FILE.replace(".", "\\.") + "\""),
+    "the driver and the runner name different ledger files");
 });
 
 test("a check module that will not load is reported and the others still run", () => {

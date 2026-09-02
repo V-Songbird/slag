@@ -135,6 +135,13 @@ Report a dead lane in plain terms: what does not run, what still does, and the
 one command that fixes it. Name the fix; never run it. Applying it is an
 approved, reversible change like any other, which means `/jig:jig`.
 
+`verify` is one row per lane entry — the commands the lanes run besides the
+check driver — and `lastGreen` is the last time jig WITNESSED that command run
+green inside a Claude session, or `null` for one no session here has been seen
+to pass. A repository whose CI runs it on every push reads `null`. Report it with
+the lanes: a lane that is live and an entry that has never run green are two
+different facts, and only the second one answers "do the tests pass".
+
 ## Closing
 
 End with one line naming where to go next, and only if something earned it:

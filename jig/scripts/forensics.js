@@ -28,6 +28,7 @@
 // construction — an author line and a Co-Authored-By trailer are the only
 // evidence git offers about who was driving.
 
+const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
@@ -106,6 +107,12 @@ const THRESHOLDS = {
 };
 
 const MAX_BUFFER = 64 * 1024 * 1024;
+
+// Said on every report that carries an actor split, because it is true of all
+// of them: git offers an author line and a Co-Authored-By trailer and nothing
+// else about who was driving.
+const ATTRIBUTION = "best-effort — author line and Co-Authored-By trailers are the only evidence git carries";
+
 const US = "\u001f";
 const RS = "\u001e";
 
@@ -457,6 +464,44 @@ function rank(hitsByClass, classes) {
 }
 
 // ---------------------------------------------------------------------------
+// Since the install
+// ---------------------------------------------------------------------------
+
+// What the repository has done since jig was installed, read from git rather
+// than from the ledger. The ledger only ever saw the agent sessions jig's own
+// hooks ran inside; a commit from a teammate, from CI or from a plain terminal
+// never touched it, so an owner coming back a month later gets day-one facts.
+// `before` and `after` split the same content hits on the install date, which
+// is the one number that answers "is this class still happening".
+function sinceInstallReport(since, commits, byShaDate, hitsByClass, contentDepth) {
+  const at = Date.parse(since);
+  if (!Number.isFinite(at)) return null;
+  const after = commits.filter((c) => Date.parse(c.date) >= at);
+  const byClass = {};
+  for (const [classId, hits] of hitsByClass) {
+    const seen = hits.filter((h) => Date.parse(byShaDate.get(h.sha)) >= at).length;
+    byClass[classId] = { before: hits.length - seen, after: seen };
+  }
+  // `truncated` answers for the window `byClass` was built from, which is the
+  // CONTENT pass and not the deeper log pass above it. Read against the log,
+  // it said `false` for a repository whose install predates its 200th-newest
+  // commit while every class read `before: 0` — the same report saying the
+  // history reaches back and that nothing existed before the install. Depth 0
+  // is the fallback paths, where no diff was read at all and an empty
+  // `byClass` means "not mined" rather than "no longer happening".
+  const read = contentDepth > 0 ? commits.slice(0, contentDepth) : [];
+  const oldest = read.length ? Date.parse(read[read.length - 1].date) : null;
+  return {
+    since,
+    commits: after.length,
+    actors: tallyActors(after.map((c) => c.actor)),
+    truncated: oldest === null || oldest > at,
+    byClass,
+    attribution: ATTRIBUTION,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // The public call
 // ---------------------------------------------------------------------------
 
@@ -475,7 +520,8 @@ function runForensics(root, opts) {
     cleared: [],
     incidents: [],
     ranking: rank(new Map(), classes),
-    attribution: "best-effort — author line and Co-Authored-By trailers are the only evidence git carries",
+    attribution: ATTRIBUTION,
+    sinceInstall: null,
     notes: [],
   };
 
@@ -483,6 +529,15 @@ function runForensics(root, opts) {
 
   const commits = readLog(root, th.logCommits);
   if (commits === null || commits.length === 0) return { ...empty, fallback: "no-history" };
+
+  // The since-install view survives every fallback below it. A squash-merged or
+  // young history destroys the per-commit SIGNAL, but "142 commits landed here
+  // since jig was installed" is still a fact, and it is the whole point of a
+  // report somebody opens a month later.
+  const byShaDate = new Map(commits.map((c) => [c.sha, c.date]));
+  const since = (hits, contentDepth) =>
+    (typeof options.since === "string"
+      ? sinceInstallReport(options.since, commits, byShaDate, hits, contentDepth || 0) : null);
 
   const merges = commits.filter((c) => c.parents.length > 1).length;
   const squashSubjects = commits.filter((c) => /\(#\d+\)\s*$/.test(c.subject)).length;
@@ -500,13 +555,19 @@ function runForensics(root, opts) {
   // A young or squash-merged history destroys the per-commit signal every one
   // of these thresholds is calibrated against — a squash collapses the fix
   // cluster into the feature that caused it. Say nothing rather than guess.
-  if (commits.length < th.minCommits) return { ...empty, repo, fallback: "young-history" };
-  if (squashed) return { ...empty, repo, fallback: "squash-merged" };
+  if (commits.length < th.minCommits) {
+    return { ...empty, repo, fallback: "young-history", sinceInstall: since(new Map()) };
+  }
+  if (squashed) return { ...empty, repo, fallback: "squash-merged", sinceInstall: since(new Map()) };
 
   const byShaActor = new Map(commits.map((c) => [c.sha, c.actor]));
   const detectors = contentDetectors(classes);
   const notes = [];
-  const diffs = readDiffs(root, Math.min(th.diffCommits, commits.length), diffPathspec(classes));
+  // How deep the content pass actually went. `sinceInstall.truncated` answers
+  // for this window, not the log one above it, so it has to travel with the
+  // hits it describes.
+  const diffDepth = Math.min(th.diffCommits, commits.length);
+  const diffs = readDiffs(root, diffDepth, diffPathspec(classes));
   if (diffs === null) {
     notes.push("the diff pass could not be read, so content signals are missing from this ranking");
   }
@@ -547,7 +608,7 @@ function runForensics(root, opts) {
   // signal is a coincidence, and showing it invites the interview to build a
   // story on it.
   if (cleared.length < th.clearedSignals) {
-    return { ...empty, repo, cleared, fallback: "below-threshold", notes };
+    return { ...empty, repo, cleared, fallback: "below-threshold", sinceInstall: since(hitsByClass, diffs ? diffDepth : 0), notes };
   }
 
   return {
@@ -565,7 +626,8 @@ function runForensics(root, opts) {
       ...found["assertion-reduced"],
     ],
     ranking: rank(hitsByClass, classes),
-    attribution: "best-effort — author line and Co-Authored-By trailers are the only evidence git carries",
+    attribution: ATTRIBUTION,
+    sinceInstall: since(hitsByClass, diffs ? diffDepth : 0),
     notes,
   };
 }
@@ -578,7 +640,9 @@ function main(argv) {
   const root = typeof opts.root === "string" ? path.resolve(opts.root) : process.cwd();
   const thresholds = {};
   if (opts.commits) thresholds.diffCommits = Number(opts.commits);
-  process.stdout.write(JSON.stringify(runForensics(root, { thresholds }), null, 2) + "\n");
+  const options = { thresholds };
+  if (typeof opts.since === "string") options.since = opts.since;
+  process.stdout.write(JSON.stringify(runForensics(root, options), null, 2) + "\n");
 }
 
 if (require.main === module) main(process.argv.slice(2));
@@ -602,6 +666,7 @@ module.exports = {
   deletedTests,
   weakenedAssertions,
   contentHits,
+  sinceInstallReport,
   catalogueOrder,
   rank,
   runForensics,

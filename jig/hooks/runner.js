@@ -2,12 +2,13 @@
 "use strict";
 
 // The single dispatch point. `hooks.json` registers exactly one shell-free
-// entry per event and passes the event name as argv[1], so PreToolUse[Bash] and
-// PostToolUse[Edit|Write] cost one node process each and every guard for that
-// event is evaluated inside it — no chaining, no second spawn.
+// entry per event and passes the event name as argv[1], so each event costs one
+// node process and every guard for that event is evaluated inside it — no
+// chaining, no second spawn.
 //
-// Two spawns ride every Bash and every Edit/Write in every repo where jig is
-// installed. That is why the two instant-exit checks happen
+// Two spawns ride every Bash — one before it for the guards, one after it to
+// witness a verification run — and one rides every Edit/Write, in every repo
+// where jig is installed. That is why the two instant-exit checks happen
 // before stdin is read and before the config is parsed: in a repository that
 // never ran the interview, this file does two `existsSync` calls and stops.
 
@@ -15,7 +16,9 @@ const lib = require("./jig-lib");
 
 function main(argv) {
   const event = argv[0];
-  if (!lib.HOOK_RUNNERS.includes(event)) return;
+  // The dispatchable set, not the set a guard may name: Stop and the two
+  // witness events run here and carry no guard at all.
+  if (!lib.HOOK_EVENTS.includes(event)) return;
   const root = process.cwd();
   if (lib.isOff(root) || !lib.isConfigured(root)) return;
 

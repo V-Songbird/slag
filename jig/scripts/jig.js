@@ -4690,6 +4690,12 @@ function guardEvidence(lib, root, guard, stats) {
   const record = lib.loadCheck(root, guard.check);
   const dets = record.problem ? [] : lib.sessionDetectors(record.mod, guard.runner);
   const s = stats[guard.id] || {};
+  // The same class, caught in a lane the session hook never saw. The commit
+  // driver runs the check with no guard and no denominator, so its catches
+  // cannot join `fired`/`evaluated` — but a guard whose class only ever fires
+  // there read as one that had never fired, which is the retirement offer the
+  // review skill makes off that count.
+  const lane = stats[lib.CLASS_KEY + guard.classId] || {};
   return {
     problem: record.problem || (dets.length ? null : "the installed check `" + guard.check +
       "` declares no " + guard.runner + " detector"),
@@ -4699,6 +4705,15 @@ function guardEvidence(lib, root, guard, stats) {
     // there is nothing honest to say about a module that is not there.
     mod: record.problem ? null : record.mod,
     fired: s.fired || 0,
+    // What `fired` never said: out of how many calls, split by what the guard
+    // was actually allowed to do, and when the last catch was. A guard that
+    // caught four out of four is a different guard from one that caught four
+    // out of four thousand, and the report used to render both the same way.
+    evaluated: s.evaluated || 0,
+    otherLanes: lane.fired || 0,
+    denied: s.denied || 0,
+    wouldDeny: s.wouldDeny || 0,
+    lastFired: s.lastFired || null,
     wavedOff: s.falsePositives || 0,
     // A wave-off the owner raised and never approved the change for. The guard
     // is still doing whatever its config says, which is the opposite of what
@@ -4802,6 +4817,7 @@ function cmdReview(root) {
       why: "there is no " + STATE_DIR + "/" + CONFIG_FILE + " here, so no guards are installed",
       guards: [],
       lanes: lanesOf(root, []),
+      verify: verifyStatus(root),
       ledger: { file: STATE_DIR + "/" + LEDGER_FILE, lines: ledgerLines(root) },
     };
   }
@@ -4825,6 +4841,14 @@ function cmdReview(root) {
       provable: e.evidence.proof !== null,
       provenance: g.provenance,
       fired: e.fired,
+      evaluated: e.evaluated,
+      // Catches of this guard's class at commit time, where the check runs
+      // without a guard. Its own field rather than part of `fired`: that lane
+      // has no denominator, and the two numbers answer different questions.
+      otherLanes: e.otherLanes,
+      denied: e.denied,
+      wouldDeny: e.wouldDeny,
+      lastFired: e.lastFired,
       wavedOff: e.wavedOff,
       pendingWaveOff: e.pendingWaveOff,
       // A guard whose module will not load or carries nothing for its event is
@@ -4847,8 +4871,28 @@ function cmdReview(root) {
     installed: true,
     guards: rows,
     lanes: lanesOf(root, rows),
+    verify: verifyStatus(root),
     ledger: { file: STATE_DIR + "/" + LEDGER_FILE, lines: ledgerLines(root) },
   };
+}
+
+// The last time each lane entry was seen to run green, from the witness rows
+// the session hook writes. This is the answer to "do the tests pass" that does
+// not depend on anybody saying so: an entry with `lastGreen: null` has never
+// been observed passing here, whatever a transcript claims. Its own function
+// because a repository with no guard config still has lanes and still has
+// rows — the question survives the config being gone.
+function verifyStatus(root) {
+  const lib = require("../hooks/jig-lib.js");
+  const green = lib.lastGreenRuns(lib.verifyRows(root));
+  return lib.verifyEntries(root)
+    .filter((e) => typeof e.id === "string")
+    .map((e) => ({
+      id: e.id,
+      lanes: Array.isArray(e.lanes) ? e.lanes : [],
+      paths: Array.isArray(e.paths) ? e.paths : [],
+      lastGreen: green.get(e.id) || null,
+    }));
 }
 
 // Which lanes actually run today, read fresh rather than remembered. Wiring is
@@ -4974,6 +5018,7 @@ function cmdInventory(root) {
     checks: installedChecks(root),
     artifacts,
     lanes: review ? review.lanes : lanesOf(root, []),
+    verify: review ? review.verify : verifyStatus(root),
     ledger: review ? review.ledger : { file: STATE_DIR + "/" + LEDGER_FILE, lines: ledgerLines(root) },
   };
 }
@@ -5152,13 +5197,29 @@ function cmdRerun(root) {
   } catch {
     backlog = [];
   }
+  // The ledger only ever saw the agent sessions jig's own hooks ran inside, so
+  // on its own this report says the same thing a month later that it said on
+  // day one. git saw every lane and every teammate; mine it from the install
+  // date. Failing open — an unreadable history subtracts a section, never the
+  // report.
+  let sinceInstall = null;
+  if (installedAt) {
+    try {
+      sinceInstall = require("./forensics.js").runForensics(root, { since: installedAt }).sinceInstall;
+    } catch {
+      sinceInstall = null;
+    }
+  }
   return {
     ok: true,
     schemaVersion: SCHEMA_VERSION,
     installedAt,
+    sinceInstall,
     drifted: states.filter((s) => s.state === "drifted").map((s) => s.path),
     guards,
-    neverFired: guards.filter((g) => g.fired === 0).map((g) => g.guardId),
+    // A class the commit lane has caught is not a class nothing catches, so it
+    // is not a retirement candidate however quiet the session lane has been.
+    neverFired: guards.filter((g) => g.fired === 0 && !g.otherLanes).map((g) => g.guardId),
     armable: guards.filter((g) => g.armable).map((g) => g.guardId),
     backlog,
     ledgerLines: ledgerLines(root),

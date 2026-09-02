@@ -44,8 +44,10 @@ function tmpDir(tag) {
   return dir;
 }
 
-function git(root, args) {
-  const r = spawnSync("git", args, { cwd: root, encoding: "utf-8", windowsHide: true });
+function git(root, args, env) {
+  const r = spawnSync("git", args, {
+    cwd: root, encoding: "utf-8", windowsHide: true, env: { ...process.env, ...(env || {}) },
+  });
   if (r.status !== 0) throw new Error("git " + args.join(" ") + " failed: " + (r.stderr || r.stdout));
   return r.stdout;
 }
@@ -78,7 +80,9 @@ function commit(root, files, subject, opts) {
   if (o.body) args.push("-m", o.body);
   if (o.trailer) args.push("-m", o.trailer);
   if (o.author) args.push("--author=" + o.author);
-  git(root, args);
+  // `date` pins when the commit landed, which is the only way a test can put
+  // one either side of an install timestamp deterministically.
+  git(root, args, o.date ? { GIT_AUTHOR_DATE: o.date, GIT_COMMITTER_DATE: o.date } : null);
   return git(root, ["rev-parse", "HEAD"]).trim();
 }
 
@@ -409,6 +413,121 @@ test("the CLI prints one JSON object", () => {
   const out = JSON.parse(r.stdout);
   assert.equal(out.ok, true);
   assert.equal(out.schemaVersion, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Since the install — the month-later view
+// ---------------------------------------------------------------------------
+
+const INSTALL = "2026-06-01T00:00:00.000Z";
+const BEFORE = "2026-05-01T12:00:00Z";
+const AFTER = "2026-07-01T12:00:00Z";
+
+function dated(root, count, date, from) {
+  const start = from || 0;
+  for (let i = start; i < start + count; i++) {
+    commit(root, { ["src/f" + i + ".js"]: "module.exports = " + i + ";\n" }, "add module " + i, { date });
+  }
+}
+
+test("no install date asked about means no since-install section at all", () => {
+  const root = newRepo();
+  filler(root, 4);
+  commit(root, { "src/swallow.js": "try { risky(); } catch {}\n" }, "wrap the risky call");
+  commit(root, { "tests/focus.test.js": "it.only('one', () => {});\n" }, "focus one test");
+  const out = forensics.runForensics(root, MINI);
+  assert.equal(out.usable, true);
+  assert.equal(out.sinceInstall, null);
+});
+
+test("the since-install view splits each class's content hits on the install date", () => {
+  const root = newRepo();
+  dated(root, 4, BEFORE);
+  commit(root, { "src/old.js": "try { risky(); } catch {}\n" }, "wrap the risky call", { date: BEFORE });
+  commit(root, { "src/new.js": "try { other(); } catch {}\n" }, "wrap the other risky call", { date: AFTER });
+  commit(root, { "tests/focus.test.js": "it.only('one', () => {});\n" }, "focus one test", { date: AFTER });
+
+  const out = forensics.runForensics(root, { ...MINI, since: INSTALL });
+  assert.equal(out.usable, true);
+  assert.equal(out.sinceInstall.since, INSTALL);
+  assert.equal(out.sinceInstall.commits, 2);
+  assert.equal(out.sinceInstall.truncated, false);
+  assert.deepEqual(out.sinceInstall.byClass["javascript-typescript/swallowed-exception"], { before: 1, after: 1 });
+  assert.deepEqual(out.sinceInstall.byClass["javascript-typescript/focused-test"], { before: 0, after: 1 });
+});
+
+test("the since-install commits are split by actor and the split says it is best-effort", () => {
+  const root = newRepo();
+  dated(root, 4, BEFORE);
+  commit(root, { "src/mate.js": "module.exports = 1;\n" }, "a teammate's commit", { date: AFTER });
+  commit(root, { "src/bot.js": "module.exports = 2;\n" }, "an agent's commit",
+    { date: AFTER, trailer: AGENT_TRAILER });
+
+  const out = forensics.runForensics(root, { ...MINI, since: INSTALL });
+  assert.deepEqual(out.sinceInstall.actors, { human: 1, agent: 1 });
+  assert.match(out.sinceInstall.attribution, /^best-effort/);
+});
+
+test("a history too young to rank still says what has landed since the install", () => {
+  const root = newRepo();
+  commit(root, { "src/a.js": "module.exports = 1;\n" }, "before the install", { date: BEFORE });
+  commit(root, { "src/b.js": "module.exports = 2;\n" }, "after the install", { date: AFTER });
+
+  const out = forensics.runForensics(root, { since: INSTALL });
+  assert.equal(out.fallback, "young-history");
+  assert.equal(out.usable, false);
+  assert.equal(out.sinceInstall.commits, 1);
+  assert.deepEqual(out.sinceInstall.byClass, {});
+});
+
+test("a mining window that does not reach back to the install says so", () => {
+  const root = newRepo();
+  dated(root, 5, AFTER);
+  const out = forensics.runForensics(root, { thresholds: { minCommits: 4 }, since: INSTALL });
+  assert.equal(out.sinceInstall.commits, 5);
+  assert.equal(out.sinceInstall.truncated, true, "a window starting after the install claimed to cover it");
+});
+
+// The two passes have different depths, and `byClass` comes from the shallower
+// one. Read against the log pass, `truncated` said the window reached back to
+// the install while every class read `before: 0` — the same report saying the
+// history covers the install and that nothing existed before it.
+test("truncated answers for the window byClass was actually built from", () => {
+  const root = newRepo();
+  commit(root, { "src/old.js": "try { risky(); } catch {}\n" }, "wrap the risky call", { date: BEFORE });
+  dated(root, 4, AFTER);
+  commit(root, { "src/new.js": "try { other(); } catch {}\n" }, "wrap the other one", { date: AFTER });
+
+  const deep = forensics.runForensics(root, { ...MINI, since: INSTALL });
+  assert.equal(deep.sinceInstall.truncated, false);
+  assert.deepEqual(deep.sinceInstall.byClass["javascript-typescript/swallowed-exception"],
+    { before: 1, after: 1 });
+
+  // Same repository, same install date, a content pass too shallow to see the
+  // pre-install commit. `before` drops to 0, so `truncated` has to say so.
+  const shallow = forensics.runForensics(root, { thresholds: { minCommits: 4, diffCommits: 2 }, since: INSTALL });
+  assert.deepEqual(shallow.sinceInstall.byClass["javascript-typescript/swallowed-exception"],
+    { before: 0, after: 1 }, "the shallow pass still reached the pre-install commit");
+  assert.equal(shallow.sinceInstall.truncated, true,
+    "before: 0 was reported as a count over a window that never reached the install");
+  assert.equal(shallow.sinceInstall.commits, 5, "the metadata pass was narrowed too");
+});
+
+test("an install date that cannot be read yields no section rather than a nonsense one", () => {
+  const root = newRepo();
+  dated(root, 5, AFTER);
+  assert.equal(forensics.runForensics(root, { ...MINI, since: "whenever" }).sinceInstall, null);
+});
+
+test("the CLI takes --since and mines from it", () => {
+  const root = newRepo();
+  dated(root, 4, BEFORE);
+  dated(root, 2, AFTER, 4);
+  const r = spawnSync(process.execPath,
+    [path.join(__dirname, "..", "scripts", "forensics.js"), "--root", root, "--since", INSTALL],
+    { encoding: "utf-8", windowsHide: true });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).sinceInstall.commits, 2);
 });
 
 // ---------------------------------------------------------------------------
