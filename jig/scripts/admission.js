@@ -61,6 +61,27 @@ function pairedUnits(check) {
   return units;
 }
 
+// The two session levers, and the hook runner each is proven under. A session
+// guard is proven by the runner's OWN evaluation — injected, the way the
+// blanker and the glob matcher are — because a second matcher here is exactly
+// what let a bash-guard whose pattern matched nothing ship under a printed
+// proof. A patternless session detector is NOT skipped the way an empty
+// check-driver unit is: an empty driver unit mints no guard row and this one
+// mints an armed guard with a coverage cell, so it comes in as a unit and fails
+// on its own violation like any other lever that catches nothing.
+const SESSION_RUNNERS = { "bash-guard": "PreToolUse", "edit-observe-guard": "PostToolUse" };
+
+function sessionUnits(check) {
+  const units = [];
+  (check.detectors || []).forEach((det, i) => {
+    const runner = det && SESSION_RUNNERS[det.lever];
+    // The lever is named the way `adaptAuthoredDetector` names it, so the id a
+    // discard reports is the id the plan and the manifest print.
+    if (runner) units.push({ id: det.lever + "-" + i, runner, det });
+  });
+  return units;
+}
+
 // A change-set fixture is one path per line. Blank lines and stray indentation
 // are the author's formatting, never part of a path.
 function changeSet(text) {
@@ -84,7 +105,7 @@ function matchesAny(rel, globs, match) {
 // because a mismatch between the two would discard every check silently.
 function patternCount(check, id) {
   return driverUnits(check, id).reduce((n, u) => n + u.patterns.length, 0) +
-    (pairedUnits(check).length ? 1 : 0);
+    (pairedUnits(check).length ? 1 : 0) + sessionUnits(check).length;
 }
 
 function checkId(check) {
@@ -115,7 +136,7 @@ function fires(blanked, pattern, perLine) {
   return perLine ? blanked.split("\n").some((line) => re.test(line)) : re.test(blanked);
 }
 
-function ownPair(check, blank, match) {
+function ownPair(check, blank, match, evaluate) {
   const id = checkId(check);
   if (typeof blank !== "function") {
     throw new Error(`admission: check "${id}" cannot be tested — no blanker function was injected`);
@@ -123,7 +144,8 @@ function ownPair(check, blank, match) {
   const { violation, nearMiss } = fixturesOf(check, id);
   const units = driverUnits(check, id);
   const paired = pairedUnits(check);
-  if (!units.length && !paired.length) {
+  const session = sessionUnits(check);
+  if (!units.length && !paired.length && !session.length) {
     throw new Error(
       `admission: check "${id}" declares no check-driver patterns, so there is nothing to prove against its fixtures`,
     );
@@ -133,6 +155,10 @@ function ownPair(check, blank, match) {
   // Missing, it is untestable, and an untestable check is never an admitted one.
   if (paired.length && typeof match !== "function") {
     throw new Error(`admission: check "${id}" is a paired-change check and no glob matcher was injected — it cannot be tested`);
+  }
+  if (session.length && typeof evaluate !== "function") {
+    throw new Error(`admission: check "${id}" carries the session lever(s) ${session.map((u) => u.id).join(", ")} ` +
+      "and no session evaluator was injected — it cannot be tested");
   }
 
   let violationHits = 0;
@@ -174,7 +200,21 @@ function ownPair(check, blank, match) {
     }
   }
 
-  const total = units.reduce((n, u) => n + u.patterns.length, 0) + (paired.length ? 1 : 0);
+  // The session half. Each lever is run through the hook runner's own
+  // evaluation over the same fixture pair, and counts one hit exactly as the
+  // paired rule does. A lever that misses its violation or fires on its near
+  // miss discards the WHOLE check: a check is one promise, and half a promise
+  // printed as coverage is the defect this closes.
+  for (const unit of session) {
+    if (evaluate(unit.det, unit.runner, violation)) violationHits++;
+    else missed.push(unit.id);
+    if (evaluate(unit.det, unit.runner, nearMiss)) {
+      nearMissHits++;
+      falsePositives.push(unit.id);
+    }
+  }
+
+  const total = units.reduce((n, u) => n + u.patterns.length, 0) + (paired.length ? 1 : 0) + session.length;
   const passes = violationHits === total && nearMissHits === 0;
   const reasons = [];
   if (missed.length) {
@@ -194,7 +234,10 @@ function ownPair(check, blank, match) {
 // near miss only tests a check when it is the kind of thing that check reads:
 // running a source pattern over a list of file paths, or a path rule over
 // somebody's Python, proves nothing about either and would fail at random.
-function crossNearMiss(checks, blank, match) {
+// The session levers are a third kind and cross the same way: a bash-guard
+// against another bash-guard's near-miss command, an edit guard against another
+// edit guard's near-miss source, never across the two.
+function crossNearMiss(checks, blank, match, evaluate) {
   if (!Array.isArray(checks)) throw new Error("admission: crossNearMiss expects an array of checks");
   if (typeof blank !== "function") throw new Error("admission: crossNearMiss needs the blanker function injected");
   const rows = [];
@@ -203,6 +246,7 @@ function crossNearMiss(checks, blank, match) {
     const { nearMiss } = fixturesOf(owner, ownerId);
     const ownerUnits = driverUnits(owner, ownerId);
     const ownerPaired = pairedUnits(owner);
+    const ownerRunners = new Set(sessionUnits(owner).map((u) => u.runner));
     for (const runner of checks) {
       const runnerId = checkId(runner);
       if (runnerId === ownerId) continue;
@@ -229,6 +273,19 @@ function crossNearMiss(checks, blank, match) {
           pairedFires(runnerPaired, changeSet(nearMiss), match)) {
         rows.push({ check: runnerId, foreignCheck: ownerId, pattern: "paired-change" });
       }
+      // And the session levers. A bash-guard whose pattern matches every command
+      // still fires on its own violation and can still dodge its own near miss;
+      // somebody else's near-miss command is the only sample it was not
+      // authored against (SCOPE, "Is the admission test only a check against its
+      // own pair").
+      if (typeof evaluate === "function") {
+        for (const unit of sessionUnits(runner)) {
+          if (!ownerRunners.has(unit.runner)) continue;
+          if (evaluate(unit.det, unit.runner, nearMiss)) {
+            rows.push({ check: runnerId, foreignCheck: ownerId, pattern: unit.id });
+          }
+        }
+      }
     }
   }
   return rows;
@@ -240,11 +297,48 @@ function crossNearMiss(checks, blank, match) {
 // than no guard.
 const DENY_PARTS = ["reason", "alternative", "override"];
 
+// A deny reply is prose, and the fixture pair cannot read prose. jig has already
+// shipped an `alternative` sliced out of a catalogue note mid-code-span, present
+// and complete and meaningless to the agent it refuses. These two are what a
+// machine can tell about it: text that opens a code span and never closes it was
+// cut, and text this short cannot say what to do instead.
+const DENY_FLOOR = 20;
+
+function denySense(part, text) {
+  const trimmed = text.trim();
+  if (trimmed.length < DENY_FLOOR) {
+    return `its ${part} is ${trimmed.length} characters, under the ${DENY_FLOOR}-character floor — too short to tell a blocked call anything`;
+  }
+  // An odd number of backticks means a span was opened and the text ended
+  // inside it, which is what a mid-sentence slice out of markdown looks like.
+  if ((trimmed.match(/`/g) || []).length % 2 === 1) {
+    return `its ${part} ends inside an unclosed code span, so the text was cut mid-sentence`;
+  }
+  return null;
+}
+
+// Every reply this check can hand a blocked call, resolved the way the runner
+// resolves it: a detector's own deny wins over the check's (`denyOf` in
+// jig-lib). Reading only the check's is how a garbled per-detector triple went
+// past admission, past the plan, and into the words a refused agent reads.
+function denyReplies(check) {
+  const dets = (check.detectors || []).filter((d) => d && typeof d === "object");
+  return dets.length ? dets.map((d) => d.deny || check.deny) : [check.deny];
+}
+
 function denyProblem(check, id) {
-  const deny = check.deny || (check.detectors || []).map((d) => d && d.deny).find(Boolean);
-  if (!deny) return `check "${id}" declares no deny triple — reason, alternative and override are all required`;
-  const missing = DENY_PARTS.filter((k) => typeof deny[k] !== "string" || !deny[k].trim());
-  return missing.length ? `check "${id}" has an incomplete deny triple — missing ${missing.join(", ")}` : null;
+  for (const deny of denyReplies(check)) {
+    if (!deny || typeof deny !== "object") {
+      return `check "${id}" declares no deny triple — reason, alternative and override are all required`;
+    }
+    const missing = DENY_PARTS.filter((k) => typeof deny[k] !== "string" || !deny[k].trim());
+    if (missing.length) return `check "${id}" has an incomplete deny triple — missing ${missing.join(", ")}`;
+    for (const part of DENY_PARTS) {
+      const why = denySense(part, deny[part]);
+      if (why) return `check "${id}" ships a deny reply that was not authored whole — ${why}`;
+    }
+  }
+  return null;
 }
 
 // A heuristic check may buy one known near-miss hit up front. The number is
@@ -265,8 +359,10 @@ function declaredNearMissHits(check, id) {
 // verdict. Turning it on makes admission strict.
 //
 // `opts.match` is the glob matcher, injected the way the blanker is, and only a
-// paired-change check needs it. Without it such a check is discarded with that
-// as the reason rather than admitted untested.
+// paired-change check needs it. `opts.evaluate` is the hook runner's own
+// session evaluation, and only a check carrying a session lever needs it.
+// Without either, such a check is discarded with that as the reason rather than
+// admitted untested.
 function admit(checks, blank, opts) {
   if (!Array.isArray(checks)) throw new Error("admission: admit expects an array of authored checks");
   if (typeof blank !== "function") throw new Error("admission: admit needs the blanker function injected");
@@ -295,7 +391,7 @@ function admit(checks, blank, opts) {
     let total;
     try {
       expected = declaredNearMissHits(check, id);
-      result = ownPair(check, blank, o.match);
+      result = ownPair(check, blank, o.match, o.evaluate);
       total = patternCount(check, id);
     } catch (err) {
       discarded.push({ id, why: err.message });
@@ -316,7 +412,7 @@ function admit(checks, blank, opts) {
   }
 
   if (o.cross) {
-    for (const row of crossNearMiss(admitted.map((a) => a.check), blank, o.match)) {
+    for (const row of crossNearMiss(admitted.map((a) => a.check), blank, o.match, o.evaluate)) {
       const at = admitted.findIndex((a) => a.id === row.check);
       if (at === -1) continue;
       admitted.splice(at, 1);

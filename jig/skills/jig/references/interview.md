@@ -312,4 +312,15 @@ Print these the moment they become true, not in a summary at the end.
 
 > Every value here was assumed rather than asked. Each assumed row is labelled
 > as one wherever it appears, so nothing you never saw is reported back to you
-> as a decision you made.
+> as a decision you made. The classes were not picked in the moment either —
+> `quick` in `.jig/profile.json` records which ones, on what basis, and out of
+> how many.
+>
+> Quick start skips the rounds, not the approvals. Every item-tier change —
+> anything that wires a guard into a hook, installs a tool, writes outside
+> `.jig/`, or can fail a build — is still put to you by name with nothing
+> pre-ticked, and applied one `--change <id> --path <rel>` pair at a time.
+>
+> The commit lane stays unwired. Nothing runs at commit time until git is
+> pointed at the hook jig writes, and that is its own plan after the install:
+> `plan --wire-commit`.

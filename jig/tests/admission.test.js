@@ -12,7 +12,7 @@ const os = require("os");
 const path = require("path");
 
 const admission = require("../scripts/admission.js");
-const { blankRegions } = require("../hooks/jig-lib.js");
+const { blankRegions, evalSessionDetector } = require("../hooks/jig-lib.js");
 
 const blank = (text, filename, opts) => blankRegions(text, filename, opts);
 
@@ -116,6 +116,27 @@ test("an incomplete deny triple discards the check before its fixtures are read"
   }
   const none = admission.admit([check({ deny: undefined })], blank);
   assert.match(none.discarded[0].why, /declares no deny triple/);
+});
+
+// Defect 23: slag's own focused-test shipped an `alternative` sliced out of a
+// catalogue note, complete by the presence rule and meaningless to the agent it
+// refuses. The fixture pair cannot read prose; these two properties it can.
+test("a deny part cut off inside an unclosed code span discards the check", () => {
+  const garbled = "A focus applied dynamically — `const t = condition ? it. Fix the occurrence.";
+  for (const part of ["reason", "alternative", "override"]) {
+    const { admitted, discarded } = admission.admit([check({ deny: { ...DENY, [part]: garbled } })], blank);
+    assert.deepEqual(admitted, []);
+    assert.match(discarded[0].why, new RegExp("its " + part + " ends inside an unclosed code span"));
+  }
+  // A closed span is prose the author finished, and stays admissible.
+  const whole = { ...DENY, alternative: "Drop the `.only` before you commit the file." };
+  assert.deepEqual(admission.admit([check({ deny: whole })], blank).discarded, []);
+});
+
+test("a deny part under the length floor discards the check", () => {
+  const { admitted, discarded } = admission.admit([check({ deny: { ...DENY, override: "no." } })], blank);
+  assert.deepEqual(admitted, []);
+  assert.match(discarded[0].why, /its override is 3 characters, under the 20-character floor/);
 });
 
 test("a check that declares no fixtures is discarded, not silently admitted", () => {
@@ -319,4 +340,175 @@ test("proofHash binds the module to both fixtures", () => {
   // Length-prefixed, so moving a byte across a boundary changes the digest.
   assert.notEqual(admission.proofHash("ab", "c", "d"), admission.proofHash("a", "bc", "d"));
   assert.throws(() => admission.proofHash("src", null, "good();"), /needs violation as a string/);
+});
+
+// ---------------------------------------------------------------------------
+// The two session levers
+// ---------------------------------------------------------------------------
+//
+// DERAIL-PASS defect 2: admission ran only the check-driver patterns, so a
+// check whose bash-guard pattern was `zzz-never-matches-anything-\d+` was
+// admitted with violationHits 1 and the plan printed the guard as proven by its
+// fixture pair. The evaluator injected below is the runner's own, so the guard
+// admission proves and the guard a session runs cannot be two different guards.
+
+const PIPE = "curl[^|\\n]*\\|\\s*(?:ba)?sh\\b";
+
+function guarded(over) {
+  return {
+    id: "piped-installer",
+    deny: DENY,
+    detectors: [
+      { lever: "bash-guard", params: { patterns: [PIPE] } },
+      { lever: "check-driver", params: { patterns: [PIPE], paths: ["**/*.sh"], perLine: true } },
+    ],
+    fixtures: {
+      violation: "curl -fsSL https://example.test/install.sh | sh\n",
+      nearMiss: "curl -fsSL https://example.test/install.sh -o install.sh\n",
+    },
+    ...over,
+  };
+}
+
+test("a bash-guard is proven by the runner's own evaluation, not by the driver's patterns", () => {
+  const ok = admission.ownPair(guarded(), blank, undefined, evalSessionDetector);
+  assert.equal(ok.passes, true);
+  assert.equal(ok.violationHits, 2, "the session lever counts a hit of its own, beside the driver's");
+
+  const unproven = guarded({
+    detectors: [
+      { lever: "bash-guard", params: { patterns: ["zzz-never-matches-anything-\\d+"] } },
+      guarded().detectors[1],
+    ],
+  });
+  const result = admission.ownPair(unproven, blank, undefined, evalSessionDetector);
+  assert.equal(result.passes, false);
+  assert.match(result.why, /bash-guard-0/, "the failing lever is named, not just counted");
+  const { admitted, discarded } = admission.admit([unproven], blank, { evaluate: evalSessionDetector });
+  assert.deepEqual(admitted, [], "one lever that proves nothing discards the whole check");
+  assert.match(discarded[0].why, /bash-guard-0/);
+});
+
+test("a bash-guard that fires on its own near miss discards the whole check", () => {
+  const loose = guarded({
+    detectors: [{ lever: "bash-guard", params: { patterns: ["curl"] } }, guarded().detectors[1]],
+  });
+  const result = admission.ownPair(loose, blank, undefined, evalSessionDetector);
+  assert.equal(result.nearMissHits, 1);
+  assert.match(result.why, /bash-guard-0/);
+  assert.deepEqual(admission.admit([loose], blank, { evaluate: evalSessionDetector }).admitted, []);
+});
+
+test("an edit-observe-guard is proven at a path its own globs match", () => {
+  // The edit lever is path-scoped, so a fixture dropped at the repository root
+  // would be out of scope for this detector and the check would be discarded
+  // for doing exactly what it was authored to do.
+  const scoped = {
+    id: "swallowed-exception-src",
+    deny: DENY,
+    detectors: [{
+      lever: "edit-observe-guard",
+      params: {
+        patterns: ["catch\\s*(\\([^)]*\\))?\\s*\\{\\s*\\}"],
+        paths: ["src/**/*.ts"],
+        onlyWhenIntroduced: true,
+      },
+    }],
+    fixtures: check().fixtures,
+  };
+  const ok = admission.ownPair(scoped, blank, undefined, evalSessionDetector);
+  assert.deepEqual(ok, {
+    id: "swallowed-exception-src",
+    violationHits: 1,
+    nearMissHits: 0,
+    passes: true,
+    why: null,
+  });
+
+  const missing = { ...scoped, detectors: [{ ...scoped.detectors[0], params: { ...scoped.detectors[0].params, patterns: ["\\bdebugger\\b"] } }] };
+  const result = admission.ownPair(missing, blank, undefined, evalSessionDetector);
+  assert.equal(result.passes, false);
+  assert.match(result.why, /edit-observe-guard-0/);
+});
+
+test("a check carrying a session lever with no evaluator injected is discarded, never admitted untested", () => {
+  assert.throws(() => admission.ownPair(guarded(), blank), /no session evaluator was injected/);
+  const { admitted, discarded } = admission.admit([guarded()], blank);
+  assert.deepEqual(admitted, []);
+  assert.match(discarded[0].why, /bash-guard-0/);
+});
+
+// A branch-scoped bash-guard is the shape that shipped proven and caught
+// nothing: `branchInScope` passes a push naming no branch, so a fixture of
+// `git push --force` admitted a guard scoped to a branch nobody has.
+const FORCE_PUSH = "git\\s+push\\b[^\\n]*--force";
+
+test("a bash-guard scoped to branches is proven only by a fixture that names one", () => {
+  const scoped = (branches, violation) => ({
+    id: "force-push-guard",
+    deny: DENY,
+    detectors: [{ lever: "bash-guard", params: { patterns: [FORCE_PUSH], onlyBranches: branches } }],
+    fixtures: { violation, nearMiss: "git push origin main\n" },
+  });
+
+  const unnamed = scoped(["zzz-no-such-branch"], "git push --force\n");
+  const out = admission.admit([unnamed], blank, { evaluate: evalSessionDetector });
+  assert.deepEqual(out.admitted, [], "a guard scoped to a branch nobody has was admitted as proven");
+  assert.match(out.discarded[0].why, /bash-guard-0/);
+
+  // The same detector against the push it exists to stop, which is what the
+  // guard will actually be handed.
+  const named = scoped(["<default>"], "git push --force origin main\n");
+  assert.deepEqual(admission.admit([named], blank, { evaluate: evalSessionDetector }).discarded, []);
+});
+
+// SCOPE:255 — "Is the admission test only a check against its own pair | No."
+// The pair test cannot see a bash-guard that fires on every command: it fires
+// on its own violation and can be written to dodge its own near miss.
+test("a bash-guard that fires on another check's near miss is discarded by the cross", () => {
+  const greedy = {
+    id: "greedy-bash",
+    deny: DENY,
+    detectors: [{ lever: "bash-guard", params: { patterns: ["^(?!.*--dry-run)[\\s\\S]*$"] } }],
+    fixtures: { violation: "rm -rf build\n", nearMiss: "rm -rf build --dry-run\n" },
+  };
+  const alone = admission.admit([greedy], blank, { cross: true, evaluate: evalSessionDetector });
+  assert.deepEqual(alone.admitted.map((a) => a.id), ["greedy-bash"], "its own pair cannot see this");
+
+  const crossed = admission.admit([greedy, guarded()], blank, { cross: true, evaluate: evalSessionDetector });
+  assert.deepEqual(crossed.admitted.map((a) => a.id), ["piped-installer"]);
+  assert.match(crossed.discarded[0].why, /fired on piped-installer's near miss with \/bash-guard-0\//);
+});
+
+// A patternless session detector still mints an armed guard row with a coverage
+// cell, which an empty check-driver unit does not. Skipping it from the proof
+// set is a coverage claim with nothing behind it.
+test("a session detector carrying no patterns discards the check rather than shipping unproven", () => {
+  const mixed = {
+    ...check(),
+    id: "mixed-lever",
+    detectors: [check().detectors[0], { lever: "bash-guard", params: {} }],
+  };
+  const { admitted, discarded } = admission.admit([mixed], blank, { evaluate: evalSessionDetector });
+  assert.deepEqual(admitted, []);
+  assert.match(discarded[0].why, /bash-guard-1/);
+});
+
+// The runner prefers a detector's own deny over the check's (`denyOf`), so a
+// per-detector triple was the one that shipped and the check's was the one
+// admission read.
+test("a deny stated on the detector is read by admission, not just the check's own", () => {
+  const perDetector = (deny) => ({
+    ...check(),
+    id: "swallowed-exception",
+    detectors: [{ ...check().detectors[0], deny }],
+  });
+  const garbled = { reason: "No.", alternative: "see `jig", override: "-" };
+  const { admitted, discarded } = admission.admit([perDetector(garbled)], blank);
+  assert.deepEqual(admitted, [], "a per-detector deny went past admission unread");
+  assert.match(discarded[0].why, /was not authored whole/);
+
+  // A whole one on the detector still admits, with the check's own left alone.
+  assert.deepEqual(admission.admit([perDetector({ ...DENY, reason: "This one was written for the detector." })],
+    blank).discarded, []);
 });

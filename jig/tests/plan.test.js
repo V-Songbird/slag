@@ -53,7 +53,7 @@ function planOnly(root, opts, checks) {
 
 function install(root, opts, checks) {
   const plan = planOnly(root, opts, checks);
-  const applied = engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  const applied = A.applyPlan(engine, root, plan);
   return { plan, applied };
 }
 
@@ -357,6 +357,47 @@ test("every cell in plan.json is rendered verbatim in plan.md", () => {
   });
 });
 
+// Defect 23: nothing on the plan showed the owner the sentence a blocked agent
+// gets back, so a garbled one shipped past an approval. It is rendered through
+// the hook library's own composer, which is the string that actually ships.
+test("plan.md prints the exact reply each guard hands a blocked call", () => {
+  const root = nodeProject();
+  planOnly(root);
+  const plan = readJson(root, ".jig/plan.json");
+  const md = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
+  assert.ok(plan.denyReplies.length, "no guard on this plan speaks at all");
+  assert.match(md, /## What a blocked call will read/);
+  for (const reply of plan.denyReplies) {
+    assert.ok(reply.text.startsWith("[jig guard " + reply.guardId + "] "), reply.text);
+    assert.ok(md.includes("- `" + reply.guardId + "` — " + reply.text), reply.guardId);
+  }
+});
+
+// The runner takes a detector's own deny over the check's (`denyOf`), so a plan
+// that read the check's showed the owner one set of words and shipped another.
+test("plan.md prints the detector's own deny where a detector states one", () => {
+  const own = {
+    reason: "This bash call pipes an unread script into a shell on this machine.",
+    alternative: "Fetch it to a file, read it, then run the file.",
+    override: "Run the two steps by hand if you have already read the script.",
+  };
+  const check = A.authored({
+    id: "piped-installer",
+    title: "A downloaded script piped straight into a shell",
+    detectors: A.PIPED_INSTALLER.detectors.map((det, i) => (i === 0 ? { ...det, deny: own } : det)),
+    fixtures: A.PIPED_INSTALLER.fixtures,
+    deny: A.PIPED_INSTALLER.deny,
+  });
+
+  const root = nodeProject();
+  planOnly(root, { "no-ci": true }, [check]);
+  const reply = readJson(root, ".jig/plan.json").denyReplies.find((r) => r.guardId === GUARD);
+  assert.ok(reply, "the guard that can refuse a call says nothing on the plan");
+  assert.ok(reply.text.includes(own.reason), reply.text);
+  assert.ok(!reply.text.includes(A.PIPED_INSTALLER.deny.reason), reply.text);
+  assert.ok(fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8").includes(reply.text));
+});
+
 test("plan.md's header names every actor column, so no column is rendered unlabelled", () => {
   const root = nodeProject();
   planOnly(root);
@@ -424,12 +465,48 @@ test("everything that can refuse something is approved one at a time", () => {
     ".github/workflows/jig.yml",
     ".jig/checks/empty-catch.check.mjs",
     ".jig/checks/piped-installer.check.mjs",
+    // The driver's exit code IS the build verdict and the shim is what asks for
+    // it, so neither one is a thing that "only ever reports". They live under
+    // `.jig/` and used to fall through to the batch tier on that alone.
+    ".jig/checks/run.mjs",
     ".jig/config.json",
+    ".jig/hooks/pre-commit",
   ]);
   assert.deepEqual(plan.consent.item.sort(), item.map((a) => a.id).sort());
   assert.match(item.find((a) => a.path === ".jig/config.json").why, /refuse a tool call/);
   assert.match(item.find((a) => a.path.startsWith(".github/")).why, /fails the build/);
   assert.match(item.find((a) => a.path.endsWith(".check.mjs")).why, /can fail a build/);
+  assert.match(item.find((a) => a.path === ".jig/checks/run.mjs").why, /commit and CI verdict/);
+  assert.match(item.find((a) => a.path === ".jig/hooks/pre-commit").why, /whether a commit is checked at all/);
+});
+
+// DERAIL-PASS defect 20: `apply --plan <id>` was the widened form SCOPE:190
+// forbids — one approval, every destination, no path named for any of them.
+test("apply --plan refuses the item tier and names the token for every change in it", () => {
+  const root = nodeProject();
+  const plan = planOnly(root, { "no-ci": true });
+  let message = null;
+  try {
+    engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  } catch (err) {
+    message = err.message;
+  }
+  assert.ok(message, "a whole plan applied with no path named for anything in it");
+  const item = readJson(root, ".jig/plan.json").artifacts.filter((a) => a.tier === "item");
+  assert.ok(item.length > 1);
+  for (const a of item) assert.ok(message.includes("--change " + a.id + " --path " + a.path), a.id);
+  // Refused whole, not half: nothing in the plan was written.
+  assert.equal(fs.existsSync(path.join(root, ".jig", "config.json")), false);
+  assert.equal(fs.existsSync(path.join(root, ".jig", "manifest.json")), false);
+});
+
+test("apply --plan still carries a plan whose every change only reports", () => {
+  const root = nodeProject();
+  fs.writeFileSync(path.join(root, "draft.json"), JSON.stringify({
+    changes: [{ id: "batch-only", kind: "write-side-file", path: ".jig/hand.json", content: "{}\n" }],
+  }));
+  const plan = engine.cmdPlan(root, { _: [], change: [], from: "draft.json" });
+  assert.equal(engine.cmdApply(root, { _: [], change: [], plan: plan.planId }).applied[0].outcome, "applied");
 });
 
 test("everything that only reports is approved in one go", () => {
@@ -438,8 +515,6 @@ test("everything that only reports is approved in one go", () => {
   const batch = readJson(root, ".jig/plan.json").artifacts.filter((a) => a.tier === "batch");
   assert.deepEqual(batch.map((a) => a.path).sort(), [
     ".jig/activation.md",
-    ".jig/checks/run.mjs",
-    ".jig/hooks/pre-commit",
     ".jig/proposed-permissions.json",
   ]);
   for (const a of batch) assert.match(a.why, /reports only, and refuses nothing/);
@@ -470,6 +545,159 @@ test("a config wiring no guard is not treated as deny-capable", () => {
   assert.equal(armed.tier, "item");
   const bare = engine.consentFor({ kind: "write-config", path: ".jig/config.json" }, []);
   assert.equal(bare.tier, "batch");
+});
+
+test("a config that stops an armed guard refusing is item tier and names it", () => {
+  const installed = [{ id: "a-0", mode: "armed" }, { id: "b-0", mode: "armed" }];
+  // b-0 is gone and a-0 is back to observe: two different ways to stop refusing
+  // a tool call, and neither is an approval anybody gives in a batch.
+  const content = JSON.stringify({ schemaVersion: 1, guards: [{ id: "a-0" }] }) + "\n";
+  const consent = engine.consentFor({ kind: "write-config", path: ".jig/config.json", content }, [], installed);
+  assert.equal(consent.tier, "item");
+  assert.match(consent.why, /a-0/);
+  assert.match(consent.why, /b-0/);
+});
+
+// ---------------------------------------------------------------------------
+// The config face of a re-run (DERAIL-PASS defect 3)
+// ---------------------------------------------------------------------------
+//
+// A plan is an interview about what to ADD. Computing the whole config from the
+// current selection put `guards: []` in front of an owner whose repository had
+// two armed guards, under the tier you approve in one go.
+
+test("a second interview carries the installed guards forward and adds the new one", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const before = readJson(root, ".jig/config.json").guards.map((g) => g.id).sort();
+  assert.equal(before.length, 2);
+
+  const plan = planOnly(root, { "no-ci": true }, [A.HEURISTIC_ONLY]);
+  const record = readJson(root, ".jig/plan-" + plan.planId + ".json");
+  const change = record.changes.find((c) => c.kind === "write-config");
+  const proposed = JSON.parse(change.content);
+  assert.deepEqual(proposed.guards.map((g) => g.id).sort(),
+    [...before, "test-file-removal-bash-guard-0"].sort());
+  // The owner's answer on a row they already gave one for is carried verbatim.
+  for (const row of readJson(root, ".jig/config.json").guards) {
+    assert.deepEqual(proposed.guards.find((g) => g.id === row.id), row);
+  }
+  assert.match(change.rationale, /carried forward: /);
+
+  const matrix = readJson(root, ".jig/plan.json");
+  assert.equal(matrix.artifacts.find((a) => a.id === change.id).tier, "item");
+  assert.ok(plan.consent.item.includes(change.id));
+});
+
+test("a selection plan with nothing armable behind it still proposes the installed guards", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const before = readJson(root, ".jig/config.json").guards;
+  fs.rmSync(path.join(root, "authored.json"), { force: true });
+
+  // The live reproduction: an edition class taken with `--select` and nothing
+  // authored behind it installs no guard, so the config used to come out empty.
+  const plan = engine.cmdPlan(root, {
+    _: [], change: [], select: "javascript-typescript/swallowed-exception",
+    provenance: "elicited", "no-ci": true,
+  });
+  const record = readJson(root, ".jig/plan-" + plan.planId + ".json");
+  const change = record.changes.find((c) => c.kind === "write-config");
+  assert.deepEqual(JSON.parse(change.content).guards, before);
+  assert.ok(plan.consent.item.includes(change.id), "a config holding two armed guards sat in the batch tier");
+  // Nothing was added, so nothing is proposed: the face is byte for byte the
+  // file already on disk.
+  assert.equal(change.content, fs.readFileSync(path.join(root, ".jig", "config.json"), "utf-8"));
+});
+
+test("an empty config proposed over a non-empty one is a refusal, not a change", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.PIPED_INSTALLER]);
+  const guard = readJson(root, ".jig/config.json").guards[0].id;
+
+  // Retiring the last guard is the shortest route to an empty config through
+  // jig's own CLI. It refuses rather than disarming the repository; `revert` is
+  // the door that takes an install back out.
+  assert.throws(() => engine.cmdRetire(root, { _: [], change: [], guard }),
+    /disarms this repository/);
+  assert.equal(readJson(root, ".jig/config.json").guards.length, 1);
+});
+
+// The gate above refuses to COMPOSE that config. A plan file is a file, and the
+// token the owner was handed names a change in it rather than the bytes it held
+// when they read it — so the same gate has to run against what is about to
+// land, or jig's own approved, journalled path is the cheapest way to disarm
+// everything.
+test("apply refuses an approved change whose plan file was edited to empty the config", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.PIPED_INSTALLER]);
+  const guard = readJson(root, ".jig/config.json").guards[0].id;
+  const out = engine.cmdDisarm(root, { _: [], change: [], guard });
+
+  // Only the content, and only inside the change the owner approved: the plan
+  // id and the change id are left exactly as they were printed.
+  const file = path.join(root, ".jig", "plan-" + out.plan + ".json");
+  const record = JSON.parse(fs.readFileSync(file, "utf-8"));
+  record.changes[0].content = JSON.stringify({ schemaVersion: 1, guards: [] }, null, 2) + "\n";
+  fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+
+  assert.throws(() => engine.cmdApply(root, { _: [], change: [out.change], path: [out.path] }),
+    /disarms this repository/);
+  assert.equal(readJson(root, ".jig/config.json").guards.length, 1);
+});
+
+// Deleting an observing guard refuses nothing and fails no build, so the tier
+// rule read off the guard's mode alone put a config that drops it in the batch.
+// Coverage the owner approved is still coverage they are being asked to lose.
+test("a config that drops an installed guard is item tier whatever mode it was in", () => {
+  const installed = [{ id: "a-0", mode: "observe" }, { id: "b-0" }];
+  const content = JSON.stringify({ schemaVersion: 1, guards: [{ id: "a-0", mode: "observe" }] }) + "\n";
+  const consent = engine.consentFor({ kind: "write-config", path: ".jig/config.json", content }, [], installed);
+  assert.equal(consent.tier, "item");
+  assert.match(consent.why, /b-0/);
+  assert.doesNotMatch(consent.why, /a-0/, "a row this config keeps untouched was named as a loss");
+});
+
+// DERAIL-PASS N3: a second interview is the whole point of carrying the
+// installed guards forward, and after N17 the only token that carries the item
+// tier is the pair — which could not resolve, because an artifact id comes from
+// its template and every unchanged artifact was defined by both plan files.
+test("a second interview applies, one pair at a time, against the plan just reviewed", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.PIPED_INSTALLER]);
+  const plan = planOnly(root, { "no-ci": true }, [A.PIPED_INSTALLER, A.EMPTY_CATCH]);
+  assert.ok(fs.readdirSync(path.join(root, ".jig")).filter((f) => /^plan-[0-9a-f]+\.json$/.test(f)).length > 1,
+    "the first plan file is gone, so there is no ambiguity left to resolve");
+
+  const artifacts = readJson(root, ".jig/plan.json").artifacts;
+  const applied = engine.cmdApply(root, {
+    _: [], change: artifacts.map((a) => a.id), path: artifacts.map((a) => a.path),
+  });
+  assert.ok(applied.ok);
+  assert.deepEqual(readJson(root, ".jig/config.json").guards.map((g) => g.id).sort(),
+    ["empty-catch-edit-observe-guard-0", "piped-installer-bash-guard-0"]);
+});
+
+// The mechanical half of a carried row is not the owner's answer. Carrying the
+// `proof` forward recorded the proof of the module the same plan replaced, so
+// jig's own install came out unarmable and drifted.
+test("a re-run that installs an edited check module carries the mode, not the stale proof", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.PIPED_INSTALLER]);
+  const before = configRow(root);
+  // The one answer that IS the owner's: they took this guard back to observe,
+  // and running the interview again does not re-ask it.
+  const down = engine.cmdDisarm(root, { _: [], change: [], guard: before.id });
+  engine.cmdApply(root, { _: [], change: [down.change], path: [down.path] });
+  assert.equal(configRow(root).mode, undefined);
+
+  const edited = { ...A.PIPED_INSTALLER, module: A.PIPED_INSTALLER.module + "\n// one more line\n" };
+  const plan = planOnly(root, { "no-ci": true }, [edited]);
+  const change = readJson(root, ".jig/plan-" + plan.planId + ".json").changes.find((c) => c.kind === "write-config");
+  const row = JSON.parse(change.content).guards.find((g) => g.id === before.id);
+  assert.notEqual(row.proof, before.proof, "the plan proposed the proof of the module it replaces");
+  assert.equal(row.provenance, before.provenance, "the owner's provenance was re-asked");
+  assert.equal(row.mode, undefined, "the interview re-armed a guard the owner had quieted");
 });
 
 // ---------------------------------------------------------------------------
@@ -676,20 +904,76 @@ test("arming is a journaled config change, and the review agrees afterwards", ()
   assert.equal(engine.cmdReview(root).guards.find((g) => g.guardId === GUARD).mode, "armed");
 });
 
-test("a recorded false positive holds the guard in observe, and disarm drops its mode", () => {
+// SCOPE, the derail pass: "Does `fp` need the same pause as disarm | Yes."
+// Waving a report off stops an armed guard refusing tool calls, so the ledger
+// line is the judgment and the config change the owner approves is the effect.
+test("fp records the wave-off, changes nothing, and hands back the token that does", () => {
   const root = armProject();
   engine.cmdArm(root, { _: [], change: [], guard: GUARD });
 
   const fp = engine.cmdFp(root, { _: [], change: [], guard: GUARD });
-  assert.equal(fp.recorded, "false-positive");
+  assert.equal(fp.recorded, "false-positive-pending");
+  assert.equal(fp.applied, false);
+  assert.equal(fp.pending, "false-positive");
+  assert.equal(fp.path, ".jig/config.json");
+  assert.equal(fp.apply, "apply --change " + fp.change + " --path .jig/config.json");
+  assert.equal(configRow(root).mode, "armed", "fp quieted the guard with nobody approving anything");
+
   const row = engine.cmdReview(root).guards.find((g) => g.guardId === GUARD);
   assert.equal(row.wavedOff, 1);
-  assert.equal(row.mode, "observe", "the false positive did not pull the guard back to observe");
+  assert.equal(row.pendingWaveOff, true);
+  assert.equal(row.mode, "armed");
+
+  engine.cmdApply(root, { _: [], change: [fp.change], path: [fp.path] });
+  assert.equal(configRow(root).mode, undefined, "the approved change did not quiet the guard");
+});
+
+test("a false positive left standing by an older install holds the guard, and --clear releases it", () => {
+  const root = armProject();
+  engine.cmdArm(root, { _: [], change: [], guard: GUARD });
+  // The shape a 1.0.1 install migrates in with, and the one the arming gate has
+  // always read. Nothing shipped writes it any more; `--clear` is the way out.
+  fs.appendFileSync(path.join(root, ".jig", "ledger.jsonl"),
+    JSON.stringify({ guardId: GUARD, decision: "false-positive" }) + "\n");
+
+  let row = engine.cmdReview(root).guards.find((g) => g.guardId === GUARD);
+  assert.equal(row.mode, "observe", "the standing false positive did not pull the guard back");
   assert.match(row.why, /false positive/);
   assert.equal(row.armable, false);
+  // The sentence the review prints for this case, not just the throw: it is the
+  // only place the owner is told WHY the guard will not go back to blocking.
   assert.match(row.barrier, /false positive/);
+  assert.throws(() => engine.cmdArm(root, { _: [], change: [], guard: GUARD }), /false positive/);
 
-  engine.cmdDisarm(root, { _: [], change: [], guard: GUARD });
+  const cleared = engine.cmdFp(root, { _: [], change: [], guard: GUARD, clear: true });
+  assert.equal(cleared.recorded, "false-positive-cleared");
+  assert.equal(cleared.cleared, GUARD);
+  // Append-only: the earlier judgment is still on the record, it just no longer
+  // stands.
+  const decisions = fs.readFileSync(path.join(root, ".jig", "ledger.jsonl"), "utf-8")
+    .split("\n").filter(Boolean).map((l) => JSON.parse(l).decision);
+  assert.ok(decisions.includes("false-positive"));
+  assert.equal(decisions[decisions.length - 1], "false-positive-cleared");
+
+  row = engine.cmdReview(root).guards.find((g) => g.guardId === GUARD);
+  assert.equal(row.mode, "armed");
+  assert.equal(row.armable, true);
+});
+
+test("disarm plans and stops — nothing changes until the pair is approved", () => {
+  const root = armProject();
+  engine.cmdArm(root, { _: [], change: [], guard: GUARD });
+
+  const out = engine.cmdDisarm(root, { _: [], change: [], guard: GUARD });
+  assert.equal(out.applied, false);
+  assert.equal(out.pending, "disarm");
+  assert.equal(out.path, ".jig/config.json");
+  assert.equal(configRow(root).mode, "armed", "disarm took the guard down with no approval");
+
+  // The pair is the token, and the wrong half of it is a refusal.
+  assert.throws(() => engine.cmdApply(root, { _: [], change: [out.change], path: ["package.json"] }),
+    /Refusing to apply/);
+  engine.cmdApply(root, { _: [], change: [out.change], path: [out.path] });
   assert.equal(configRow(root).mode, undefined);
 });
 
@@ -805,7 +1089,7 @@ test("weave-precommit puts jig's line into a committed sh hook, and only there",
   const woven = plan.changes.find((c) => c.kind === "include-line");
   assert.ok(woven, "no weave was planned");
   assert.equal(woven.path, "scripts/git-hooks/pre-commit");
-  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  A.applyPlan(engine, root, plan);
 
   const after = fs.readFileSync(path.join(root, "scripts/git-hooks/pre-commit"), "utf-8");
   assert.ok(after.includes("jig:checks"), "the marker never landed");
@@ -825,7 +1109,7 @@ test("a node-shebang hook gets the in-process line, below its strict-mode direct
   assert.equal(scan.guardrails.precommit[0].host, "node");
 
   const plan = planOnly(root, { "no-ci": true, "weave-precommit": true });
-  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  A.applyPlan(engine, root, plan);
   const after = fs.readFileSync(path.join(root, "scripts/git-hooks/pre-commit"), "utf-8");
   assert.ok(after.indexOf('"use strict";') < after.indexOf("jig:checks"),
     "the line landed above the directive prologue, which turns strict mode off");
@@ -848,7 +1132,7 @@ test("wire-governance emits one computed pointer rule from the scan's own orphan
   const plan = planOnly(root, { "no-ci": true, "wire-governance": true });
   const rule = plan.changes.find((c) => c.path === ".claude/rules/jig-governance.md");
   assert.ok(rule, "no governance rule was planned");
-  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  A.applyPlan(engine, root, plan);
   const text = fs.readFileSync(path.join(root, ".claude/rules/jig-governance.md"), "utf-8");
   assert.match(text, /SCOPE\.md/);
   assert.match(text, /docs\/adr\/0001-x\.md/);
@@ -882,13 +1166,19 @@ test("rerun reports drift, the firing record, the quiet guards and the backlog i
   assert.ok(report.backlog.length > 0);
 });
 
-test("retiring a guard is a journaled config change the ledger survives", () => {
+test("retiring a guard plans and stops, then lands as a journaled config change the ledger survives", () => {
   const root = nodeProject();
   install(root, { "no-ci": true });
   const before = engine.readJournal(root).length;
 
   const out = engine.cmdRetire(root, { _: [], change: [], guard: GUARD });
-  assert.equal(out.retired, GUARD);
+  assert.equal(out.applied, false);
+  assert.equal(out.pending, "retire");
+  assert.equal(readJson(root, ".jig/config.json").guards.some((g) => g.id === GUARD), true,
+    "the guard was deleted before anybody approved it");
+  assert.equal(engine.readJournal(root).length, before);
+
+  engine.cmdApply(root, { _: [], change: [out.change], path: [out.path] });
   assert.equal(readJson(root, ".jig/config.json").guards.some((g) => g.id === GUARD), false);
   assert.ok(engine.readJournal(root).length > before);
   assert.throws(() => engine.cmdRetire(root, { _: [], change: [], guard: GUARD }), /not a configured guard/);

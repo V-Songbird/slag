@@ -72,7 +72,7 @@ Takes effect next session. Nothing to configure — the interview is the configu
 | You want to… | Command |
 | --- | --- |
 | Set up guardrails, interview included | `/jig:jig` |
-| Set them up with one review and no questions, every value an assumed default labelled as one | `/jig:jig --quick` |
+| Set them up with one review and no questions — the engine picks the classes from your own history, records the choice and its basis, and labels every value assumed | `/jig:jig --quick` |
 | Scaffold a new project and guard it from line one | `/jig:jig` in the empty folder |
 | See what the guards caught, and which checks are actually running | `/jig:review` |
 | Put a noisy guard back to watching | `/jig:review` |

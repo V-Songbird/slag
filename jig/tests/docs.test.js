@@ -149,3 +149,21 @@ test("the README describes the quick start and the kill switch as the engine has
   assert.doesNotMatch(shim, /\.jig\/off/,
     "the commit shim now honours the kill switch, so the README line may say so");
 });
+
+test("the item tier is asked as an enumerated multi-select, and applied one pair at a time", () => {
+  // SCOPE's derail-pass row on N19 allows the multi-select on two conditions:
+  // nothing pre-ticked, and the token unchanged. Both are prose, so both are
+  // pinned here — the engine cannot refuse a skill that walks the tier as
+  // paragraphs or ticks an option nobody chose.
+  const skill = read("skills", "jig", "SKILL.md");
+  const consent = skill.slice(skill.indexOf("Then take consent in two tiers"), skill.indexOf("## 7. Apply"));
+  assert.ok(consent.includes("consent.item"), "the consent section is gone from SKILL.md");
+  assert.match(consent, /multiSelect/, "the item tier is not asked as an AskUserQuestion multiSelect");
+  assert.match(consent, /at most four options per question and at\s+most four questions per call/,
+    "the item tier's page size is not stated");
+  assert.match(consent, /\*\*Nothing is pre-ticked\.\*\*/,
+    "the item tier does not say that nothing is pre-ticked");
+  assert.match(consent, /label is the change id/, "the option label is not the change id");
+  assert.match(consent, /--change <id> --path <rel>/,
+    "the multi-select no longer says the token stays one pair per ticked id");
+});

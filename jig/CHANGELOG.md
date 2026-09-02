@@ -4,6 +4,27 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.8.0] — 2026-09-02
+
+### Fixed
+
+- A guard that watches your agent's commands could be installed armed, printed as proven, and catch nothing. Only the committed checks were ever run against their own fixtures; the two levers that watch a session were taken on trust. All of them are proven now, through the same code that runs them for real — and a check whose guard misses its own violation, or fires on its own near miss, is discarded whole and named in `.jig/discarded.json`. The three levers a check can carry are named in the skill for the first time, and a release gate keeps that list and the engine in step.
+- Running the interview a second time on a repository that already had jig proposed a guard list with nothing in it, in the tier you approve in one go — so a second look at your coverage could switch all of it off. What a plan proposes is now what is installed plus what you just picked. A change that would drop or downgrade an armed guard is approved one at a time, with each guard named, and an empty list proposed over a full one is refused rather than offered.
+- `jig apply --plan` applied a whole plan on one approval, including the checks that can fail your build. It now refuses anything in the per-item tier and prints the exact `--change`/`--path` line for each one.
+- One mistaken `jig review fp` locked a guard in observing for good — `arm` refused while the false alarm stood and nothing could clear it. `fp --clear` clears it, by adding a line rather than editing history.
+- The repository's own `focused-test` check shipped a mangled alternative, sliced off mid-sentence. Admission now refuses a reply that ends inside an unclosed code span or is too short to act on, so the next one cannot ship.
+
+### Added
+
+- A blocked call says which guard blocked it. The reply now opens with `[jig guard <id>]` and closes with how to report a false alarm, and the plan you approve has a "What a blocked call will read" section, so you see the exact words before they are ever printed at your agent. The committed checks print the reason and the alternative under each finding too, instead of just the class name.
+- `--quick` picks its coverage with a recorded basis instead of a judgement call. It ranks from your own history where jig can read it, falls back to the catalogue order where it cannot, writes both the selection and its basis to `.jig/profile.json`, and says plainly which approvals are still coming and that the commit lane is not wired yet.
+
+### Changed
+
+- `disarm` and `retire` stop and hand you a plan instead of applying themselves; `fp` does the same. Turning a guard off is now the same approved, reversible, per-item change as turning one on. `arm` still applies directly — putting a guard back to work needs no pause.
+- The per-item approvals are asked as a short list you tick rather than a wall of prose, with nothing ticked for you and the consequence of each one spelled out. Each one is still applied on its own by id and path, and a mismatch is still a refusal.
+- Migrating a 1.0.1 install now drops a guard whose lever fails its own fixture pair, and tells you which. The one this affects in practice is `pipe-to-shell`'s command guard: its old near-miss sample contains the piped install command inside a quoted string, and a command guard does not read quotes the way the file checks do. The class is still caught by its committed check; only the session guard goes, and the reason is on the record.
+
 ## [2.7.2] — 2026-09-02
 
 ### Fixed

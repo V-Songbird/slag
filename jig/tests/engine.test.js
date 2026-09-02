@@ -781,10 +781,18 @@ function regionPlan(root) {
   });
 }
 
+// The region is item tier — every Codex session loads AGENTS.md — so it is
+// applied by its own pair, which is the only token that carries the item tier.
+function applyRegion(root, plan) {
+  return engine.cmdApply(root, {
+    _: [], change: plan.changes.map((c) => c.id), path: plan.changes.map((c) => c.path),
+  });
+}
+
 test("the region lands fenced, replaces only itself, and never touches the user's own text", () => {
   const root = tmpProject({ "AGENTS.md": "# My rules\n\n- Mine stays mine.\n" });
   const plan = regionPlan(root);
-  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  applyRegion(root, plan);
   const first = fs.readFileSync(path.join(root, "AGENTS.md"), "utf-8");
   assert.match(first, /# My rules/);
   assert.match(first, /jig:begin/);
@@ -795,7 +803,7 @@ test("the region lands fenced, replaces only itself, and never touches the user'
     _: [], change: [], select: "silent-catch", "no-ci": true,
     "agents-region": true, provenance: "elicited",
   });
-  engine.cmdApply(root, { _: [], change: [], plan: wider.planId });
+  applyRegion(root, wider);
   const second = fs.readFileSync(path.join(root, "AGENTS.md"), "utf-8");
   assert.match(second, /# My rules/);
   assert.equal(second.match(/jig:begin/g).length, 1, "the region duplicated instead of replacing itself");
@@ -805,7 +813,7 @@ test("the region lands fenced, replaces only itself, and never touches the user'
 test("a repository with no AGENTS.md gets one holding only the region, and revert removes it", () => {
   const root = tmpProject({});
   const plan = regionPlan(root);
-  engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  applyRegion(root, plan);
   const text = fs.readFileSync(path.join(root, "AGENTS.md"), "utf-8");
   assert.ok(text.startsWith(engine.AGENTS_BEGIN || "<!-- jig:begin"), "the file holds more than the region");
   engine.cmdRevert(root, { _: [], change: [], all: true });
@@ -815,7 +823,7 @@ test("a repository with no AGENTS.md gets one holding only the region, and rever
 test("the loadability ceiling refuses a region that would push AGENTS.md past 32 KiB", () => {
   const root = tmpProject({ "AGENTS.md": "# Mine\n" + "x".repeat(32700) + "\n" });
   const plan = regionPlan(root);
-  assert.throws(() => engine.cmdApply(root, { _: [], change: [], plan: plan.planId }),
+  assert.throws(() => applyRegion(root, plan),
     /loadability ceiling/);
 });
 
@@ -834,7 +842,12 @@ test("every command runs through the real CLI entry, not just through require", 
   const plan = JSON.parse(cli(["plan", "--select", "silent-catch", "--no-ci",
     "--provenance", "elicited"]).stdout);
   assert.equal(plan.ok, true);
-  assert.equal(cli(["apply", "--plan", plan.planId]).status, 0);
+  // One `--change/--path` pair per artifact, which is the only token that
+  // carries the item tier — the driver and the commit shim are both in it.
+  const artifacts = JSON.parse(fs.readFileSync(path.join(root, ".jig", "plan.json"), "utf-8")).artifacts;
+  const pairs = artifacts.flatMap((a) => ["--change", a.id, "--path", a.path]);
+  const applied = cli(["apply", ...pairs]);
+  assert.equal(applied.status, 0, "the apply CLI died: " + applied.stderr);
   const review = cli(["review"]);
   assert.equal(review.status, 0, "the review CLI died: " + review.stderr);
   assert.equal(JSON.parse(review.stdout).ok, true);

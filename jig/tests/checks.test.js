@@ -428,7 +428,7 @@ test("installing a second check keeps the first one's rows", () => {
 test("re-applying the same plan changes nothing and says so", () => {
   const root = nodeProject();
   const { plan } = install(root);
-  const again = engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  const again = A.applyPlan(engine, root, plan);
   assert.ok(again.applied.every((r) => r.outcome === "already-applied"));
 });
 
@@ -512,6 +512,19 @@ test("a finding names the file, the line and the pattern, and never the text tha
   const finding = JSON.parse(run.stdout).findings[0];
   assert.ok(finding, "the driver reported nothing for a seeded violation");
   assert.deepEqual(Object.keys(finding).sort(), ["classId", "line", "note", "path", "pattern"]);
+});
+
+// Defect 23: a finding said what matched and where, and nothing about why it is
+// a mistake or what to do instead. The check's author wrote both for exactly
+// this moment; printing the row without them throws that away.
+test("a finding prints the reason and the alternative the check's author wrote", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.EMPTY_CATCH]);
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.writeFileSync(path.join(root, "src", "swallow.js"), "try { risky(); } catch {}\n");
+  const out = driver(root).stdout;
+  assert.ok(out.includes("  " + A.EMPTY_CATCH.deny.reason), out);
+  assert.ok(out.includes("  Instead: " + A.EMPTY_CATCH.deny.alternative), out);
 });
 
 test("a violation inside a comment or a string literal is not a violation", () => {
@@ -1050,6 +1063,26 @@ test("each route gets the way back from the thing it actually did", () => {
   // Weaving puts one line into a hook the owner already had, and taking that
   // line back out is not unsetting core.hooksPath.
   assert.equal(engine.activationFace(root, { "weave-precommit": true }), "activation-woven");
+});
+
+test("a second interview on a wired repository is never offered the unwired text", () => {
+  const root = nodeProject();
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  install(root, { "no-ci": true });
+  wireCommit(root);
+
+  // Not `--refresh-activation`, not `--wire-commit`: an ordinary re-run. It used
+  // to re-propose the doc that tells the owner to switch on checks that have
+  // been running since the last plan.
+  assert.equal(engine.activationFace(root, {}), "activation-wired");
+  const plan = engine.cmdPlan(root, {
+    _: [], change: [], authored: A.writeChecks(root, [A.HEURISTIC_ONLY]), provenance: "elicited", "no-ci": true,
+  });
+  const record = JSON.parse(fs.readFileSync(path.join(root, ".jig", "plan-" + plan.planId + ".json"), "utf-8"));
+  const act = record.changes.find((c) => c.path === ".jig/activation.md");
+  assert.ok(act, "the re-run planned no activation doc at all");
+  assert.equal(act.template.name, "activation-wired");
+  assert.match(act.content, /Commit-time checks are running/);
 });
 
 test("a repository wired under an older jig can be put back in step without being rewired", () => {

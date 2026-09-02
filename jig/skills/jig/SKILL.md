@@ -35,8 +35,8 @@ A check installs proven and blocking. Observe mode is a choice the owner can
 make per guard, not a probation every guard serves — never describe it as
 something a guard graduates from.
 
-Flags in `$ARGUMENTS`: `--quick` (skip the rounds, take the edition's leading
-classes, plan as `assumed`), `--edition <id>` (the user named the language, so
+Flags in `$ARGUMENTS`: `--quick` (skip the rounds, pass `--quick` to `scan` and
+take the selection it computes, plan as `assumed`), `--edition <id>` (the user named the language, so
 work against that edition rather than detection — the flag a project that does
 not exist yet runs on), `--select <classId,…>` (the user already named the
 classes, so skip that question and treat them as elicited), `--no-ci` (pass
@@ -213,9 +213,14 @@ Three rules bind every round:
 - **Disclose a gap the moment one is named**, mid-round, with the reference's
   own lines — never in a summary at the end.
 
-**Under `--quick`, skip the rounds entirely.** Take the leading classes from the
-matched edition, plan with `--provenance assumed`, and tag every assumed value
-in the printout: an `assumed` row is a default the owner never saw, and it is
+**Under `--quick`, skip the rounds entirely.** Run step 1 as `scan --quick` and
+take the selection from `quick.classes` on the profile — the engine computes it
+(the head of the forensics ranking where history is usable, otherwise classes by
+tier and then catalogue order, capped at `quick.cap`) and records `quick.basis`
+and `quick.why` beside it. Never substitute a selection of your own: the whole
+point of the recorded one is that the owner can check afterwards what was
+assumed. Then plan with `--provenance assumed` and tag every assumed value in
+the printout: an `assumed` row is a default the owner never saw, and it is
 disclosed as one everywhere it appears. Quick start's one interaction is the
 plan review at step 6.
 
@@ -280,10 +285,34 @@ Each authored check carries, in one module:
   are a refusal, not a suffix.
 - `module` — the check source itself. A check with no module is discarded
   before it is ever run, because there is nothing to install.
-- the detector, under a `detectors` entry whose `lever` is `check-driver`, with
-  `paths`, `patterns`, `perLine` and the blanker switches `stripComments` and
-  `stripStrings` in its `params`. Both switches are true unless there is a
-  stated reason.
+- the detectors, one `detectors` entry each, every entry naming one `lever`.
+  Five levers can be authored and each needs its own shape:
+
+  - `check-driver` — the deterministic floor, run by `run.mjs` on a human's
+    machine, at commit time and in CI. Its `params` take `paths`, `patterns`,
+    `perLine` and the blanker switches `stripComments` and `stripStrings`. Both
+    switches are true unless there is a stated reason.
+  - `bash-guard` — a PreToolUse guard over the command a session is about to
+    run. Its `params.patterns` are matched against the whole command as one
+    string and **nothing is blanked**: a shell command is not source, so a
+    pattern that fires inside a quoted argument is a false positive here.
+    `onlyBranches` narrows a `git push` to the branches named, `<default>`
+    meaning the repository's own.
+  - `edit-observe-guard` — a PostToolUse guard over an Edit or a Write. Its
+    `params.patterns` are matched against the text going in, blanked by the same
+    two switches the driver uses; `paths` scopes it exactly as it scopes the
+    driver, and `onlyWhenIntroduced` fires only when the edit adds a match it
+    did not replace.
+  - `ci-workflow` and `tool-rule` — the class is named in the workflow jig
+    writes and in the tool rule it proposes. Neither carries patterns of its
+    own, so `params` is empty.
+
+  A session guard's fixture pair is read the way that lever reads it: the
+  `bash-guard` pair is one command per fixture, and the `edit-observe-guard`
+  pair is the text of one edit. Admission runs both through the session
+  runner's own evaluation, at a path the detector's own `paths` match — so a
+  lever that misses its violation or fires on its near miss discards the whole
+  check. Every lever on a check is proven, or none of them ships.
 - `fixtures.violation` and `fixtures.nearMiss`, **inline in the module** so they
   revert with the check and the selftest stays re-runnable forever. The
   near-miss is the point: it must read like the defect and not be one.
@@ -427,8 +456,24 @@ Then take consent in two tiers, read off `consent` on the result:
 
 - `consent.batch` — artifacts that only ever report. Approve them together.
 - `consent.item` — anything that wires a guard into a hook, installs a tool,
-  writes outside `.jig/`, or fails somebody's build. Approve these one at a
-  time, by id. Every authored check is item tier, because it can fail a build.
+  writes outside `.jig/`, or fails somebody's build. Every authored check is
+  item tier, because it can fail a build.
+
+The item tier is where every dangerous change lives, so it is never walked as
+prose — nine paragraphs is a plan approved by fatigue. Put it to the user as
+`AskUserQuestion` multiSelect pages: **at most four options per question and at
+most four questions per call**, paging until every item-tier change has been
+asked. Each option's label is the change id, and its description is the path,
+the kind, and the exact consequence of approving it — the hook it wires into,
+the tool it installs, the build it can fail.
+
+**Nothing is pre-ticked.** An option the owner did not tick is an answer they
+did not give, and jig never substitutes a default for one of those: a change
+nobody ticked is not applied, and it is reported back as not applied.
+
+A multi-select is how the question is *asked*; it does not widen what is
+*applied*. Step 7 still runs one `--change <id> --path <rel>` pair per ticked
+id.
 
 `refused` and `enforcementGaps` are reported, never swallowed. `refused` names
 each thing this plan wanted and could not have, and why; a plan that quietly

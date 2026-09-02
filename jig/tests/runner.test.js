@@ -769,6 +769,17 @@ test("a guard whose proof matches denies a PreToolUse call, with reason, alterna
   assert.equal(last.mode, "armed");
 });
 
+// Defect 23: the blocked agent is the one audience jig never wrote for. It was
+// told what was wrong and offered nothing to look up and no way to appeal.
+test("a deny names the guard that refused and how to report it as a false alarm", () => {
+  const root = guarded([A.PIPED_INSTALLER], { mode: "armed" });
+  const emitted = JSON.parse(run(root, "PreToolUse", PIPE_CALL).stdout);
+  const guardId = emitted.jig.guards.find((g) => g.decision === "deny").guardId;
+  const reason = emitted.hookSpecificOutput.permissionDecisionReason;
+  assert.ok(reason.startsWith("[jig guard " + guardId + "] "), reason);
+  assert.ok(reason.endsWith("(false alarm? /jig:review fp " + guardId + ")"), reason);
+});
+
 test("an armed edit guard blocks a PostToolUse write with the same three-part reason", () => {
   const root = guarded([A.EMPTY_CATCH], { mode: "armed" });
   const out = run(root, "PostToolUse", edit("a.js", "risky();", "try { risky(); } catch {}"));

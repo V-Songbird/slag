@@ -352,3 +352,83 @@ test("commentSyntaxFor refuses an edition with no map and a bad value", () => {
     /needs a file extension/,
   );
 });
+
+// ---------------------------------------------------------------------------
+// quickSelection
+//
+// `--quick` was prose in a skill and nothing computed it, so the selection had
+// no recorded basis and the `assumed` provenance it plans under could not be
+// checked. These pin the computation, not the wording.
+
+test("quickSelection takes the head of the forensics ranking when history is usable", () => {
+  const ranking = [
+    { classId: "python/deleted-test", edition: "python", severity: "safety", hits: 9, basis: "forensics" },
+    { classId: "python/softened-assertion", edition: "python", severity: "safety", hits: 2, basis: "forensics" },
+    { classId: "python/broad-except", edition: "python", severity: "hygiene", hits: 0, basis: "catalogue" },
+  ];
+  const quick = editions.quickSelection({ editions: ["python"] }, { usable: true, fallback: null, ranking });
+  assert.equal(quick.basis, "forensics");
+  assert.equal(quick.considered, 3);
+  assert.deepEqual(quick.classes.map((c) => c.classId), ranking.map((r) => r.classId));
+  // The per-row basis survives, because a row forensics ranked by nothing is
+  // not evidence and must not be presented as any.
+  assert.deepEqual(quick.classes.map((c) => c.basis), ["forensics", "forensics", "catalogue"]);
+  assert.deepEqual(quick.classes.map((c) => c.hits), [9, 2, 0]);
+});
+
+test("quickSelection falls back to tier then catalogue order, and names why", () => {
+  const quick = editions.quickSelection({ editions: ["go"] }, { usable: false, fallback: "young-history", ranking: [] });
+  assert.equal(quick.basis, "catalogue");
+  assert.match(quick.why, /young-history/);
+  const go = editions.loadEdition(PLUGIN_ROOT, "go");
+  assert.equal(quick.considered, go.classes.length);
+  // Safety before hygiene, and inside a tier the order the edition authored.
+  const expected = go.classes
+    .map((cls, i) => ({ id: "go/" + cls.id, safety: cls.severity === "safety", i }))
+    .sort((a, b) => Number(b.safety) - Number(a.safety) || a.i - b.i)
+    .slice(0, editions.QUICK_CAP)
+    .map((r) => r.id);
+  assert.deepEqual(quick.classes.map((c) => c.classId), expected);
+  assert.ok(quick.classes.every((c) => c.basis === "catalogue" && c.hits === 0));
+});
+
+test("quickSelection caps the selection and states the cap", () => {
+  const quick = editions.quickSelection({ editions: ["python", "go"] }, null);
+  assert.equal(quick.cap, editions.QUICK_CAP);
+  assert.equal(quick.classes.length, editions.QUICK_CAP);
+  assert.ok(quick.considered > editions.QUICK_CAP, "the fallback ranked fewer classes than the cap");
+  assert.match(quick.why, /it was never run/);
+  assert.deepEqual(quick.editions, ["python", "go"]);
+});
+
+test("quickSelection selects nothing rather than guessing when no edition matched", () => {
+  const quick = editions.quickSelection({ editions: [] }, { usable: false, fallback: "not-a-repository", ranking: [] });
+  assert.deepEqual(quick.classes, []);
+  assert.equal(quick.considered, 0);
+});
+
+test("quickSelection needs the profile", () => {
+  assert.throws(() => editions.quickSelection(null, null), /needs the scan profile/);
+});
+
+// The ranking forensics returns spans every edition it could read. Taking its
+// head unfiltered installed another language's classes while reporting the
+// matched edition as the basis for them.
+test("quickSelection ranks only inside the editions the scan matched", () => {
+  const ranking = [
+    { classId: "rust/unwrap-in-production", edition: "rust", severity: "safety", hits: 40, basis: "forensics" },
+    { classId: "python/deleted-test", edition: "python", severity: "safety", hits: 9, basis: "forensics" },
+    { classId: "python/broad-except", edition: "python", severity: "hygiene", hits: 3, basis: "forensics" },
+  ];
+  const quick = editions.quickSelection({ editions: ["python"] }, { usable: true, fallback: null, ranking });
+  assert.deepEqual(quick.classes.map((c) => c.classId), ["python/deleted-test", "python/broad-except"]);
+  assert.equal(quick.considered, 2, "a class from another edition was counted as considered");
+  assert.deepEqual(quick.editions, ["python"]);
+});
+
+test("quickSelection selects nothing when the whole ranking is another edition's", () => {
+  const ranking = [{ classId: "rust/unwrap-in-production", edition: "rust", severity: "safety", hits: 40 }];
+  const quick = editions.quickSelection({ editions: [] }, { usable: true, fallback: null, ranking });
+  assert.deepEqual(quick.classes, []);
+  assert.equal(quick.basis, "catalogue", "an empty scoped ranking was still reported as evidence");
+});

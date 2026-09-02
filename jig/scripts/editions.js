@@ -436,7 +436,87 @@ function commentSyntaxFor(edition, ext) {
   return found;
 }
 
+// ---------------------------------------------------------------------------
+// Quick start
+// ---------------------------------------------------------------------------
+
+// `--quick` used to be a phrase in a skill — "take the edition's leading
+// classes" — and nothing computed it, so the selection was whatever the model
+// decided in the moment. That makes the `assumed` provenance SCOPE keeps for
+// quick start unfalsifiable: the owner cannot see what was assumed on their
+// behalf. The answer is computed here and recorded on the profile, so the same
+// repository selects the same classes twice and the basis is on disk either way.
+
+// Deliberately small. Quick start's whole promise is one review and no
+// questions, and forty item-tier changes is not something anybody reviews — it
+// is something they approve by fatigue.
+const QUICK_CAP = 8;
+
+function fallbackReason(forensics) {
+  if (!isObject(forensics)) return "it was never run";
+  if (typeof forensics.fallback === "string" && forensics.fallback !== "") return forensics.fallback;
+  return "nothing ranked";
+}
+
+function quickSelection(profile, forensics, pluginRoot) {
+  if (!isObject(profile)) {
+    throw expected("editions.quickSelection needs the scan profile, and got " + JSON.stringify(profile));
+  }
+  const root = typeof pluginRoot === "string" && pluginRoot !== "" ? pluginRoot : path.join(__dirname, "..");
+  const editionIds = Array.isArray(profile.editions)
+    ? profile.editions.filter((id) => typeof id === "string" && id !== "")
+    : [];
+
+  // The order the editions themselves argue for when history has nothing to
+  // say: tier first — safety before hygiene — then the order the edition
+  // authored its classes in. That is forensics' own fallback rule, restated
+  // here rather than imported, because forensics requires this file.
+  const catalogue = [];
+  for (const id of editionIds) {
+    loadEdition(root, id).classes.forEach((cls, i) => {
+      catalogue.push({ classId: namespacedId(id, cls.id), edition: id, severity: cls.severity, order: i });
+    });
+  }
+  catalogue.sort((a, b) =>
+    Number(b.severity === "safety") - Number(a.severity === "safety") ||
+    a.edition.localeCompare(b.edition) ||
+    a.order - b.order);
+
+  // Forensics that mined nothing ranks by nothing, and its rows say so in
+  // their own `basis`. Taking that head would dress catalogue order up as
+  // evidence, so an unusable run falls back explicitly instead.
+  // Scoped to the editions the scan matched, the same set the result reports as
+  // its basis. Forensics ranks over every edition it can read, so an unfiltered
+  // head would install Python classes in a TypeScript repository and report the
+  // TypeScript edition as the reason.
+  const ranking = isObject(forensics) && forensics.usable === true && Array.isArray(forensics.ranking)
+    ? forensics.ranking.filter((row) => isObject(row) && typeof row.classId === "string" &&
+      editionIds.includes(row.edition))
+    : [];
+  const usable = ranking.length > 0;
+  const head = (usable ? ranking : catalogue).slice(0, QUICK_CAP);
+
+  return {
+    cap: QUICK_CAP,
+    basis: usable ? "forensics" : "catalogue",
+    why: usable
+      ? "the head of the forensics ranking over this repository's own history"
+      : "no usable forensics (" + fallbackReason(forensics) + "), so classes by tier and then catalogue order",
+    editions: editionIds,
+    considered: usable ? ranking.length : catalogue.length,
+    classes: head.map((row) => ({
+      classId: row.classId,
+      edition: typeof row.edition === "string" ? row.edition : null,
+      severity: typeof row.severity === "string" ? row.severity : null,
+      hits: usable && Number.isInteger(row.hits) ? row.hits : 0,
+      basis: usable ? row.basis || "forensics" : "catalogue",
+    })),
+  };
+}
+
 module.exports = {
+  QUICK_CAP,
+  quickSelection,
   loadIndex,
   detectEditions,
   loadEdition,

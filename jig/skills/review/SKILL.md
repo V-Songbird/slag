@@ -11,7 +11,7 @@ description: >-
   guard blocking", "has anything drifted", "are my commit checks running" — or
   invokes /jig:review. Do NOT use to install or set up guardrails — that is
   /jig:jig.
-argument-hint: "[fp <guardId>] [arm <guardId>] [disarm <guardId>] [retire <guardId>] [rerun]"
+argument-hint: "[fp <guardId>] [fp <guardId> --clear] [arm <guardId>] [disarm <guardId>] [retire <guardId>] [rerun]"
 allowed-tools: Bash, Read, AskUserQuestion
 ---
 
@@ -29,6 +29,14 @@ A guard's mode is a choice, not a rank. Checks install proven and blocking;
 observe is something the owner picks, in either direction, at any time. There is
 no clean-session count that earns anything, and nothing here is a waiting
 period.
+
+Anything that takes enforcement AWAY — `fp`, `disarm`, `retire` — plans and
+stops. The command writes a change and changes nothing; its result carries
+`applied: false`, the `change` id, the `path`, and an `apply` string. Put the
+change to the user with ONE `AskUserQuestion` and run the apply only if they say
+yes. Never pre-tick it, never assume it, never run both halves in one breath.
+`arm` is the exception and applies itself: it puts enforcement up, and the owner
+already named the guard.
 
 If a command here refuses because the install predates the rework, that install
 needs upgrading before any of this reads correctly. Send the user to `/jig:jig`,
@@ -48,6 +56,10 @@ read. Say `why` and stop; offer `/jig:jig` to install. Do not report the empty
 `guards[]` carries one row per installed guard:
 
 - `fired` — times it matched. `wavedOff` — false positives recorded.
+  `pendingWaveOff` — a wave-off the user raised and never approved the change
+  for. The guard is still doing whatever its config says, which is not what
+  somebody who ran `fp` and walked away expects: say so, and offer the token
+  again.
 - `problem` — non-null means this guard is broken, not quiet: its check module
   would not load, or it carries nothing for the event it is registered on. Say
   so first and separately. A broken guard reported as "never fired" is coverage
@@ -102,10 +114,32 @@ When the user says a report was wrong:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" fp <guardId>
 ```
 
-This writes the false positive into the ledger as its own line — a human
-judgment, recorded where the guard's history lives. Report the fresh stats back.
-A guard that keeps producing them belongs in section 3 or 4, and the ledger is
-the evidence for that conversation.
+This writes the judgment into the ledger as its own line — a human judgment,
+recorded where the guard's history lives — and **quiets nothing yet**. Acting on
+a false alarm stops an armed guard refusing tool calls, which is the same step
+down `disarm` takes, so it gets the same pause. The result carries the token:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" apply --change <change> --path <path>
+```
+
+Ask ONE `AskUserQuestion` — quiet this guard, or leave it blocking and keep the
+report on the record — and run the apply only on a yes. On a no, stop; the
+ledger line stands as evidence either way and `review` reports it as
+`pendingWaveOff`.
+
+A guard that keeps producing false alarms belongs in section 3 or 4, and the
+ledger is the evidence for that conversation.
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" fp <guardId> --clear
+```
+
+The other direction, and it needs no pause: it appends the cleared line the
+arming gate reads, so a wave-off stops holding the guard in observe. Nothing is
+edited — the earlier line stays on the record. Use it when a wave-off was itself
+a mistake, or when an install migrated in carrying one that will not let `arm`
+through.
 
 ## 3. Quiet a guard, or let it block again
 
@@ -113,22 +147,23 @@ the evidence for that conversation.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" disarm <guardId>
 ```
 
-The guard drops to observe on the next call: it still writes a ledger line, and
-the call proceeds. This is the move for a check that is right often enough to
-keep and wrong often enough to be in the way.
+This plans and stops, exactly as `fp` does: put the named change to the user and
+apply it only on a yes. Once applied the guard drops to observe on the next
+call: it still writes a ledger line, and the call proceeds. This is the move for
+a check that is right often enough to keep and wrong often enough to be in the
+way.
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" arm <guardId>
 ```
 
-Back to blocking. From the next session a match denies the call and shows the
-reason, the alternative and the override path. Say that plainly before the user
-answers.
+Back to blocking, and this one applies itself. From the next session a match
+denies the call and shows the reason, the alternative and the override path. Say
+that plainly before the user answers.
 
 `arm` re-derives the guard's proof and refuses when the check module or its
 fixtures no longer match what was proven — report that refusal verbatim, never
-retry. `disarm` checks nothing, because lowering a guard to observe is always
-safe.
+retry.
 
 ## 4. Retire a guard
 
@@ -136,10 +171,11 @@ safe.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" retire <guardId>
 ```
 
-For a guard that never earned its keep. The row leaves the config through the
-same journaled door everything else uses, so `revert` puts it back. The ledger
-keeps its history — evidence is never deleted. Only ever offer this for a guard
-the user confirmed, one at a time.
+For a guard that never earned its keep. Plans and stops like the rest, and the
+user approves the named change before anything moves. The row then leaves the
+config through the same journaled door everything else uses, so `revert` puts it
+back. The ledger keeps its history — evidence is never deleted. Only ever offer
+this for a guard the user confirmed, one at a time.
 
 ## 5. Drift, and the re-run question
 
@@ -155,9 +191,9 @@ the pre-image if they want it back.
 Then ask ONE `AskUserQuestion`, and do exactly the chosen one:
 
 - **Retire the dead** — `retire <guardId>` for each never-fired guard the user
-  confirms.
+  confirms, then the `apply` it hands back.
 - **Quiet the noisy** — `disarm <guardId>` for each guard the wave-offs
-  indict.
+  indict, then the `apply` it hands back.
 - **Cover something new** — hand off to `/jig:jig`, which authors and proves the
   new checks.
 - **Nothing, just the report** — stop here.

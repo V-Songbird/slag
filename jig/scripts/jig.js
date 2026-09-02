@@ -27,7 +27,11 @@
 //                                            applies ONLY what is named here —
 //                                            the id says what and the path says
 //                                            where, and both halves are the
-//                                            approval boundary
+//                                            approval boundary. `--plan` names
+//                                            no path, so it carries the batch
+//                                            tier only and refuses any change
+//                                            that can refuse a call or fail a
+//                                            build
 //   node jig.js status [--root <path>]       replay the journal and print state;
 //                                            writes nothing, ever
 //   node jig.js revert --change <id> | --tx <id> | --all [--force]
@@ -555,6 +559,33 @@ function changeState(c) {
 // plan
 // ---------------------------------------------------------------------------
 
+// Returns the sentence refusing a write-config change that would leave the
+// repository with no guards at all, or null when it would not. Reads the file on
+// disk rather than anything the caller says about it: the whole point is that
+// the caller believed the empty config was fine.
+function emptiesConfig(root, rel, content) {
+  let proposed = null;
+  try {
+    proposed = JSON.parse(stripBom(content));
+  } catch {
+    return null; // Not this gate's job — validateConfig says what a broken config is.
+  }
+  if (!isObject(proposed) || (Array.isArray(proposed.guards) && proposed.guards.length)) return null;
+  const raw = readIfExists(path.join(root, rel));
+  if (raw === null) return null;
+  let installed = null;
+  try {
+    installed = JSON.parse(stripBom(raw.toString("utf8")));
+  } catch {
+    return null;
+  }
+  const guards = isObject(installed) && Array.isArray(installed.guards) ? installed.guards : [];
+  if (!guards.length) return null;
+  return "this would replace " + rel + "'s " + guards.length + " guard" + (guards.length === 1 ? "" : "s") +
+    " (" + guards.map((g) => (g && g.id) || "?").join(", ") + ") with none, which disarms this repository." +
+    " jig does not propose that — use `revert` to take the install back out.";
+}
+
 // Draft → canonical plan. Everything mechanical is computed here rather than
 // trusted from the draft: the fingerprint, the file's EOL/BOM style, the
 // format, and how that format gets verified. A draft that states any of them is
@@ -632,6 +663,16 @@ function planFromDraft(draft, root) {
       }
     } else if (typeof raw.content !== "string") {
       problems.push(label + ": " + rel + " has no `content` string"); continue;
+    }
+
+    // The last line of defence under the config face. Whatever computed it —
+    // a plan, a retirement, a hand-written draft — a config holding no guards
+    // proposed over one that holds some is a repository being disarmed, and
+    // that is never a change jig offers. Taking the guards out wholesale is
+    // `revert`, which puts the install back the way it was found.
+    if (raw.kind === "write-config") {
+      const dropped = emptiesConfig(root, rel, raw.content);
+      if (dropped) { problems.push(label + ": " + dropped); continue; }
     }
 
     // A git setting has no file behind it, so every fact computed from one is
@@ -749,9 +790,35 @@ function findChange(root, changeId) {
   }
   if (!hits.length) throw expected("no plan in " + STATE_DIR + "/ defines change " + changeId);
   if (hits.length > 1) {
-    throw expected("change " + changeId + " is defined by " + hits.length + " plans — the id has to name one change");
+    // A second interview in the same repository writes a second plan file, and
+    // an artifact id is derived from its template rather than from the plan —
+    // so every unchanged artifact is defined twice and a re-run could not be
+    // applied at all. The tie is broken by the plan the owner was handed the
+    // token from: `plan.json` is the reviewed plan, rewritten by the same
+    // command that printed the id. It is not "the newest wins" — with no
+    // reviewed plan on disk, or with the id in none of it, the id still means
+    // more than one thing and stays a refusal.
+    const reviewed = reviewedPlanId(root);
+    const one = hits.filter((h) => h.plan.planId === reviewed);
+    if (one.length !== 1) {
+      throw expected("change " + changeId + " is defined by " + hits.length + " plans — the id has to name one change");
+    }
+    return one[0];
   }
   return hits[0];
+}
+
+// The planId of the plan `.jig/plan.json` last reviewed, or null when there is
+// none to read. Null and unreadable are the same answer: no tie to break.
+function reviewedPlanId(root) {
+  const raw = readIfExists(path.join(root, STATE_DIR, PLAN_JSON_FILE));
+  if (raw === null) return null;
+  try {
+    const record = JSON.parse(stripBom(raw.toString("utf8")));
+    return isObject(record) && typeof record.planId === "string" ? record.planId : null;
+  } catch {
+    return null;
+  }
 }
 
 function findPlan(root, planId) {
@@ -1382,6 +1449,58 @@ function configFromSelection(classes, provenance, mode) {
   return { schemaVersion: SCHEMA_VERSION, guards };
 }
 
+// The guard configuration as it stands on disk, or null when there is none jig
+// can read. Null and "no guards" are the same answer to every caller here, so
+// neither gets its own branch upstream.
+function installedConfig(root) {
+  const raw = readIfExists(path.join(root, STATE_DIR, CONFIG_FILE));
+  if (raw === null) return null;
+  let record = null;
+  try {
+    record = JSON.parse(stripBom(raw.toString("utf8")));
+  } catch {
+    return null;
+  }
+  return isObject(record) && Array.isArray(record.guards) ? record : null;
+}
+
+// The config face of ANY plan: the guards already installed, union the ones this
+// selection adds. A plan is an interview about what to ADD, and computing the
+// whole file from the current selection alone proposed `guards: []` over a
+// repository that had two armed — approving it disarmed everything through
+// jig's own approval flow.
+//
+// An installed row is carried forward on its OWNER'S answers — the mode and the
+// provenance — and on nothing else. On an id this plan also computes, the
+// mechanical half is recomputed: the same plan writes the check module, and
+// carrying the row's `proof` would record the proof of the module it replaced,
+// leaving a guard jig itself just installed unarmable and drifted. Every other
+// key of the installed config rides along too, because `defaultBranches` is
+// theirs and a re-run is not where it disappears.
+function configFace(root, classes, provenance, mode) {
+  const fresh = configFromSelection(classes, provenance, mode);
+  const installed = installedConfig(root);
+  if (!installed) return { config: fresh, carried: [], added: fresh.guards.map((g) => g.id) };
+  const now = new Map(fresh.guards.map((g) => [g.id, g]));
+  const carried = installed.guards.filter((g) => isObject(g)).map((row) => {
+    const planned = now.get(row.id);
+    if (!planned) return row;
+    const merged = { ...planned, provenance: row.provenance };
+    // Absent `mode` is observe, and that is an answer too — a guard the owner
+    // disarmed does not come back armed because they ran the interview again.
+    if ("mode" in row) merged.mode = row.mode;
+    else delete merged.mode;
+    return merged;
+  });
+  const have = new Set(carried.map((g) => g.id));
+  const added = fresh.guards.filter((g) => !have.has(g.id));
+  return {
+    config: { ...installed, schemaVersion: SCHEMA_VERSION, guards: [...carried, ...added] },
+    carried: carried.map((g) => g.id),
+    added: added.map((g) => g.id),
+  };
+}
+
 // Printed and persisted, never applied. The host's permission rules match a
 // command by prefix; jig's guards match it by pattern. Saying that plainly is
 // more use than proposing a rule broad enough to be expressible and wrong.
@@ -1474,7 +1593,7 @@ function checkSlug(id) {
 function admitAuthored(root, checks) {
   // jig-lib is required lazily: it requires this module back for the shared
   // vocabulary, and a top-level require would be a cycle.
-  const { blankRegions, globToRegExp } = require("../hooks/jig-lib.js");
+  const { blankRegions, globToRegExp, evalSessionDetector } = require("../hooks/jig-lib.js");
   const discarded = [];
   const testable = [];
   for (const check of checks) {
@@ -1488,10 +1607,13 @@ function admitAuthored(root, checks) {
     testable.push(check);
   }
 
-  // The blanker proves a pattern check and the glob matcher proves a paired
-  // one. Both are the real ones the session guards and the driver use — a pair
-  // proved against a toy is a pair that proves nothing about what will run.
-  const result = admission.admit(testable, blankRegions, { cross: true, match: globToRegExp });
+  // The blanker proves a pattern check, the glob matcher proves a paired one,
+  // and the runner's own evaluation proves a session lever. All three are the
+  // real ones the session guards and the driver use — a pair proved against a
+  // toy is a pair that proves nothing about what will run.
+  const result = admission.admit(testable, blankRegions, {
+    cross: true, match: globToRegExp, evaluate: evalSessionDetector,
+  });
   discarded.push(...result.discarded);
 
   const admitted = [];
@@ -1693,12 +1815,16 @@ function composeConfigs(items, manifests) {
 // so the unwired file was written while the lane really was dead and then
 // nothing ever went back to correct it.
 //
-// `--refresh-activation` asks the repository instead of the plan, which is how
-// a repo wired under an older jig gets the right file without being rewired.
+// Every other route asks the repository instead of the plan, which is how a
+// repo wired under an older jig gets the right file without being rewired —
+// and how a re-run never offers the unwired text over a live lane.
 function activationFace(root, opts) {
   if (opts["wire-commit"]) return "activation-wired";
   if (opts["weave-precommit"]) return "activation-woven";
-  if (!opts["refresh-activation"]) return "activation";
+  // The lane is consulted on EVERY route, not just `--refresh-activation`. A
+  // second interview on a wired repository was re-proposing the unwired text —
+  // a document telling the owner to turn on checks that have been running for
+  // weeks — over the true one.
   const lane = commitLane(root);
   if (lane.state !== "live") return "activation";
   return lane.setting === STATE_DIR + "/hooks" ? "activation-wired" : "activation-woven";
@@ -1758,6 +1884,9 @@ function draftFromTemplates(root, opts, checks) {
       severity: check.severity || "safety",
       axes: Array.isArray(check.axes) ? check.axes : [],
       gapNotes: check.gapNotes || null,
+      // The words a blocked call will read, carried onto the class so the plan
+      // can print them. Admission already refused an incomplete or garbled one.
+      deny: check.deny || (check.detectors || []).map((d) => d && d.deny).find(Boolean) || null,
       detectors: (check.detectors || []).map((det, i) => adaptAuthoredDetector(check, det, i)),
       authored: true,
       expectedNearMissHits: authored.expectedNearMissHits,
@@ -1774,7 +1903,7 @@ function draftFromTemplates(root, opts, checks) {
   const changes = [];
   const refused = [];
 
-  const add = (entry, content, classIds) => {
+  const add = (entry, content, classIds, rationale) => {
     const problem = occupancyProblem(root, entry.target, states);
     if (problem) { refused.push(problem); return; }
     changes.push({
@@ -1786,7 +1915,7 @@ function draftFromTemplates(root, opts, checks) {
       ownership: entry.ownership,
       provenance,
       template: { name: entry.name, version: entry.version },
-      rationale: ACTIVATION_WHY[entry.name] || entry.name,
+      rationale: rationale || ACTIVATION_WHY[entry.name] || entry.name,
     });
   };
 
@@ -1970,9 +2099,14 @@ function draftFromTemplates(root, opts, checks) {
   // exact thing SCOPE says jig must never do, arriving through jig's own
   // approval flow. A plan that proposes no coverage proposes no config.
   if (!wiringOnly && !noCoverage) {
-    const config = configFromSelection(classes, provenance, mode);
+    const face = configFace(root, classes, provenance, mode);
     add({ name: "config", version: "1.0.0", target: STATE_DIR + "/" + CONFIG_FILE, kind: "write-config", ownership: "schema" },
-      JSON.stringify(config, null, 2) + "\n", selection);
+      JSON.stringify(face.config, null, 2) + "\n", selection,
+      // Named, not counted: the owner is approving a file that decides which
+      // tool calls get refused, and "config" told them nothing about which.
+      "the guard configuration" +
+        (face.carried.length ? " — carried forward: " + face.carried.join(", ") : "") +
+        (face.added.length ? " — added by this plan: " + face.added.join(", ") : ""));
     const permissions = permissionsProposal(classes);
     if (permissions) {
       add({ name: "permissions", version: "1.0.0", target: STATE_DIR + "/" + PERMISSIONS_FILE, kind: "write-side-file", ownership: "file" },
@@ -2114,6 +2248,10 @@ function draftFromTemplates(root, opts, checks) {
     configConflicts: configs.conflicts,
     discarded: admissionResult.discarded,
     discardedFile,
+    // What this repository was guarding by before the plan. The consent tier of
+    // a config change is read against it: a plan that takes a guard away is not
+    // the same approval as one that adds three.
+    installedGuards: (installedConfig(root) || { guards: [] }).guards.filter((g) => isObject(g)),
   };
 }
 
@@ -2336,17 +2474,63 @@ function matrixRow(cls, provenance, changes, guards) {
   };
 }
 
+// The guard rows a write-config change would leave on disk, or null when the
+// change carries no readable config. Null is not "no guards" — a caller that
+// cannot see the file must not conclude the file is empty.
+function proposedGuards(content) {
+  if (typeof content !== "string") return null;
+  let record = null;
+  try {
+    record = JSON.parse(stripBom(content));
+  } catch {
+    return null;
+  }
+  if (!isObject(record) || !Array.isArray(record.guards)) return null;
+  return record.guards.filter((g) => isObject(g));
+}
+
+// Every installed guard this config would take away, by id: one it drops
+// outright, or an armed one it steps down. `mode` absent is observe (the runner
+// reads it that way), so a row losing its `mode` stops refusing tool calls just
+// as surely as a row that is deleted — and a deleted row stops reporting too,
+// which is coverage the owner approved and would be losing here.
+function guardsWeakened(installed, content) {
+  const rows = proposedGuards(content);
+  if (!rows) return [];
+  const after = new Map(rows.map((g) => [g.id, g.mode]));
+  return installed
+    .filter((g) => isObject(g) && (!after.has(g.id) || (g.mode === "armed" && after.get(g.id) !== "armed")))
+    .map((g) => g.id);
+}
+
 // Tiered consent. Batch-approve what only ever reports;
 // item-approve anything that can refuse a tool call or fail somebody's build.
 // Both tests are mechanical — the change's kind and its target — so no artifact
 // lands in the cheap tier because somebody classified it there by hand.
-function consentFor(change, guards) {
-  if (change.kind === "write-config" && guards.length) {
-    return {
-      tier: "item",
-      why: "wires " + guards.length + " guard" + (guards.length === 1 ? "" : "s") +
-        " into a hook that can refuse a tool call",
-    };
+function consentFor(change, guards, installed) {
+  if (change.kind === "write-config") {
+    // Taking enforcement AWAY is the approval nobody should be able to give in
+    // a batch. Named one by one, because "3 guards change mode" is not a thing
+    // an owner can check against what they remember installing.
+    const weakened = guardsWeakened(installed || [], change.content);
+    if (weakened.length) {
+      return {
+        tier: "item",
+        why: "takes " + weakened.length + " installed guard" + (weakened.length === 1 ? "" : "s") +
+          " away from what this repository is guarding by: " + weakened.join(", "),
+      };
+    }
+    // Read from the file the plan proposes rather than from the selection that
+    // computed it: the face is the installed guards union the new ones, so a
+    // re-run adding nothing still hands over every guard already refusing here.
+    const wiring = proposedGuards(change.content) || guards;
+    if (wiring.length) {
+      return {
+        tier: "item",
+        why: "wires " + wiring.length + " guard" + (wiring.length === 1 ? "" : "s") +
+          " into a hook that can refuse a tool call",
+      };
+    }
   }
   if (change.kind === "include-line") {
     return { tier: "item", why: "edits one line into a file jig does not own" };
@@ -2371,6 +2555,17 @@ function consentFor(change, guards) {
   }
   if (toPosix(change.path).startsWith(".github/workflows/")) {
     return { tier: "item", why: "fails the build for everyone who pushes" };
+  }
+  // The build verdict itself, and the thing that asks for it. `run.mjs`'s exit
+  // code is what the commit hook and the CI job report, and the shim is what
+  // makes the commit lane run at all — either one lands under `.jig/` and would
+  // otherwise fall through to "reports only", which is the one thing they are
+  // not.
+  if (toPosix(change.path) === STATE_DIR + "/checks/run.mjs") {
+    return { tier: "item", why: "is the check driver every lane runs — its exit code is the commit and CI verdict" };
+  }
+  if (toPosix(change.path) === STATE_DIR + "/hooks/pre-commit") {
+    return { tier: "item", why: "is the hook git runs at commit time, so it decides whether a commit is checked at all" };
   }
   // SCOPE, "Which consent tier is an authored check": item. The check driver
   // and CI both run it, so it can fail somebody's build — and it is the thing
@@ -2458,10 +2653,28 @@ function buildReview(payload, generated) {
     kind: c.kind,
     classIds: c.classIds,
     enforcementGap: c.enforcementGap,
-    ...consentFor(c, guards),
+    ...consentFor(c, guards, generated.installedGuards || []),
   }));
   const backlog = backlogFor(generated.loaded || [], selection);
   const rows = classes.map((cls) => matrixRow(cls, provenance, payload.changes, guards));
+  // The exact sentence each armable guard hands back, composed by the hook
+  // library itself so the plan cannot describe words other than the ones that
+  // ship. Nothing else on this plan shows the owner the text a blocked agent
+  // reads, and that text is the whole of what the agent gets.
+  // Resolved per DETECTOR, the way `denyOf` resolves it at runtime: a check may
+  // state one reply for itself or one per detector, and printing the check's
+  // where a detector states its own would show the owner words other than the
+  // ones that ship.
+  const denyByGuard = new Map();
+  for (const cls of classes) {
+    for (const det of cls.detectors || []) {
+      const deny = (det && det.deny) || cls.deny;
+      if (deny) denyByGuard.set(cls.id + "-" + det.id, deny);
+    }
+  }
+  const denyReplies = guards
+    .filter((g) => denyByGuard.has(g.id))
+    .map((g) => ({ guardId: g.id, text: require("../hooks/jig-lib.js").denyText(g.id, denyByGuard.get(g.id)) }));
 
   const review = {
     schemaVersion: SCHEMA_VERSION,
@@ -2474,6 +2687,7 @@ function buildReview(payload, generated) {
     mode,
     actors: ACTORS,
     editions,
+    denyReplies,
     selection,
     rows,
     artifacts,
@@ -2604,6 +2818,19 @@ function renderReviewMd(review, backlog) {
   if (!item.length) out.push("- nothing in this plan can refuse anything");
   for (const a of item) out.push("- `" + a.id + "` → `" + a.path + "` — " + a.why);
   out.push("");
+
+  // The one thing on this plan the owner cannot read anywhere else: the exact
+  // sentence a refused call gets back. It ships composed by the hook library, so
+  // what is printed here is the string, not a description of it.
+  if ((review.denyReplies || []).length) {
+    out.push("## What a blocked call will read");
+    out.push("");
+    out.push("Word for word, the reply each of these guards hands back when it refuses. Approve");
+    out.push("the words, not just the guard — this is the whole of what the blocked caller gets:");
+    out.push("");
+    for (const r of review.denyReplies) out.push("- `" + r.guardId + "` — " + r.text);
+    out.push("");
+  }
 
   if (review.refused.length) {
     out.push("## Refused");
@@ -2786,7 +3013,12 @@ function cmdPlan(root, opts) {
   };
 }
 
-function cmdApply(root, opts) {
+// `internal` is the third positional argument and is unreachable from the CLI:
+// `main` calls every command with exactly two. It is how jig's own already-
+// approved transactions — `arm`, which the owner asked for by guard id, and
+// `migrate`, which rewrites an install the owner already has — replay a whole
+// plan they wrote themselves. Nothing an owner types can set it.
+function cmdApply(root, opts, internal) {
   const named = opts.change.filter((c) => typeof c === "string" && c);
   // The approval token, both halves of it (SCOPE, "What is the approval
   // token"): a change id alone does not name a path, so an edited plan could
@@ -2816,9 +3048,37 @@ function cmdApply(root, opts) {
     const record = findPlan(root, opts.plan);
     planId = record.planId;
     selected = record.changes;
+    // The widened form SCOPE forbids. A plan id names no path, so approving one
+    // approves every destination in it sight unseen — which is exactly the
+    // "one approval that lands many writes" the write boundary exists to stop.
+    // The engine runs the same tier function the review surface printed, and
+    // anything in the item tier has to come back one pair at a time.
+    if (!internal) {
+      const installed = (installedConfig(root) || { guards: [] }).guards.filter((g) => isObject(g));
+      // `guards` is only consentFor's fallback for a write-config it cannot
+      // parse; falling back to the installed rows keeps an unreadable config in
+      // the item tier instead of waving it through as reporting-only.
+      const item = selected.filter((c) => consentFor(c, installed, installed).tier === "item");
+      if (item.length) {
+        throw expected("Refusing to apply plan " + planId + " as a whole: " + item.length + " of its changes can" +
+          " refuse a tool call or fail a build, and --plan names no path for any of them. Approve each one by" +
+          " name:\n" + item.map((c) => "  --change " + c.id + " --path " + toPosix(c.path)).join("\n") +
+          "\nNothing was written.");
+      }
+    }
   } else {
     throw expected("apply needs --change <id> --path <rel> (repeatable) or --plan <id> — the argument is the" +
       " approval boundary");
+  }
+
+  // Read again here, against the bytes about to land. `planFromDraft` refuses to
+  // COMPOSE a config that disarms the repository; a plan file is a file, and the
+  // approved token names a change in it rather than the content it held when it
+  // was reviewed. This is the gate on what is written.
+  for (const change of selected) {
+    if (change.kind !== "write-config") continue;
+    const dropped = emptiesConfig(root, change.path, change.content);
+    if (dropped) throw expected("Refusing to apply " + change.id + ": " + dropped + " Nothing was written.");
   }
 
   const tx = hashBytes(Buffer.from(String(planId) + "|" + selected.map((c) => c.id).join(",") + "|" + new Date().toISOString()))
@@ -3315,7 +3575,7 @@ function cmdSelftest(root, opts) {
 const PROFILE_FILE = "profile.json";
 
 const PROFILE_KEYS = ["schemaVersion", "scannedAt", "stack", "languages", "edition", "editions", "node",
-  "guardrails", "governance", "slots", "occupied", "greenfield", "disclosures"];
+  "guardrails", "governance", "slots", "occupied", "greenfield", "disclosures", "quick"];
 
 // The files jig writes at v1 — the same targets the engine's per-kind
 // allowlist permits, named here as slots a human can be shown.
@@ -3781,8 +4041,30 @@ function cmdScan(root, opts) {
     slots,
     occupied: occupied.map((s) => s.slot),
     greenfield,
+    // Null on an ordinary scan: quick start is the only run that selects
+    // without asking, so it is the only one that owes a recorded answer.
+    quick: null,
     disclosures,
   };
+
+  // `--quick` skips every round, so the selection cannot be a decision somebody
+  // makes in the moment and nobody can check afterwards. The engine computes it
+  // here from this repository's own history, writes it with its basis, and says
+  // what quick start still costs.
+  if (opts && opts.quick) {
+    let mined = null;
+    try {
+      mined = require("./forensics.js").runForensics(root, {});
+    } catch {
+      // History is an improvement on catalogue order, never a gate. A git that
+      // will not run leaves the catalogue fallback, which says so in `basis`.
+    }
+    profile.quick = editionsLib.quickSelection(profile, mined);
+    disclosures.push("Quick start selected " + profile.quick.classes.length + " of " + profile.quick.considered +
+      " classes on a " + profile.quick.basis + " basis — " + profile.quick.why + ". The selection is written to " +
+      STATE_DIR + "/" + PROFILE_FILE + " under `quick`, so what was assumed on your behalf is on disk rather than" +
+      " in somebody's head.");
+  }
 
   ensureStateDir(root);
   fs.writeFileSync(statePath(root, PROFILE_FILE), JSON.stringify(profile, null, 2) + "\n");
@@ -3877,6 +4159,10 @@ function guardEvidence(lib, root, guard, stats) {
     mod: record.problem ? null : record.mod,
     fired: s.fired || 0,
     wavedOff: s.falsePositives || 0,
+    // A wave-off the owner raised and never approved the change for. The guard
+    // is still doing whatever its config says, which is the opposite of what
+    // somebody who ran `fp` and walked away expects.
+    pendingWaveOff: !!s.pendingFalsePositive,
     evidence: {
       proof: record.problem ? null : lib.checkProof(record),
       deny: record.problem ? null : lib.denyOf(record.mod, dets[0]),
@@ -3999,6 +4285,7 @@ function cmdReview(root) {
       provenance: g.provenance,
       fired: e.fired,
       wavedOff: e.wavedOff,
+      pendingWaveOff: e.pendingWaveOff,
       // A guard whose module will not load or carries nothing for its event is
       // a broken install, and a review that stayed quiet about it would report
       // coverage nothing delivers.
@@ -4150,36 +4437,58 @@ function cmdInventory(root) {
   };
 }
 
-// A false positive is a human judgment, recorded as its own ledger line. The
-// arming gate reads it as the reset it is.
+// A false positive is a human judgment, recorded as its own ledger line. Acting
+// on it stops an armed guard refusing tool calls, which is what `disarm` does —
+// the surfaces differ, the effect does not — so SCOPE's derail pass gives it the
+// same pause. The line jig writes here is PENDING: it is the judgment, counted
+// as a wave-off and reported as one, and it moves nothing. What quiets the guard
+// is the planned config change handed back with it, approved by the same
+// `--change/--path` pair as any other item-tier write.
+//
+// `--clear` is the other direction and needs no pause: it appends the
+// `false-positive-cleared` line the arming gate already reads, which is how a
+// standing wave-off — one a 1.0.1 install carried in, or one raised here and
+// thought better of — stops holding a guard in observe. Never an edit to
+// history: the ledger is append-only and the earlier line stays where it is.
 function cmdFp(root, opts) {
   const { lib, guards } = configuredGuards(root);
-  const guardId = typeof opts.guard === "string" ? opts.guard : opts._[1];
-  if (!guardId) throw expected("fp needs the guard id: jig.js fp <guardId>");
+  // `--clear` reads as a flag after the id and as an option before it, because
+  // both are how a person types it.
+  const guardId = typeof opts.guard === "string" ? opts.guard
+    : opts._[1] || (typeof opts.clear === "string" ? opts.clear : undefined);
+  if (!guardId) throw expected("fp needs the guard id: jig.js fp <guardId> [--clear]");
   const guard = guards.find((g) => g.id === guardId);
   if (!guard) {
     throw expected(guardId + " is not a configured guard. Configured: " +
       guards.map((g) => g.id).join(", "));
   }
+  const clearing = opts.clear !== undefined;
   lib.appendLedger(root, {
     session: typeof opts.session === "string" ? opts.session : null,
     actor: "user",
     guardId,
     classId: guard.classId,
     mode: "observe",
-    decision: "false-positive",
+    decision: clearing ? "false-positive-cleared" : "false-positive-pending",
     tool: null,
     matched: null,
     path: null,
     durMs: 0,
   });
-  return { ok: true, recorded: "false-positive", guardId, stats: lib.ledgerStats(root)[guardId] };
+  const stats = lib.ledgerStats(root)[guardId];
+  if (clearing) return { ok: true, recorded: "false-positive-cleared", cleared: guardId, stats };
+  return pendingChange("false-positive", guardId,
+    planGuardMode(root, guardId, null, "fp", "a report from " + guardId + " was wrong"),
+    { recorded: "false-positive-pending", stats });
 }
 
 // The one journaled way a guard's mode changes. The whole config is rewritten
 // through the engine — plan file, pre-image, journal row — so `revert` can put
-// the previous mode back byte for byte.
-function rewriteGuardMode(root, guardId, mode) {
+// the previous mode back byte for byte. This writes the PLAN and stops; whether
+// the change is then applied by jig itself or handed back as a token for the
+// owner to approve is the caller's call, because only the caller knows whether
+// enforcement is going up or coming down.
+function planGuardMode(root, guardId, mode, label, rationale) {
   const rel = STATE_DIR + "/" + CONFIG_FILE;
   const raw = readIfExists(path.join(root, rel));
   if (raw === null) throw expected("no " + rel + " here — run the interview first");
@@ -4191,7 +4500,12 @@ function rewriteGuardMode(root, guardId, mode) {
   const content = JSON.stringify(config, null, 2) + "\n";
   const draft = {
     changes: [{
-      id: (mode === "armed" ? "arm-" : "disarm-") + guardId + "-" + hashBytes(Buffer.from(content, "utf8")).slice(0, 8),
+      // Salted with the moment the plan was written, not content-addressed
+      // alone: the owner may leave a proposed change unapproved and ask for the
+      // same one again, and two plan files defining one change id is a token
+      // `apply` refuses to resolve.
+      id: label + "-" + guardId + "-" +
+        hashBytes(Buffer.from(content + "|" + new Date().toISOString(), "utf8")).slice(0, 8),
       kind: "write-config",
       path: rel,
       content,
@@ -4199,7 +4513,7 @@ function rewriteGuardMode(root, guardId, mode) {
       ownership: "schema",
       provenance: row.provenance || "assumed",
       template: { name: "config", version: "1.0.0" },
-      rationale: (mode === "armed" ? "arm " : "return to observe: ") + guardId,
+      rationale,
     }],
   };
   const { problems, payload } = planFromDraft(draft, root);
@@ -4207,8 +4521,27 @@ function rewriteGuardMode(root, guardId, mode) {
   ensureStateDir(root);
   fs.writeFileSync(path.join(root, STATE_DIR, "plan-" + payload.planId + ".json"),
     JSON.stringify(payload, null, 2) + "\n");
-  cmdApply(root, { _: [], change: [], plan: payload.planId });
-  return payload.planId;
+  return { planId: payload.planId, change: payload.changes[0] };
+}
+
+// Plan-then-stop, for every command that takes enforcement AWAY. The engine
+// puts a config change that stops a guard refusing tool calls in the item tier,
+// and the item tier is approved one pair at a time — so these commands write
+// the plan, change nothing on disk, and hand back the exact token. The owner
+// says yes; `apply` is what acts.
+function pendingChange(action, guardId, plan, rest) {
+  return {
+    ok: true,
+    applied: false,
+    pending: action,
+    guardId,
+    plan: plan.planId,
+    change: plan.change.id,
+    path: plan.change.path,
+    // The whole command, so a caller reads it back rather than assembling one.
+    apply: "apply --change " + plan.change.id + " --path " + plan.change.path,
+    ...(rest || {}),
+  };
 }
 
 // Arming is offered only when it would hold. Asking to arm past the gate is
@@ -4228,8 +4561,12 @@ function cmdArm(root, opts) {
   if (ifArmed.mode !== "armed") {
     throw expected("the arming gate is not met for " + guardId + ": " + ifArmed.why);
   }
-  const planId = rewriteGuardMode(root, guardId, "armed");
-  return { ok: true, armed: guardId, plan: planId, evidence: ifArmed.why };
+  // Arming keeps its internal apply: the owner named this guard, the gate they
+  // are asking past has already been evaluated, and the change puts enforcement
+  // UP. The pause the item tier exists for is the one on the way down.
+  const plan = planGuardMode(root, guardId, "armed", "arm", "arm " + guardId);
+  cmdApply(root, { _: [], change: [], plan: plan.planId }, true);
+  return { ok: true, armed: guardId, plan: plan.planId, change: plan.change.id, evidence: ifArmed.why };
 }
 
 function cmdDisarm(root, opts) {
@@ -4240,8 +4577,8 @@ function cmdDisarm(root, opts) {
     throw expected(guardId + " is not a configured guard. Configured: " +
       guards.map((g) => g.id).join(", "));
   }
-  const planId = rewriteGuardMode(root, guardId, null);
-  return { ok: true, disarmed: guardId, plan: planId };
+  return pendingChange("disarm", guardId,
+    planGuardMode(root, guardId, null, "disarm", "return to observe: " + guardId));
 }
 
 // ---------------------------------------------------------------------------
@@ -4289,7 +4626,8 @@ function cmdRerun(root) {
 
 // Retiring is for a guard that never earned its keep: the row leaves the
 // config through the same journaled door arming uses, so `revert` can put it
-// back. The ledger keeps its history — evidence is never deleted.
+// back. The ledger keeps its history — evidence is never deleted. Like `disarm`
+// it plans and stops: deleting a guard row is the largest step down there is.
 function cmdRetire(root, opts) {
   const { guards } = configuredGuards(root);
   const guardId = typeof opts.guard === "string" ? opts.guard : opts._[1];
@@ -4305,7 +4643,10 @@ function cmdRetire(root, opts) {
   const content = JSON.stringify(config, null, 2) + "\n";
   const draft = {
     changes: [{
-      id: "retire-" + guardId + "-" + hashBytes(Buffer.from(content, "utf8")).slice(0, 8),
+      // Time-salted for the same reason the mode plans are: a retirement the
+      // owner does not approve must not poison the id of the next one.
+      id: "retire-" + guardId + "-" +
+        hashBytes(Buffer.from(content + "|" + new Date().toISOString(), "utf8")).slice(0, 8),
       kind: "write-config",
       path: rel,
       content,
@@ -4321,8 +4662,7 @@ function cmdRetire(root, opts) {
   ensureStateDir(root);
   fs.writeFileSync(path.join(root, STATE_DIR, "plan-" + payload.planId + ".json"),
     JSON.stringify(payload, null, 2) + "\n");
-  cmdApply(root, { _: [], change: [], plan: payload.planId });
-  return { ok: true, retired: guardId, plan: payload.planId };
+  return pendingChange("retire", guardId, { planId: payload.planId, change: payload.changes[0] });
 }
 
 const COMMANDS = {
@@ -4361,11 +4701,11 @@ module.exports = {
   leverOf, leverAvailable, toolchainFacts, toolchainToolFor, RELEASE_ORDER,
   denyCapable, hostNeutralFloor, floorNote, detectorGrade, detectorCeiling,
   detectorCell, matrixRow, consentFor, bestGrade, backlogFor, buildReview, cellText, renderReviewMd,
-  resolveEditions, editionClassById, adaptAuthoredDetector, readAuthored, admitAuthored, checkSlug,
+  resolveEditions, editionClassById, AUTHORED_RUNNERS, adaptAuthoredDetector, readAuthored, admitAuthored, checkSlug,
   authoredChecksIn, readFromFile, toolchainProposal, toolchainRow, installTouchPaths, guardEvidence,
   PROFILE_KEYS, FILE_SLOTS, HOOK_SLOTS, RULE_FILES,
   CHANGE_KINDS, INSTALLABLE_KINDS, KIND_TARGETS, VALIDATORS, PROSE_BUDGET_BYTES, probeGreen,
-  OWNERSHIPS, PROVENANCES, DEFAULT_INSTALL_MODE, installMode, TEMPLATE_DIR, guardProbe,
+  OWNERSHIPS, PROVENANCES, DEFAULT_INSTALL_MODE, installMode, TEMPLATE_DIR, guardProbe, fixturePath,
   applyStyle, detectStyle, hasBom, stripBom, hashBytes,
   resolveInsideRoot, resolveWritePath, targetProblem, isEngineOwned,
   formatOf, verifyByFor, verifyWritten,

@@ -25,7 +25,7 @@ const path = require("path");
 // The engine owns the shared vocabulary: the schema version every jig artifact
 // ships at and the directory they all live in. Re-declaring either here is how
 // they would drift apart.
-const { SCHEMA_VERSION, STATE_DIR, stripBom } = require("../scripts/jig.js");
+const { SCHEMA_VERSION, STATE_DIR, stripBom, fixturePath } = require("../scripts/jig.js");
 // The one function that says what binds a proof to the check it proves. A
 // second copy of that hashing rule here would be a second answer to the
 // question admission already answered.
@@ -456,6 +456,19 @@ function denyOf(mod, det) {
   return DENY_PARTS.every((k) => typeof deny[k] === "string" && deny[k].trim()) ? deny : null;
 }
 
+// The words a blocked call reads, composed in one place. The guard id leads,
+// because a refusal that will not say which guard refused leaves the caller
+// nothing to look up; the false-alarm line closes it, because a caller who
+// thinks the guard is wrong needs the command rather than a search. jig's plan
+// renders through this same function, so the owner approves the exact string
+// that ships.
+function denyText(guardId, deny) {
+  return "[jig guard " + guardId + "] " + deny.reason +
+    " Instead: " + deny.alternative +
+    " To override: " + deny.override +
+    ". (false alarm? /jig:review fp " + guardId + ")";
+}
+
 // What binds a proof to the check it proves: the module as installed plus both
 // inline fixtures, hashed by the same function that recorded the proof at
 // admission. A check missing a fixture can no longer be proven, so it hashes to
@@ -571,11 +584,17 @@ function effectiveState(guard, config, filePath, evidence) {
 }
 
 // One pass over the ledger, stats for every guard at once. The arming model
-// reads one fact from it: whether a false positive stands. The review skill
-// raises one with {decision:"false-positive", guardId} and settles it with
-// {decision:"false-positive-cleared", guardId} — the later line wins, because
-// an append-only ledger is how a wave-off stays undoable. `fired` is carried
-// for the review surface, which reports what each guard has done.
+// reads one fact from it: whether a false positive stands. A 1.0.1 install and
+// a hand-written line raise one with {decision:"false-positive", guardId};
+// {decision:"false-positive-cleared", guardId} settles it — the later line
+// wins, because an append-only ledger is how a wave-off stays undoable.
+//
+// `fp` writes {decision:"false-positive-pending"} instead: since 2.8.0 the
+// judgment is recorded here and the guard is quieted by an approved config
+// change, so a pending line counts as a wave-off and holds nothing. It is
+// tracked separately so a review can say a wave-off was raised and never
+// settled. `fired` is carried for the review surface, which reports what each
+// guard has done.
 function ledgerStats(root) {
   let lines = [];
   try {
@@ -590,13 +609,17 @@ function ledgerStats(root) {
     try { row = JSON.parse(line); } catch { continue; }
     if (!row.guardId) continue;
     const s = stats[row.guardId] || (stats[row.guardId] = {
-      standingFalsePositive: false, falsePositives: 0, fired: 0,
+      standingFalsePositive: false, pendingFalsePositive: false, falsePositives: 0, fired: 0,
     });
     if (row.decision === "false-positive") {
       s.falsePositives++;
       s.standingFalsePositive = true;
+    } else if (row.decision === "false-positive-pending") {
+      s.falsePositives++;
+      s.pendingFalsePositive = true;
     } else if (row.decision === "false-positive-cleared") {
       s.standingFalsePositive = false;
+      s.pendingFalsePositive = false;
     } else if (row.decision === "would-deny" || row.decision === "deny") {
       s.fired++;
     }
@@ -743,6 +766,29 @@ function evaluateGuard(dets, event, payload, config, failed, rel) {
   return null;
 }
 
+// The session levers, proven the way they will run. Admission hands over one
+// detector and one fixture; this builds the tool call the host would send and
+// answers with the evaluation above — so a lever admission calls proven and the
+// guard a session actually runs can never be two different guards. Reaching for
+// a second matcher inside admission is what let a bash-guard matching
+// `zzz-never-matches-anything` ship under a printed proof.
+// A path-scoped edit detector only fires on a path its own globs match, so the
+// fixture is seeded at the same derived path `jig selftest` probes it at.
+function evalSessionDetector(det, runner, text) {
+  if (runner === "PreToolUse") {
+    // `branchInScope` passes a push that names no branch, because a bare
+    // `git push` cannot be read for one. That is right at runtime and it is not
+    // a proof: a fixture naming no branch would admit a guard scoped to a
+    // branch nobody has, which then catches nothing real. A branch-scoped lever
+    // is proven by a fixture that names the push it exists to stop.
+    const params = (det && det.params) || {};
+    if (Array.isArray(params.onlyBranches) && params.onlyBranches.length && pushBranch(text) === null) return false;
+    return !!evaluateGuard([det], runner, { tool_input: { command: text } }, {}, [], "");
+  }
+  const rel = fixturePath({ params: (det && det.params) || {} });
+  return !!evaluateGuard([det], runner, { tool_input: { file_path: rel, content: text } }, {}, [], rel);
+}
+
 // ---------------------------------------------------------------------------
 // The ledger
 // ---------------------------------------------------------------------------
@@ -811,6 +857,7 @@ function runEvent(root, event, payload, warn) {
   const stats = running.some((g) => g.mode === "armed") ? ledgerStats(root) : {};
   const results = [];
   let deny = null;
+  let denyGuard = null;
   for (const guard of running) {
     const started = process.hrtime.bigint();
     const durMs = () => Math.round(Number(process.hrtime.bigint() - started) / 1e6 * 1000) / 1000;
@@ -870,7 +917,10 @@ function runEvent(root, event, payload, warn) {
       guardId: guard.id, classId: guard.classId, decision,
       matched: hit ? hit.matched : null, mode: eff.mode,
     });
-    if (decision === "deny" && !deny) deny = denyOf(record.mod, det);
+    if (decision === "deny" && !deny) {
+      deny = denyOf(record.mod, det);
+      if (deny) denyGuard = guard.id;
+    }
   }
 
   const out = {
@@ -886,7 +936,7 @@ function runEvent(root, event, payload, warn) {
   // to arm a guard whose check ships an incomplete triple, so a deny that
   // reaches here always carries reason, alternative and override.
   if (deny) {
-    const reason = deny.reason + " Instead: " + deny.alternative + " To override: " + deny.override + ".";
+    const reason = denyText(denyGuard, deny);
     if (event === "PreToolUse") {
       out.hookSpecificOutput = {
         hookEventName: "PreToolUse",
@@ -907,8 +957,8 @@ module.exports = {
   CONFIG_FILE, LEDGER_FILE, OFF_FILE, CHECKS_DIR,
   statePath, isOff, isConfigured, readInput,
   readConfig, validateConfig,
-  loadCheck, sessionDetectors, denyOf, checkProof,
-  blankRegions, globToRegExp, pushBranch, branchInScope, evaluateGuard,
+  loadCheck, sessionDetectors, denyOf, denyText, checkProof,
+  blankRegions, globToRegExp, pushBranch, branchInScope, evaluateGuard, evalSessionDetector,
   effectiveState, ledgerStats, zoneForcesObserve,
   appendLedger, runEvent,
 };

@@ -135,6 +135,21 @@ function pipeWithStrings() {
     .replace("{ strings: false, perLine: true }", "{ strings: true, perLine: true }");
 }
 
+// The 1.0.1 guard set with pipe-to-shell watched by the bash detector that can
+// still be proven. Admission now runs a bash-guard's own fixture pair through
+// the runner's evaluation, and the class's `pipe` detector fires on its own
+// near miss: `echo "curl … | sh"` is a command, and a Bash guard does not blank
+// string literals the way the check driver does. `force-push` is the same
+// class's other bash guard and it passes both halves.
+function guardsWithProvenPipe() {
+  return [
+    legacyGuard("silent-catch", "edit-observe-guard", "PostToolUse", { provenance: "elicited", mode: "observe" }),
+    legacyGuard("focused-or-skipped-test", "edit-observe-guard", "PostToolUse"),
+    legacyGuard("pipe-to-shell", "force-push", "PreToolUse"),
+    legacyGuard("test-file-deletion", "bash-guard", "PreToolUse"),
+  ];
+}
+
 test("a clean 1.0.1 install migrates in place", () => {
   const root = install();
   const result = migrate.cmdMigrate(root);
@@ -198,10 +213,10 @@ test("migration never arms anything, and history follows every surviving guard",
 test("a class with no edition equivalent carries forward under its own id", () => {
   const checks = Object.fromEntries(LEGACY.map((id) => [id, templateText("checks/" + id + ".check.mjs")]));
   checks["pipe-to-shell"] = pipeWithStrings();
-  const root = install({ checks });
+  const root = install({ checks, guards: guardsWithProvenPipe() });
   const result = migrate.cmdMigrate(root);
 
-  const guard = readJson(root, ".jig/config.json").guards.find((g) => g.id === "pipe-to-shell-pipe");
+  const guard = readJson(root, ".jig/config.json").guards.find((g) => g.id === "pipe-to-shell-force-push");
   assert.equal(guard.classId, "pipe-to-shell", "no edition names this class, so the id is left alone");
   assert.equal(guard.check, "pipe-to-shell");
   assert.equal(guard.runner, "PreToolUse");
@@ -216,10 +231,36 @@ test("a class with no edition equivalent carries forward under its own id", () =
   assert.equal(guard.proof, proofOnDisk(root, "pipe-to-shell", mod));
 });
 
+// The other half of the same change, and the one an owner notices: their
+// pipe-to-shell guard watched the `pipe` bash detector, which fires on the
+// class's own near miss now that admission runs a bash-guard the way the runner
+// does. A lever that cannot be proven discards the WHOLE check (SCOPE, "It
+// never claims coverage it has not demonstrated"), so the commit-time half goes
+// with it — and migration says so rather than quietly installing less.
+test("a 1.0.1 guard whose bash lever fires on its own near miss is dropped, and named", () => {
+  const checks = Object.fromEntries(LEGACY.map((id) => [id, templateText("checks/" + id + ".check.mjs")]));
+  checks["pipe-to-shell"] = pipeWithStrings();
+  const root = install({ checks });
+  const result = migrate.cmdMigrate(root);
+
+  assert.equal(result.ok, true);
+  const dropped = result.droppedGuards.find((d) => d.guardId === "pipe-to-shell-pipe");
+  assert.ok(dropped, "the guard vanished with nothing said about it: " + JSON.stringify(result.droppedGuards));
+  assert.match(dropped.why, /discarded/);
+  assert.equal(result.discarded.some((d) => d.id === "pipe-to-shell"), true);
+  assert.equal(readJson(root, ".jig/config.json").guards.some((g) => g.classId === "pipe-to-shell"), false);
+  // The commit-time half stops with it: the module is left as a tombstone that
+  // exports nothing, so the driver has nothing to run and `revert` still has the
+  // original to put back.
+  const tomb = fs.readFileSync(path.join(root, ".jig/checks/pipe-to-shell.check.mjs"), "utf8");
+  assert.match(tomb, /discarded by jig's 1\.0\.1 migration/);
+  assert.doesNotMatch(tomb, /export const detectors/);
+});
+
 test("a CRLF install keeps a proof that still binds", () => {
   const checks = Object.fromEntries(LEGACY.map((id) => [id, templateText("checks/" + id + CHECK_SUFFIX)]));
   checks["pipe-to-shell"] = pipeWithStrings();
-  const root = install({ checks, eol: "crlf" });
+  const root = install({ checks, eol: "crlf", guards: guardsWithProvenPipe() });
   migrate.cmdMigrate(root);
 
   const source = fs.readFileSync(path.join(root, ".jig/checks/silent-catch.check.mjs"), "utf8");

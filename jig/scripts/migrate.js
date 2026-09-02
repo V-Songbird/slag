@@ -397,8 +397,10 @@ function cmdMigrate(root) {
 
   // The same admission every authored check faces, cross near-miss included:
   // migration is not a door around the test that admits a check.
-  const { blankRegions } = require("../hooks/jig-lib.js");
-  const verdict = admission.admit(candidates.map((c) => c.check), blankRegions, { cross: true });
+  const { blankRegions, globToRegExp, evalSessionDetector } = require("../hooks/jig-lib.js");
+  const verdict = admission.admit(candidates.map((c) => c.check), blankRegions, {
+    cross: true, match: globToRegExp, evaluate: evalSessionDetector,
+  });
   const admitted = new Map(verdict.admitted.map((a) => [a.id, a]));
   for (const row of candidates) {
     if (admitted.has(row.check.id)) continue;
@@ -520,7 +522,14 @@ function cmdMigrate(root) {
   if (problems.length) throw expected("The migration was rejected:\n  - " + problems.join("\n  - "));
   fs.writeFileSync(statePath(root, "plan-" + payload.planId + ".json"),
     JSON.stringify(payload, null, 2) + "\n");
-  const applied = jig.cmdApply(root, { _: [], change: [], plan: payload.planId });
+  // Internal: the migration is one transaction over an install the owner
+  // already has, and every guard that survives it keeps the mode its own row
+  // recorded — there is no new coverage here to approve item by item. What does
+  // not survive is a guard whose check the pair test no longer admits; that row
+  // is dropped rather than carried, because coverage jig cannot demonstrate is
+  // coverage it does not claim, and every dropped row is named on
+  // `droppedGuards`. `apply --plan` refuses the item tier for everybody else.
+  const applied = jig.cmdApply(root, { _: [], change: [], plan: payload.planId }, true);
 
   // Written whether or not anything was discarded: an absent file and a clean
   // run are the same silence otherwise.

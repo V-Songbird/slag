@@ -500,6 +500,11 @@ async function runChecks(root, only) {
   const findings = [];
   const skipped = [];
   const broken = [];
+  // The reason and the alternative the check's author wrote for the moment it
+  // fires. A finding that names a pattern and a line tells somebody WHAT
+  // matched; these tell them why it is a mistake and what to do instead, which
+  // is the only part they can act on.
+  const denies = {};
   // Read once, for every paired detector in the run. Asking git per check would
   // spawn a process per module to learn the same fact.
   let changed;
@@ -510,6 +515,10 @@ async function runChecks(root, only) {
     if (!mine.length && !paired.length) {
       skipped.push({ id: mod.id, why: "no detector this driver runs — it is watched elsewhere", command: null });
       continue;
+    }
+    const deny = mod.deny || mod.detectors.map((d) => d && d.deny).find(Boolean);
+    if (deny && typeof deny.reason === "string" && typeof deny.alternative === "string") {
+      denies[mod.id] = { reason: deny.reason, alternative: deny.alternative };
     }
     try {
       for (const det of mine) findings.push(...scanWith(ctx, mod, det));
@@ -530,7 +539,7 @@ async function runChecks(root, only) {
     }
   }
   findings.sort((a, b) => (a.path === b.path ? a.line - b.line : a.path < b.path ? -1 : 1));
-  return { findings, skipped, broken, truncated: ctx.truncated };
+  return { findings, skipped, broken, denies, truncated: ctx.truncated };
 }
 
 // The witnessed catch, without jig. Every check carries the pair that admitted
@@ -615,7 +624,14 @@ async function runSelftest() {
 
 function report(out) {
   const lines = [];
-  for (const f of out.findings) lines.push(`${f.path}:${f.line}  ${f.classId}${f.note ? "  (" + f.note + ")" : ""}`);
+  for (const f of out.findings) {
+    lines.push(`${f.path}:${f.line}  ${f.classId}${f.note ? "  (" + f.note + ")" : ""}`);
+    const deny = (out.denies || {})[f.classId];
+    if (deny) {
+      lines.push(`  ${deny.reason}`);
+      lines.push(`  Instead: ${deny.alternative}`);
+    }
+  }
   for (const s of out.skipped) lines.push(`skipped  ${s.id} — ${s.why}${s.command ? "\n  run it yourself: " + s.command : ""}`);
   for (const b of out.broken) lines.push(`BROKEN   ${b.id} — ${b.why}`);
   // A partial walk is disclosed on the report and again in the closing line,

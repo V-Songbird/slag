@@ -165,17 +165,26 @@ function writeChecks(root, checks) {
   return "authored.json";
 }
 
+// Every change in a plan, each under its own `--change <id> --path <rel>` pair.
+// `apply --plan` carries the batch tier only (2.8.0), and an install plan is
+// almost entirely item tier, so this is what a whole install looks like now.
+function applyPlan(engine, root, plan) {
+  return engine.cmdApply(root, {
+    _: [], change: plan.changes.map((c) => c.id), path: plan.changes.map((c) => c.path),
+  });
+}
+
 // A whole install through the surface a person uses. Suites that are about the
 // approval token itself drive `apply --change/--path` directly instead.
 function installChecks(engine, root, checks, opts) {
   const plan = engine.cmdPlan(root, { _: [], change: [], authored: writeChecks(root, checks), ...(opts || {}) });
-  const applied = engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
-  return { plan, applied };
+  return { plan, applied: applyPlan(engine, root, plan) };
 }
 
 module.exports = {
   authored,
   writeChecks,
+  applyPlan,
   installChecks,
   moduleSource,
   PIPED_INSTALLER,

@@ -21,7 +21,10 @@
 //     through exactly one door": the proof hash that admitted the check.
 //   - `hostNeutralFloor` stopped being a gate and became a report.
 //
-// Four gates are new with the rework, G1 to G4, and are marked as such.
+// Five gates are new with the rework, G1 to G4 and G6, and are marked as such.
+// G5 is taken: SCOPE:237 ratifies it by name for the composition gate, which
+// lives in sections.test.js. Two gates answering to one letter is a checklist
+// nobody can read back against the contract.
 //
 // Cells this run could not close are counted and printed as DISCLOSED GAPS at
 // the end of every run. A checklist that silently omits what it could not
@@ -651,5 +654,28 @@ test("release gate G4: every shipped edition parses, is at schemaVersion 4, and 
       assert.notEqual(edition.detect.commentSyntax[ext.toLowerCase()], undefined,
         row.id + " detects on " + ext + " and declares no commentSyntax for it");
     }
+  }
+});
+
+test("release gate G6: every lever the engine can author is named in SKILL.md section 4, and no other", () => {
+  const skill = fs.readFileSync(path.join(PLUGIN_ROOT, "skills", "jig", "SKILL.md"), "utf8");
+  const from = skill.indexOf("## 4. Check authoring");
+  const to = skill.indexOf("## 5. The admission test");
+  assert.ok(from !== -1 && to > from, "SKILL.md no longer has a section 4 to read");
+  const section = skill.slice(from, to);
+
+  // A lever the engine runs and the authoring section never names is a lever
+  // the model can only guess at — which is how `bash-guard` and
+  // `edit-observe-guard` shipped unwritten, and then unproven.
+  for (const lever of Object.keys(engine.AUTHORED_RUNNERS)) {
+    assert.ok(section.includes("`" + lever + "`"),
+      "SKILL.md section 4 never names the `" + lever + "` lever the engine runs");
+  }
+  // And the other way. A lever section 4 tells a model to author that
+  // `adaptAuthoredDetector` refuses is a plan that dies after the interview.
+  for (const lever of Object.keys(engine.LEVERS)) {
+    if (engine.AUTHORED_RUNNERS[lever]) continue;
+    assert.ok(!section.includes("`" + lever + "`"),
+      "SKILL.md section 4 names `" + lever + "`, which no authored check can run");
   }
 });

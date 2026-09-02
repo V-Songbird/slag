@@ -640,3 +640,30 @@ test("a project with no governance docs scans clean and quiet", () => {
   assert.deepEqual(scan.governance, { docs: [], orphans: [] });
   assert.equal(scan.disclosures.some((d) => d.includes("governance")), false);
 });
+
+// `--quick` skips every round, so the classes it installs have to be computed
+// and recorded rather than decided in the moment by whoever is driving.
+
+test("scan --quick records the selection and its basis; an ordinary scan records none", () => {
+  const root = project({ "src/a.js": "//a\n", "package.json": "{\"name\":\"q\"}\n" });
+
+  engine.cmdScan(root, { _: [], change: [] });
+  assert.equal(engine.readProfile(root).profile.quick, null,
+    "an ordinary scan selected classes nobody asked it to");
+
+  const out = engine.cmdScan(root, { _: [], change: [], quick: true });
+  const quick = engine.readProfile(root).profile.quick;
+  assert.deepEqual(quick, out.quick, "the profile on disk disagrees with what scan returned");
+  assert.ok(["forensics", "catalogue"].includes(quick.basis));
+  assert.equal(quick.cap, editions.QUICK_CAP);
+  assert.ok(quick.classes.length > 0 && quick.classes.length <= quick.cap);
+  assert.ok(quick.classes.every((c) => c.classId.startsWith("javascript-typescript/")),
+    "quick start selected classes from an edition this project is not written in");
+  // The same tree twice: a selection nobody can reproduce is not one anybody
+  // can check.
+  assert.deepEqual(engine.cmdScan(root, { _: [], change: [], quick: true }).quick.classes, quick.classes);
+
+  const said = out.disclosures.filter((d) => d.startsWith("Quick start selected "));
+  assert.equal(said.length, 1, "the quick selection was not disclosed");
+  assert.match(said[0], /\.jig\/profile\.json under `quick`/);
+});
