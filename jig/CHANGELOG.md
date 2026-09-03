@@ -4,6 +4,29 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.14.0] — 2026-09-03
+
+### Fixed
+
+- On Windows, nothing jig watched a session for was running. The host's shell tool there is named `PowerShell`, and every matcher jig registered named `Bash` — so no command guard was ever evaluated, no test run was ever witnessed, and the report still said the session lane was live. jig now registers for whichever shell tool the host offers, from one list, and `/jig:inventory` and the plan tell you which one that is.
+- `jig selftest --live --toolchain` could delete a file it did not write. Where a tool's demonstration used a path your project already had — `Cargo.toml`, `package-lock.json`, `requirements.txt` — jig correctly refused to overwrite it, said so, and then removed it anyway on the way out, with no copy to put back. The run exited 0 and left both lanes red. Cleanup now removes only what that run planted.
+- `jig apply --plan` could never reach the batch half of a mixed plan. It refused while any per-item change was outstanding and told you to approve each one by name, which implied the batch became available once you had; it did not. A plan whose items have landed now offers its remaining pair as one approval.
+- The lanes jig wired were red on the tree jig had just written, on every ecosystem. A Python install audited whatever interpreter was on the machine instead of the requirements file jig wrote for it; a JVM install under Maven wired all seven entries to a Gradle wrapper no Maven route creates; .NET analyzers read as installed because the SDK answered a version query, so nothing was added and the lane reported green over a linter that was absent; Rust declared a workspace with no member directory; the shipped eslint sample failed jig's own formatter; and the Python starter failed its own linter and its own coverage floor. Each is driven end to end on every release now.
+- A tool jig asked the machine about could answer for something else. `python -m build` asked `python`, every `cargo` subcommand asked `cargo` — six tools read as present that were not, so nothing was installed and the lane failed later. Each probe now asks the tool itself, and a runner that fetches on demand is disclosed as unprobeable rather than guessed at.
+- The CI workflow jig writes was red on step two for any install with no authored check module. An empty checks directory is not a failing check; it now reports that and exits 0.
+- The coverage table read your plan's guards as refusing calls even when you had asked for observation only, and marked a tool as unrun whenever its config shared a file with another tool's — 21 such cells on a fresh Python plan, over a lane that really did run all of them.
+- A starter file could be changed with nothing checking it. Every other file jig writes carries a version and a checksum; starter bodies did not, so an install had no way to say which one it received. They are under the same discipline now.
+
+### Changed
+
+- A check's patterns are each proved on their own. Admission used to count one hit per check, so a pattern added beside an existing one rode in on its neighbour's proof and was never demonstrated to catch anything. Every pattern now has to fire on the violation and hold on the near miss by itself.
+- Go's linter, formatter and scanner are offered again. Their only correct removal command needs a shell to name your `GOPATH`, and jig opens no shell — which had made all three unofferable, because "is there a way back out" and "could jig run it" were being asked as one question. They are separate now: an install with no stated undo is still refused, and an undo only you can run is printed for you to run.
+- The JVM edition no longer claims a Maven toolchain it does not have. Every verify command it shipped was a Gradle task; Maven now gets its own project file, its guards and its checks, and seven honest refusals in place of seven entries that could not run.
+
+### Known limits
+
+- A command guard's patterns are written in shell idiom. On a host whose shell tool is PowerShell the guard now runs, but a POSIX-shaped pattern will mostly not match what it sees — so it passes rather than never running, and the skill says so to anyone writing one.
+
 ## [2.13.0] — 2026-09-02
 
 ### Added
