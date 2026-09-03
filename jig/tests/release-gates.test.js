@@ -1865,3 +1865,35 @@ test("release gate G14: no plan page says a tool is unrun that its own verify.js
     }
   }
 });
+
+// The gap list, held against the matrix it disclaims. It says in its own words
+// that it exists "so the matrix above is not read as more than it is" — and it
+// was computed from a class's DECLARED detectors, never from what the plan
+// installs, so a row graded GAP in every column could clear the floor and be
+// left off. `javascript-typescript/skipped-test` was that row: GAP in all four
+// actors, absent from the one list an owner reads to find exactly that.
+test("release gate G14: a row that is GAP in every column is named in the gap list", () => {
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    const manager = (edition.detect.packageManagers || [])[0];
+    if (!manager || !edition.classes.length) continue;
+    const root = tmpProject();
+    engine.cmdPlan(root, {
+      _: [], change: [], provenance: "elicited", edition: row.id, "package-manager": manager,
+      tools: edition.toolchain.map((t) => t.id).join(","),
+      select: edition.classes.map((c) => editions.namespacedId(row.id, c.id)).join(","),
+    });
+    const review = JSON.parse(fs.readFileSync(path.join(root, ".jig", "plan.json"), "utf-8"));
+    const page = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
+    const section = page.split("## ENFORCEMENT GAP")[1];
+    const listed = new Set((section || "").split(/\r?\n/)
+      .filter((l) => l.startsWith("- `"))
+      .map((l) => l.slice(3, l.indexOf("`", 3))));
+    const allGap = review.rows.filter((r) => Object.values(r.cells).every((c) => c.grade === "GAP"));
+    if (!allGap.length) { disclose("G14/gaplist/" + row.id, "no row on this edition's plan is GAP in every column"); continue; }
+    for (const r of allGap) {
+      assert.ok(listed.has(r.classId), row.id + " — `" + r.classId + "` is GAP in every column of the" +
+        " matrix and is not in the ENFORCEMENT GAP list under it");
+    }
+  }
+});

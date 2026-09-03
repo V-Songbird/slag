@@ -3061,8 +3061,8 @@ function detectorCell(cls, det, index, provenance, changes, guards, installed, l
     const blind = driverBlindDir(det);
     why = blind ? "the check driver never walks " + blind + "/"
       : removalOnlyDetector(det) ? "a removal is only visible between two versions of a file, so only the" +
-        " commit lane counts it — and no pre-commit hook here runs the driver. `jig plan --wire-commit`" +
-        " is what turns this cell on"
+        " commit lane counts it — and no pre-commit hook here runs the driver. " + WIRE_COMMIT_FIX +
+        " — that is what turns this cell on"
       : det.lever === "tool-rule"
         ? "no lane runs " + ((det.params && det.params.tool) || det.lever)
         : "this plan writes no " + det.lever + " artifact for " + cls.id;
@@ -3110,6 +3110,13 @@ function matrixRow(cls, provenance, changes, guards, installed, lanes) {
     // The floor, reported rather than enforced: a class no host-neutral
     // deterministic lever catches IS the enforcement gap, said once.
     enforcementGap: !floorCleared,
+    // And the same question asked of THIS plan rather than of the class's
+    // declared detectors. `hostNeutralFloor` reads what the class says it has;
+    // a row can clear it and still have every actor's cell graded GAP, because
+    // the artifact the detector needs is not in the plan. `javascript-typescript/
+    // skipped-test` was exactly that: GAP in all four columns, and absent from
+    // the list an owner reads to find exactly that.
+    allCellsGap: Object.values(cells).every((c) => c.grade === "GAP"),
     floorCleared,
     floorNote: floorNote(cls, (installed || NO_INSTALLED_TOOLS).commitLane),
     // The edition's own words about what this class cannot see. Carried through
@@ -3544,9 +3551,27 @@ function renderReviewMd(review, backlog) {
     const names = (rs) => rs.map((r) => "`" + r.classId + "`").join(", ");
     out.push("## No session guard");
     out.push("");
-    out.push("This plan installs nothing that runs inside a session. An edition class carries no");
-    out.push("session detector, so a `--select` run installs none: watching one of these in session");
-    out.push("means authoring the class a second detector and the fixture pair that proves it.");
+    // The diagnosis is not the remedy. The remedy holds however these classes
+    // got here; the diagnosis does not. This blamed an edition class and a
+    // `--select` run on plans that had neither — an authored check planned with
+    // no `--select` flag at all sent its owner to the catalogue for a decision
+    // the check's own author had already made.
+    const editionRows = review.rows.filter((r) => !r.authored);
+    const authoredRows = review.rows.filter((r) => r.authored);
+    out.push("This plan installs nothing that runs inside a session.");
+    out.push("");
+    if (editionRows.length && authoredRows.length) {
+      out.push("The edition classes here carry no session detector, so selecting one installs none, and");
+      out.push("the authored ones declare none either.");
+    } else if (editionRows.length) {
+      out.push("An edition class carries no session detector, so a `--select` run installs none.");
+    } else {
+      out.push("None of the checks here declares a session detector. That is their author's own call,");
+      out.push("made in the check — no catalogue and no `--select` run decided it.");
+    }
+    out.push("");
+    out.push("Watching one of these in session means giving its class a second detector and the");
+    out.push("fixture pair that proves it.");
     out.push("");
     if (driven.length) {
       // Which lanes, not "both": the same claim the header stopped making. A
@@ -3599,15 +3624,24 @@ function renderReviewMd(review, backlog) {
     out.push("");
   }
 
-  const stamped = review.rows.filter((r) => r.enforcementGap);
+  // Read off the cells as well as the declared detectors. The list exists, in
+  // its own words, "so the matrix above is not read as more than it is" — and a
+  // row graded GAP in every column is the plainest case of that, which is the
+  // one it used to leave out.
+  const stamped = review.rows.filter((r) => r.enforcementGap || r.allCellsGap);
   if (stamped.length) {
     out.push("## ENFORCEMENT GAP");
     out.push("");
-    out.push("Nothing here refuses the plan. These are the classes no host-neutral deterministic");
-    out.push("lever catches, said out loud so the matrix above is not read as more than it is:");
+    out.push("Nothing here refuses the plan. These are the classes nothing in it catches — either no");
+    out.push("host-neutral deterministic lever names them, or every cell in their row above is GAP —");
+    out.push("said out loud so the matrix is not read as more than it is:");
     out.push("");
     for (const row of stamped) {
-      out.push("- `" + row.classId + "` — " + row.title + (row.gapNotes ? " " + row.gapNotes : ""));
+      const reason = row.enforcementGap
+        ? (row.gapNotes ? " " + row.gapNotes : "")
+        : " Every actor's cell above is GAP: this plan installs nothing that catches it." +
+          (row.gapNotes ? " " + row.gapNotes : "");
+      out.push("- `" + row.classId + "` — " + row.title + reason);
     }
     out.push("");
   }
