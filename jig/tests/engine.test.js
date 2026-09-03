@@ -1071,3 +1071,42 @@ test("a glob in an edition's detect.files is resolved at intent time, so the fil
   assert.equal(fs.readFileSync(path.join(root, "App.csproj"), "utf-8"), before,
     "the edited project file could not be put back");
 });
+
+// ---------------------------------------------------------------------------
+// Roadmap 249 — four small reporting inaccuracies
+// ---------------------------------------------------------------------------
+
+// (a) The fixed-name review surfaces mean "the plan for this repository as it
+// stands". Left behind by a full revert, `.jig/plan.md` is a coverage matrix —
+// armed mode, a table of DET cells — for a harness that is gone. The id-stamped
+// copies stay, and the result says so rather than removing them in silence.
+test("revert --all takes the fixed-name review surfaces out and names them", () => {
+  const root = tmpProject({});
+  draft(root, [{ id: "c1", kind: "write-config", path: ".jig/config.json", content: "{\"mode\":\"armed\"}\n" }]);
+  apply(root, ["c1"]);
+  fs.writeFileSync(path.join(root, ".jig", "plan.md"), "# a coverage matrix for an install\n");
+  fs.writeFileSync(path.join(root, ".jig", "plan.json"), "{}\n");
+  const out = engine.cmdRevert(root, { _: [], change: [], all: true });
+  assert.ok(out.removedSurfaces.includes(".jig/plan.md"), JSON.stringify(out.removedSurfaces));
+  assert.ok(out.removedSurfaces.includes(".jig/plan.json"));
+  assert.equal(fs.existsSync(path.join(root, ".jig", "plan.md")), false);
+  assert.equal(fs.existsSync(path.join(root, ".jig", "plan.json")), false);
+  // And the audit trail is kept, said out loud on the same result.
+  assert.ok(out.notes.some((n) => n.includes("plan-<id>.md")), JSON.stringify(out.notes));
+});
+
+// (b) Linters colour their output and jig captures it through a pipe. The
+// escapes are noise in a JSON field nothing renders as a terminal, and the cap
+// could land inside one — a truncated report ended mid-escape and swallowed
+// whatever the reader's own terminal printed next.
+test("a toolchain probe's output carries no ANSI escapes and never truncates inside one", () => {
+  const esc = String.fromCharCode(27);
+  assert.equal(engine.readableOutput("src/a.ts:1 " + esc + "[31merror" + esc + "[0m here"),
+    "src/a.ts:1 error here");
+  // The cap counts what the tool said, not what it painted.
+  const long = (esc + "[31m" + "x".repeat(100) + esc + "[0m").repeat(200);
+  const out = engine.readableOutput(long);
+  assert.equal(out.includes(esc), false, "an escape survived into the report");
+  assert.match(out, /… truncated at 4000 characters$/);
+  assert.equal(out.split("\n")[0].length, 4000);
+});

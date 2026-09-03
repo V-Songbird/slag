@@ -1115,8 +1115,13 @@ function shellFreeArgv(argv) {
 }
 
 function runVerify(lane, only) {
+  // `proves` names every tool one argv proves. Three dotnet rows verify with the
+  // same `dotnet build`, and the lane used to spawn it three times and print
+  // three independent `ok` lines for one run. One entry now carries all three
+  // ids, and naming any of them still selects it.
   const entries = readVerifyEntries()
-    .filter((e) => e.lanes.includes(lane) && (only === null || e.id === only));
+    .filter((e) => e.lanes.includes(lane) &&
+      (only === null || e.id === only || (Array.isArray(e.proves) && e.proves.includes(only))));
   const results = [];
   for (const entry of entries) {
     const expectedExit = Number.isInteger(entry.expectedExit) ? entry.expectedExit : 0;
@@ -1139,7 +1144,7 @@ function runVerify(lane, only) {
       continue;
     }
     results.push({
-      id: entry.id, command, ran: true, code: run.status, expectedExit,
+      id: entry.id, proves: entry.proves || null, command, ran: true, code: run.status, expectedExit,
       passed: run.status === expectedExit,
       output: ((run.stdout || "") + (run.stderr || "")).trim(),
     });
@@ -1150,7 +1155,12 @@ function runVerify(lane, only) {
 function verifyReport(out) {
   const lines = [];
   for (const r of out.results) {
-    if (r.passed) lines.push(`ok       ${r.id} — ${r.command} exited ${r.code}`);
+    // What one run actually proved. Where an argv is shared, saying it once and
+    // naming every tool it covers is the honest line; three `ok` rows read as
+    // three runs.
+    const also = Array.isArray(r.proves) && r.proves.length > 1
+      ? ` (also proves ${r.proves.filter((id) => id !== r.id).join(", ")})` : "";
+    if (r.passed) lines.push(`ok       ${r.id}${also} — ${r.command} exited ${r.code}`);
     else if (!r.ran) lines.push(`NOT RUN  ${r.id} — ${r.why}\n  command: ${r.command}`);
     else lines.push(`FAILED   ${r.id} — ${r.command} exited ${r.code}, expected ${r.expectedExit}` +
       (r.output ? "\n" + r.output : ""));

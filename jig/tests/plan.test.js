@@ -2356,3 +2356,42 @@ test("the lane entry for an audit runs the auditor of the manager it was install
       "a " + manager + " install wired a lane running `" + audit.argv.join(" ") + "`");
   }
 });
+
+// Roadmap 249(c). `clippy.toml` carries clippy's knobs — the thresholds, the
+// disallowed lists, `allow-unwrap-in-tests` — and not one lint level.
+// `unwrap_used = "deny"` is a line in Cargo.toml's `[lints.clippy]`, and
+// eighteen DET cells named clippy.toml as the artifact that denies unwrap.
+test("a clippy tool-rule cell names the file that carries the lint level", () => {
+  const root = project({});
+  const edition = JSON.parse(fs.readFileSync(
+    path.join(__dirname, "..", "catalogues", "rust.json"), "utf-8"));
+  engine.cmdPlan(root, {
+    _: [], change: [], provenance: "elicited", edition: "rust", "package-manager": "cargo",
+    tools: edition.toolchain.map((t) => t.id).join(","),
+    select: edition.classes.map((c) => "rust/" + c.id).join(","),
+  });
+  const review = JSON.parse(fs.readFileSync(path.join(root, ".jig", "plan.json"), "utf-8"));
+  const cells = review.rows.flatMap((r) => Object.values(r.cells))
+    .filter((c) => c.lever === "tool-rule" && c.artifact);
+  assert.ok(cells.length, "this plan graded no tool-rule cell, so it asserts nothing");
+  assert.deepEqual(cells.filter((c) => c.artifact === "clippy.toml"), [],
+    "a cell still names clippy.toml as the artifact that denies a lint clippy.toml does not level");
+});
+
+// Roadmap 249(d). dotnet's `csc`, `dotnet-analyzers` and `sonaranalyzer-csharp`
+// all verify with `dotnet build --configuration Release -warnaserror`, so the
+// lane spawned that build three times and printed three `ok` lines — three
+// independent proofs, of one run.
+test("tools that verify with one argv ride one lane entry that names them all", () => {
+  const root = project({});
+  const edition = JSON.parse(fs.readFileSync(
+    path.join(__dirname, "..", "catalogues", "dotnet.json"), "utf-8"));
+  const items = edition.toolchain.map((t) => ({
+    item: { id: t.id, role: t.role, edition: "dotnet", packageManager: "dotnet" },
+  }));
+  const { entries } = engine.verifyEntriesFor([edition], items, ["ci"], null);
+  const build = entries.filter((e) => e.argv.join(" ") === "dotnet build --configuration Release -warnaserror");
+  assert.equal(build.length, 1, "one build is wired as " + build.length + " lane entries");
+  assert.deepEqual(build[0].proves.sort(), ["csc", "dotnet-analyzers", "sonaranalyzer-csharp"]);
+  assert.ok(root);
+});

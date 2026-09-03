@@ -10,12 +10,12 @@
       "starter": {
         "files": [
           {
-          "path": "App.sln",
-          "version": "1.1.0",
-          "sha256": "ca02eb6375286015b3e1310fe3c6622b247353f14b2fb186e7c89f788af261d2",
-          "body": "Microsoft Visual Studio Solution File, Format Version 12.00\nProject(\"{9A19103F-16F7-4668-BE54-9A1E7A4F7556}\") = \"App\", \"src\\App.csproj\", \"{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}\"\nEndProject\nProject(\"{9A19103F-16F7-4668-BE54-9A1E7A4F7556}\") = \"App.Tests\", \"tests\\App.Tests.csproj\", \"{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}\"\nEndProject\nGlobal\n\tGlobalSection(SolutionConfigurationPlatforms) = preSolution\n\t\tDebug|Any CPU = Debug|Any CPU\n\t\tRelease|Any CPU = Release|Any CPU\n\tEndGlobalSection\n\tGlobalSection(ProjectConfigurationPlatforms) = postSolution\n\t\t{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU\n\t\t{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}.Debug|Any CPU.Build.0 = Debug|Any CPU\n\t\t{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}.Release|Any CPU.ActiveCfg = Release|Any CPU\n\t\t{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}.Release|Any CPU.Build.0 = Release|Any CPU\n\t\t{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU\n\t\t{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}.Debug|Any CPU.Build.0 = Debug|Any CPU\n\t\t{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}.Release|Any CPU.ActiveCfg = Release|Any CPU\n\t\t{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}.Release|Any CPU.Build.0 = Release|Any CPU\n\tEndGlobalSection\nEndGlobal\n"
-        },
-        {
+            "path": "App.sln",
+            "version": "1.1.0",
+            "sha256": "ca02eb6375286015b3e1310fe3c6622b247353f14b2fb186e7c89f788af261d2",
+            "body": "Microsoft Visual Studio Solution File, Format Version 12.00\nProject(\"{9A19103F-16F7-4668-BE54-9A1E7A4F7556}\") = \"App\", \"src\\App.csproj\", \"{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}\"\nEndProject\nProject(\"{9A19103F-16F7-4668-BE54-9A1E7A4F7556}\") = \"App.Tests\", \"tests\\App.Tests.csproj\", \"{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}\"\nEndProject\nGlobal\n\tGlobalSection(SolutionConfigurationPlatforms) = preSolution\n\t\tDebug|Any CPU = Debug|Any CPU\n\t\tRelease|Any CPU = Release|Any CPU\n\tEndGlobalSection\n\tGlobalSection(ProjectConfigurationPlatforms) = postSolution\n\t\t{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU\n\t\t{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}.Debug|Any CPU.Build.0 = Debug|Any CPU\n\t\t{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}.Release|Any CPU.ActiveCfg = Release|Any CPU\n\t\t{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}.Release|Any CPU.Build.0 = Release|Any CPU\n\t\t{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU\n\t\t{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}.Debug|Any CPU.Build.0 = Debug|Any CPU\n\t\t{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}.Release|Any CPU.ActiveCfg = Release|Any CPU\n\t\t{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}.Release|Any CPU.Build.0 = Release|Any CPU\n\tEndGlobalSection\nEndGlobal\n"
+          },
+          {
             "path": "tests/App.Tests.csproj",
             "version": "1.1.0",
             "sha256": "13aa15e8b0a165188d09aff57941527055f9455600d3185ca6e138a84a5df9ac",
@@ -107,7 +107,7 @@
       },
       "configPath": ".editorconfig",
       "configSample": "root = true\n\n[*.cs]\ndotnet_diagnostic.CA1031.severity = error\ndotnet_diagnostic.CA1062.severity = warning\ndotnet_diagnostic.CA2000.severity = warning\ndotnet_diagnostic.CA2007.severity = none\ndotnet_diagnostic.CA2016.severity = warning\ndotnet_diagnostic.CA2100.severity = error\ndotnet_diagnostic.CA2200.severity = error\ndotnet_diagnostic.CA2201.severity = warning\ndotnet_diagnostic.CA5350.severity = error\ndotnet_diagnostic.CA5351.severity = error\ndotnet_diagnostic.CA5394.severity = error\ndotnet_diagnostic.IDE0005.severity = warning\ndotnet_diagnostic.IDE0035.severity = warning\ndotnet_diagnostic.IDE0051.severity = warning\ndotnet_diagnostic.IDE0059.severity = warning\ndotnet_diagnostic.IDE0079.severity = warning\n",
-      "wiring": "<AnalysisLevel>latest-Recommended</AnalysisLevel> and <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild> in Directory.Build.props; IDE rules only run on command-line builds when EnforceCodeStyleInBuild is true.",
+      "wiring": "<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild> in Directory.Build.props, which the csc row composes into the same file; IDE rules only run on command-line builds when it is true. The severities are the .editorconfig entries above and nothing else sets them: jig writes no AnalysisLevel property, so the SDK default decides which CA rules are on beyond the ones named here.",
       "ciStep": "dotnet build --configuration Release -warnaserror",
       "verify": {
         "argv": [
@@ -195,7 +195,7 @@
       },
       "configPath": ".runsettings",
       "configSample": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TestSessionTimeout>600000</TestSessionTimeout>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\">\n        <Configuration>\n          <LogFileName>results.trx</LogFileName>\n        </Configuration>\n      </Logger>\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n",
-      "wiring": "<RunSettingsFilePath>$(MSBuildThisFileDirectory).runsettings</RunSettingsFilePath> in Directory.Build.props, so every test project picks the same settings up without a --settings flag.",
+      "wiring": ".runsettings at the repository root, which jig writes. Nothing reads it by itself: dotnet test needs either --settings .runsettings on the command line, which the lane entry does not pass, or a RunSettingsFilePath property in Directory.Build.props, which jig does not write. Add one of the two, or these settings are inert.",
       "ciStep": "dotnet test --configuration Release --no-build --logger \"trx;LogFileName=results.trx\" --collect:\"XPlat Code Coverage\"",
       "verify": {
         "argv": [
@@ -655,7 +655,7 @@
           "params": {
             "patterns": [
               "#pragma\\s+warning\\s+disable\\s+([A-Za-z]+\\d+)(?![\\s\\S]*#pragma\\s+warning\\s+restore\\s+\\1)",
-          "#pragma\\s+warning\\s+disable[ \\t]*(?=\\r?\\n|$)(?![\\s\\S]*#pragma\\s+warning\\s+restore[ \\t]*(?:\\r?\\n|$))"
+              "#pragma\\s+warning\\s+disable[ \\t]*(?=\\r?\\n|$)(?![\\s\\S]*#pragma\\s+warning\\s+restore[ \\t]*(?:\\r?\\n|$))"
             ],
             "paths": [
               "**/*.cs"
@@ -1422,7 +1422,7 @@
         "violation": "using System;\nusing Xunit;\n\nnamespace Example.Billing.Tests;\n\npublic class InvoiceTests\n{\n    private readonly Invoice _invoice = new();\n\n    [Fact]\n    public void TotalsASingleLine()\n    {\n        Assert.Equal(1200, _invoice.TotalDue(Line.Of(\"seat\", 1200)));\n    }\n\n    [Fact]\n    public void AppliesTheAnnualDiscount()\n    {\n        Assert.Equal(1080, _invoice.TotalDue(Line.Of(\"seat\", 1200), Term.Annual));\n    }\n\n    [Fact]\n    public void RejectsANegativeLine()\n    {\n        Assert.Throws<ArgumentOutOfRangeException>(() => _invoice.TotalDue(Line.Of(\"seat\", -1)));\n    }\n}\n--- after\nusing System;\nusing Xunit;\n\nnamespace Example.Billing.Tests;\n\npublic class InvoiceTests\n{\n    private readonly Invoice _invoice = new();\n\n    [Fact]\n    public void TotalsASingleLine()\n    {\n        Assert.Equal(1200, _invoice.TotalDue(Line.Of(\"seat\", 1200)));\n    }\n}\n",
         "nearMiss": "using System;\nusing Xunit;\n\nnamespace Example.Billing.Tests;\n\npublic class InvoiceTests\n{\n    private readonly Invoice _invoice = new();\n\n    [Fact]\n    public void TotalsASingleLine()\n    {\n        Assert.Equal(1200, _invoice.TotalDue(Line.Of(\"seat\", 1200)));\n    }\n\n    [Fact]\n    public void RejectsANegativeLine()\n    {\n        Assert.Equal(0, _invoice.TotalDue(Line.Of(\"seat\", -1)));\n    }\n}\n--- after\nusing System;\nusing Xunit;\n\nnamespace Example.Billing.Tests;\n\npublic class InvoiceTests\n{\n    private readonly Invoice _invoice = new();\n\n    [Fact]\n    public void TotalsASingleLine()\n    {\n        Assert.Equal(1200, _invoice.TotalDue(Line.Of(\"seat\", 1200)));\n    }\n\n    [Fact]\n    public void RejectsANegativeLine()\n    {\n        Assert.Throws<ArgumentOutOfRangeException>(() => _invoice.TotalDue(Line.Of(\"seat\", -1)));\n    }\n}\n"
       },
-      "gapNotes": "A removal is not in any file's content \u2014 the deleted case is absent from the file that is left, so a pathless check-driver run reports this class skipped and proves it only from the fixture pair, which carries the file before the edit and the file after it. The commit lane is the run that holds both versions: `--staged` counts the index against HEAD, a file deleted outright included, so a commit that shrinks the suite is a finding there. The earlier lane is an authored `edit-guard` on the same removal rule — a catalogue never carries a session guard, so that half is the owner's to author. It reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a test class is seen, and a Write payload carries none, so a whole-file rewrite that drops a test class is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right \u2014 behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
+      "gapNotes": "A removal is not in any file's content — the deleted case is absent from the file that is left, so a pathless check-driver run reports this class skipped and proves it only from the fixture pair, which carries the file before the edit and the file after it. The commit lane is the run that holds both versions: `--staged` counts the index against HEAD, a file deleted outright included, so a commit that shrinks the suite is a finding there. The earlier lane is an authored `edit-guard` on the same removal rule — a catalogue never carries a session guard, so that half is the owner's to author. It reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a test class is seen, and a Write payload carries none, so a whole-file rewrite that drops a test class is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right — behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
       "evidence": {
         "tier": "reasoned",
         "source": "No tool in the .NET ecosystem gates on a drop in test count between two revisions; the runners report what they discovered, never what they stopped discovering. The judgement that a shrinking suite is a defect is jig's own."

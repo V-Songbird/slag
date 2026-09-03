@@ -1852,7 +1852,10 @@ test("release gate G14: no plan page says a tool is unrun that its own verify.js
       .find((p) => p.changes.some((c) => c.path === ".jig/verify.json"));
     if (!payload) { disclose("G14/" + row.id, "this plan wires no verify.json, so no cell can contradict one"); continue; }
     const entries = JSON.parse(payload.changes.find((c) => c.path === ".jig/verify.json").content).entries || [];
-    const run = new Set(entries.filter((e) => (e.lanes || []).length).map((e) => e.id));
+    // Every tool the lane covers, `proves` included: one argv may stand for
+    // several rows since roadmap 249.
+    const covered = (e) => (Array.isArray(e.proves) && e.proves.length ? e.proves : [e.id]);
+    const run = new Set(entries.filter((e) => (e.lanes || []).length).flatMap(covered));
     const review = JSON.parse(fs.readFileSync(path.join(root, ".jig", "plan.json"), "utf-8"));
     for (const r of review.rows) {
       for (const [actor, cell] of Object.entries(r.cells)) {
@@ -1860,7 +1863,7 @@ test("release gate G14: no plan page says a tool is unrun that its own verify.js
         if (!claim) continue;
         assert.ok(!run.has(claim[1]), row.id + " — " + r.classId + "/" + actor + ": the page says `" +
           cell.why + "` and this same plan's verify.json runs " + claim[1] + " in " +
-          (entries.find((e) => e.id === claim[1]).lanes || []).join(" and "));
+          (entries.find((e) => covered(e).includes(claim[1])).lanes || []).join(" and "));
       }
     }
   }
@@ -1988,4 +1991,49 @@ test("release gate G17: a probeable row that installs several distributions prob
     }
   }
   if (!checked) disclose("G17/probeable-multi", "no shipped row both installs several distributions and can be probed");
+});
+
+// ---------------------------------------------------------------------------
+// G18 — a wiring line names nothing the plan does not write
+// ---------------------------------------------------------------------------
+//
+// Roadmap 249(c). `dotnet-analyzers` told the owner its wiring was
+// `<AnalysisLevel>latest-Recommended</AnalysisLevel>` and
+// `<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>` in
+// Directory.Build.props. The composed Directory.Build.props carries the second
+// and not the first, so an owner reading the plan believed a level jig had not
+// set. A wiring line is prose, so this asks the one machine-readable thing in
+// it: every XML element it names as belonging to a config file has to appear in
+// a configSample that writes to that file.
+test("release gate G18: a wiring line names no XML element the shipped configs do not carry", () => {
+  let checked = 0;
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    for (const tool of edition.toolchain) {
+      const wiring = typeof tool.wiring === "string" ? tool.wiring : "";
+      const named = [...wiring.matchAll(/<([A-Za-z][A-Za-z0-9]*)>/g)].map((m) => m[1]);
+      if (!named.length) continue;
+      // Only a line that places those elements IN a file this edition writes. A
+      // wiring line describing somebody else's build file — jvm's Maven
+      // `<plugin>` block lives in a pom.xml jig never writes — is prose about
+      // the ecosystem and jig claims nothing by it. `in <file>` is the phrase
+      // every shipped line uses for the claim that IS jig's.
+      const target = edition.toolchain.map((t) => t.configPath)
+        .find((p) => typeof p === "string" && wiring.includes("in " + p));
+      if (!target) continue;
+      // Every row that writes that file, because a composed config is written by
+      // several: `Directory.Build.props` carries csc's properties and
+      // nuget-audit's, and a wiring line may point at either.
+      const body = edition.toolchain.filter((t) => t.configPath === target)
+        .map((t) => String(t.configSample || "")).join("\n");
+      for (const element of new Set(named)) {
+        checked++;
+        assert.ok(body.includes("<" + element + ">"),
+          row.id + "/" + tool.id + " says its wiring is `<" + element + ">` in " + target +
+          ", and no config this edition writes to that file carries the element — the owner reads a" +
+          " setting jig never set.");
+      }
+    }
+  }
+  if (!checked) disclose("G18/xml-wiring", "no shipped wiring line names an XML element");
 });

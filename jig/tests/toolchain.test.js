@@ -1089,7 +1089,14 @@ test("every shipped tool's verify argv survives the no-shell parser", () => {
     const items = row.edition.toolchain.map((t) => tickedRow(t.id, t.role, row.edition.edition));
     const { entries, refused } = engine.verifyEntriesFor([row.edition], items, ["ci"], null);
     assert.deepEqual(refused, [], row.id + " carries a verify command no lane can run");
-    assert.equal(entries.length, row.edition.toolchain.length, row.id);
+    // Every tool reaches a lane, and one argv is one entry. Three dotnet rows
+    // verify with the same `dotnet build`, so counting entries against tools
+    // would demand the three separate runs roadmap 249 collapsed — what has to
+    // hold is that no tool was dropped on the way (roadmap 249).
+    assert.deepEqual(entries.flatMap((e) => e.proves).sort(),
+      row.edition.toolchain.map((t) => t.id).sort(), row.id);
+    assert.equal(entries.length, new Set(entries.map((e) => e.argv.join(" "))).size,
+      row.id + " wires one argv as two lane entries, so one run reports twice");
   }
 });
 

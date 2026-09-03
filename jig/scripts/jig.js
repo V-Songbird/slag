@@ -1726,7 +1726,19 @@ function verifyEntriesFor(loaded, items, lanes, testScript) {
       continue;
     }
     if (row.item.role) roles.add(row.item.role);
-    entries.push({ id: row.item.id, argv: parsed, expectedExit: 0, paths: extensionsOf(row.item.edition), lanes });
+    // One argv is one run. dotnet's `csc`, `dotnet-analyzers` and
+    // `sonaranalyzer-csharp` all verify with `dotnet build --configuration
+    // Release -warnaserror`, so the lane spawned that build three times and
+    // printed three `ok` lines — three independent proofs, of one run. Collapsed
+    // onto the first entry, with every tool it proves named on it, so the report
+    // says what actually happened and `--entry <id>` still finds any of them.
+    const same = entries.find((e) => e.argv.join(" ") === parsed.join(" "));
+    if (same) {
+      same.proves.push(row.item.id);
+      continue;
+    }
+    entries.push({ id: row.item.id, argv: parsed, expectedExit: 0, paths: extensionsOf(row.item.edition), lanes,
+      proves: [row.item.id] });
   }
   // The scan already read `package.json`'s test script, and until now nothing
   // did anything with it. Where the owner ticked no test runner, it IS the test
@@ -1736,7 +1748,7 @@ function verifyEntriesFor(loaded, items, lanes, testScript) {
     try {
       entries.push({
         id: "test-script", argv: toolchainLib.parseCommand(testScript, "the project's own test script"),
-        expectedExit: 0, paths: [], lanes,
+        expectedExit: 0, paths: [], lanes, proves: ["test-script"],
       });
     } catch (err) {
       if (!err.expected) throw err;
@@ -2902,7 +2914,12 @@ function detectorCeiling(det) {
 function verifiesTool(changes, tool) {
   const hit = changes.find((c) => toPosix(c.path) === STATE_DIR + "/" + VERIFY_FILE);
   const entries = hit ? proposedVerifyEntries(hit.content) : null;
-  return !!entries && entries.some((e) => e.id === tool && Array.isArray(e.lanes) && e.lanes.includes("ci"));
+  // `proves` names every tool an entry's one argv covers. Three dotnet rows
+  // verify with the same `dotnet build` and ride one entry since roadmap 249;
+  // reading the id alone would grade two of them "no lane runs it" over a lane
+  // that runs all three.
+  const covers = (e) => e.id === tool || (Array.isArray(e.proves) && e.proves.includes(tool));
+  return !!entries && entries.some((e) => covers(e) && Array.isArray(e.lanes) && e.lanes.includes("ci"));
 }
 
 // The installed half of a tool rule: the tool's config artifact in the manifest,
@@ -2927,7 +2944,11 @@ function installedToolFace(root) {
   }
   const raw = readIfExists(path.join(root, STATE_DIR, VERIFY_FILE));
   const entries = raw === null ? null : proposedVerifyEntries(raw.toString("utf8"));
-  const ci = (entries || []).filter((e) => Array.isArray(e.lanes) && e.lanes.includes("ci")).map((e) => e.id);
+  // Every tool a ci-lane entry covers, `proves` included: one argv may stand for
+  // several rows since roadmap 249, and reading the id alone would grade the
+  // other rows uncovered over a lane that runs them.
+  const ci = (entries || []).filter((e) => Array.isArray(e.lanes) && e.lanes.includes("ci"))
+    .flatMap((e) => (Array.isArray(e.proves) && e.proves.length ? e.proves : [e.id]));
   // The commit lane, read the same way: a removal is counted by `--staged` and
   // by nothing else, so a removal cell that named its check module in a
   // repository with no hook would be claiming a lane nobody runs.
@@ -3008,7 +3029,19 @@ function detectorArtifact(cls, det, index, changes, guards, installed) {
       (c.template.name === "toolchain-" + tool || c.template.name === "install-" + tool)) ||
       (Array.isArray(c.tools) && c.tools.includes(tool)));
     const config = hit ? hit.path : (face.config.get(tool) || null);
-    return config && (verifiesTool(changes, tool) || face.ci.has(tool)) ? config : null;
+    if (!config || !(verifiesTool(changes, tool) || face.ci.has(tool))) return null;
+    // Where the rule's LEVEL lives in a file other than the tool's own config.
+    // `clippy.toml` carries clippy's knobs — the thresholds, the disallowed
+    // lists, `allow-unwrap-in-tests` — and not one lint level: `unwrap_used =
+    // "deny"` is a line in Cargo.toml's `[lints.clippy]`. Eighteen cells named
+    // clippy.toml as the artifact that denies unwrap, and clippy.toml denies
+    // nothing. Held to the same rule as every other artifact here: named only
+    // where this plan writes that file, or the install already has it.
+    const rulesIn = det.params.rulesIn;
+    if (!rulesIn) return config;
+    const carried = changes.some((c) => toPosix(c.path || "") === rulesIn) ||
+      [...face.config.values()].includes(rulesIn);
+    return carried ? rulesIn : null;
   }
   if (det.lever === "agents-region") {
     const hit = changes.find((c) => c.kind === "write-agents-region");
@@ -4460,6 +4493,21 @@ function ledgerLines(root) {
 // diagnostics into it would bury the rest of the close.
 const PROBE_OUTPUT_MAX = 4000;
 
+// Linters colour their diagnostics, and jig spawns them with a pipe rather than
+// a terminal — several colour anyway. The escapes are noise in a JSON field
+// nothing renders as a terminal, and the cap above could land inside one, so a
+// truncated report ended mid-escape and swallowed whatever a reader's own
+// terminal printed next. Stripped before the cap, so the 4000 characters are
+// 4000 characters of what the tool said.
+const ANSI = new RegExp("\\u001b\\[[0-9;?]*[ -\\/]*[@-~]|\\u001b", "g");
+
+function readableOutput(text) {
+  const clean = String(text || "").replace(ANSI, "");
+  return clean.length > PROBE_OUTPUT_MAX
+    ? clean.slice(0, PROBE_OUTPUT_MAX) + "\n… truncated at " + PROBE_OUTPUT_MAX + " characters"
+    : clean;
+}
+
 // A probe never throws. It either ran and says what it saw, or it did not run
 // and says what to run instead.
 function runProbe(root, guardId, probe, live) {
@@ -4587,9 +4635,7 @@ function execToolchainProbe(root, tool, base) {
       // makes a catch legible. A toolchain probe owes the owner the same, but a
       // linter over a whole tree is not one JSON object, so it is capped here
       // rather than read out unbounded.
-      output: proof.output.length > PROBE_OUTPUT_MAX
-        ? proof.output.slice(0, PROBE_OUTPUT_MAX) + "\n… truncated at " + PROBE_OUTPUT_MAX + " characters"
-        : proof.output,
+      output: readableOutput(proof.output),
       // A repository whose baseline is already red fails the seeded run for the
       // reason it failed the baseline, and the seed proved nothing. SCOPE step
       // 8: that is disclosed as `baseline: red`, never counted as a catch.
@@ -6157,7 +6203,7 @@ module.exports = {
   PROFILE_KEYS, FILE_SLOTS, HOOK_SLOTS, RULE_FILES,
   CHANGE_KINDS, INSTALLABLE_KINDS, KIND_TARGETS, VALIDATORS, PROSE_BUDGET_BYTES, probeGreen,
   OWNERSHIPS, PROVENANCES, DEFAULT_INSTALL_MODE, installMode, TEMPLATE_DIR, guardProbe, fixturePath,
-  execToolchainProbe,
+  execToolchainProbe, readableOutput,
   applyStyle, detectStyle, hasBom, stripBom, hashBytes,
   resolveInsideRoot, resolveWritePath, targetProblem, isEngineOwned,
   formatOf, verifyByFor, verifyWritten,
