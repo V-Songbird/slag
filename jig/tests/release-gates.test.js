@@ -1897,3 +1897,48 @@ test("release gate G14: a row that is GAP in every column is named in the gap li
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// G16 — a tool's verify runs the manager the tool was installed with
+// ---------------------------------------------------------------------------
+//
+// Roadmap 244. `javascript-typescript/audit` keyed its install by manager —
+// `pnpm audit`, `yarn npm audit`, `bun audit` — and carried one `verify.argv`
+// of `npm audit`. So a pnpm, yarn or bun install wired a lane entry running
+// npm's auditor over a tree npm never resolved, and probed npm for a tool this
+// project reaches through another manager. Same family as the jvm defect
+// 2.14.0 closed: the lane and the install disagreeing about which manager this
+// project is.
+//
+// The rule is narrow on purpose. A verify legitimately runs something the
+// install command never names — `npx eslint` after `npm install eslint`,
+// `python -m build` after `uv add build` — so this does not ask that the two
+// share a word. And a program that merely shares its edition with a manager is
+// no evidence either: rust installs clippy with `rustup component add` and
+// proves it with `cargo clippy`, which is the correct pair.
+//
+// It asks the one question that is never legitimate: where the ROW ITSELF states
+// a separate install per manager, the verify under manager M must not run one of
+// the OTHER managers that same row names. The row has already said those two are
+// different programs.
+test("release gate G16: no tool's verify runs a package manager other than the one it was installed with", () => {
+  let checked = 0;
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    for (const tool of edition.toolchain) {
+      const keyed = Object.keys(tool.install || {});
+      if (keyed.length < 2) continue;
+      for (const manager of keyed) {
+        const resolved = toolchain.toolFor(tool, manager);
+        const program = resolved.verify.argv[0];
+        checked++;
+        if (program === manager || !keyed.includes(program)) continue;
+        assert.fail(row.id + "/" + tool.id + " installs under `" + manager + "` (" + tool.install[manager] +
+          ") and its verify runs `" + resolved.verify.argv.join(" ") + "` — that is " + program +
+          "'s program over a tree " + program + " never resolved. Key the row's `verify.byManager." +
+          manager + "`.");
+      }
+    }
+  }
+  assert.ok(checked > 0, "G16 examined no tool at all, so it asserts nothing");
+});

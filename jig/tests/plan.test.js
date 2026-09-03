@@ -2339,3 +2339,20 @@ test("a re-plan that does not repeat --verify-commit keeps the commit lane it wa
   assert.deepEqual(proposed.entries.find((e) => e.id === "eslint").lanes, ["ci", "commit"],
     "the second plan proposes taking the commit lane away from a tool the owner put it on");
 });
+
+// Roadmap 244. The audit row keys its install by manager — `pnpm audit`,
+// `yarn npm audit`, `bun audit` — and carried one `verify.argv` of `npm audit`.
+// So every non-npm install wired a lane entry running npm's auditor over a tree
+// npm never resolved.
+test("the lane entry for an audit runs the auditor of the manager it was installed with", () => {
+  for (const [manager, program] of [["npm", "npm"], ["pnpm", "pnpm"], ["yarn", "yarn"], ["bun", "bun"]]) {
+    const root = nodeProject();
+    const plan = planOnly(root, { select: "javascript-typescript/focused-test", edition: "javascript-typescript",
+      "package-manager": manager, tools: "audit" });
+    const payload = engine.planFiles(root).map(engine.readPlan).find((p) => p.planId === plan.planId);
+    const entries = JSON.parse(payload.changes.find((c) => c.path === ".jig/verify.json").content).entries;
+    const audit = entries.find((e) => e.id === "audit");
+    assert.equal(audit.argv[0], program,
+      "a " + manager + " install wired a lane running `" + audit.argv.join(" ") + "`");
+  }
+});

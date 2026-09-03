@@ -1711,7 +1711,10 @@ function verifyEntriesFor(loaded, items, lanes, testScript) {
     return exts.map((ext) => "**/*" + ext);
   };
   for (const row of items) {
-    const tool = toolchainToolFor(loaded, row.item.id);
+    // The lane entry runs the verify THIS project's manager runs. Until 2.14.1
+    // it ran the row's default, so a pnpm, yarn or bun install wired a lane
+    // running `npm audit` over a tree npm never resolved.
+    const tool = toolchainLib.toolFor(toolchainToolFor(loaded, row.item.id), row.item.packageManager);
     const argv = tool && tool.verify && Array.isArray(tool.verify.argv) ? tool.verify.argv : null;
     if (!argv) continue;
     let parsed;
@@ -1946,7 +1949,11 @@ function toolchainProposal(root, loaded, opts, states) {
       // tool. jig still writes nothing it does not own; the config becomes a
       // note the owner can act on, and the install goes ahead.
       const occupied = occupancyProblem(root, toPosix(proposed.configPath), states);
-      items.push({ item: proposed, occupied: occupied || null, ...toolchainLib.presence(root, tool) });
+      // `toolFor`, because presence is derived from the verify argv and a row
+      // may key that by manager: probing `npm` for a tool this project installs
+      // through pnpm answers for a program the lane will never run.
+      items.push({ item: proposed, occupied: occupied || null,
+        ...toolchainLib.presence(root, toolchainLib.toolFor(tool, manager)) });
     }
   }
   return { packageManager, items, refused };
@@ -2776,6 +2783,19 @@ function toolchainToolFor(loaded, toolId) {
     if (hit) return { edition: edition.edition, ...hit };
   }
   return null;
+}
+
+// Which package manager owns the project this tool belongs to, read the way the
+// install read it. Null wherever it is not conclusive — a `verify.byManager` row
+// then falls back to its own default, which is the reading jig has always had.
+function projectManager(root, loaded, toolId) {
+  const edition = loaded.find((e) => (e.toolchain || []).some((t) => t.id === toolId));
+  if (!edition) return null;
+  try {
+    return toolchainLib.pickPackageManager(root, edition);
+  } catch {
+    return null;
+  }
 }
 
 const CELL_RANK = { GAP: 0, PROB: 1, DET: 2 };
@@ -4639,7 +4659,10 @@ function runToolchainProbes(root, live, wanted) {
     const toolId = artifact.template.name.replace(/^(?:toolchain|install)-/, "");
     if (seen.has(toolId)) continue;
     seen.add(toolId);
-    const tool = toolchainToolFor(loaded, toolId);
+    // The verify this project's manager runs, for the reason the lane composer
+    // reads it that way: a row whose install is keyed by manager and whose
+    // verify is not proves one manager's program over another's tree.
+    const tool = toolchainLib.toolFor(toolchainToolFor(loaded, toolId), projectManager(root, loaded, toolId));
     if (!tool || !tool.verify || !Array.isArray(tool.verify.argv)) continue;
     // The proof of a tool config is the tool's own verify run over a seeded
     // violation, and its expected exit code is machine-readable — which is not

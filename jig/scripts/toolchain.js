@@ -202,6 +202,23 @@ function verifyExecutable(tool) {
   return argv;
 }
 
+// The tool as ONE package manager runs it. `install` and `uninstall` are keyed
+// by manager already; `verify` was not, so the javascript audit row installed
+// `pnpm audit` and then wired a lane running `npm audit` over a tree npm never
+// resolved — the same shape as the jvm defect 2.14.0 closed, the lane and the
+// install disagreeing about which manager this project is.
+//
+// Where an edition keys `verify.byManager`, the manager picks; where it does
+// not, the tool is itself, which is every row that runs the same program under
+// every manager.
+function toolFor(tool, manager) {
+  const byManager = tool && tool.verify && tool.verify.byManager;
+  if (!isObject(byManager) || !nonEmptyString(manager) || !isObject(byManager[manager])) return tool;
+  const verify = { ...tool.verify, ...byManager[manager] };
+  delete verify.byManager;
+  return { ...tool, verify };
+}
+
 function readIfExists(full) {
   try {
     return fs.readFileSync(full, "utf8");
@@ -838,6 +855,10 @@ module.exports = {
   // is one parser and one refusal for both.
   parseCommand,
   presence,
+  // Exported so the caller that already knows which manager this project is —
+  // the install proposal, the lane composer, the toolchain probe — reads the
+  // verify that manager runs rather than the row's default.
+  toolFor,
   // Exported for release gate G10, which asked its own version of this question
   // and got a different answer: it skipped ruff on a machine carrying ruff and
   // would have run nextest on one carrying none. One reading, one export.

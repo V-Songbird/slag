@@ -248,7 +248,32 @@
           "--audit-level=high"
         ],
         "expected": "exit code 1 with 'found N vulnerabilities (… high, … critical)' after a package with a known advisory is added to the lockfile",
-        "expectedExit": 1
+        "expectedExit": 1,
+        "byManager": {
+          "pnpm": {
+            "argv": [
+              "pnpm",
+              "audit",
+              "--audit-level=high"
+            ]
+          },
+          "yarn": {
+            "argv": [
+              "yarn",
+              "npm",
+              "audit",
+              "--severity",
+              "high"
+            ]
+          },
+          "bun": {
+            "argv": [
+              "bun",
+              "audit",
+              "--audit-level=high"
+            ]
+          }
+        }
       },
       "seed": {
         "path": "package-lock.json",
