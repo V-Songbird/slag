@@ -602,6 +602,36 @@ function denyProblem(check, id) {
   return null;
 }
 
+// The module is hashed with the pair to make the proof, and the runner rehashes
+// it at load time over the fixtures the MODULE exports. So a module that exports
+// no `fixtures` at all — or a different pair from the one admission proved —
+// records a proof that can never match itself: the guard installs armed, the
+// runner pulls it back to observe on every call, and the owner has a check that
+// refuses nothing. That mismatch is what the proof exists to catch, and this
+// catches it one step earlier, where the author can still fix the module.
+//
+// Read statically, because admission runs during `plan` and `plan` executes
+// nothing the model wrote. A missing export is exact; a divergent pair is read
+// by looking for each fixture's text in the source, raw or JSON-escaped, which
+// are the two ways a module can carry it.
+const FIXTURES_EXPORT = /export\s+(?:const|let|var)\s+fixtures\b|export\s*\{[^}]*\bfixtures\b/;
+
+function moduleFixtureProblem(check, id) {
+  const src = check.module;
+  if (typeof src !== "string") return null;
+  if (!FIXTURES_EXPORT.test(src)) {
+    return `check "${id}" ships a module with no \`fixtures\` export — its proof is hashed over the pair the ` +
+      "module carries, so it would install armed and run as observe for ever";
+  }
+  const { violation, nearMiss } = fixturesOf(check, id);
+  for (const [half, text] of [["violation", violation], ["nearMiss", nearMiss]]) {
+    if (src.includes(JSON.stringify(text)) || src.includes(text)) continue;
+    return `check "${id}" ships a module whose \`fixtures\` export does not carry the ${half} it was admitted ` +
+      "on — the recorded proof would never match the check on disk";
+  }
+  return null;
+}
+
 // A heuristic check may buy one known near-miss hit up front. The number is
 // carried into the result rather than consumed here, so what was tolerated is
 // disclosed on the coverage matrix instead of vanishing into a pass.
@@ -661,6 +691,11 @@ function admit(checks, blank, opts) {
 
     if (result.violationHits !== total || result.nearMissHits > expected) {
       discarded.push({ id, why: result.why });
+      continue;
+    }
+    const moduleWhy = moduleFixtureProblem(check, id);
+    if (moduleWhy) {
+      discarded.push({ id, why: moduleWhy });
       continue;
     }
     admitted.push({
@@ -730,6 +765,7 @@ module.exports = {
   ownPair,
   crossNearMiss,
   admit,
+  moduleFixtureProblem,
   writeDiscarded,
   proofHash,
 };

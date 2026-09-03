@@ -146,6 +146,36 @@ test("a check that declares no fixtures is discarded, not silently admitted", ()
   assert.throws(() => admission.ownPair(check({ fixtures: {} }), blank), /no inline violation fixture/);
 });
 
+// Roadmap 248. A module exporting id, deny and detectors but no `fixtures` was
+// admitted, recorded `"mode": "armed"`, and then ran as observe on every single
+// call for ever: the runner rehashes the proof over the module's OWN fixtures,
+// and there were none to hash. The proof can never agree, so admission refuses
+// the module here instead — where the author can still fix it.
+const MODULE_PAIR = JSON.stringify(check().fixtures, null, 2);
+
+test("a module that exports no `fixtures` is discarded, never installed armed", () => {
+  const { admitted, discarded } = admission.admit(
+    [check({ module: "export const id = \"swallowed-exception\";\nexport const detectors = [];\n" })], blank);
+  assert.deepEqual(admitted, []);
+  assert.match(discarded[0].why, /no `fixtures` export/);
+  assert.match(discarded[0].why, /install armed and run as observe/);
+});
+
+test("a module whose exported pair is not the pair it was admitted on is discarded", () => {
+  const drifted = MODULE_PAIR.replace("save(row);", "persist(row);");
+  const { admitted, discarded } = admission.admit(
+    [check({ module: "export const fixtures = " + drifted + ";\n" })], blank);
+  assert.deepEqual(admitted, []);
+  assert.match(discarded[0].why, /does not carry the violation it was admitted on/);
+});
+
+test("a module carrying the admitted pair is admitted", () => {
+  const { admitted, discarded } = admission.admit(
+    [check({ module: "export const fixtures = " + MODULE_PAIR + ";\n" })], blank);
+  assert.deepEqual(discarded, []);
+  assert.equal(admitted.length, 1);
+});
+
 test("cross-class hits name the check, the foreign check and the pattern", () => {
   const greedy = check({
     id: "greedy-catch",
