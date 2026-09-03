@@ -125,6 +125,33 @@ test("the probe names the tool: a dispatched subcommand as itself, a fetching ru
   }), eslint).how, "manifest");
 });
 
+// A NuGet analyzer is a package with no executable ANYWHERE: `dotnet add
+// package SonarAnalyzer.CSharp` writes a PackageReference and puts nothing on
+// PATH, and what runs afterwards is `dotnet build`. `dotnet` dispatches no
+// separate program, so until 2.14.0 all three .NET analyzer packages answered
+// `dotnet --version` and read present at the SDK's own version — jig planned
+// zero installs, said "already here, config only", and reported the lane green
+// over a linter that was not in the project.
+test("a package with no executable is unprobeable, and its PackageReference is what says it is here", () => {
+  const dotnet = edition("dotnet");
+  const sonar = dotnet.toolchain.find((t) => t.id === "sonaranalyzer-csharp");
+  assert.equal(toolchain.probeArgv(sonar, sonar.verify.argv), null,
+    "nothing may be spawned for a tool that has no program of its own");
+  assert.deepEqual(toolchain.presence(tmpProject({}), sonar),
+    { present: false, version: null, how: "unprobeable" });
+
+  // The project file is the manifest here, and it is neither at a fixed name nor
+  // at the root — jig's own starter writes `src/App.csproj`.
+  assert.equal(toolchain.presence(tmpProject({
+    "src/App.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <ItemGroup>\n" +
+      "    <PackageReference Include=\"SonarAnalyzer.CSharp\" Version=\"10.16.0.120216\" />\n" +
+      "  </ItemGroup>\n</Project>\n",
+  }), sonar).how, "manifest");
+  // And the SDK's own tools are unaffected: `dotnet test` ships inside dotnet.
+  const test = dotnet.toolchain.find((t) => t.id === "dotnet-test");
+  assert.deepEqual(toolchain.probeArgv(test, test.verify.argv), ["dotnet", "--version"]);
+});
+
 test("presence refuses a tool entry with no verify.argv", () => {
   const root = tmpProject({});
   assert.throws(() => toolchain.presence(root, { id: "broken" }), /verify\.argv/);
@@ -236,16 +263,42 @@ test("a command carrying shell syntax is refused rather than quoted around", () 
     detect: { packageManagers: ["go"] },
     toolchain: [{
       id: "shelly", role: "linter", installKind: "package",
-      install: { go: "go install example.com/shelly@latest" },
-      uninstall: { go: 'rm -f "$(go env GOPATH)/bin/shelly"' },
+      install: { go: 'go install "$(cat name)"@latest' },
+      uninstall: { go: "go clean -i example.com/shelly" },
       configPath: ".shellyrc", configSample: "{}\n",
       verify: { argv: ["shelly", "--version"], expected: "prints a version", expectedExit: 0 },
     }],
   };
   assert.throws(
     () => toolchain.proposeInstalls(root, shelly, ["shelly"], "go"),
-    (err) => err.expected === true && /without a shell/.test(err.message) && /uninstall command/.test(err.message),
+    (err) => err.expected === true && /without a shell/.test(err.message) && /install command/.test(err.message),
   );
+});
+
+// The other half, and it is NOT a refusal. jig spawns no uninstall on any
+// route — the command is journalled as `reconcile` and printed on the plan for
+// the owner — so "jig cannot spawn this" and "there is no way back out" are two
+// questions, and answering them as one cost the go edition its linter, its
+// formatter and its scanner on every machine. Go ships no uninstall verb, and
+// naming the binary means expanding `go env GOPATH`, which needs a shell.
+test("an uninstall only a shell can run is disclosed as manual, never parsed into an argv", () => {
+  const root = tmpProject({});
+  const shelly = {
+    edition: "synthetic",
+    detect: { packageManagers: ["go"] },
+    toolchain: [{
+      id: "shelly", role: "linter", installKind: "package",
+      install: { go: "go install example.com/shelly@latest" },
+      uninstall: { go: 'rm -f "$(go env GOPATH)/bin/shelly"' },
+      configPath: ".shellyrc", configSample: "{}\n",
+      verify: { argv: ["shelly", "--version"], expected: "prints a version", expectedExit: 0 },
+    }],
+  };
+  const [item] = toolchain.proposeInstalls(root, shelly, ["shelly"], "go");
+  assert.equal(item.uninstallCommand, 'rm -f "$(go env GOPATH)/bin/shelly"',
+    "the way out is still stated verbatim");
+  assert.equal(item.uninstallArgv, null, "and it is never turned into something jig would spawn");
+  assert.equal(item.uninstallManual, true, "and the plan is told to say so");
 });
 
 test("a package install with no uninstall is refused before the owner ever sees it", () => {
@@ -366,13 +419,25 @@ test("no chosen package manager means the owner is asked, not defaulted for", ()
 // dropped silently, and the set of tools jig cannot offer is exactly the set
 // somebody wrote down.
 //
-// Go's three installed tools are that set. `go install` puts a binary in
-// GOPATH/bin and Go ships no uninstall verb; removing it means expanding
-// `go env GOPATH`, which needs a shell, and jig never uses one. `go clean -i`
-// is not a substitute — it cleans packages of the current module, and a tool
-// installed with `pkg@latest` is not one. So the honest answer is a refusal
-// with that reason, and the three Go builtins are still offered.
-const CANNOT_BE_OFFERED = ["go/gofumpt", "go/golangci-lint", "go/govulncheck"];
+// The jvm edition under Maven is that set, and it is the whole of it. jvm's
+// toolchain is researched for Gradle — every row's verify is a `./gradlew`
+// task, and its config is a `build.gradle.kts` block or a file that build
+// script points at. Until 2.14.0 a Maven install got those anyway, by falling
+// through to the gradle command whenever the row named no maven one: seven
+// lane entries reading `./gradlew`, which `mvn -N wrapper:wrapper` never
+// creates, and a `build.gradle.kts` written beside the pom. jig claims no
+// coverage it has not demonstrated, so under Maven those rows are refused by
+// name and the pom starter is still written.
+//
+// Go used to be this set and is not any more. `go install` puts a binary in
+// GOPATH/bin and Go ships no uninstall verb; naming it means expanding
+// `go env GOPATH`, which needs a shell. But jig spawns no uninstall on any
+// route, so that is a manual undo to disclose, not a tool to withhold — see
+// the go arm below.
+const CANNOT_BE_OFFERED = [
+  "jvm/checkstyle", "jvm/detekt", "jvm/errorprone", "jvm/gradle",
+  "jvm/junit5", "jvm/pmd", "jvm/spotbugs",
+];
 
 test("a tool jig cannot offer is refused by name, and never silently dropped", () => {
   const refused = [];
@@ -440,19 +505,23 @@ test("the dotnet edition writes its test project instead of generating one", () 
   assert.match(sln, /App\.Tests\.csproj/);
 });
 
-test("an edition whose install jig cannot offer still offers everything else it has", () => {
+// The go arm of the row above. Every one of the six is offerable, and the three
+// whose undo only a shell can run carry it verbatim with `uninstallManual` set
+// — which is what makes SCOPE's "G10 ticks EVERY tool an edition offers" true
+// for go at all. Before 2.14.0 the parse of that undo was a refusal, so
+// golangci-lint, gofumpt and govulncheck could not be ticked on any machine and
+// the owner had no action to take about it.
+test("every go tool is offerable, and a shell-only undo is disclosed rather than withheld", () => {
   const root = tmpProject({});
   const go = shippedEditions().find((row) => row.id === "go").edition;
-  const offered = [];
-  for (const tool of go.toolchain) {
-    try {
-      offered.push(toolchain.proposeInstalls(root, go, [tool.id], "go")[0].id);
-    } catch (err) {
-      assert.equal(err.expected, true);
-    }
+  const items = go.toolchain.map((tool) => toolchain.proposeInstalls(root, go, [tool.id], "go")[0]);
+  assert.deepEqual(items.map((i) => i.id).sort(),
+    ["go-build", "go-test", "go-vet", "gofumpt", "golangci-lint", "govulncheck"]);
+  for (const item of items.filter((i) => i.installKind === "package")) {
+    assert.equal(item.uninstallManual, true, item.id + " should carry a manual undo");
+    assert.equal(item.uninstallArgv, null, item.id + "'s undo must not be spawnable");
+    assert.match(item.uninstallCommand, /go env GOPATH/, item.id + " must still state the way out");
   }
-  assert.deepEqual(offered.sort(), ["go-build", "go-test", "go-vet"],
-    "one unusable row took the whole edition's proposal down with it");
 });
 
 test("proposeInstalls writes nothing and runs nothing", () => {

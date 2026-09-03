@@ -282,7 +282,8 @@ manager: `role` and `why`, `installKind` (`package`, `scaffold`, `builtin` or
 `audit` — a scaffold command and a package install are not the same act, so do
 not describe them the same way), `present`/`how`/`version` for a tool already
 here, `command` and `uninstall` (each one flat string, the one that would run
-under `packageManager`), `configPath` and `configSample` (the exact bytes it
+under `packageManager`) plus `uninstallManual` where that undo needs a shell and
+is therefore the owner's own step, `configPath` and `configSample` (the exact bytes it
 would write), `wiring`, `ciStep` and `occupied`. `ciStep` is the edition's
 hand-written CI line for a project that wires its own workflow — it is text to
 show somebody who asks, and nothing jig ever runs. What the lanes run is not on
@@ -299,13 +300,21 @@ that the owner did not tick.**
 Hold the ticked ids for `--tools` at step 6. The plan probes the thing that has
 to exist — the tool's own `--version`, a module through its interpreter, a
 dispatched subcommand as itself — and then the manifest, so a tool the machine
-already carries comes back as present and is never installed again. A tool
-behind a runner that would FETCH it to answer (`npx <tool>`) is not probed at
-all: it comes back `unprobeable` rather than absent, and jig plans an install
-the owner can decline. A tool with no `uninstall` path
-for the chosen package manager is refused there rather than installed — jig
-never leaves an install it cannot undo — and the refusal arrives on `refused`,
-reported and not hidden. The package manager is chosen by lockfile first, then
+already carries comes back as present and is never installed again. Two shapes
+are not probed at all and come back `unprobeable` rather than absent, with jig
+planning an install the owner can decline: a tool behind a runner that would
+FETCH it to answer (`npx <tool>`), and a package with no executable anywhere —
+a NuGet analyzer runs inside `dotnet build`, so the manifest's own
+`PackageReference` is the only thing that could say it is here. A tool with no
+`uninstall` path for the chosen package manager is refused there rather than
+installed — jig never leaves an install it cannot undo — and the refusal
+arrives on `refused`, reported and not hidden. An uninstall only a shell can
+run is NOT that: jig spawns no uninstall on any route, so the line is carried
+verbatim with `uninstallManual` set and the plan says it is the owner's to run.
+A tool whose only install command belongs to a DIFFERENT build system of the
+same edition is refused too, by name — jvm's toolchain is Gradle's, so a Maven
+install gets the pom and seven refusal lines rather than a `build.gradle.kts`
+beside it. The package manager is chosen by lockfile first, then
 by what the manifest declares; when neither settles it the plan refuses and
 names the candidates, and that is the question to put to the user. Their answer
 goes back as `--package-manager <name>`.

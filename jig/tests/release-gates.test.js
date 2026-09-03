@@ -983,6 +983,10 @@ const STARTER_BUILDS = {
   },
 };
 
+// The plan each scaffold came out of, so a gate can ask what jig actually
+// offered rather than assuming the whole toolchain was.
+const scaffoldPlans = new Map();
+
 // The scaffold a person drives, minus the installs: applying a `run-install`
 // change spawns a package manager, and the claim here is about the tree jig
 // writes rather than about npm.
@@ -1014,6 +1018,7 @@ function scaffoldStarter(edition, manager, tools, extra) {
       fs.writeFileSync(path.join(root, rel), body);
     }
   }
+  scaffoldPlans.set(root, payload);
   return root;
 }
 
@@ -1103,25 +1108,38 @@ test("release gate G7: every edition's starter scaffolds into a tree its own bui
 // So the scaffold now ticks EVERY tool the edition offers, whatever its role
 // and whether or not it is here, and the run list gains the test runners.
 //
-// Two roles still cannot be RUN offline, and G7 covers the ground they would:
+// One role still cannot be RUN offline, and G7 covers the ground it would:
 //
 //   build            — `python -m build --wheel` fetches hatchling from PyPI and
 //                      `./gradlew` is a wrapper the starter does not carry.
 //                      G7's `spec.runs` builds every starter with the
 //                      ecosystem's own command instead.
-//   security-scanner — every one of them queries an advisory database over the
-//                      network, and what it reports is the state of the world
-//                      today rather than anything about the tree jig wrote.
 //
-// Their CONFIGS still land, which is the half that was actually failing.
-const STARTER_TOOL_ROLES = ["formatter", "linter", "type-checker", "test-runner"];
+// Its CONFIG still lands, which is the half that was actually failing.
+//
+// `security-scanner` was excluded here too until 2.14.0, on the grounds that a
+// scanner queries an advisory database and reports the state of the world
+// rather than of this tree. That reasoning is what let the python defect ship.
+// python's lane entry was `pip-audit --strict` with no `-r`, which audits
+// whatever interpreter is on PATH — 48 vulnerabilities in 6 packages on a
+// greenfield install, none of them anything jig or the owner wrote, and exit 1
+// on every machine including a clean venv, where pip's own advisory does it.
+// jig had already written the `requirements.txt` the tool's own `ciStep` pins
+// with `-r`, and then never read it. Every other edition's scanner is
+// project-scoped by construction — cargo deny reads Cargo.lock, npm audit the
+// lockfile, govulncheck the module — and what makes that checkable is running
+// them: a scanner over the starter must be green, because a lane that is red
+// out of the box is not one an owner can act on. The advisory query is the cost
+// of asking; a scanner this machine does not carry is a named skip as always.
+const STARTER_TOOL_ROLES = ["formatter", "linter", "type-checker", "test-runner", "security-scanner"];
 
 // The argv jig runs, minus the package runner in front of it. `npx <tool>` would
 // FETCH `<tool>`, and this gate installs nothing — so the only tool that can run
 // over the starter is one already on the machine.
+const FETCHING_RUNNERS = ["npx", "pnpx", "bunx", "uvx"];
 function toolArgv(tool) {
   const argv = tool.verify.argv;
-  return argv[0] === "npx" ? argv.slice(1) : argv;
+  return FETCHING_RUNNERS.includes(argv[0]) ? argv.slice(1) : argv;
 }
 
 // jig's own reading of "is this tool here", not a second one. This gate had a
@@ -1141,9 +1159,36 @@ function toolPresent(tool) {
   if (!runnableCache.has(key)) {
     if (!emptyRoots.length) emptyRoots.push(tmpProject());
     const seen = toolchain.presence(emptyRoots[0], { ...tool, verify: { ...tool.verify, argv } });
-    runnableCache.set(key, seen.present && seen.how === "probe");
+    // `unprobeable` is not `absent`. A NuGet analyzer package has no executable
+    // of its own — it runs inside `dotnet build` — so the engine has nothing to
+    // ask on its behalf and says so. What this gate needs to know is whether the
+    // program in the command is here, which it can ask directly. Without this,
+    // fixing the false `present` in 2.14.0 would have turned three dotnet arms
+    // into skips and quietly cost the gate the config it exists to read.
+    runnableCache.set(key, seen.how === "unprobeable"
+      ? !FETCHING_RUNNERS.includes(argv[0]) && runnable(argv[0])
+      : seen.present && seen.how === "probe");
   }
   return runnableCache.get(key);
+}
+
+// Which of an edition's package managers get their own scaffold here. One per
+// distinct project file, because that is the edition's own statement that two
+// of its managers are different build systems rather than two doors into one
+// project (SCOPE, "One edition, two build systems"). python under pip and under
+// pdm write the same `pyproject.toml`, so scaffolding both would say the same
+// thing twice; jvm under gradle and under maven write two different files and
+// until 2.14.0 a maven install wrote BOTH — a `build.gradle.kts` beside the
+// pom, with all seven lane entries reading `./gradlew`, which no maven route
+// creates. This gate pinned `manager: "gradle"` and never looked at the other
+// half, so it never saw it.
+function buildSystemsOf(edition) {
+  const seen = new Map();
+  for (const manager of edition.detect.packageManagers || []) {
+    const file = editions.manifestFor(edition, manager).path;
+    if (file && !seen.has(file)) seen.set(file, manager);
+  }
+  return [...seen.values()];
 }
 
 test("release gate G10: every tool an edition installs exits clean over the starter jig just wrote", async (t) => {
@@ -1154,42 +1199,82 @@ test("release gate G10: every tool an edition installs exits clean over the star
     // already names who writes one instead.
     if (!spec || !editions.manifestFor(edition, spec.manager).sample) continue;
 
-    // Every tool, every role, present or not: the scaffold's job is to write
-    // every config this edition can write, and a config only lands for a tool
-    // the plan was asked for.
-    const root = scaffoldStarter(row.id, spec.manager, edition.toolchain.map((tool) => tool.id));
-    // A config the plan named and never wrote is the hole this gate closed, so
-    // it is an assertion rather than a skip.
-    for (const tool of edition.toolchain) {
-      assert.ok(fs.existsSync(path.join(root, tool.configPath)),
-        row.id + ": " + tool.id + " was ticked and " + tool.configPath + " never landed, so no tool" +
-        " here reads the config jig writes for it");
-    }
+    // The spec's manager first, so the arm that runs the tools is the one G7
+    // and G12 also build; the rest are checked for what they write.
+    const managers = [spec.manager, ...buildSystemsOf(edition).filter((m) => m !== spec.manager)];
+    const otherManifests = managers
+      .map((m) => editions.manifestFor(edition, m).path)
+      .filter(Boolean);
 
-    const candidates = edition.toolchain.filter((tool) => STARTER_TOOL_ROLES.includes(tool.role));
-    const ran = new Set(spec.runs.map((argv) => argv.join(" ")));
-    for (const tool of candidates) {
-      const argv = toolArgv(tool);
-      // Five dotnet tools and two rust ones share one command. Running it five
-      // times would say the same thing five times and cost five restores.
-      if (ran.has(argv.join(" "))) continue;
-      ran.add(argv.join(" "));
-      await t.test(row.id + ": " + tool.id + " over the starter", {
-        // Named, never silent: a release cut here has to say which tools nobody
-        // ran. The reason is presence alone, so a runner carrying the toolchain
-        // runs every one of these.
-        skip: toolPresent(tool)
-          ? false
-          : argv[0] + " is not on this machine, so " + tool.id + " read nothing here",
-      }, () => {
-        const run = spawnSync(argv[0], argv.slice(1), {
-          cwd: root, shell: false, windowsHide: true, encoding: "utf8",
-          timeout: 600000, maxBuffer: 8 * 1024 * 1024,
+    for (const manager of managers) {
+      if (!editions.manifestFor(edition, manager).sample) continue;
+      // Every tool, every role, present or not: the scaffold's job is to write
+      // every config this edition can write, and a config only lands for a tool
+      // the plan was asked for.
+      const root = scaffoldStarter(row.id, manager, edition.toolchain.map((tool) => tool.id));
+      const offered = new Set((scaffoldPlans.get(root).changes || [])
+        .filter((c) => c.kind === "run-install" && c.install).map((c) => c.install.id));
+      // A config the plan named and never wrote is the hole this gate closed, so
+      // it is an assertion rather than a skip. A tool the plan REFUSED under this
+      // manager wrote nothing on purpose and is not one of them — what that costs
+      // is disclosed on the plan's own Refused list.
+      for (const tool of edition.toolchain) {
+        if (!offered.has(tool.id)) continue;
+        assert.ok(fs.existsSync(path.join(root, tool.configPath)),
+          row.id + " under " + manager + ": " + tool.id + " was ticked and " + tool.configPath +
+          " never landed, so no tool here reads the config jig writes for it");
+      }
+      // And nothing belonging to the OTHER build system. A repository holding
+      // two project files is one whose build is a coin toss, and it is what a
+      // silent fall-through to the other manager's commands produces.
+      const mine = editions.manifestFor(edition, manager).path;
+      for (const foreign of otherManifests) {
+        if (foreign === mine) continue;
+        assert.ok(!fs.existsSync(path.join(root, foreign)),
+          row.id + " under " + manager + " wrote " + foreign + ", which belongs to the other build system");
+      }
+      // The same claim one step earlier, where it is exact. A tool proposed
+      // through a manager that writes a DIFFERENT project file is a tool being
+      // installed into somebody else's build: that is how every jvm row under
+      // maven got its gradle command, `./gradlew` on seven lane entries and a
+      // `build.gradle.kts` beside the pom. A manager sharing this one's project
+      // file is a second door into the same project — `rustup component add
+      // clippy` in a cargo tree — and is not that.
+      for (const change of (scaffoldPlans.get(root).changes || [])) {
+        if (change.kind !== "run-install" || !change.install) continue;
+        const through = change.install.packageManager;
+        assert.equal(editions.manifestFor(edition, through).path, mine,
+          row.id + " under " + manager + " proposes " + change.install.id + " through " + through +
+          ", which builds a different project (" + editions.manifestFor(edition, through).path + "): `" +
+          change.install.command + "`");
+      }
+      if (manager !== spec.manager) continue;
+
+      const candidates = edition.toolchain.filter((tool) => STARTER_TOOL_ROLES.includes(tool.role));
+      const ran = new Set(spec.runs.map((argv) => argv.join(" ")));
+      for (const tool of candidates) {
+        const argv = toolArgv(tool);
+        // Five dotnet tools and two rust ones share one command. Running it five
+        // times would say the same thing five times and cost five restores.
+        if (ran.has(argv.join(" "))) continue;
+        ran.add(argv.join(" "));
+        await t.test(row.id + ": " + tool.id + " over the starter", {
+          // Named, never silent: a release cut here has to say which tools nobody
+          // ran. The reason is presence alone, so a runner carrying the toolchain
+          // runs every one of these.
+          skip: toolPresent(tool)
+            ? false
+            : argv[0] + " is not on this machine, so " + tool.id + " read nothing here",
+        }, () => {
+          const run = spawnSync(argv[0], argv.slice(1), {
+            cwd: root, shell: false, windowsHide: true, encoding: "utf8",
+            timeout: 600000, maxBuffer: 8 * 1024 * 1024,
+          });
+          assert.equal(run.status, 0, row.id + ": `" + argv.join(" ") + "` exited " + run.status +
+            " over a starter jig had just written, with the config jig wrote for " + tool.id + "\n" +
+            String(run.stdout || "") + String(run.stderr || ""));
         });
-        assert.equal(run.status, 0, row.id + ": `" + argv.join(" ") + "` exited " + run.status +
-          " over a starter jig had just written, with the config jig wrote for " + tool.id + "\n" +
-          String(run.stdout || "") + String(run.stderr || ""));
-      });
+      }
     }
   }
 });
@@ -1310,6 +1395,17 @@ test("release gate G12: every step of the workflow jig writes exits 0 on the tre
 // G10 could not catch it: a tool that is not on this machine is skipped there,
 // and a tool the probe invented is precisely one that is not.
 //
+// Widened in 2.14.0, because the first version only knew about hosts that
+// DISPATCH — and the dotnet edition's three analyzer packages have no
+// executable to dispatch to at all. `dotnet add package SonarAnalyzer.CSharp`
+// writes a PackageReference and puts nothing on PATH; what then runs is
+// `dotnet build`. All three read present at the SDK's own 10.0.303, so jig
+// planned zero installs, told the owner "already here, config only", wrote
+// three inert Sonar severities into `.editorconfig`, and reported the lane
+// GREEN over a linter that was not in the project. The shape is not "which
+// host dispatches" but "the verify runs the same program the install runs",
+// which is what this gate asks now.
+//
 // The hosts are named HERE rather than imported from the engine. A gate that
 // reads its rule out of the code it is gating asserts nothing, and this one has
 // to keep firing if that code goes back to asking the host.
@@ -1322,7 +1418,12 @@ function hostQuery(tool) {
   const argv = tool.verify.argv;
   if (tool.installKind === "builtin") return null;
   if (argv[1] === "-m") return [argv[0], "--version"];
-  return DISPATCHING_HOSTS.includes(argv[0]) ? [argv[0], "--version"] : null;
+  if (DISPATCHING_HOSTS.includes(argv[0])) return [argv[0], "--version"];
+  // A package whose verify runs the very program its own install runs through
+  // is a package plugged into that program's build, not a program of its own.
+  const hosts = Object.values(tool.install || {}).map((cmd) => String(cmd).trim().split(/\s+/)[0]);
+  if (tool.installKind === "package" && hosts.includes(argv[0])) return [argv[0], "--version"];
+  return null;
 }
 
 test("release gate G13: no presence probe answers with the version of the tool's host", async (t) => {
@@ -1374,6 +1475,22 @@ test("release gate G13: no presence probe answers with the version of the tool's
 //
 // Driven on all four shapes, because a gate run on one of them is how the last
 // three corrections each passed.
+//
+// Widened twice in 2.14.0, for the fifth and sixth wrong claims this page made:
+//
+//   - the four shapes above are all ARMED, so the mode was never a variable and
+//     the cell never had to answer for it. An `--observe` plan printed `[proven
+//     by its fixture pair — refuses the call in session]` four lines under a
+//     header saying every guard here refuses nothing, over a `config.json` that
+//     really did say `mode: observe`. The shape list gains an observing one and
+//     every cell's answer is held to `review.mode`.
+//   - and the claim in the other direction. `GAP — no lane runs ruff` is a
+//     computed statement too, and it was printed 21 times on a python plan whose
+//     own `.jig/verify.json` — written by the same plan, in the same run — runs
+//     ruff in CI. Composed configs are why: ruff, mypy and pytest all live in
+//     `pyproject.toml`, and the change that writes it is named after the path.
+//     So the edition shapes below drive a real greenfield plan per edition and
+//     hold every "no lane runs X" against the verify entries beside it.
 function planShape(checks, opts, wire) {
   const root = tmpProject({ "package.json": "{ \"private\": true }\n", "src/a.ts": "export const a = 1;\n" });
   if (wire) spawnSync("git", ["init", "-q"], { cwd: root, windowsHide: true });
@@ -1395,17 +1512,29 @@ test("release gate G14: no armed plan page claims a lane this repository does no
     "a check driver on an unwired repository": planShape([authored.DOC_LEFT_BEHIND], { "no-ci": true }, false),
     "a check driver on a wired one": planShape([authored.DOC_LEFT_BEHIND], { "no-ci": true }, true),
     "both levers, both lanes": planShape([authored.PIPED_INSTALLER], {}, true),
+    "a session guard the owner asked to observe": planShape([authored.PIPED_INSTALLER], { "no-ci": true, observe: true }, false),
+    "both levers, both lanes, observing": planShape([authored.PIPED_INSTALLER], { observe: true }, true),
   };
   for (const [shape, root] of Object.entries(shapes)) {
     const review = JSON.parse(fs.readFileSync(path.join(root, ".jig", "plan.json"), "utf-8"));
-    assert.equal(review.mode, "armed", shape + ": the header under test is the armed one");
+    const observing = shape.includes("observ");
+    assert.equal(review.mode, observing ? "observe" : "armed", shape + ": that is not the mode this shape asked for");
+    // And the mode on the page is the mode in the config it installs. The two
+    // came apart silently once: nothing read the config back.
+    const installed = JSON.parse(fs.readFileSync(path.join(root, ".jig", "config.json"), "utf-8"));
+    for (const g of installed.guards) {
+      assert.equal(g.mode, review.mode, shape + ": guard " + g.id + " is `" + g.mode + "` and the page says `" + review.mode + "`");
+    }
     const header = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8")
       .split(/\r?\n/).find((line) => line.startsWith("- mode:"));
     // The header may say what mode was taken and where to read the answer. Every
-    // other word here would be a claim it cannot make for every row.
-    for (const claim of ["block", "commit", "CI", "session", "fixture pair"]) {
+    // other word here would be a claim it cannot make for every row. The
+    // observing header is allowed the one word the armed one is not: `block`,
+    // because "records what it would have blocked" is a claim about the guards
+    // it names and every guard row in an observe plan is observing.
+    for (const claim of observing ? ["commit", "CI", "session", "fixture pair"] : ["block", "commit", "CI", "session", "fixture pair"]) {
       assert.ok(!header.includes(claim),
-        shape + ": the armed header names `" + claim + "` — it is answering for the table again\n  " + header);
+        shape + ": the " + review.mode + " header names `" + claim + "` — it is answering for the table again\n  " + header);
     }
     // And the prose under the matrix, which made the same blanket claim twenty
     // lines lower: "caught by the check driver at commit time and in CI" on a
@@ -1436,6 +1565,47 @@ test("release gate G14: no armed plan page claims a lane this repository does no
         if (/\bCI\b/.test(cell.blocks)) {
           assert.equal(review.lanes.ci, true, where + ": claims the CI lane, which is not live here");
         }
+        // The mode, held the same way the lanes are. A guard row is the only
+        // thing a mode belongs to, so the cell is checked against the row this
+        // plan writes rather than against the page's word for it.
+        const guard = installed.guards.find((g) => g.id === cell.artifact);
+        if (guard) {
+          assert.equal(/refuses the call in session/.test(cell.blocks), guard.mode === "armed",
+            where + ": `" + cell.blocks + "` over a guard installed `" + guard.mode + "`");
+        }
+      }
+    }
+  }
+});
+
+// The claim in the other direction, driven per edition on a real greenfield
+// plan: a cell saying nothing runs a tool, printed beside a `.jig/verify.json`
+// the same plan writes that tool into. Conservative is still false, and this is
+// the cell roadmap 229 rebuilt in 2.12.0 to stop exactly this.
+test("release gate G14: no plan page says a tool is unrun that its own verify.json runs", () => {
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    const manager = (edition.detect.packageManagers || [])[0];
+    if (!manager || !edition.classes.length) continue;
+    const root = tmpProject();
+    engine.cmdPlan(root, {
+      _: [], change: [], provenance: "elicited", edition: row.id, "package-manager": manager,
+      tools: edition.toolchain.map((t) => t.id).join(","),
+      select: edition.classes.map((c) => editions.namespacedId(row.id, c.id)).join(","),
+    });
+    const payload = engine.planFiles(root).map(engine.readPlan)
+      .find((p) => p.changes.some((c) => c.path === ".jig/verify.json"));
+    if (!payload) { disclose("G14/" + row.id, "this plan wires no verify.json, so no cell can contradict one"); continue; }
+    const entries = JSON.parse(payload.changes.find((c) => c.path === ".jig/verify.json").content).entries || [];
+    const run = new Set(entries.filter((e) => (e.lanes || []).length).map((e) => e.id));
+    const review = JSON.parse(fs.readFileSync(path.join(root, ".jig", "plan.json"), "utf-8"));
+    for (const r of review.rows) {
+      for (const [actor, cell] of Object.entries(r.cells)) {
+        const claim = /^no lane runs (\S+)$/.exec(cell.why || "");
+        if (!claim) continue;
+        assert.ok(!run.has(claim[1]), row.id + " — " + r.classId + "/" + actor + ": the page says `" +
+          cell.why + "` and this same plan's verify.json runs " + claim[1] + " in " +
+          (entries.find((e) => e.id === claim[1]).lanes || []).join(" and "));
       }
     }
   }

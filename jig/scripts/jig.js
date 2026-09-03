@@ -737,6 +737,13 @@ function planFromDraft(draft, root) {
       // still has a wiring line and a CI step; dropping them here is what made
       // the manual-install follow-up hand back bare config.
       tool: typeof raw.tool === "string" ? raw.tool : undefined,
+      // And the plural, for a config file several tools share. `tool` cannot
+      // answer for one — a composed change is named after its path, not after
+      // any one tool — so the matrix has nothing to ask unless the list rides
+      // the plan the same way. Dropping it here is what left ruff and mypy
+      // graded GAP against a `verify.json` the same plan wrote them into.
+      tools: Array.isArray(raw.tools) && raw.tools.length
+        ? raw.tools.filter((s) => typeof s === "string") : undefined,
       wiring: typeof raw.wiring === "string" ? raw.wiring : undefined,
       ciStep: typeof raw.ciStep === "string" ? raw.ciStep : undefined,
       proof: /^[0-9a-f]{64}$/.test(String(raw.proof)) ? raw.proof : undefined,
@@ -2039,7 +2046,13 @@ function composeConfigs(items, manifests) {
     }
     const merged = sectionsLib.merge(parts, rel);
     conflicts.push(...merged.conflicts);
-    writes.push({ path: rel, body: merged.body, sources: parts.map((p) => p.source) });
+    // Which tools this one file configures, kept as ids rather than left to be
+    // read back out of `sources` — that list also names the starter, in prose.
+    // A composed file is the config artifact of every tool in it, and the
+    // coverage matrix has no other way to know: the change is named after the
+    // path, so a cell looking for `toolchain-ruff` found nothing and printed
+    // "no lane runs ruff" over a `verify.json` this same plan writes ruff into.
+    writes.push({ path: rel, body: merged.body, sources: parts.map((p) => p.source), tools: rows.map((r) => r.item.id) });
   }
 
   // A starter manifest nothing else configures is still a file jig has to
@@ -2050,12 +2063,15 @@ function composeConfigs(items, manifests) {
     if (writes.some((w) => w.path === rel) || byPath.has(rel)) continue;
     const parts = [{ source: "the starter " + rel + " jig writes", body: m.sample }, ...scriptParts(m)];
     if (parts.length === 1 || !sectionsLib.mergeable(rel)) {
-      writes.push({ path: rel, body: m.sample, sources: [parts[0].source] });
+      writes.push({ path: rel, body: m.sample, sources: [parts[0].source], tools: [] });
       continue;
     }
     const merged = sectionsLib.merge(parts, rel);
     conflicts.push(...merged.conflicts);
-    writes.push({ path: rel, body: merged.body, sources: parts.map((p) => p.source) });
+    // No `tools` here either: this branch composes a starter manifest with the
+    // `scripts` members some tools need in it, and a script member is wiring,
+    // not the tool's config — its config file is written under its own name.
+    writes.push({ path: rel, body: merged.body, sources: parts.map((p) => p.source), tools: [] });
   }
   return { writes, notes, conflicts, composed };
 }
@@ -2373,6 +2389,10 @@ function draftFromTemplates(root, opts, checks) {
       ownership: "file",
       provenance,
       template: { name: "toolchain-config-" + write.path, version: "composed" },
+      // The tools whose config is IN this file. A composed change is named after
+      // the path it writes, so its template name can answer for no tool — the
+      // list is how a reader asks "is <tool> configured by this plan".
+      tools: write.tools,
       rationale: write.sources.length === 1
         ? write.sources[0]
         : write.path + ", composed from " + write.sources.join(", "),
@@ -2828,13 +2848,15 @@ function verifiesTool(changes, tool) {
 function installedToolFace(root) {
   const config = new Map();
   for (const a of readManifest(root).artifacts) {
+    // `toolchain-config-<path>` is a composed file, named after the path rather
+    // than a tool — so it answers for its tools from the list the row carries.
+    // Skipping it outright is what made a re-plan on an installed python repo
+    // read its ruff cell as uncovered while ruff sat configured and in CI.
+    for (const tool of Array.isArray(a.tools) ? a.tools : []) config.set(tool, a.path);
     const name = a.template && a.template.name;
     if (typeof name !== "string") continue;
-    // `toolchain-config-<path>` is a composed file, named after the path rather
-    // than a tool, and a plan never gives a composed tool an artifact either.
-    if (name.startsWith("toolchain-config-")) continue;
     const prefix = ["toolchain-", "install-"].find((p) => name.startsWith(p));
-    if (prefix) config.set(name.slice(prefix.length), a.path);
+    if (prefix && !name.startsWith("toolchain-config-")) config.set(name.slice(prefix.length), a.path);
   }
   const raw = readIfExists(path.join(root, STATE_DIR, VERIFY_FILE));
   const entries = raw === null ? null : proposedVerifyEntries(raw.toString("utf8"));
@@ -2908,8 +2930,16 @@ function detectorArtifact(cls, det, index, changes, guards, installed) {
     // and the tool is no less covered for it.
     const tool = det.params && det.params.tool;
     const face = installed || NO_INSTALLED_TOOLS;
-    const hit = changes.find((c) => c.template &&
-      (c.template.name === "toolchain-" + tool || c.template.name === "install-" + tool));
+    //
+    // Asked of the composed files too. A tool whose config shares a manifest —
+    // ruff and mypy in `pyproject.toml`, csc in a `.csproj` — arrives as
+    // `toolchain-config-<path>`, which is a name no tool matches, so the cell
+    // read GAP and printed "no lane runs ruff" against the very `verify.json`
+    // this plan writes ruff into, in both lanes. Whether a file configures a
+    // tool is the change's own answer, not something a template name can carry.
+    const hit = changes.find((c) => (c.template &&
+      (c.template.name === "toolchain-" + tool || c.template.name === "install-" + tool)) ||
+      (Array.isArray(c.tools) && c.tools.includes(tool)));
     const config = hit ? hit.path : (face.config.get(tool) || null);
     return config && (verifiesTool(changes, tool) || face.ci.has(tool)) ? config : null;
   }
@@ -2941,12 +2971,21 @@ const NO_LANES = { commit: false, ci: false };
 // answer is per cell: three page-level sentences in a row claimed one answer for
 // the whole table, and each was false for the rows the previous one was right
 // about.
-function cellBlocks(cls, det, grade, lanes) {
+function cellBlocks(cls, det, grade, lanes, guard) {
   if (grade === "GAP") return null;
   if (denyCapable(det)) {
-    return typeof cls.proof === "string"
-      ? "proven by its fixture pair — refuses the call in session"
-      : "observe only — no proof binds this check";
+    if (typeof cls.proof !== "string") return "observe only — no proof binds this check";
+    // The MODE is the third half of the answer, and it is the guard row's own —
+    // `--observe` writes `mode: observe` into the config this plan installs, and
+    // a guard in that config records the call and refuses nothing. Answering for
+    // the lever alone printed "refuses the call in session" four lines under a
+    // header saying every guard here refuses nothing, over a config that really
+    // did say observe. That is the fifth correction to this cell that was true
+    // in one shape and false in another; the mode is asked per row for the same
+    // reason the lanes are (SCOPE, "Does top-level config.mode survive").
+    return guard && guard.mode === "observe"
+      ? "proven by its fixture pair — records the call in session, refuses nothing"
+      : "proven by its fixture pair — refuses the call in session";
   }
   if (det.lever === "agents-region") return "prose an agent reads — it refuses nothing";
   // Everything else is a lane. The commit lane counts for the driver alone: a
@@ -2964,6 +3003,10 @@ function cellBlocks(cls, det, grade, lanes) {
 function detectorCell(cls, det, index, provenance, changes, guards, installed, lanes) {
   const lever = leverOf(det.lever);
   const artifact = detectorArtifact(cls, det, index, changes, guards, installed);
+  // The very row this plan will write for this detector, so what the cell says
+  // about arming and about mode comes off the config rather than off a second
+  // copy of the answer threaded down beside it.
+  const guard = (guards || []).find((g) => g.id === cls.id + "-" + det.id) || null;
   let grade = detectorGrade(det);
   let why = null;
   if (grade === "GAP") {
@@ -2999,7 +3042,7 @@ function detectorCell(cls, det, index, provenance, changes, guards, installed, l
     armable: denyCapable(det) ? typeof cls.proof === "string" : null,
     // What this cell refuses and where, in the lanes this plan leaves live. The
     // marker a person reads comes off this and nothing else.
-    blocks: cellBlocks(cls, det, grade, lanes || NO_LANES),
+    blocks: cellBlocks(cls, det, grade, lanes || NO_LANES, guard),
     why,
   };
 }
@@ -3233,6 +3276,10 @@ function toolchainRow(row) {
     packageManager: item.packageManager,
     command: item.command,
     uninstall: item.uninstallCommand,
+    // Whether that line is one jig could run. It never runs any of them, but a
+    // shell-only undo is a step the owner has to take by hand and the page has
+    // to say so rather than print it like every other command here.
+    uninstallManual: !!item.uninstallManual,
     configPath: item.configPath,
     wiring: item.wiring,
     ciStep: item.ciStep,
@@ -3510,7 +3557,13 @@ function renderReviewMd(review, backlog) {
       if (t.ciStep) out.push("  - CI line if you wire your own workflow (jig runs this nowhere — jig's own" +
         " workflow runs `" + STATE_DIR + "/checks/run.mjs --verify --lane ci` per `" +
         STATE_DIR + "/" + VERIFY_FILE + "` entry): `" + t.ciStep + "`");
-      out.push("  - undo: " + (t.uninstall ? "`" + t.uninstall + "`" : "nothing to uninstall — jig only writes its config"));
+      // jig runs no uninstall on any route, so every one of these is a line for
+      // the owner. The manual ones say so out loud because they need a shell
+      // jig will never open, and an owner who read `undo:` as something jig
+      // would do would be reading a promise nothing here keeps.
+      out.push("  - undo: " + (t.uninstall
+        ? "`" + t.uninstall + "`" + (t.uninstallManual ? " — run this yourself: it needs a shell, and jig opens none" : "")
+        : "nothing to uninstall — jig only writes its config"));
     }
     out.push("");
   }
@@ -3917,6 +3970,10 @@ function writeManifest(root, ctx, selected, results) {
         // newer; a row written before the field existed answers from the plan
         // file it was applied from, which is still on disk beside it.
         rationale: c.rationale || null,
+        // Which tools a composed config file configures. Written only when the
+        // change carried one, so a row for anything else is unchanged and an
+        // older jig reading this manifest ignores a field it does not know.
+        ...(Array.isArray(c.tools) && c.tools.length ? { tools: c.tools } : {}),
         template: c.template,
         state: "active",
         installedAt: new Date().toISOString(),

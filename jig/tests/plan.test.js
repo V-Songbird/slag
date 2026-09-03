@@ -295,6 +295,62 @@ test("the config and a lane entry together are what read DET", () => {
   assert.equal(cell.why, null);
 });
 
+// The config half of that pair, for a tool whose config shares a file. The
+// change is named after the PATH — `toolchain-config-pyproject.toml` — so a
+// lookup keyed on `toolchain-<tool>` found nothing and the cell said "no lane
+// runs ruff" on a plan whose own verify.json runs ruff in CI. Measured on a
+// greenfield python install: 21 such cells against one DET.
+test("a config composed into a shared file is still the tool's config", () => {
+  const cls = synthetic({ detectors: [{ ...TOOL_RULE, params: { tool: "ruff", rule: "PT009" } }] });
+  const composed = { id: "toolchain-config-pyproject.toml", path: "pyproject.toml",
+    template: { name: "toolchain-config-pyproject.toml", version: "composed" },
+    tools: ["ruff", "mypy"], classIds: [cls.id] };
+  const changes = [composed, laneChange([{ id: "ruff", argv: ["ruff", "check", "."], expectedExit: 0, paths: [], lanes: ["ci"] }])];
+  const cell = engine.matrixRow(cls, "elicited", changes, []).cells["human-ci"];
+  assert.equal(cell.grade, "DET");
+  assert.equal(cell.artifact, "pyproject.toml");
+  // And a tool the file does NOT configure is still uncovered by it: the list is
+  // read, not the fact that some composed file exists.
+  const other = synthetic({ detectors: [{ ...TOOL_RULE, params: { tool: "pytest" } }] });
+  assert.equal(engine.matrixRow(other, "elicited", changes, []).cells["human-ci"].grade, "GAP");
+});
+
+test("a greenfield python plan grades every tool its own verify.json runs", () => {
+  // Driven end to end, because the unit above cannot see the half that was
+  // actually broken: `planFromDraft` rebuilds every change from a whitelist, so
+  // the tool list has to ride the plan file too or the matrix reads none.
+  const root = project();
+  const edition = editions.loadEdition(PLUGIN_ROOT, "python");
+  const select = edition.classes.map((c) => "python/" + c.id).join(",");
+  const plan = engine.cmdPlan(root, { _: [], change: [], provenance: "elicited",
+    edition: "python", "package-manager": "uv",
+    tools: edition.toolchain.map((t) => t.id).join(","), select });
+  const review = readJson(root, ".jig/plan.json");
+  const unrun = review.rows.flatMap((r) => Object.values(r.cells))
+    .filter((c) => /^no lane runs /.test(c.why || "")).map((c) => c.why);
+  assert.deepEqual([...new Set(unrun)], [], "cells claiming nothing runs a tool this plan wires");
+  const cells = review.rows.flatMap((r) => Object.values(r.cells)).filter((c) => c.lever === "tool-rule");
+  assert.equal(cells.length, 22);
+  assert.ok(cells.every((c) => c.grade !== "GAP"));
+  assert.ok(cells.some((c) => c.artifact === "pyproject.toml"), "ruff, mypy and pytest are configured there");
+
+  // And the installed half, which is the same fact read from the other side. A
+  // re-plan is an interview about what to ADD, so it proposes no config at all —
+  // the cell has only the manifest to ask, and a composed row that recorded no
+  // tools would tell an owner their linter is uncovered while it sits configured
+  // and running in CI.
+  const payload = engine.planFiles(root).map(engine.readPlan).find((p) => p.planId === plan.planId);
+  const keep = payload.changes.filter((c) => c.kind !== "run-install");
+  engine.cmdApply(root, { _: [], change: keep.map((c) => c.id), path: keep.map((c) => c.path) });
+  const composed = readJson(root, ".jig/manifest.json").artifacts.find((a) => a.path === "pyproject.toml");
+  assert.ok(composed.tools.includes("ruff") && composed.tools.includes("mypy"));
+  engine.cmdPlan(root, { _: [], change: [], provenance: "elicited", select });
+  const again = readJson(root, ".jig/plan.json").rows.flatMap((r) => Object.values(r.cells))
+    .filter((c) => c.lever === "tool-rule");
+  assert.equal(again.length, 22);
+  assert.ok(again.every((c) => c.grade !== "GAP"), "a re-plan reads its own install as uncovered");
+});
+
 test("an unreadable lane list is read as no lane at all, never as coverage", () => {
   const cls = synthetic({ detectors: [TOOL_RULE] });
   const torn = { id: "verify", path: ".jig/verify.json", kind: "write-side-file", content: "{ not json" };
@@ -981,6 +1037,34 @@ test("what refuses anything is per cell and per lane, on all four plan shapes", 
     assert.ok(!/nothing else here blocks/.test(md), "the blanket claim is back on " + root);
     assert.ok(!/blocks from install/.test(md), "the blanket claim is back on " + root);
   }
+});
+
+// Shape 5, and the fifth wrong claim this cell has made. All four shapes above
+// are armed, so the mode was never a variable: the marker read "refuses the call
+// in session" whatever `.jig/config.json` said. Under `--observe` the page
+// printed that four lines below a header saying every guard here refuses
+// nothing, over a config that really did say `mode: observe`.
+test("an observing plan's guard cell says it records rather than refuses", () => {
+  const observing = nodeProject();
+  install(observing, { "no-ci": true, observe: true }, [SESSION_ONLY]);
+  const review = readJson(observing, ".jig/plan.json");
+  assert.equal(review.mode, "observe");
+  const config = readJson(observing, ".jig/config.json");
+  assert.equal(config.guards[0].mode, "observe", "the config this plan writes is the fact the cell answers for");
+  assert.equal(engine.cellText(review.rows[0].cells["claude-session"]),
+    "DET session-only-bash-guard-0 [proven by its fixture pair — records the call in session, refuses nothing]");
+  // The header and the cell now say the same thing, which is what the page was
+  // contradicting itself about.
+  assert.match(headerOf(observing), /refuses nothing$/);
+  const md = fs.readFileSync(path.join(observing, ".jig", "plan.md"), "utf-8");
+  assert.ok(!/refuses the call in session/.test(md), "an observe page still claims a refusal");
+
+  // And the armed page is unchanged: the correction has to be true in BOTH
+  // modes, which is the way the last four went wrong.
+  const armed = nodeProject();
+  install(armed, { "no-ci": true }, [SESSION_ONLY]);
+  assert.equal(engine.cellText(readJson(armed, ".jig/plan.json").rows[0].cells["claude-session"]),
+    "DET session-only-bash-guard-0 [proven by its fixture pair — refuses the call in session]");
 });
 
 // ---------------------------------------------------------------------------

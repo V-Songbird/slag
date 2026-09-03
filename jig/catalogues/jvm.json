@@ -52,8 +52,7 @@
       "role": "build",
       "why": "Owns whether the other checks actually ran: it is the only place that can prove `check` depended on `test`, that no one passed `-x test`, and that a source set with tests present did not silently discover zero of them.",
       "install": {
-        "gradle": "gradle wrapper --gradle-version 9.1.0",
-        "maven": "mvn -N wrapper:wrapper"
+        "gradle": "gradle wrapper --gradle-version 9.1.0"
       },
       "installKind": "scaffold",
       "configPath": "build.gradle.kts",
@@ -79,8 +78,7 @@
       "role": "linter",
       "why": "The only tool here that lets a project ban an arbitrary source shape by regex (RegexpSinglelineJava) and police what @SuppressWarnings is allowed to silence, so project-specific bans do not need a bespoke plugin.",
       "install": {
-        "gradle": "./gradlew checkstyleMain checkstyleTest",
-        "maven": "mvn checkstyle:check"
+        "gradle": "./gradlew checkstyleMain checkstyleTest"
       },
       "installKind": "audit",
       "configPath": "config/checkstyle/checkstyle.xml",
@@ -106,8 +104,7 @@
       "role": "linter",
       "why": "The only tool here with test-shaped rules \u2014 it can tell that a @Test method contains no assertion at all, or that a test class has stopped containing tests, which no formatter or compiler plugin models.",
       "install": {
-        "gradle": "./gradlew pmdMain pmdTest",
-        "maven": "mvn pmd:check"
+        "gradle": "./gradlew pmdMain pmdTest"
       },
       "installKind": "audit",
       "configPath": "config/pmd/ruleset.xml",
@@ -133,8 +130,7 @@
       "role": "type-checker",
       "why": "Runs inside javac with the real type model, so it catches things no regex or AST linter can: an assertion whose arguments can never be equal by type, a fail() that a catch block eats, a @Test that will never be run.",
       "install": {
-        "gradle": "./gradlew compileJava compileTestJava",
-        "maven": "mvn -DskipTests compile"
+        "gradle": "./gradlew compileJava compileTestJava"
       },
       "installKind": "audit",
       "configPath": "build.gradle.kts",
@@ -186,8 +182,7 @@
       "role": "security-scanner",
       "why": "Reads bytecode rather than source, so it sees what survived compilation \u2014 an ignored return value or a swallowed exception the author obscured \u2014 and with the find-sec-bugs plugin it is the ecosystem's standard hardcoded-credential and injection detector.",
       "install": {
-        "gradle": "./gradlew spotbugsMain spotbugsTest",
-        "maven": "mvn spotbugs:check"
+        "gradle": "./gradlew spotbugsMain spotbugsTest"
       },
       "installKind": "audit",
       "configPath": "config/spotbugs/exclude.xml",
@@ -213,8 +208,7 @@
       "role": "test-runner",
       "why": "Defines the vocabulary every other check keys on \u2014 @Test, @Disabled, Assumptions, @Tag \u2014 and is the only thing that can report that a test was skipped rather than passed.",
       "install": {
-        "gradle": "./gradlew test",
-        "maven": "mvn test"
+        "gradle": "./gradlew test"
       },
       "installKind": "audit",
       "configPath": "src/test/resources/junit-platform.properties",

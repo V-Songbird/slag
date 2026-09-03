@@ -107,7 +107,49 @@ const MANIFEST_FILES = [
   "build.gradle",
   "build.gradle.kts",
   "Directory.Packages.props",
+  "Directory.Build.props",
 ];
+
+// The .NET project file is the manifest, and it is neither at a fixed name nor
+// necessarily at the root — jig's own starter writes `src/App.csproj` and
+// `tests/App.Tests.csproj`. So the suffixes are listed and the search is the
+// root plus its immediate children: `dotnet add package` writes a
+// PackageReference into one of these and nowhere else, and an analyzer package
+// has no other trace to read.
+const MANIFEST_SUFFIXES = [".csproj", ".fsproj", ".vbproj"];
+
+// Bounded on purpose: one readdir of the root and one per immediate child, with
+// the directories every ecosystem fills skipped. A manifest search is on the
+// read-only path and must not turn into a walk of somebody's node_modules.
+const UNSEARCHED_DIRS = ["node_modules", "target", "build", "bin", "obj", "dist", "vendor"];
+
+function manifestPaths(root) {
+  const out = MANIFEST_FILES.map((f) => path.join(root, f));
+  const dirs = [root];
+  let entries;
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory() && !entry.name.startsWith(".") && !UNSEARCHED_DIRS.includes(entry.name)) {
+      dirs.push(path.join(root, entry.name));
+    }
+  }
+  for (const dir of dirs) {
+    let listing;
+    try {
+      listing = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of listing) {
+      if (entry.isFile() && MANIFEST_SUFFIXES.some((ext) => entry.name.endsWith(ext))) out.push(path.join(dir, entry.name));
+    }
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Refusals and shape checks
@@ -205,12 +247,12 @@ function firstVersion(text) {
 // `eslint.config.js` is a filename. Over-reading either way turns "declared"
 // into a claim the manifest never made.
 function manifestMentions(root, names) {
-  for (const file of MANIFEST_FILES) {
-    const text = readIfExists(path.join(root, file));
+  for (const file of manifestPaths(root)) {
+    const text = readIfExists(file);
     if (text === null) continue;
     for (const name of names) {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      if (new RegExp("(?<![\\w.\\-/])" + escaped + "(?![\\w.\\-])").test(text)) return file;
+      if (new RegExp("(?<![\\w.\\-/])" + escaped + "(?![\\w.\\-])").test(text)) return path.relative(root, file);
     }
   }
   return null;
@@ -232,6 +274,28 @@ const FETCHING_RUNNERS = ["npx", "pnpx", "bunx", "uvx"];
 // an argument it does not take.
 const SUBCOMMAND_HOSTS = ["cargo"];
 
+// The programs an edition's install commands run through, one per manager.
+// `dotnet add package X` and `npm install --save-dev X` both start with the
+// host, never with the thing being installed.
+function installHosts(tool) {
+  return Object.values(isObject(tool.install) ? tool.install : {})
+    .filter(nonEmptyString).map((cmd) => cmd.trim().split(/\s+/)[0]);
+}
+
+// The operand each install command names — its last argument that is not a
+// flag. For a package with no executable that IS the tool's name on disk: the
+// `PackageReference` `dotnet add package SonarAnalyzer.CSharp` writes into the
+// project file is the only trace such a tool leaves anywhere.
+function installOperands(tool) {
+  const out = [];
+  for (const cmd of Object.values(isObject(tool.install) ? tool.install : {})) {
+    if (!nonEmptyString(cmd)) continue;
+    const last = cmd.trim().split(/\s+/).filter((w) => !w.startsWith("-")).pop();
+    if (nonEmptyString(last)) out.push(last);
+  }
+  return out;
+}
+
 // The version query that proves THIS tool, derived from the verify argv the
 // edition already carries (SCOPE, "How is tool presence determined"). null
 // where the query cannot be asked without installing something.
@@ -245,6 +309,14 @@ function probeArgv(tool, argv) {
   // for `python -m build` on a machine with no build module.
   if (argv[1] === "-m" && nonEmptyString(argv[2])) return [argv[0], "-m", argv[2], "--version"];
   if (SUBCOMMAND_HOSTS.includes(argv[0]) && argv[1] && !argv[1].startsWith("-")) return [argv[0], argv[1], "--version"];
+  // A package whose verify runs through the very program its own install runs
+  // through has no executable anywhere: `dotnet add package
+  // SonarAnalyzer.CSharp` writes a PackageReference and puts nothing on PATH,
+  // and the thing that then runs is the SDK's build. So there is nothing to
+  // spawn and nothing is spawned — asking `dotnet --version` answered 10.0.303
+  // for three analyzers that were not in the project, jig planned no install,
+  // and the lane went green over a linter that was never there.
+  if (tool.installKind === "package" && installHosts(tool).includes(argv[0])) return null;
   return [argv[0], "--version"];
 }
 
@@ -276,12 +348,17 @@ function presence(projectRoot, tool) {
     }
   }
 
-  // What a manifest would have to name is the tool's own program, never the
-  // host it is dispatched through: `npx` in a scripts block is not eslint, and
-  // a Cargo.toml saying `cargo` is not nextest.
-  const subject = probeCmd ? probeCmd[probeCmd.length - 2] : argv[1] || argv[0];
-  const names = [...new Set([tool.id, subject])];
-  if (manifestMentions(root, names)) return { present: true, version: null, how: "manifest" };
+  // What a manifest would have to name is the tool's own program or package,
+  // never the host it is dispatched through: `npx` in a scripts block is not
+  // eslint, and a Cargo.toml saying `cargo` is not nextest. A package with no
+  // executable is named by its own install operand, because a PackageReference
+  // is the only place it exists at all.
+  const names = probeCmd
+    ? [tool.id, probeCmd[probeCmd.length - 2]]
+    : FETCHING_RUNNERS.includes(argv[0])
+      ? [tool.id, argv[1] || argv[0]]
+      : [tool.id, ...installOperands(tool)];
+  if (manifestMentions(root, [...new Set(names.filter(nonEmptyString))])) return { present: true, version: null, how: "manifest" };
   // Nothing could be asked and nothing was declared: jig does not know, and
   // says so rather than calling it absent. Either way it plans the install,
   // which is the direction the owner can decline.
@@ -365,19 +442,44 @@ function findTool(edition, id) {
   return tool;
 }
 
+// Whether two of an edition's managers are two doors into ONE project or two
+// different projects, read off the thing the edition already says: a manager
+// that needs its own project file is a different build system, and a manager
+// that shares one is a second door. `rustup component add clippy` in a cargo
+// project is a second door — one Cargo.toml, two managers — which is why
+// falling through to it is not a guess. `detect.manifest.path` being a map is
+// the edition's own statement that its managers are alternatives (SCOPE, "One
+// edition, two build systems").
+function twoDoorsOneProject(edition, a, b) {
+  const held = edition && edition.detect && edition.detect.manifest && edition.detect.manifest.path;
+  return typeof held === "string" || (isObject(held) && held[a] === held[b]);
+}
+
 // A tool usually installs through the project's manager. Some do not exist
 // under it at all — clippy is a rustup component in a cargo project — so when
 // the chosen manager offers no command and the tool offers exactly one that
 // the edition recognises, that one is not a guess, it is the only door. Two
 // doors and no match is a refusal, because then it would be.
+//
+// So is one door into a DIFFERENT project. Until 2.14.0 the single-door rule
+// took no notice of which build system it was falling into, and a jvm install
+// under maven took every tool's gradle command: seven lane entries all reading
+// `./gradlew`, which `mvn -N wrapper:wrapper` never creates, plus a
+// `build.gradle.kts` written beside the pom. Both lanes exited 1 on every
+// machine. Substituting the other build system is exactly the silent default
+// this contract forbids, so it is a refusal that names the two by name.
 function managerForTool(edition, tool, packageManager, allowed) {
   const install = tool.install;
   if (!isObject(install) || !Object.keys(install).length) throw refuse(tool.id + " carries no install commands, so jig has nothing to propose for it");
   if (nonEmptyString(install[packageManager])) return packageManager;
   const offered = Object.keys(install).filter((m) => allowed.includes(m));
-  if (offered.length === 1) return offered[0];
-  throw refuse(tool.id + " has no install command for " + packageManager + " (it offers: " + Object.keys(install).join(", ") +
-    "). Pick a package manager it supports, or install it yourself and re-run.");
+  if (offered.length === 1 && twoDoorsOneProject(edition, packageManager, offered[0])) return offered[0];
+  throw refuse(tool.id + " has no install command for " + packageManager + " (it offers: " + Object.keys(install).join(", ") + ")." +
+    (offered.length === 1
+      ? " " + offered[0] + " and " + packageManager + " are different build systems here — each writes its own project file — so jig will not run " +
+        offered[0] + "'s command in a " + packageManager + " project."
+      : "") +
+    " Pick a package manager it supports, or install it yourself and re-run.");
 }
 
 // One item per tool, and the item is the whole tool: install, config, wiring
@@ -422,6 +524,18 @@ function proposeInstalls(projectRoot, edition, toolIds, packageManager) {
     // than trusted.
     let uninstallCommand = null;
     let uninstallArgv = null;
+    // Set where the way out is a line the OWNER runs in their own shell rather
+    // than an argv. jig runs no uninstall on any route — the command is written
+    // into the journal as `reconcile` and printed on the plan — so "jig cannot
+    // spawn this" is not the same question as "is there a way back out". Until
+    // 2.14.0 the two were one refusal, and it cost the go edition its linter,
+    // its formatter and its scanner on every machine: `rm -f "$(go env
+    // GOPATH)/bin/gofumpt$(go env GOEXE)"` is the only correct undo Go has —
+    // there is no `go uninstall` — and it needs a shell to say GOPATH. Three of
+    // six go tools were structurally unofferable and the owner could act on
+    // none of it. A shell-only undo is now disclosed as a manual step; an
+    // install with no stated undo at all is still refused.
+    let uninstallManual = false;
     const uninstall = isObject(tool.uninstall) ? tool.uninstall[manager] : null;
     if (!JOURNAL_REVERSIBLE_KINDS.includes(tool.installKind) || escapesRoot(command)) {
       if (!nonEmptyString(uninstall)) {
@@ -430,11 +544,15 @@ function proposeInstalls(projectRoot, edition, toolIds, packageManager) {
           " and the edition states no uninstall for it, so nothing outside the project root could be put back." +
           " jig never leaves an install it cannot undo, so it will not offer this one.");
       }
-      uninstallArgv = parseCommand(uninstall, id + "'s " + manager + " uninstall command");
+    }
+    if (nonEmptyString(uninstall)) {
       uninstallCommand = uninstall;
-    } else if (nonEmptyString(uninstall)) {
-      uninstallArgv = parseCommand(uninstall, id + "'s " + manager + " uninstall command");
-      uninstallCommand = uninstall;
+      try {
+        uninstallArgv = parseCommand(uninstall, id + "'s " + manager + " uninstall command");
+      } catch (err) {
+        if (!err.expected) throw err;
+        uninstallManual = true;
+      }
     }
 
     if (!nonEmptyString(tool.configPath) || typeof tool.configSample !== "string") {
@@ -478,6 +596,9 @@ function proposeInstalls(projectRoot, edition, toolIds, packageManager) {
       ciStep: nonEmptyString(tool.ciStep) ? tool.ciStep : null,
       uninstallCommand,
       uninstallArgv: uninstallArgv ? Object.freeze(uninstallArgv) : null,
+      // True when `uninstallCommand` is a shell line, not an argv. The plan says
+      // so rather than printing it as though jig would run it.
+      uninstallManual,
       timeoutMs: INSTALL_TIMEOUT_MS,
     }));
   }

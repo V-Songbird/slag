@@ -94,6 +94,16 @@ edition claims has no style, and a reader that finds none blanks nothing.
 tool installable under four managers states four ways out. `uninstall` is present on every
 `package` entry — 20 of the 37 — and on none of the other 17, which install nothing to undo.
 
+A manager an entry does not name is a manager that entry is not offered under, with one narrow
+exception: where the edition's managers share one project file, the tool's single door is taken
+(`rustup component add clippy` in a cargo tree — one `Cargo.toml`, two managers). Where they write
+DIFFERENT project files they are different build systems and no fall-through happens, because
+running one build system's command in the other's project is the silent default this shelf exists
+to avoid. That is why every `jvm` entry names `gradle` and none names `maven`: jvm's toolchain is
+Gradle's — each `verify` is a `./gradlew` task and each config a `build.gradle.kts` block or a file
+that script points at — so a Maven install gets the `pom.xml` starter and seven refusal lines
+naming what it did not get.
+
 `configPath` and `configSample` are a tool's configuration and where it belongs — but the path is
 not always a file that tool owns alone. Five python tools name `pyproject.toml`, four dotnet tools
 name `.editorconfig`, two rust tools name `Cargo.toml`, two dotnet tools name
@@ -300,11 +310,14 @@ extension without opening half a megabyte of class rows. Nothing else is duplica
   has no check mode — `gofumpt -l .` reports unformatted files on stdout and exits 0 either way. It
   is the only tool of the 37 that declares a catch at exit 0, a test names it as the one exception,
   and the formatting catch is witnessed by `golangci-lint fmt` instead.
-- **`uninstall` commands are declared, not executed either.** They are written to be runnable as
-  plain argv, with one exception: `go` ships no uninstall verb, so removing a `go install`ed binary
-  means expanding `go env GOPATH`. All three of `go`'s package tools state that shell form, and a
-  reader that refuses shells hands those three back to the owner by name — the three `go` builtins
-  are still offered.
+- **`uninstall` commands are declared, not executed either.** Not by anyone: jig spawns no
+  uninstall on any route, so an `uninstall` string is a line the OWNER runs, journalled as
+  `reconcile` and printed on the plan. Most are runnable as plain argv. `go` is the exception —
+  it ships no uninstall verb, so removing a `go install`ed binary means expanding `go env GOPATH`,
+  which needs a shell. All three of `go`'s package tools state that shell form, and jig carries it
+  verbatim with `uninstallManual` set rather than refusing the tool: until 2.14.0 the parse was a
+  refusal and those three were unofferable on every machine, which left the owner with nothing to
+  act on and no linter, formatter or scanner for go at all.
 
 ## Deliberately absent
 

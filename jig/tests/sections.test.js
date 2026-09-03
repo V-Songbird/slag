@@ -549,12 +549,27 @@ test("the same edition under Maven gets a pom, not a Gradle settings file", () =
     edition: "jvm", "package-manager": "maven",
     tools: "checkstyle,pmd", select: "jvm/swallowed-exception",
   });
-  assert.deepEqual(plan.refused, []);
   assert.equal(pathsOf(plan).includes("settings.gradle.kts"), false, "a Maven build cannot use one");
   assert.ok(pathsOf(plan).includes("pom.xml"), pathsOf(plan).join(", "));
   const body = bodyOf(root, plan, "pom.xml");
   assert.match(body, /<modelVersion>4\.0\.0<\/modelVersion>/);
   assert.match(body, /<artifactId>app<\/artifactId>/);
+
+  // Until 2.14.0 this plan also offered checkstyle and pmd — by falling through
+  // to their GRADLE commands, because those were the only ones the rows carried.
+  // It wrote a `build.gradle.kts` beside the pom and wired every lane entry to
+  // `./gradlew`, which no Maven route creates, so both lanes exited 1 on every
+  // machine. jvm's toolchain is researched for Gradle, so under Maven it is
+  // refused by name and nothing gradle-shaped is written.
+  assert.equal(pathsOf(plan).includes("build.gradle.kts"), false,
+    "a Maven install must not write the other build system's script: " + pathsOf(plan).join(", "));
+  assert.deepEqual(plan.refused.length, 2, plan.refused.join("\n"));
+  for (const id of ["checkstyle", "pmd"]) {
+    const line = plan.refused.find((r) => r.startsWith(id + " "));
+    assert.ok(line, id + " was dropped without a sentence naming it: " + plan.refused.join("\n"));
+    assert.match(line, /different build systems/, line);
+    assert.match(line, /maven/, line);
+  }
 });
 
 test("a greenfield .NET project gets a project file that compiles with nothing in it", () => {

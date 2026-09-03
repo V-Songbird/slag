@@ -230,8 +230,8 @@
         "pdm": "pdm remove -d -G dev pip-audit"
       },
       "configPath": "requirements.txt",
-      "configSample": "# pip-audit has no config file of its own; it audits the active environment by\n# default and a pinned requirements file when given -r. Pin the input so the\n# audit is reproducible:\nhttpx==0.28.1\npydantic==2.11.7\n",
-      "wiring": "[tool.pdm.scripts] audit = \"pip-audit --strict\"  (uv/poetry projects: export first, e.g. `uv export --no-hashes -o requirements.txt`)",
+      "configSample": "# pip-audit has no config file of its own. With no -r it audits the interpreter\n# that happens to be on PATH, which is a fact about the machine and not about\n# this project; -r pins the input to this file, so the audit is reproducible and\n# is about the code here. jig runs it that way in every lane.\nhttpx==0.28.1\npydantic==2.11.7\n",
+      "wiring": "[tool.pdm.scripts] audit = \"pip-audit --strict -r requirements.txt\"  (uv/poetry projects: export first, e.g. `uv export --no-hashes -o requirements.txt`)",
       "ciStep": "pip-audit --strict -r requirements.txt",
       "seed": {
         "path": "requirements.txt",
@@ -240,7 +240,9 @@
       "verify": {
         "argv": [
           "pip-audit",
-          "--strict"
+          "--strict",
+          "-r",
+          "requirements.txt"
         ],
         "expected": "exit code 1 with `Found N known vulnerabilities in M package(s)` above a Name/Version/ID/Fix Versions table; exit code 0 and `No known vulnerabilities found` when clean",
         "expectedExit": 1
