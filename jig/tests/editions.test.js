@@ -169,7 +169,7 @@ test("loadEdition loads one edition and caches it", () => {
   const python = editions.loadEdition(PLUGIN_ROOT, "python");
   assert.equal(python.schemaVersion, 4);
   assert.equal(python.edition, "python");
-  assert.equal(python.classes.length, 26);
+  assert.equal(python.classes.length, 29);
   assert.equal(editions.loadEdition(PLUGIN_ROOT, "python"), python);
 });
 
@@ -315,7 +315,7 @@ test("namespacedId qualifies a class id by its edition", () => {
   assert.equal(editions.namespacedId("python", "swallowed-exception"), "python/swallowed-exception");
 });
 
-test("namespacing makes the 26 shared class ids unambiguous", () => {
+test("namespacing makes the 30 shared class ids unambiguous", () => {
   const seen = new Set();
   const bare = new Set();
   let shared = 0;
@@ -329,7 +329,7 @@ test("namespacing makes the 26 shared class ids unambiguous", () => {
     }
   }
   assert.ok(shared > 0, "the editions do share class ids");
-  assert.equal(seen.size, 147);
+  assert.equal(seen.size, 165);
 });
 
 test("namespacedId refuses an empty half rather than producing `/x`", () => {
@@ -504,4 +504,75 @@ test("no shipped seed is planted inside jig's own state directory", () => {
       assert.equal(/^\.jig(\/|$)/.test(tool.seed.path), false, file + "/" + tool.id + " seeds under .jig/");
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// The starter tree
+//
+// A project file on its own is not a project: cargo exits 101 on a `Cargo.toml`
+// with no `src/lib.rs`. `detect.manifest.starter.files` is the rest of the
+// smallest tree that builds, and every path in it is a byte jig writes into
+// somebody's repository — so the shape is refused at load rather than at write.
+
+function starterShelf(manifest) {
+  return shelf(
+    { schemaVersion: 3, editions: [{ id: "x", file: "x.json", detect: {} }] },
+    { "x.json": { schemaVersion: 4, edition: "x", classes: [], detect: { manifest, packageManagers: ["npm"] } } },
+  );
+}
+
+test("an edition offering starter files for a project file it does not write is refused at load", () => {
+  const root = starterShelf({
+    path: "go.mod", sample: null, hint: "run `go mod init <module path>` here",
+    starter: { files: [{ path: "src/main.go", body: "package main\n" }] },
+  });
+  assert.throws(() => editions.loadEdition(root, "x"), /for a project file it does not write/);
+});
+
+test("a starter file that escapes the project is refused at load", () => {
+  for (const rel of ["../.bashrc", "a/../../b", "/etc/profile", "C:/Windows/x", "src\\index.js"]) {
+    const root = starterShelf({
+      path: "package.json", sample: "{}\n", hint: null,
+      starter: { files: [{ path: rel, body: "x\n" }] },
+    });
+    assert.throws(() => editions.loadEdition(root, "x"), /is not a relative path inside the project/, rel);
+  }
+});
+
+test("a starter file with no body is refused at load", () => {
+  const root = starterShelf({
+    path: "package.json", sample: "{}\n", hint: null,
+    starter: { files: [{ path: "src/index.js" }] },
+  });
+  assert.throws(() => editions.loadEdition(root, "x"), /must each carry a `path` and a `body`/);
+});
+
+// A starter file may belong to one tool rather than to the edition, because
+// `node --test` and vitest read different files and neither can read the
+// other's. An unreachable name would leave a file nobody ever writes and
+// nobody ever hears about.
+test("a starter file naming a tool the edition does not offer is refused at load", () => {
+  const root = starterShelf({
+    path: "package.json", sample: "{}\n", hint: null,
+    starter: { files: [{ path: "tests/smoke.spec.js", body: "x\n", tool: "vitest" }] },
+  });
+  assert.throws(() => editions.loadEdition(root, "x"), /which this edition does not offer/);
+});
+
+test("the shipped JavaScript starter keeps one smoke test per runner", () => {
+  const js = editions.loadEdition(PLUGIN_ROOT, "javascript-typescript");
+  const starter = editions.manifestFor(js, "npm").starter;
+  assert.deepEqual(starter.map((f) => f.path), ["src/index.js", "test/smoke.js", "tests/smoke.spec.js"]);
+  // The node one is unconditional and invisible to vitest; the vitest one is
+  // written only where vitest is, and `node --test` discovers neither `tests/`
+  // nor a `.spec.` name.
+  assert.equal(starter.find((f) => f.path === "test/smoke.js").tool, undefined);
+  assert.equal(starter.find((f) => f.path === "tests/smoke.spec.js").tool, "vitest");
+});
+
+test("manifestFor hands back the starter tree, and an empty one where the edition declares none", () => {
+  const rust = editions.loadEdition(PLUGIN_ROOT, "rust");
+  assert.deepEqual(editions.manifestFor(rust, "cargo").starter.map((f) => f.path), ["src/lib.rs", "Cargo.lock"]);
+  const go = editions.loadEdition(PLUGIN_ROOT, "go");
+  assert.deepEqual(editions.manifestFor(go, "go").starter, []);
 });

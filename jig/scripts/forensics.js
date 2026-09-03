@@ -6,7 +6,8 @@
 // are answerable to different standards:
 //
 //   incidents[] — reverts, fix-clusters, churn hotspots, deleted test files,
-//                 assertion-reducing test diffs. These ANCHOR the interview:
+//                 assertion-reducing test diffs, stale co-change pairs. These
+//                 ANCHOR the interview:
 //                 "this file has been fixed six times" is a question worth
 //                 asking a human. They are never a claim about a class.
 //   ranking[]   — the catalogue's own classes, re-ordered by how often this
@@ -104,6 +105,10 @@ const THRESHOLDS = {
   churn: 8, // commits touching one file before it is a hotspot
   squashRatio: 0.6, // share of "(#123)"-suffixed subjects that reads as squash-merged
   clearedSignals: 2, // distinct signal kinds needed before incidents are shown
+  pairCoChanges: 5, // commits two files must have landed in together before the pair is a relation
+  pairSupport: 0.6, // share of the rarer file's own commits the pair must account for
+  pairDiverged: 3, // commits one of them moved alone before the silence is divergence
+  pairFanout: 20, // files in one commit above which it relates everything to everything
 };
 
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -112,6 +117,11 @@ const MAX_BUFFER = 64 * 1024 * 1024;
 // of them: git offers an author line and a Co-Authored-By trailer and nothing
 // else about who was driving.
 const ATTRIBUTION = "best-effort — author line and Co-Authored-By trailers are the only evidence git carries";
+
+// Said on every stale pair, because co-change is the whole of the evidence.
+// git knows these two files landed together and then stopped; it cannot know
+// whether they are meant to move together, and only the owner can say.
+const PAIR_CONFIDENCE = "best-effort — co-change is correlation, not a declared relation; only the owner can say whether these two are meant to move together";
 
 const US = "\u001f";
 const RS = "\u001e";
@@ -383,6 +393,79 @@ function deletedTests(commits) {
   return out;
 }
 
+// Two files that changed together until they stopped. Co-change is the one
+// relation git carries for free, and it is the only way jig can name a doc-sync
+// pair the owner never thought to mention — a README beside the flag it
+// documents, a schema beside its migration. The rule, stated so it can be
+// argued with:
+//
+//   related   — they landed in `pairCoChanges` commits together, AND those
+//               commits are `pairSupport` of every commit either of them
+//               appeared in up to the last one that carried both. The second
+//               half is what separates "always together" from "both busy": two
+//               files in a churning package co-occur constantly and change
+//               alone just as often, and only the ratio can tell them apart.
+//               The window stops at the last co-change on purpose — counting
+//               the divergence itself would make a longer lapse, which is more
+//               evidence, read as weaker.
+//   diverged  — since the last commit that carried both, one of them moved
+//               `pairDiverged` more times and the other has not moved at all.
+//               One file moving alone once is a commit in progress; the other
+//               being untouched across three is a relation that lapsed.
+//
+// A sweeping commit is skipped for pairing entirely: a hundred-file rename
+// relates everything to everything and is scenery, not evidence.
+function stalePairs(commits, th) {
+  const changed = new Map(); // path -> commit indexes, newest first
+  const together = new Map(); // "ab" -> commit indexes, newest first
+  for (let i = 0; i < commits.length; i++) {
+    const paths = [...new Set(commits[i].files.filter((f) => f.status !== "D").map((f) => f.path))].sort();
+    for (const p of paths) {
+      if (!changed.has(p)) changed.set(p, []);
+      changed.get(p).push(i);
+    }
+    if (paths.length > th.pairFanout) continue;
+    for (let a = 0; a < paths.length; a++) {
+      for (let b = a + 1; b < paths.length; b++) {
+        const key = paths[a] + US + paths[b];
+        if (!together.has(key)) together.set(key, []);
+        together.get(key).push(i);
+      }
+    }
+  }
+
+  const out = [];
+  for (const [key, shared] of together) {
+    if (shared.length < th.pairCoChanges) continue;
+    const [a, b] = key.split(US);
+    const [ca, cb] = [changed.get(a), changed.get(b)];
+    // Newest first, so a lower index is a later commit than the last co-change.
+    const last = shared[0];
+    const busiest = Math.max(ca.filter((i) => i >= last).length, cb.filter((i) => i >= last).length);
+    if (shared.length / busiest < th.pairSupport) continue;
+    const aloneA = ca.filter((i) => i < last).length;
+    const aloneB = cb.filter((i) => i < last).length;
+    if (Math.min(aloneA, aloneB) !== 0) continue;
+    const drifted = Math.max(aloneA, aloneB);
+    if (drifted < th.pairDiverged) continue;
+    const moved = aloneA > aloneB ? a : b;
+    out.push({
+      kind: "stale-pair",
+      paths: [a, b],
+      moved,
+      stale: moved === a ? b : a,
+      coChanges: shared.length,
+      drifted,
+      lastTogether: commits[last].sha,
+      date: commits[last].date,
+      actors: tallyActors(shared.map((i) => commits[i].actor)),
+      confidence: PAIR_CONFIDENCE,
+    });
+  }
+  return out.sort((x, y) => y.coChanges - x.coChanges || y.drifted - x.drifted
+    || (x.paths.join(US) < y.paths.join(US) ? -1 : 1));
+}
+
 // A test diff that takes out more assertions than it puts back. The catalogue
 // says in the class's own detector note that this shape is only visible in a
 // diff, which is why it lives here and not in a check driver.
@@ -577,6 +660,7 @@ function runForensics(root, opts) {
     "fix-cluster": fixClusters(commits, th.fixCluster),
     churn: churn(commits, th.churn),
     "test-file-deleted": deletedTests(commits),
+    "stale-pair": stalePairs(commits, th),
     "assertion-reduced": diffs ? weakenedAssertions(diffs, byShaActor) : [],
   };
   const hitsByClass = diffs ? contentHits(diffs, detectors, byShaActor) : new Map();
@@ -623,6 +707,7 @@ function runForensics(root, opts) {
       ...found["fix-cluster"],
       ...found.churn,
       ...found["test-file-deleted"],
+      ...found["stale-pair"],
       ...found["assertion-reduced"],
     ],
     ranking: rank(hitsByClass, classes),
@@ -664,6 +749,7 @@ module.exports = {
   fixClusters,
   churn,
   deletedTests,
+  stalePairs,
   weakenedAssertions,
   contentHits,
   sinceInstallReport,

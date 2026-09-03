@@ -1569,10 +1569,53 @@
         "violation": "package com.example.billing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nimport org.junit.jupiter.api.Test;\n\nclass InvoiceTest {\n\n    private final Invoice invoice = new Invoice();\n\n    @Test\n    void totalsASingleLine() {\n        assertEquals(1200, invoice.totalDue(Line.of(\"seat\", 1200)));\n    }\n\n    @Test\n    void appliesTheAnnualDiscount() {\n        assertEquals(1080, invoice.totalDue(Line.of(\"seat\", 1200), Term.ANNUAL));\n    }\n\n    @Test\n    void rejectsANegativeLine() {\n        assertThrows(IllegalArgumentException.class, () -> invoice.totalDue(Line.of(\"seat\", -1)));\n    }\n}\n--- after\npackage com.example.billing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nimport org.junit.jupiter.api.Test;\n\nclass InvoiceTest {\n\n    private final Invoice invoice = new Invoice();\n\n    @Test\n    void totalsASingleLine() {\n        assertEquals(1200, invoice.totalDue(Line.of(\"seat\", 1200)));\n    }\n}\n",
         "nearMiss": "package com.example.billing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nimport org.junit.jupiter.api.Test;\n\nclass InvoiceTest {\n\n    private final Invoice invoice = new Invoice();\n\n    @Test\n    void totalsASingleLine() {\n        assertEquals(1200, invoice.totalDue(Line.of(\"seat\", 1200)));\n    }\n\n    @Test\n    void rejectsANegativeLine() {\n        assertEquals(0, invoice.totalDue(Line.of(\"seat\", -1)));\n    }\n}\n--- after\npackage com.example.billing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nimport org.junit.jupiter.api.Test;\n\nclass InvoiceTest {\n\n    private final Invoice invoice = new Invoice();\n\n    @Test\n    void totalsASingleLine() {\n        assertEquals(1200, invoice.totalDue(Line.of(\"seat\", 1200)));\n    }\n\n    @Test\n    void rejectsANegativeLine() {\n        assertThrows(IllegalArgumentException.class, () -> invoice.totalDue(Line.of(\"seat\", -1)));\n    }\n}\n"
       },
-      "gapNotes": "A removal is not in any file's content — the deleted case is absent from the file that is left, so the committed check driver reports this class skipped on a normal run and proves it only from the fixture pair, which carries the file before the edit and the file after it. Nothing in this catalogue watches it — a catalogue never carries a session guard — so the class ships as a named mistake with a proven pair and no lane, and the plan grades that cell GAP. The lane is an authored `edit-guard` on the same removal rule, which reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a test class is seen, and a Write payload carries none, so a whole-file rewrite that drops a test class is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right — behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
+      "gapNotes": "A removal is not in any file's content — the deleted case is absent from the file that is left, so a pathless check-driver run reports this class skipped and proves it only from the fixture pair, which carries the file before the edit and the file after it. The commit lane is the run that holds both versions: `--staged` counts the index against HEAD, a file deleted outright included, so a commit that shrinks the suite is a finding there. The earlier lane is an authored `edit-guard` on the same removal rule — a catalogue never carries a session guard, so that half is the owner's to author. It reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a test class is seen, and a Write payload carries none, so a whole-file rewrite that drops a test class is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right — behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
       "evidence": {
         "tier": "reasoned",
         "source": "No tool in the JVM ecosystem gates on a drop in test count between two revisions; the runners report what they discovered, never what they stopped discovering. The judgement that a shrinking suite is a defect is jig's own."
+      }
+    },
+    {
+      "id": "test-config-loosened",
+      "title": "Test harness config relaxed instead of the failure fixed",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Sets ignoreFailures so a failing test task stops failing the build",
+        "Turns failOnNoDiscoveredTests off, or excludes the tag the failing tests carry, after failing to fix them",
+        "Edits the build.gradle.kts jig installed rather than the code that made it fail"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bfailOnNoDiscoveredTests\\s*=\\s*false\\b",
+              "\\bignoreFailures\\s*=\\s*true\\b",
+              "\\bexcludeTags\\s*\\("
+            ],
+            "paths": [
+              "**/build.gradle.kts",
+              "**/build.gradle"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "plugins {\n    java\n    checkstyle\n    pmd\n}\n\nrepositories { mavenCentral() }\n\ntasks.withType<JavaCompile>().configureEach {\n    options.compilerArgs.addAll(listOf(\"-Xlint:all\"))\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform {\n        excludeTags(\"slow\", \"integration\")\n    }\n    failOnNoDiscoveredTests = false\n    ignoreFailures = true\n    testLogging { events(\"failed\", \"skipped\") }\n}\n",
+        "nearMiss": "plugins {\n    java\n    checkstyle\n    pmd\n}\n\nrepositories { mavenCentral() }\n\ndependencies {\n    testImplementation(platform(\"org.junit:junit-bom:5.13.4\"))\n    testImplementation(\"org.junit.jupiter:junit-jupiter\")\n    testRuntimeOnly(\"org.junit.platform:junit-platform-launcher\")\n}\n\ntasks.withType<JavaCompile>().configureEach {\n    options.compilerArgs.addAll(listOf(\"-Xlint:all\", \"-Werror\"))\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform()\n    failOnNoDiscoveredTests = true\n    ignoreFailures = false\n    testLogging { events(\"failed\", \"skipped\") }\n}\n"
+      },
+      "gapNotes": "The near miss is the build.gradle.kts jig writes, character for character, so this class fails the moment it would fire on jig's own install. A regex over a Kotlin DSL, not an evaluated build: a value read from a gradle.properties entry or a project extra, an `ignoreFailures = shouldSoften` bound to a variable, and the same settings applied in an init script or a convention plugin all evaluate to the same thing at build time and match nothing. excludeTags has honest uses — a nightly-only tag is a legitimate split — so that pattern is a review prompt rather than a verdict. The loudest loosening of all leaves no token: deleting the `check` task's dependsOn wiring, or running the build with -x test, which the `build-check-disabled` class and the CI lane cover instead. Maven's pom.xml equivalents (testFailureIgnore, skipTests) are not read here.",
+      "evidence": {
+        "tier": "documented",
+        "source": "ignoreFailures and failOnNoDiscoveredTests are documented properties of Gradle's Test task and excludeTags is a documented JUnitPlatformOptions method; the near miss is jig's own installed configSample for this edition."
       }
     }
   ]

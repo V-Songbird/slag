@@ -6,7 +6,23 @@
   "detect": {
     "manifest": {
       "path": "App.csproj",
-      "sample": "<!-- Starter project file. Rename it and its assembly before you publish it.\n     It builds as a library, so it compiles with no source files in it yet;\n     add <OutputType>Exe</OutputType> when you write an entry point. -->\n<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net9.0</TargetFramework>\n    <RootNamespace>App</RootNamespace>\n    <AssemblyName>App</AssemblyName>\n  </PropertyGroup>\n\n</Project>\n",
+      "sample": "<!-- Starter project file. Rename it and its assembly before you publish it.\n     It builds as a library, so it compiles with no source files in it yet;\n     add <OutputType>Exe</OutputType> when you write an entry point. -->\n<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net9.0</TargetFramework>\n    <RootNamespace>App</RootNamespace>\n    <AssemblyName>App</AssemblyName>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <!-- The starter test project under tests/ compiles itself. Without this the\n         SDK's default glob would pull its sources into this project too, and a\n         library that does not reference xunit cannot compile them. -->\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+      "starter": {
+        "files": [
+          {
+          "path": "App.sln",
+          "body": "Microsoft Visual Studio Solution File, Format Version 12.00\nProject(\"{9A19103F-16F7-4668-BE54-9A1E7A4F7556}\") = \"App\", \"App.csproj\", \"{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}\"\nEndProject\nProject(\"{9A19103F-16F7-4668-BE54-9A1E7A4F7556}\") = \"App.Tests\", \"tests\\App.Tests.csproj\", \"{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}\"\nEndProject\nGlobal\n\tGlobalSection(SolutionConfigurationPlatforms) = preSolution\n\t\tDebug|Any CPU = Debug|Any CPU\n\t\tRelease|Any CPU = Release|Any CPU\n\tEndGlobalSection\n\tGlobalSection(ProjectConfigurationPlatforms) = postSolution\n\t\t{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU\n\t\t{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}.Debug|Any CPU.Build.0 = Debug|Any CPU\n\t\t{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}.Release|Any CPU.ActiveCfg = Release|Any CPU\n\t\t{6A9E1B47-1C2D-4E3F-9A5B-0D1E2F3A4B5C}.Release|Any CPU.Build.0 = Release|Any CPU\n\t\t{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU\n\t\t{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}.Debug|Any CPU.Build.0 = Debug|Any CPU\n\t\t{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}.Release|Any CPU.ActiveCfg = Release|Any CPU\n\t\t{7B8F2C58-2D3E-4F40-8B6C-1E2F3A4B5C6D}.Release|Any CPU.Build.0 = Release|Any CPU\n\tEndGlobalSection\nEndGlobal\n"
+        },
+        {
+            "path": "tests/App.Tests.csproj",
+            "body": "<!-- Starter test project. Rename it with the project it tests.\n     Written by jig rather than generated: every path here is named on the plan\n     before it lands, which is what makes the scaffold revertable. -->\n<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net9.0</TargetFramework>\n    <RootNamespace>App.Tests</RootNamespace>\n    <AssemblyName>App.Tests</AssemblyName>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.12.0\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../App.csproj\" />\n  </ItemGroup>\n\n</Project>\n"
+          },
+          {
+            "path": "tests/SmokeTests.cs",
+            "body": "// Smoke test, so a new project's test command has something to run and\n// TreatNoTestsAsError has something to find. It asserts on the assembly the\n// project reference pulled in, so it fails if the reference is dropped.\nusing Xunit;\n\nnamespace App.Tests;\n\npublic class SmokeTests\n{\n    [Fact]\n    public void TheProjectUnderTestIsReferenced()\n    {\n        Assert.NotNull(typeof(SmokeTests).Assembly);\n    }\n}\n"
+          }
+        ]
+      },
       "hint": null
     },
     "ignore": [
@@ -167,9 +183,9 @@
       "id": "dotnet-test",
       "role": "test-runner",
       "why": "The only step that proves behaviour rather than shape; with TreatNoTestsAsError it is also the only step that can tell 'everything passed' apart from 'nothing ran'.",
-      "installKind": "scaffold",
+      "installKind": "builtin",
       "install": {
-        "dotnet": "dotnet new xunit -o tests/Project.Tests"
+        "dotnet": "dotnet --version"
       },
       "configPath": ".runsettings",
       "configSample": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TestSessionTimeout>600000</TestSessionTimeout>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\">\n        <Configuration>\n          <LogFileName>results.trx</LogFileName>\n        </Configuration>\n      </Logger>\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n",
@@ -198,6 +214,9 @@
       "installKind": "scaffold",
       "install": {
         "dotnet": "dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org"
+      },
+      "uninstall": {
+        "dotnet": "dotnet nuget remove source nuget.org"
       },
       "configPath": "Directory.Build.props",
       "configSample": "<Project>\n  <PropertyGroup>\n    <NuGetAudit>true</NuGetAudit>\n    <NuGetAuditMode>all</NuGetAuditMode>\n    <NuGetAuditLevel>low</NuGetAuditLevel>\n    <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>\n  </PropertyGroup>\n</Project>\n",
@@ -611,14 +630,15 @@
     },
     {
       "id": "unrestored-pragma-suppression",
-      "title": "#pragma warning disable never restored",
+      "title": "#pragma warning disable left unrestored or unscoped",
       "axes": [
         "agent"
       ],
       "agentModes": [
         "a session adds #pragma warning disable at the top of a file to clear a diagnostic and never emits the matching restore",
         "a session disables a rule id it cannot satisfy so the -warnaserror build passes",
-        "a session widens the scope of an existing scoped suppression by deleting the restore line"
+        "a session widens the scope of an existing scoped suppression by deleting the restore line",
+        "a session writes a bare #pragma warning disable with no rule id, which turns every warning off for the rest of the file"
       ],
       "severity": "safety",
       "detectors": [
@@ -628,7 +648,8 @@
           "confidence": "heuristic",
           "params": {
             "patterns": [
-              "#pragma\\s+warning\\s+disable\\s+([A-Za-z]+\\d+)(?![\\s\\S]*#pragma\\s+warning\\s+restore\\s+\\1)"
+              "#pragma\\s+warning\\s+disable\\s+([A-Za-z]+\\d+)(?![\\s\\S]*#pragma\\s+warning\\s+restore\\s+\\1)",
+          "#pragma\\s+warning\\s+disable[ \\t]*(?=\\r?\\n|$)(?![\\s\\S]*#pragma\\s+warning\\s+restore[ \\t]*(?:\\r?\\n|$))"
             ],
             "paths": [
               "**/*.cs"
@@ -640,10 +661,10 @@
         }
       ],
       "fixtures": {
-        "violation": "#pragma warning disable CS8602\n\nusing System.Collections.Generic;\n\nnamespace Notifications;\n\npublic sealed class DigestBuilder\n{\n    private readonly IReadOnlyList<Subscriber?> _subscribers;\n\n    public DigestBuilder(IReadOnlyList<Subscriber?> subscribers) => _subscribers = subscribers;\n\n    public IEnumerable<string> Addresses()\n    {\n        foreach (var subscriber in _subscribers)\n        {\n            yield return subscriber.EmailAddress;\n        }\n    }\n}\n",
+        "violation": "#pragma warning disable CS8602\n#pragma warning disable\n\nusing System.Collections.Generic;\n\nnamespace Notifications;\n\npublic sealed class DigestBuilder\n{\n    private readonly IReadOnlyList<Subscriber?> _subscribers;\n\n    public DigestBuilder(IReadOnlyList<Subscriber?> subscribers) => _subscribers = subscribers;\n\n    public IEnumerable<string> Addresses()\n    {\n        foreach (var subscriber in _subscribers)\n        {\n            yield return subscriber.EmailAddress;\n        }\n    }\n}\n",
         "nearMiss": "using System.Collections.Generic;\n\nnamespace Notifications;\n\npublic sealed class DigestBuilder\n{\n    private readonly IReadOnlyList<Subscriber?> _subscribers;\n\n    public DigestBuilder(IReadOnlyList<Subscriber?> subscribers) => _subscribers = subscribers;\n\n    public IEnumerable<string> Addresses()\n    {\n        foreach (var subscriber in _subscribers)\n        {\n            if (subscriber is null)\n            {\n                continue;\n            }\n\n#pragma warning disable CA1308\n            yield return subscriber.EmailAddress.ToLowerInvariant();\n#pragma warning restore CA1308\n        }\n    }\n}\n"
       },
-      "gapNotes": "Heuristic, not deterministic: the lookahead only matches a restore of the same rule id later in the same file, so the legal bare form 'disable CS8602 ... #pragma warning restore' with no id - which restores every disabled warning - reads as unrestored and is a false positive on correct code. A multi-id disable ('disable CS8602, CS8604') captures only the first id, so the second is never checked for a restore either. It cannot judge whether a correctly scoped suppression is justified, and says nothing about suppressions moved into .editorconfig as severity = none, which is the quieter version of the same move.",
+      "gapNotes": "Heuristic, not deterministic: the lookahead only matches a restore of the same rule id later in the same file, so the legal bare form 'disable CS8602 ... #pragma warning restore' with no id - which restores every disabled warning - reads as unrestored and is a false positive on correct code. A multi-id disable ('disable CS8602, CS8604') captures only the first id, so the second is never checked for a restore either. The second pattern reads the bare form — `#pragma warning disable` with no rule id at all, which silences every warning from that line to the end of the file — and holds it against a bare `#pragma warning restore` rather than an id, so a file that opens the bare form and closes it again is not reported. It cannot judge whether a correctly scoped suppression is justified, and says nothing about suppressions moved into .editorconfig as severity = none, which is the quieter version of the same move.",
       "evidence": {
         "tier": "documented",
         "source": "Microsoft Learn C# preprocessor directives (#pragma warning) and 'How to suppress code analysis warnings'; IDE0079 is documented but only reports suppressions that are provably unnecessary."
@@ -1395,10 +1416,255 @@
         "violation": "using System;\nusing Xunit;\n\nnamespace Example.Billing.Tests;\n\npublic class InvoiceTests\n{\n    private readonly Invoice _invoice = new();\n\n    [Fact]\n    public void TotalsASingleLine()\n    {\n        Assert.Equal(1200, _invoice.TotalDue(Line.Of(\"seat\", 1200)));\n    }\n\n    [Fact]\n    public void AppliesTheAnnualDiscount()\n    {\n        Assert.Equal(1080, _invoice.TotalDue(Line.Of(\"seat\", 1200), Term.Annual));\n    }\n\n    [Fact]\n    public void RejectsANegativeLine()\n    {\n        Assert.Throws<ArgumentOutOfRangeException>(() => _invoice.TotalDue(Line.Of(\"seat\", -1)));\n    }\n}\n--- after\nusing System;\nusing Xunit;\n\nnamespace Example.Billing.Tests;\n\npublic class InvoiceTests\n{\n    private readonly Invoice _invoice = new();\n\n    [Fact]\n    public void TotalsASingleLine()\n    {\n        Assert.Equal(1200, _invoice.TotalDue(Line.Of(\"seat\", 1200)));\n    }\n}\n",
         "nearMiss": "using System;\nusing Xunit;\n\nnamespace Example.Billing.Tests;\n\npublic class InvoiceTests\n{\n    private readonly Invoice _invoice = new();\n\n    [Fact]\n    public void TotalsASingleLine()\n    {\n        Assert.Equal(1200, _invoice.TotalDue(Line.Of(\"seat\", 1200)));\n    }\n\n    [Fact]\n    public void RejectsANegativeLine()\n    {\n        Assert.Equal(0, _invoice.TotalDue(Line.Of(\"seat\", -1)));\n    }\n}\n--- after\nusing System;\nusing Xunit;\n\nnamespace Example.Billing.Tests;\n\npublic class InvoiceTests\n{\n    private readonly Invoice _invoice = new();\n\n    [Fact]\n    public void TotalsASingleLine()\n    {\n        Assert.Equal(1200, _invoice.TotalDue(Line.Of(\"seat\", 1200)));\n    }\n\n    [Fact]\n    public void RejectsANegativeLine()\n    {\n        Assert.Throws<ArgumentOutOfRangeException>(() => _invoice.TotalDue(Line.Of(\"seat\", -1)));\n    }\n}\n"
       },
-      "gapNotes": "A removal is not in any file's content \u2014 the deleted case is absent from the file that is left, so the committed check driver reports this class skipped on a normal run and proves it only from the fixture pair, which carries the file before the edit and the file after it. Nothing in this catalogue watches it — a catalogue never carries a session guard — so the class ships as a named mistake with a proven pair and no lane, and the plan grades that cell GAP. The lane is an authored `edit-guard` on the same removal rule, which reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a test class is seen, and a Write payload carries none, so a whole-file rewrite that drops a test class is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right \u2014 behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
+      "gapNotes": "A removal is not in any file's content \u2014 the deleted case is absent from the file that is left, so a pathless check-driver run reports this class skipped and proves it only from the fixture pair, which carries the file before the edit and the file after it. The commit lane is the run that holds both versions: `--staged` counts the index against HEAD, a file deleted outright included, so a commit that shrinks the suite is a finding there. The earlier lane is an authored `edit-guard` on the same removal rule — a catalogue never carries a session guard, so that half is the owner's to author. It reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a test class is seen, and a Write payload carries none, so a whole-file rewrite that drops a test class is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right \u2014 behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
       "evidence": {
         "tier": "reasoned",
         "source": "No tool in the .NET ecosystem gates on a drop in test count between two revisions; the runners report what they discovered, never what they stopped discovering. The judgement that a shrinking suite is a defect is jig's own."
+      }
+    },
+    {
+      "id": "emptied-test-body",
+      "title": "Test body emptied instead of fixed",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "a session deletes the body of a failing test but leaves the [Fact] and the method so the file still looks covered",
+        "a session scaffolds test method names to satisfy a coverage request and never fills the bodies in",
+        "a session reports the suite green because an empty test passes"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\[\\s*(?:Fact|Theory)\\b[^\\]]*\\]\\s*(?:\\[[^\\]]*\\]\\s*)*public\\s+(?:async\\s+)?[\\w<>\\[\\].?]+\\s+\\w+\\s*\\([^)]*\\)\\s*\\{\\s*\\}"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "heuristic",
+          "params": {
+            "tool": "sonaranalyzer-csharp",
+            "rule": "S2699",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System.Threading.Tasks;\nusing Xunit;\n\nnamespace Catalog.Tests;\n\npublic class ProductImporterTests\n{\n    [Fact]\n    public void Import_ParsesTheFeed()\n    {\n    }\n\n    [Theory]\n    [InlineData(\"empty.xml\")]\n    public async Task ImportAsync_OnEmptyFeed_ImportsNothing(string feed)\n    {\n    }\n}\n",
+        "nearMiss": "using System.Threading.Tasks;\nusing Xunit;\n\nnamespace Catalog.Tests;\n\npublic class ProductImporterTests\n{\n    private sealed class NullSink\n    {\n        public void Record(string line)\n        {\n        }\n    }\n\n    [Fact]\n    public void Import_ParsesTheFeed()\n    {\n        var importer = new ProductImporter(new FakeFeedReader());\n\n        var result = importer.Import(\"feed-2026-08.xml\");\n\n        Assert.Equal(42, result.ImportedCount);\n    }\n\n    [Theory]\n    [InlineData(\"empty.xml\")]\n    public async Task ImportAsync_OnEmptyFeed_ImportsNothing(string feed)\n    {\n        var importer = new ProductImporter(new FakeFeedReader());\n\n        var result = await importer.ImportAsync(feed);\n\n        Assert.Equal(0, result.ImportedCount);\n    }\n}\n"
+      },
+      "gapNotes": "Only the shell left behind is caught. A test deleted outright leaves no source to match, which is what the `test-count-dropped` class in this edition reads instead, and a body reduced to a single Assert.True(true) is `softened-assertion`. The pattern is anchored on the xUnit attributes, so an NUnit [Test] or an MSTest [TestMethod] with an empty body is missed, as is an expression-bodied test method. An empty method that carries no test attribute — a null sink, a no-op override — is deliberately not matched, which the near miss holds as its trap. S2699 reports the same emptiness from the other side but does no cross-file analysis, so a test whose assertions live in a shared helper is a false positive for it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Fact and Theory are documented xUnit attributes; SonarSource rule S2699 'Tests should include assertions' covers a test body with no assertion, and its cross-file limitation is stated in the rule's own description."
+      }
+    },
+    {
+      "id": "debug-artifact-left-behind",
+      "title": "Debug output or breakpoint left in the code",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session adds Console.WriteLine tracing while diagnosing and ships it with the fix",
+        "a session leaves Debugger.Break in a path that will run unattended on CI",
+        "a session prints request or customer objects, quietly turning debug output into a log-privacy incident"
+      ],
+      "severity": "hygiene",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\bConsole\\s*\\.\\s*(?:Write|WriteLine)\\s*\\(",
+              "\\bDebug\\s*\\.\\s*(?:Write|WriteLine|Print)\\s*\\(",
+              "\\bDebugger\\s*\\.\\s*(?:Break|Launch)\\s*\\("
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "tool-rule",
+          "actor": "human-ci",
+          "confidence": "deterministic",
+          "params": {
+            "tool": "sonaranalyzer-csharp",
+            "rule": "S106",
+            "options": {}
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System;\nusing System.Diagnostics;\n\nnamespace Ingest;\n\npublic sealed class Reconciler\n{\n    public Merge Run(Snapshot local, Snapshot remote)\n    {\n        Console.WriteLine($\"reconcile called for {local.Id}\");\n        Debug.WriteLine(\"entering merge\");\n\n        if (local.Version != remote.Version)\n        {\n            Debugger.Break();\n        }\n\n        return Merge.Of(local, remote);\n    }\n}\n",
+        "nearMiss": "using Microsoft.Extensions.Logging;\n\nnamespace Ingest;\n\npublic sealed class Reconciler\n{\n    private readonly ILogger<Reconciler> _logger;\n\n    public Reconciler(ILogger<Reconciler> logger) => _logger = logger;\n\n    public Merge Run(Snapshot local, Snapshot remote)\n    {\n        _logger.LogDebug(\"reconcile called for {SnapshotId}\", local.Id);\n\n        if (local.Version != remote.Version)\n        {\n            _logger.LogWarning(\"version drift detected for {SnapshotId}\", local.Id);\n        }\n\n        return Merge.Of(local, remote);\n    }\n}\n"
+      },
+      "gapNotes": "A console application whose whole job is writing to stdout matches on every legitimate line, so entry-point projects need excluding by path or the class becomes noise the team learns to skip. It does not see debug output routed through a real logger at debug level, which is the same information leak with better manners, nor a write through a captured TextWriter or Console.Out.WriteLine reached through a local alias. Severity is hygiene, but the log-privacy variant — printing a customer or request object — is genuinely a safety problem this class cannot grade. Debug.WriteLine compiles away in a Release build, so it is the least harmful of the three and the most likely to be a false alarm.",
+      "evidence": {
+        "tier": "documented",
+        "source": "Console.WriteLine, System.Diagnostics.Debug.WriteLine and System.Diagnostics.Debugger.Break are documented .NET APIs; SonarSource rule S106 'Standard outputs should not be used directly to log anything' covers the Console half."
+      }
+    },
+    {
+      "id": "unimplemented-stub-shipped",
+      "title": "Stub left throwing while the task is reported done",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "a session leaves throw new NotImplementedException() in a member whose signature and call sites it already wrote",
+        "a session marks the missing half with a TODO comment and reports the change complete",
+        "a session returns null or an empty collection from a member it did not write, so callers compile and the suite passes vacuously"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\bthrow\\s+new\\s+NotImplementedException\\b"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "//\\s*(?:TODO|FIXME|XXX|HACK)\\b"
+            ],
+            "paths": [
+              "**/*.cs"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System;\nusing System.Collections.Generic;\n\nnamespace Reporting;\n\npublic sealed class QuarterlyReport\n{\n    public IReadOnlyList<LineItem> LineItems(DateOnly quarterStart) =>\n        _repository.Between(quarterStart, quarterStart.AddMonths(3));\n\n    // TODO: sum the line items once the ledger schema is settled\n    public Money RunningBalance(DateOnly quarterStart)\n    {\n        throw new NotImplementedException();\n    }\n}\n",
+        "nearMiss": "using System;\nusing System.Collections.Generic;\n\nnamespace Reporting;\n\npublic sealed class QuarterlyReport\n{\n    private const int TodoReviewLimit = 25;\n\n    public IReadOnlyList<LineItem> TodoItems() => _repository.Flagged(TodoReviewLimit);\n\n    public IReadOnlyList<LineItem> LineItems(DateOnly quarterStart) =>\n        _repository.Between(quarterStart, quarterStart.AddMonths(3));\n\n    // Sums every line item in the quarter that starts at quarterStart.\n    public Money RunningBalance(DateOnly quarterStart)\n    {\n        var balance = Money.Zero;\n\n        foreach (var item in LineItems(quarterStart))\n        {\n            balance += item.Amount;\n        }\n\n        return balance;\n    }\n}\n"
+      },
+      "gapNotes": "Both tokens are also the correct code somewhere: throwing NotImplementedException is a legitimate contract for an unsupported interface member, and a TODO comment is often a note about a later improvement over finished code — so this reports a guess about intent, not a fact, and needs a wave-off path. The quietest form has no token at all: `return null` or `Array.Empty<T>()` written because the session did not know what to compute, which only a test asserting the real value catches. NotSupportedException is deliberately not matched, because it is the documented signal for a member that is meant to stay unimplemented. The near miss is the trap: `TodoReviewLimit` and `TodoItems` are code rather than markers, and the pattern is case-sensitive.",
+      "evidence": {
+        "tier": "documented",
+        "source": "System.NotImplementedException is documented as the exception for a member whose implementation is missing, in contrast with NotSupportedException; the comment markers carry no enabled rule id in the analyzer set jig installs, so no tool-rule detector is claimed."
+      }
+    },
+    {
+      "id": "sleep-based-test-synchronisation",
+      "title": "Sleep standing in for a real wait condition in a test",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "a session adds Thread.Sleep to make an intermittently failing async test pass on the machine it is running on",
+        "a session lengthens an existing delay when the test fails again, rather than waiting on the condition",
+        "a session sleeps because it does not know which signalling primitive the project already has"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\bThread\\s*\\.\\s*Sleep\\s*\\(",
+              "\\bawait\\s+Task\\s*\\.\\s*Delay\\s*\\("
+            ],
+            "paths": [
+              "**/*Tests.cs",
+              "**/*Test.cs",
+              "**/Tests/**/*.cs"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "using System.Threading;\nusing System.Threading.Tasks;\nusing Xunit;\n\nnamespace Queueing.Tests;\n\npublic class DispatchQueueTests\n{\n    [Fact]\n    public async Task Drains_Asynchronously()\n    {\n        var queue = new DispatchQueue();\n        queue.Submit(new Job(\"a\"));\n        queue.Submit(new Job(\"b\"));\n\n        Thread.Sleep(500);\n        await Task.Delay(250);\n\n        Assert.Equal(0, queue.PendingCount);\n    }\n}\n",
+        "nearMiss": "using System;\nusing System.Threading;\nusing System.Threading.Tasks;\nusing Xunit;\n\nnamespace Queueing.Tests;\n\npublic class DispatchQueueTests\n{\n    [Fact]\n    public async Task Drains_Asynchronously()\n    {\n        var queue = new DispatchQueue();\n        using var drained = new CountdownEvent(2);\n        queue.OnComplete(_ => drained.Signal());\n\n        queue.Submit(new Job(\"a\"));\n        queue.Submit(new Job(\"b\"));\n\n        Assert.True(drained.Wait(TimeSpan.FromSeconds(5)), \"queue did not drain within 5s\");\n        Assert.Equal(0, await queue.PendingCountAsync());\n    }\n\n    [Fact]\n    public void Reports_SleepBudget()\n    {\n        Assert.Equal(TimeSpan.Zero, new DispatchQueue().SleepBudget);\n    }\n}\n"
+      },
+      "gapNotes": "The call site is matched exactly, but whether the call is a defect is not decidable from the text: a delay is correct when the test is deliberately exercising timing, so this is a project-policy class whose value comes from the ledger rather than the match. No rule in the analyzer set jig installs bans it and none honestly could, so there is no tool-rule detector. It reads two spellings — a Task.Delay stored and awaited later, a SpinWait, a `Task.Delay(...).Wait()` blocking form (which is `blocking-call-in-async`'s violation instead) and an Awaitility-style polling helper all carry neither. Scoped by test-project naming convention, so a sleep in a shared fixture assembly outside those paths is missed. The near miss holds the traps: a CountdownEvent.Wait is a real condition wait, and `SleepBudget` names sleeping without doing it.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "Thread.Sleep and Task.Delay are documented .NET APIs; the judgement that their use inside a test is a synchronisation smell is jig's policy, backed by no rule id — hence the missing tool-rule detector."
+      }
+    },
+    {
+      "id": "test-config-loosened",
+      "title": "Test harness config relaxed instead of the failure fixed",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Turns coverage collection off, or drops its threshold, after failing to raise the number",
+        "Disables the trx logger, so the run leaves no artifact anyone can check the claim against",
+        "Edits the .runsettings jig installed rather than the code that made it fail"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "<\\s*CollectCoverage\\s*>\\s*[Ff]alse\\s*<",
+              "<\\s*Threshold\\s*>\\s*(?:\\d|[1-4]\\d)\\s*<",
+              "friendlyName\\s*=\\s*\"trx\"\\s+enabled\\s*=\\s*\"[Ff]alse\""
+            ],
+            "paths": [
+              "**/*.runsettings"
+            ],
+            "stripComments": false,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TestSessionTimeout>600000</TestSessionTimeout>\n  </RunConfiguration>\n  <DataCollectionRunSettings>\n    <DataCollectors>\n      <DataCollector friendlyName=\"XPlat code coverage\">\n        <Configuration>\n          <CollectCoverage>false</CollectCoverage>\n          <Threshold>10</Threshold>\n        </Configuration>\n      </DataCollector>\n    </DataCollectors>\n  </DataCollectionRunSettings>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"False\" />\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n",
+        "nearMiss": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TestSessionTimeout>600000</TestSessionTimeout>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\">\n        <Configuration>\n          <LogFileName>results.trx</LogFileName>\n        </Configuration>\n      </Logger>\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n"
+      },
+      "gapNotes": "The near miss is the .runsettings jig writes, character for character, so this class fails the moment it would fire on jig's own install. `TreatNoTestsAsError` is deliberately absent from these patterns: the `zero-tests-treated-as-pass` class in this edition already reads it over the same file, and two checks reporting one line twice is noise, not coverage. It reads values, never a diff, so a threshold moved from 80 to 60 matches nothing here, and the loosening that deletes a node outright leaves nothing at all to read. Coverage thresholds set on the coverlet MSBuild properties in a csproj, or passed on the dotnet test command line, are out of its scope.",
+      "evidence": {
+        "tier": "documented",
+        "source": "RunConfiguration, LoggerRunSettings and the XPlat code coverage data collector are documented .runsettings elements; CollectCoverage and Threshold are documented coverlet settings. The near miss is jig's own installed configSample for this edition."
       }
     }
   ]

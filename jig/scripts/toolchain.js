@@ -283,6 +283,31 @@ function pickPackageManager(projectRoot, edition) {
 // proposeInstalls
 // ---------------------------------------------------------------------------
 
+// The installKinds whose whole effect lands inside the project root, where the
+// journal's own pre-images and its created-path rows are the way back out.
+// Everything else needs the ecosystem to be told.
+//
+// The kind is a CLAIM, and `catalogueEscapesRoot` below is what checks it: a
+// row that says `builtin` and then installs a rust toolchain into ~/.rustup is
+// an install jig could not undo, offered under the kind that says it needs no
+// undoing. Release gate G8 holds every shipped row to it.
+const JOURNAL_REVERSIBLE_KINDS = ["scaffold", "builtin", "audit"];
+
+// The install shapes that reach past the project root: a global binary, a
+// toolchain, a machine-level package feed. Listed rather than inferred, because
+// an argv is the only thing jig has to read and a command that writes outside
+// the root does not announce itself.
+const ESCAPES_ROOT = [
+  /\brustup\s/, /\bgo\s+install\b/, /\bcargo\s+install\b/, /\bnuget\s+add\s+source\b/,
+  /\btool\s+install\b/, /(?:^|\s)(?:-g|--global)(?:\s|$)/,
+];
+
+// Whether a command installs something the journal will never see. Exported so
+// the release gate can hold the catalogue to it as well as this refusal.
+function escapesRoot(command) {
+  return typeof command === "string" && ESCAPES_ROOT.some((re) => re.test(command));
+}
+
 function findTool(edition, id) {
   const list = (edition && edition.toolchain) || [];
   if (!Array.isArray(list) || !list.length) throw refuse("this edition carries no toolchain, so there is nothing to propose");
@@ -331,15 +356,30 @@ function proposeInstalls(projectRoot, edition, toolIds, packageManager) {
     const command = tool.install[manager];
     const argv = parseCommand(command, id + "'s " + manager + " install command");
 
-    // The refusal that gives this module its shape. A package install that has
-    // no stated way out is not proposed at all, so `revert --all` can never
-    // meet an install it has no answer for.
+    // The refusal that gives this module its shape, stated over every
+    // installKind rather than over one. There are two ways back out of an
+    // install: the ecosystem's own reconcile command, or the journal — and the
+    // journal only reaches bytes inside the project root. `scaffold` writes
+    // exactly those, `builtin` and `audit` write none, and since 2.12.0 an
+    // install's created paths are snapshotted into the journal, so those three
+    // are undone without a command. Every other kind — `package`, and any kind
+    // this engine does not recognise, because an unrecognised kind is a claim
+    // jig cannot check — leaves bytes the journal never sees, and is not
+    // proposed at all without a stated way out.
+    //
+    // The exemption is the kind AND the command: a row may say `builtin` and
+    // still run `rustup toolchain install`, and the journal never sees a byte
+    // of that. The command decides, so a mislabelled row is refused rather
+    // than trusted.
     let uninstallCommand = null;
     let uninstallArgv = null;
     const uninstall = isObject(tool.uninstall) ? tool.uninstall[manager] : null;
-    if (tool.installKind === "package") {
+    if (!JOURNAL_REVERSIBLE_KINDS.includes(tool.installKind) || escapesRoot(command)) {
       if (!nonEmptyString(uninstall)) {
-        throw refuse(id + " installs as a package under " + manager + " but the edition states no uninstall for it. jig never leaves an install it cannot undo, so it will not offer this one.");
+        throw refuse(id + " installs as " + JSON.stringify(tool.installKind || null) + " under " + manager +
+          (escapesRoot(command) ? " by running `" + command + "`, which writes outside the project root," : "") +
+          " and the edition states no uninstall for it, so nothing outside the project root could be put back." +
+          " jig never leaves an install it cannot undo, so it will not offer this one.");
       }
       uninstallArgv = parseCommand(uninstall, id + "'s " + manager + " uninstall command");
       uninstallCommand = uninstall;
@@ -610,6 +650,11 @@ module.exports = {
   presence,
   pickPackageManager,
   proposeInstalls,
+  // Exported for release gate G8: the catalogue is held to the same reading of
+  // an install command that the refusal above uses, so a new row cannot claim a
+  // journal-reversible kind for something the journal never sees.
+  JOURNAL_REVERSIBLE_KINDS,
+  escapesRoot,
   runInstall,
   execVerify,
   execBaseline,

@@ -7,7 +7,24 @@
     "manifest": {
       "path": "package.json",
       "sample": "{\n  \"name\": \"example-app\",\n  \"version\": \"0.1.0\",\n  \"private\": true,\n  \"type\": \"module\"\n}\n",
-      "hint": null
+      "hint": null,
+      "starter": {
+        "files": [
+          {
+            "path": "src/index.js",
+            "body": "// Starter module. Replace it with your own code.\n\nexport function name() {\n  return \"example-app\";\n}\n"
+          },
+          {
+            "path": "test/smoke.js",
+            "body": "// Smoke test, so a new project's test command has something to run. Node's own\n// runner discovers every file under `test/`, and there is no `.test.` in the\n// name, so a vitest added later collects its own files and not this one too.\nimport assert from \"node:assert/strict\";\nimport test from \"node:test\";\n\nimport { name } from \"../src/index.js\";\n\nawait test(\"the starter module loads\", () => {\n  assert.equal(name(), \"example-app\");\n});\n"
+          },
+          {
+            "path": "tests/smoke.spec.js",
+            "tool": "vitest",
+            "body": "// Smoke test for the runner this project installed, so `npm test` has\n// something to collect. `node --test` never sees it: a `tests/` directory and\n// a `.spec.` name are vitest discovery, not node's, so the two runners each\n// have one file of their own and neither reads the other's.\nimport { expect, test } from 'vitest';\n\nimport { name } from '../src/index.js';\n\ntest('the starter module loads', () => {\n  expect(name()).toBe('example-app');\n});\n"
+          }
+        ]
+      }
     },
     "ignore": [
       "node_modules/",
@@ -70,7 +87,7 @@
         "bun": "bun remove eslint @eslint/js typescript typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin"
       },
       "configPath": "eslint.config.mjs",
-      "configSample": "import js from '@eslint/js';\nimport { defineConfig, globalIgnores } from 'eslint/config';\nimport tseslint from 'typescript-eslint';\nimport { importX } from 'eslint-plugin-import-x';\nimport n from 'eslint-plugin-n';\nimport security from 'eslint-plugin-security';\nimport vitest from '@vitest/eslint-plugin';\n\nexport default defineConfig([\n  globalIgnores(['dist/**', 'coverage/**', 'node_modules/**', '.jig/**', '*.config.{js,mjs,cjs,ts,mts,cts}']),\n  {\n    files: ['**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],\n    extends: [\n      js.configs.recommended,\n      tseslint.configs.strictTypeChecked,\n      importX.flatConfigs.recommended,\n      importX.flatConfigs.typescript,\n      security.configs.recommended,\n    ],\n    plugins: { n },\n    languageOptions: {\n      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },\n    },\n    rules: {\n      'eqeqeq': ['error', 'always'],\n      'no-console': ['error', { allow: ['error', 'warn'] }],\n      'no-debugger': 'error',\n      'no-eval': 'error',\n      'no-implied-eval': 'error',\n      'no-empty': ['error', { allowEmptyCatch: false }],\n      'no-unused-vars': 'off',\n      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],\n      '@typescript-eslint/no-explicit-any': 'error',\n      '@typescript-eslint/no-non-null-assertion': 'error',\n      '@typescript-eslint/no-floating-promises': 'error',\n      '@typescript-eslint/no-misused-promises': 'error',\n      '@typescript-eslint/ban-ts-comment': ['error', { 'ts-expect-error': 'allow-with-description' }],\n      '@typescript-eslint/only-throw-error': 'error',\n      '@typescript-eslint/switch-exhaustiveness-check': 'error',\n      'import-x/no-unresolved': 'error',\n      'import-x/no-extraneous-dependencies': 'error',\n      'import-x/no-cycle': 'error',\n      'n/no-process-exit': 'error',\n    },\n  },\n  {\n    files: ['**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],\n    plugins: { vitest },\n    rules: {\n      ...vitest.configs.recommended.rules,\n      'vitest/no-focused-tests': 'error',\n      'vitest/no-disabled-tests': 'error',\n      'vitest/no-commented-out-tests': 'error',\n      'vitest/expect-expect': 'error',\n      'vitest/no-conditional-expect': 'error',\n      'vitest/no-identical-title': 'error',\n      'vitest/no-standalone-expect': 'error',\n    },\n  },\n]);\n",
+      "configSample": "import js from '@eslint/js';\nimport { defineConfig, globalIgnores } from 'eslint/config';\nimport tseslint from 'typescript-eslint';\nimport { importX } from 'eslint-plugin-import-x';\nimport n from 'eslint-plugin-n';\nimport security from 'eslint-plugin-security';\nimport vitest from '@vitest/eslint-plugin';\n\nexport default defineConfig([\n  globalIgnores(['dist/**', 'coverage/**', 'node_modules/**', '.jig/**', '*.config.{js,mjs,cjs,ts,mts,cts}']),\n  {\n    files: ['**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],\n    extends: [\n      js.configs.recommended,\n      tseslint.configs.strictTypeChecked,\n      importX.flatConfigs.recommended,\n      security.configs.recommended,\n    ],\n    plugins: { n },\n    languageOptions: {\n      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },\n    },\n    rules: {\n      'eqeqeq': ['error', 'always'],\n      'no-console': ['error', { allow: ['error', 'warn'] }],\n      'no-debugger': 'error',\n      'no-eval': 'error',\n      'no-implied-eval': 'error',\n      'no-empty': ['error', { allowEmptyCatch: false }],\n      'no-unused-vars': 'off',\n      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],\n      '@typescript-eslint/no-explicit-any': 'error',\n      '@typescript-eslint/no-non-null-assertion': 'error',\n      '@typescript-eslint/no-floating-promises': 'error',\n      '@typescript-eslint/no-misused-promises': 'error',\n      '@typescript-eslint/ban-ts-comment': ['error', { 'ts-expect-error': 'allow-with-description' }],\n      '@typescript-eslint/only-throw-error': 'error',\n      '@typescript-eslint/switch-exhaustiveness-check': 'error',\n      'import-x/no-unresolved': 'error',\n      'import-x/no-extraneous-dependencies': 'error',\n      'import-x/no-cycle': 'error',\n      'n/no-process-exit': 'error',\n    },\n  },\n  {\n    files: ['**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],\n    plugins: { vitest },\n    rules: {\n      ...vitest.configs.recommended.rules,\n      'vitest/no-focused-tests': 'error',\n      'vitest/no-disabled-tests': 'error',\n      'vitest/no-commented-out-tests': 'error',\n      'vitest/expect-expect': 'error',\n      'vitest/no-conditional-expect': 'error',\n      'vitest/no-identical-title': 'error',\n      'vitest/no-standalone-expect': 'error',\n    },\n  },\n]);\n",
       "wiring": "\"lint\": \"eslint . --max-warnings 0 --report-unused-disable-directives\"",
       "ciStep": "npm run lint",
       "verify": {
@@ -96,20 +113,20 @@
       "role": "type-checker",
       "why": "Only tsc knows whether an imported symbol, method or module path actually exists and whether a widened type hides a real narrowing failure; the linter never resolves types on its own.",
       "install": {
-        "npm": "npm install --save-dev typescript",
-        "pnpm": "pnpm add -D typescript",
-        "yarn": "yarn add -D typescript",
-        "bun": "bun add -d typescript"
+        "npm": "npm install --save-dev typescript @types/node",
+        "pnpm": "pnpm add -D typescript @types/node",
+        "yarn": "yarn add -D typescript @types/node",
+        "bun": "bun add -d typescript @types/node"
       },
       "installKind": "package",
       "uninstall": {
-        "npm": "npm uninstall typescript",
-        "pnpm": "pnpm remove typescript",
-        "yarn": "yarn remove typescript",
-        "bun": "bun remove typescript"
+        "npm": "npm uninstall typescript @types/node",
+        "pnpm": "pnpm remove typescript @types/node",
+        "yarn": "yarn remove typescript @types/node",
+        "bun": "bun remove typescript @types/node"
       },
       "configPath": "tsconfig.json",
-      "configSample": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2023\",\n    \"lib\": [\"ES2023\"],\n    \"module\": \"nodenext\",\n    \"moduleResolution\": \"nodenext\",\n    \"strict\": true,\n    \"noUncheckedIndexedAccess\": true,\n    \"exactOptionalPropertyTypes\": true,\n    \"noImplicitOverride\": true,\n    \"noImplicitReturns\": true,\n    \"noFallthroughCasesInSwitch\": true,\n    \"noPropertyAccessFromIndexSignature\": true,\n    \"useUnknownInCatchVariables\": true,\n    \"noUnusedLocals\": true,\n    \"noUnusedParameters\": true,\n    \"verbatimModuleSyntax\": true,\n    \"isolatedModules\": true,\n    \"allowJs\": true,\n    \"checkJs\": true,\n    \"skipLibCheck\": true,\n    \"noEmit\": true\n  },\n  \"include\": [\"src\", \"tests\"]\n}\n",
+      "configSample": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2023\",\n    \"lib\": [\"ES2023\"],\n    \"module\": \"nodenext\",\n    \"moduleResolution\": \"nodenext\",\n    \"strict\": true,\n    \"noUncheckedIndexedAccess\": true,\n    \"exactOptionalPropertyTypes\": true,\n    \"noImplicitOverride\": true,\n    \"noImplicitReturns\": true,\n    \"noFallthroughCasesInSwitch\": true,\n    \"noPropertyAccessFromIndexSignature\": true,\n    \"useUnknownInCatchVariables\": true,\n    \"noUnusedLocals\": true,\n    \"noUnusedParameters\": true,\n    \"verbatimModuleSyntax\": true,\n    \"isolatedModules\": true,\n    \"allowJs\": true,\n    \"checkJs\": true,\n    \"skipLibCheck\": true,\n    \"noEmit\": true,\n    \"types\": [\"node\"]\n  },\n  \"include\": [\"src\", \"test\", \"tests\"]\n}\n",
       "wiring": "\"typecheck\": \"tsc --noEmit\"",
       "ciStep": "npm run typecheck",
       "verify": {
@@ -255,7 +272,8 @@
               "\\.toBeTruthy\\s*\\(\\s*\\)",
               "\\.toBeFalsy\\s*\\(\\s*\\)",
               "\\.toBeDefined\\s*\\(\\s*\\)",
-              "expect\\.(?:any|anything)\\s*\\("
+              "expect\\.(?:any|anything)\\s*\\(",
+          "expect\\s*\\(\\s*(true|false|\\d+)\\s*\\)\\s*\\.\\s*(?:toBe|toEqual|toStrictEqual)\\s*\\(\\s*\\1\\s*\\)"
             ],
             "paths": [
               "**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
@@ -267,10 +285,10 @@
         }
       ],
       "fixtures": {
-        "violation": "import { describe, it, expect } from 'vitest';\nimport { priceOrder } from '../src/pricing.js';\n\ndescribe('priceOrder', () => {\n  it('applies the volume discount above 100 units', () => {\n    const order = { unitPrice: 10, quantity: 120, currency: 'EUR' };\n    const result = priceOrder(order);\n    expect(result.total).toBeTruthy();\n    expect(result.discount).toBeDefined();\n    expect(result.error).toBeFalsy();\n    expect(result).toEqual(expect.anything());\n  });\n});\n",
+        "violation": "import { describe, it, expect } from 'vitest';\nimport { priceOrder } from '../src/pricing.js';\n\ndescribe('priceOrder', () => {\n  it('applies the volume discount above 100 units', () => {\n    const order = { unitPrice: 10, quantity: 120, currency: 'EUR' };\n    const result = priceOrder(order);\n    expect(result.total).toBeTruthy();\n    expect(result.discount).toBeDefined();\n    expect(result.error).toBeFalsy();\n    expect(result).toEqual(expect.anything());\n    expect(true).toBe(true);\n  });\n});\n",
         "nearMiss": "import { describe, it, expect } from 'vitest';\nimport { priceOrder } from '../src/pricing.js';\n\ndescribe('priceOrder', () => {\n  it('applies the volume discount above 100 units', () => {\n    const order = { unitPrice: 10, quantity: 120, currency: 'EUR' };\n    const result = priceOrder(order);\n    expect(result.total).toBe(1080);\n    expect(result.discount).toBeCloseTo(0.1, 5);\n    expect(result.currency).toStrictEqual('EUR');\n    expect(Object.keys(result)).toHaveLength(3);\n  });\n});\n"
       },
-      "gapNotes": "toBeDefined and toBeTruthy are legitimate against genuinely boolean or optional APIs, so this fires on honest tests too; it is a review prompt, not a verdict. It cannot see the opposite softening — an assertion whose expected literal was edited to match the wrong actual value — because that shape is indistinguishable from a correct test. Nothing here detects an assertion moved inside an `if`; vitest/no-conditional-expect covers that instead.",
+      "gapNotes": "toBeDefined and toBeTruthy are legitimate against genuinely boolean or optional APIs, so this fires on honest tests too; it is a review prompt, not a verdict. It cannot see the opposite softening — an assertion whose expected literal was edited to match the wrong actual value — because that shape is indistinguishable from a correct test. Nothing here detects an assertion moved inside an `if`; vitest/no-conditional-expect covers that instead. The one deterministic member of the set is the literal tautology — expect(true).toBe(true), and its numeric spelling expect(1).toBe(1) — which is matched by a back-reference, so only a literal compared against the same literal fires; expect(true).toBe(false) is an always-FAILING assertion and is deliberately not this class.",
       "evidence": {
         "tier": "documented",
         "source": "Matcher names from the Vitest expect API; the class itself is behavioural and the regexes are reasoned, not tool-backed."
@@ -321,7 +339,7 @@
         "violation": "import { describe, it, expect } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\ndescribe('parseCron', () => {\n  it('rejects a six-field expression with a bad day-of-week', () => {});\n\n  it('normalises @daily to the five-field form', function () {});\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *').minute).toBe('*/5');\n  });\n});\n",
         "nearMiss": "import { describe, it, expect, beforeEach } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\nconst test = () => ({ minute: '0' });\n\ndescribe('parseCron', () => {\n  beforeEach(() => {});\n\n  it('rejects a six-field expression with a bad day-of-week', () => {\n    expect(() => parseCron('0 0 0 0 0 9')).toThrow(/day-of-week/);\n  });\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *')).toStrictEqual(test());\n  });\n});\n"
       },
-      "gapNotes": "Only catches the shell left behind. A test deleted outright leaves no source to match, which is what the `test-count-dropped` class in this edition reads instead — it counts `it(` in the text an edit replaced against the text it wrote. It also misses a body reduced to a single trivially true assertion such as expect(true).toBe(true); vitest/expect-expect sees an assertion there and passes it. An empty beforeEach/afterEach hook is deliberately not matched, which means a suite gutted by moving its work into a now-empty hook slips through.",
+      "gapNotes": "Only catches the shell left behind. A test deleted outright leaves no source to match, which is what the `test-count-dropped` class in this edition reads instead — it counts `it(` in the text an edit replaced against the text it wrote. It also misses a body reduced to a single trivially true assertion such as expect(true).toBe(true) — the `softened-assertion` class in this edition matches that literal instead; vitest/expect-expect sees an assertion there and passes it. An empty beforeEach/afterEach hook is deliberately not matched, which means a suite gutted by moving its work into a now-empty hook slips through.",
       "evidence": {
         "tier": "documented",
         "source": "Rule vitest/expect-expect confirmed in the @vitest/eslint-plugin rule list."
@@ -1565,10 +1583,197 @@
         "violation": "import { describe, it, expect } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\ndescribe('parseCron', () => {\n  it('rejects a six-field expression with a bad day-of-week', () => {\n    expect(() => parseCron('0 0 0 0 0 9')).toThrow(/day-of-week/);\n  });\n\n  it('normalises @daily to the five-field form', () => {\n    expect(parseCron('@daily').minute).toBe('0');\n  });\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *').minute).toBe('*/5');\n  });\n});\n--- after\nimport { describe, it, expect } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\ndescribe('parseCron', () => {\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *').minute).toBe('*/5');\n  });\n});\n",
         "nearMiss": "import { describe, it, expect } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\ndescribe('parseCron', () => {\n  it('rejects a six-field expression with a bad day-of-week', () => {\n    expect(parseCron('0 0 0 0 0 9')).toBe(null);\n  });\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *').minute).toBe('*/5');\n  });\n});\n--- after\nimport { describe, it, expect } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\ndescribe('parseCron', () => {\n  it('rejects a six-field expression with a bad day-of-week', () => {\n    expect(() => parseCron('0 0 0 0 0 9')).toThrow(/day-of-week/);\n  });\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *').minute).toBe('*/5');\n  });\n});\n"
       },
-      "gapNotes": "A removal is not in any file's content — the deleted case is absent from the file that is left, so the committed check driver reports this class skipped on a normal run and proves it only from the fixture pair, which carries the file before the edit and the file after it. Nothing in this catalogue watches it — a catalogue never carries a session guard — so the class ships as a named mistake with a proven pair and no lane, and the plan grades that cell GAP. The lane is an authored `edit-guard` on the same removal rule, which reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a `describe` block is seen, and a Write payload carries none, so a whole-file rewrite that drops a spec file is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right — behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
+      "gapNotes": "A removal is not in any file's content — the deleted case is absent from the file that is left, so a pathless check-driver run reports this class skipped and proves it only from the fixture pair, which carries the file before the edit and the file after it. The commit lane is the run that holds both versions: `--staged` counts the index against HEAD, a file deleted outright included, so a commit that shrinks the suite is a finding there. The earlier lane is an authored `edit-guard` on the same removal rule — a catalogue never carries a session guard, so that half is the owner's to author. It reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a `describe` block is seen, and a Write payload carries none, so a whole-file rewrite that drops a spec file is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right — behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
       "evidence": {
         "tier": "reasoned",
         "source": "No tool in the JavaScript and TypeScript ecosystem gates on a drop in test count between two revisions; the runners report what they discovered, never what they stopped discovering. The judgement that a shrinking suite is a defect is jig's own."
+      }
+    },
+    {
+      "id": "unimplemented-stub-shipped",
+      "title": "Stub left throwing while the task is reported done",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Leaves `throw new Error('not implemented')` in a function whose signature and call sites it already wrote",
+        "Marks the missing half with a TODO comment and reports the change complete",
+        "Returns an empty array or null from a function it did not write, so callers type-check and the suite passes vacuously"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "throw\\s+new\\s+(?:Error|TypeError)\\s*\\(\\s*[\"'`]\\s*(?:TODO\\b|[Nn]ot yet implemented|[Nn]ot implemented|[Uu]nimplemented)"
+            ],
+            "paths": [
+              "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "(?://|/\\*+)\\s*(?:TODO|FIXME|XXX|HACK)\\b"
+            ],
+            "paths": [
+              "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import { addMonths } from './dates.js';\n\nexport function lineItems(ledger, quarterStart) {\n  return ledger.between(quarterStart, addMonths(quarterStart, 3));\n}\n\n// TODO: sum the line items once the ledger schema is settled\nexport function runningBalance(ledger, quarterStart) {\n  throw new Error('not implemented');\n}\n",
+        "nearMiss": "import { addMonths } from './dates.js';\n\nconst TODO_REVIEW_LIMIT = 25;\n\nexport function todoItems(ledger) {\n  return ledger.flagged(TODO_REVIEW_LIMIT);\n}\n\nexport function lineItems(ledger, quarterStart) {\n  return ledger.between(quarterStart, addMonths(quarterStart, 3));\n}\n\n// Sums every line item in the quarter that starts at quarterStart.\nexport function runningBalance(ledger, quarterStart) {\n  let balance = 0;\n  for (const item of lineItems(ledger, quarterStart)) balance += item.amount;\n  if (Number.isNaN(balance)) throw new Error('balance is not a number');\n  return balance;\n}\n"
+      },
+      "gapNotes": "Both tokens are also the correct code somewhere, so what is reported is a guess about intent rather than a fact about the source: `throw new Error('not implemented')` is the right body for an abstract base method, and a TODO comment is often a note about a later improvement sitting over finished code. The first detector reads string bodies, which is the only way to see the message, so it is the one detector in this edition that runs with stripStrings off — a message assembled from a variable is invisible to it. The quietest form of the mistake has no token at all: a function that returns `null`, `[]` or `0` because the session did not know what to compute, which only a test asserting the real value catches. The near miss carries the traps — `TODO_REVIEW_LIMIT` and `todoItems()` are code, not comments, and a genuine `throw new Error` whose message is not a stub token must stay silent.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "No ESLint rule in the config jig installs reports a stub: `no-warning-comments` exists in ESLint core but is off by default and is not in the shipped flat config, so no tool-rule detector is claimed here."
+      }
+    },
+    {
+      "id": "sleep-based-test-synchronisation",
+      "title": "Timer standing in for a real wait condition in a test",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Adds a setTimeout sleep to make an intermittently failing async test pass on the machine it is running on",
+        "Increases an existing sleep when the test fails again, rather than waiting on the condition",
+        "Sleeps because it does not know which awaiting primitive or fake-timer helper the project already has"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "new\\s+Promise\\s*\\([^;]{0,80}setTimeout\\s*\\(",
+              "\\bawait\\s+sleep\\s*\\(\\s*\\d+"
+            ],
+            "paths": [
+              "**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import { describe, it, expect } from 'vitest';\nimport { DispatchQueue } from '../src/queue.js';\nimport { sleep } from './helpers.js';\n\ndescribe('DispatchQueue', () => {\n  it('drains asynchronously', async () => {\n    const queue = new DispatchQueue();\n    queue.submit('a');\n    queue.submit('b');\n    await new Promise((resolve) => setTimeout(resolve, 500));\n    await sleep(250);\n    expect(queue.pendingCount()).toBe(0);\n  });\n});\n",
+        "nearMiss": "import { describe, it, expect } from 'vitest';\nimport { DispatchQueue } from '../src/queue.js';\n\ndescribe('DispatchQueue', () => {\n  it('drains asynchronously', async () => {\n    const queue = new DispatchQueue();\n    const drained = queue.whenDrained();\n    queue.submit('a');\n    queue.submit('b');\n    await expect(drained).resolves.toBe(2);\n    expect(queue.pendingCount()).toBe(0);\n  });\n\n  it('reports its sleep budget without sleeping', () => {\n    expect(new DispatchQueue().sleepBudgetMillis()).toBe(0);\n  });\n});\n"
+      },
+      "gapNotes": "The call site is matched exactly, but whether the call is a defect is not decidable from the text: a sleep is correct when the test is deliberately exercising timing, which makes this a project-policy class whose value comes from the ledger rather than the match. No ESLint rule in the shipped config bans it, and none honestly could, so there is no tool-rule detector. It reads two spellings and no more — a bare `setTimeout(done, 500)` in a callback-style test, a project helper named `wait` or `delay` rather than `sleep`, and `vi.advanceTimersByTime` used without any fake timers installed all carry neither token. The near miss holds the trap: a method named `sleepBudgetMillis` mentions sleeping without doing it.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "setTimeout is a documented Web/Node timer API and the promise-wrapped form is the ordinary JavaScript sleep idiom; the judgement that it is a synchronisation smell inside a test is jig's own policy, backed by no rule id — hence the missing tool-rule detector."
+      }
+    },
+    {
+      "id": "test-config-loosened",
+      "title": "Test harness config relaxed instead of the failure fixed",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Lowers the coverage threshold to whatever the current run happens to reach, then reports the suite green",
+        "Flips the switch that makes a focused or empty run fail, so a narrowed suite stops being an error",
+        "Edits the harness config jig installed rather than the code that made it fail"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\ballowOnly\\s*:\\s*true\\b",
+              "\\bpassWithNoTests\\s*:\\s*true\\b",
+              "\\b(?:lines|statements|functions|branches)\\s*:\\s*(?:0|[1-9])\\s*[,}]",
+              "\\bcoverage\\s*:\\s*\\{[^}]*\\benabled\\s*:\\s*false\\b"
+            ],
+            "paths": [
+              "**/vitest.config.{js,mjs,ts,mts}",
+              "**/vite.config.{js,mjs,ts,mts}"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import { defineConfig } from 'vitest/config';\n\nexport default defineConfig({\n  test: {\n    include: ['**/*.{test,spec}.{js,mjs,ts,mts,tsx}'],\n    allowOnly: true,\n    passWithNoTests: true,\n    coverage: {\n      enabled: false,\n      provider: 'v8',\n      thresholds: { lines: 0, statements: 0, functions: 0, branches: 0 },\n    },\n  },\n});\n",
+        "nearMiss": "import { defineConfig } from 'vitest/config';\n\nexport default defineConfig({\n  test: {\n    include: ['**/*.{test,spec}.{js,mjs,ts,mts,tsx}'],\n    allowOnly: false,\n    passWithNoTests: false,\n    coverage: {\n      provider: 'v8',\n      reporter: ['text', 'json-summary'],\n      thresholds: { lines: 80, statements: 80, functions: 80, branches: 70 },\n    },\n  },\n});\n"
+      },
+      "gapNotes": "The near miss is the vitest.config.ts jig writes, character for character, so this class fails the moment it would fire on jig's own install. It reads values, never a diff: a threshold moved from 80 to 55 is a real loosening and matches nothing here, because only a single-digit threshold is distinguishable from a project that never set one high. It also cannot see the loosening that leaves no value at all — the `thresholds` block deleted, the coverage provider removed, or the whole config file replaced by a smaller one. Scoped to the vitest and vite config files, so a threshold carried in package.json or passed on the command line is out of its reach, and `--coverage.thresholds.lines=0` on a CI run line is invisible to it.",
+      "evidence": {
+        "tier": "documented",
+        "source": "allowOnly, passWithNoTests, coverage.enabled and coverage.thresholds are all documented keys of the Vitest configuration reference; the near miss is jig's own installed configSample for this edition."
+      }
+    },
+    {
+      "id": "snapshot-updated-wholesale",
+      "title": "Snapshots regenerated by a committed command instead of reviewed",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Commits a script or CI step that runs the test suite with the snapshot-update flag, so every failing snapshot is rewritten to whatever the code now produces",
+        "Adds the update flag to the standing test command after a snapshot diff it could not explain",
+        "Leaves a workflow step that refreshes snapshots on every run, which makes the snapshot suite incapable of failing"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\b(?:vitest|jest)\\b[^\\n]{0,120}?(?:\\s-u|\\s--update(?:-snapshots?|Snapshot)?)(?!\\w)"
+            ],
+            "paths": [
+              ".github/workflows/*.yml",
+              ".github/workflows/*.yaml",
+              ".gitlab-ci.yml",
+              "**/package.json",
+              "**/Makefile",
+              "**/*.sh"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "name: verify\non: [push, pull_request]\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n      - run: npm ci\n      - run: npx vitest run -u\n",
+        "nearMiss": "name: verify\non: [push, pull_request]\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n          cache: npm\n      - run: npm ci\n      - run: npx vitest run --coverage\n      - run: npm test -- --reporter=github-actions\n"
+      },
+      "gapNotes": "This reads what was COMMITTED and nothing else: a session that types `npx vitest -u` in a terminal leaves no file to match, and catching that would need a session guard, which a catalogue never carries — the owner authors it. Two runners are named, so a snapshot updater under another name (ava, ember, a project wrapper script) is missed, as is the environment-variable spelling `CI=false` that makes some runners write snapshots by default. It cannot tell a deliberate, reviewed regeneration from a blind one; the committed flag is the evidence, not the verdict.",
+      "evidence": {
+        "tier": "documented",
+        "source": "`-u, --update` is documented in the Vitest CLI reference and `-u, --updateSnapshot` in the Jest CLI reference; both rewrite every failing snapshot in the run."
       }
     }
   ]

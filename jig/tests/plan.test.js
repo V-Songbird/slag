@@ -301,6 +301,28 @@ test("an unreadable lane list is read as no lane at all, never as coverage", () 
   assert.equal(engine.matrixRow(cls, "elicited", toolPlan([torn]), []).cells["human-ci"].grade, "GAP");
 });
 
+// A starter file that names a tool is written only where that tool is in the
+// plan. Both smoke tests otherwise: `node --test` cannot read the vitest one,
+// so a project that ticked no test runner would be scaffolded with an import
+// nothing resolves and a lint and a typecheck that fail on it.
+test("a starter file belonging to a tool lands only where that tool is ticked", () => {
+  const paths = (tools) => planOnly(project({}), {
+    select: "javascript-typescript/focused-test", edition: "javascript-typescript",
+    "package-manager": "npm", tools, "no-ci": true,
+  }).changes.map((c) => c.path);
+
+  const withVitest = paths("vitest");
+  assert.ok(withVitest.includes("tests/smoke.spec.js"),
+    "vitest was ticked and its smoke test was never planned");
+  assert.ok(withVitest.includes("test/smoke.js"));
+
+  const withoutVitest = paths("eslint");
+  assert.equal(withoutVitest.includes("tests/smoke.spec.js"), false,
+    "a vitest test was written into a project that ticked no test runner");
+  assert.ok(withoutVitest.includes("test/smoke.js"),
+    "the edition's own smoke test is not a tool's and must land either way");
+});
+
 test("a real plan that ticks a tool covers the CI cell, and one that skips CI does not", () => {
   const root = nodeProject();
   planOnly(root, { select: "javascript-typescript/focused-test", edition: "javascript-typescript",
@@ -318,6 +340,46 @@ test("a real plan that ticks a tool covers the CI cell, and one that skips CI do
   assert.equal(gap.grade, "GAP");
   assert.equal(gap.why, "no lane runs eslint");
   assert.equal(fs.existsSync(path.join(bare, ".jig", "verify.json")), false);
+});
+
+// The same understatement arriving from the other side. 2.9.0 made the cell
+// read both halves off THIS plan's changes, which is right on a first install
+// and wrong on every one after it: a re-plan is an interview about what to ADD,
+// so it ticks no tool and proposes no config — while the tool sits installed,
+// configured and in the ci lane on disk. The owner was told their linter was
+// uncovered when it was not.
+test("a re-plan over an installed tool reads the cell off the installed state", () => {
+  const root = nodeProject();
+  install(root, { select: "javascript-typescript/focused-test", edition: "javascript-typescript",
+    "package-manager": "npm", tools: "eslint" });
+  const face = engine.installedToolFace(root);
+  assert.equal(face.config.get("eslint"), "eslint.config.mjs");
+  assert.equal(face.ci.has("eslint"), true);
+
+  planOnly(root, { select: "javascript-typescript/focused-test" });
+  const cell = readJson(root, ".jig/plan.json").rows
+    .find((r) => r.classId === "javascript-typescript/focused-test").cells["human-ci"];
+  assert.equal(cell.grade, "DET");
+  assert.equal(cell.artifact, "eslint.config.mjs");
+  assert.equal(cell.why, null);
+});
+
+test("an installed config with no lane running it is still GAP, and a lane with no config too", () => {
+  // Both halves or nothing holds on the installed side exactly as it does on
+  // the plan's: reading the disk widens where a half may come FROM, never what
+  // counts as coverage.
+  const cls = synthetic({ detectors: [TOOL_RULE] });
+  const configOnly = { config: new Map([["eslint", "eslint.config.mjs"]]), ci: new Set() };
+  const laneOnly = { config: new Map(), ci: new Set(["eslint"]) };
+  for (const face of [configOnly, laneOnly]) {
+    const cell = engine.matrixRow(cls, "elicited", [], [], face).cells["human-ci"];
+    assert.equal(cell.grade, "GAP");
+    assert.equal(cell.why, "no lane runs eslint");
+  }
+  // And one installed half plus the other from this plan is coverage.
+  const cell = engine.matrixRow(cls, "elicited", toolPlan(), [], laneOnly).cells["human-ci"];
+  assert.equal(cell.grade, "DET");
+  assert.equal(cell.artifact, "eslint.config.mjs");
 });
 
 test("the lane list is approved one at a time, and names what will run", () => {

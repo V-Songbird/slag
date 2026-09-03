@@ -499,7 +499,7 @@ test("release gate: a class nothing host-neutral catches is a reported gap, neve
 // G1 — the fixture pair, over everything shipped
 // ---------------------------------------------------------------------------
 
-test("release gate G1: no check ships whose fixture pair fails — all 147 pairs, six editions", () => {
+test("release gate G1: no check ships whose fixture pair fails — all 165 pairs, six editions", () => {
   const index = editions.loadIndex(PLUGIN_ROOT);
   const failures = [];
   let pairs = 0;
@@ -516,7 +516,7 @@ test("release gate G1: no check ships whose fixture pair fails — all 147 pairs
     }
   }
   assert.deepEqual(failures, [], "a shipped check fires on its own near miss or misses its own violation");
-  assert.equal(pairs, 147, "the six editions ship " + pairs + " pairs and this gate is written for 147");
+  assert.equal(pairs, 165, "the six editions ship " + pairs + " pairs and this gate is written for 165");
 });
 
 // ---------------------------------------------------------------------------
@@ -683,5 +683,154 @@ test("release gate G6: every lever the engine can author is named in SKILL.md se
     if (engine.AUTHORED_RUNNERS[lever]) continue;
     assert.ok(!section.includes("`" + lever + "`"),
       "SKILL.md section 4 names `" + lever + "`, which no authored check can run");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// G7 — the starters build
+// ---------------------------------------------------------------------------
+//
+// SCOPE's starter row: a starter "must build with no source files in it",
+// because jig runs the checks over it the moment it has written it. Nothing
+// asserted that until 2.12.0, and the rust starter shipped a `[package]` with
+// no `src/lib.rs` for two releases — cargo exits 101 on that manifest before it
+// compiles a line. So every edition is scaffolded here through the same
+// plan-and-apply a person drives, and the ecosystem's own build and test
+// commands are run over what came out.
+//
+// An exit code is not enough on its own: every one of these runners exits 0
+// when it discovered nothing, and a gate that passes on the tree it exists to
+// reject is not a gate. So each arm also names the line a run that found the
+// starter's own test prints, and asserts it.
+//
+// An edition whose toolchain this machine does not carry is SKIPPED as its own
+// named subtest carrying the reason. Skipped, never silent: a release cut on a
+// machine with no cargo has to say which starters nobody built.
+
+// No shell, ever (SCOPE, the derail pass), so a `.cmd` or `.bat` shim counts as
+// absent here — jig would not start one either.
+const runnableCache = new Map();
+function runnable(exe) {
+  if (!runnableCache.has(exe)) {
+    const run = spawnSync(exe, ["--version"], { shell: false, windowsHide: true, encoding: "utf8", timeout: 60000 });
+    runnableCache.set(exe, !run.error);
+  }
+  return runnableCache.get(exe);
+}
+
+// `python` on Windows, `python3` on most Linux distributions: the same
+// interpreter under the name that machine put on its PATH.
+const PYTHON = ["python", "python3"].find(runnable) || "python";
+
+// `proves` is the second half of the gate and the more important one: an exit
+// code of 0 is also what every one of these runners prints when it discovered
+// nothing at all. `dotnet test` did exactly that on the starter for a whole
+// release — resolved the root project by itself, ran no test, exited 0 — so a
+// starter arm has to say what a run that found its test looks like.
+const STARTER_BUILDS = {
+  rust: {
+    manager: "cargo",
+    runs: [["cargo", "build", "--workspace", "--locked"], ["cargo", "test", "--workspace", "--locked"]],
+    proves: /test result: ok\. 1 passed/,
+  },
+  python: {
+    // `python -m build` reaches the network for hatchling. Compiling the tree
+    // and running its own suite is the offline half, and it still fails on the
+    // defect: a `pyproject.toml` with no package directory and no tests.
+    manager: "pip",
+    runs: [[PYTHON, "-m", "compileall", "-q", "src", "tests"],
+      [PYTHON, "-m", "unittest", "discover", "-s", "tests"]],
+    proves: /Ran 1 test/,
+  },
+  "javascript-typescript": {
+    manager: "npm",
+    runs: [["node", "--check", "src/index.js"], ["node", "--test"]],
+    proves: /^# pass 1$/m,
+  },
+  jvm: {
+    // Offline: a starter that needs the network to build is not one SCOPE's
+    // starter row would recognise.
+    manager: "gradle",
+    runs: [["gradle", "--no-daemon", "--offline", "check"]],
+  },
+  dotnet: {
+    // The one arm that reaches the network: the starter's test project restores
+    // xunit from NuGet. Building alone proved nothing here — `dotnet test` at
+    // the root resolved `App.csproj` by itself, ran no test at all and exited
+    // 0, with TreatNoTestsAsError set, on the tree whose whole point is that
+    // the test command has something to run. The solution file in the starter
+    // is what fixed that, and only running the command shows it.
+    manager: "dotnet",
+    runs: [["dotnet", "build", "--configuration", "Release", "--nologo"],
+      ["dotnet", "test", "--configuration", "Release", "--nologo"]],
+    proves: /Passed!\s+-\s+Failed:\s+0,\s+Passed:\s+[1-9]/,
+  },
+};
+
+// The scaffold a person drives, minus the installs: applying a `run-install`
+// change spawns a package manager, and the claim here is about the tree jig
+// writes rather than about npm.
+function scaffoldStarter(edition, manager) {
+  const root = tmpProject();
+  const plan = engine.cmdPlan(root, {
+    _: [], change: [], authored: authored.writeChecks(root, CHECKS), provenance: "elicited",
+    edition, "package-manager": manager, "no-ci": true,
+  });
+  const payload = engine.planFiles(root).map(engine.readPlan).find((p) => p.planId === plan.planId);
+  const keep = payload.changes.filter((c) => c.kind !== "run-install");
+  engine.cmdApply(root, { _: [], change: keep.map((c) => c.id), path: keep.map((c) => c.path) });
+  return root;
+}
+
+test("release gate G7: every edition's starter scaffolds into a tree its own build and tests pass on", async (t) => {
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    const spec = STARTER_BUILDS[row.id] || null;
+    const manifest = editions.manifestFor(edition, spec ? spec.manager : null);
+
+    // An edition that writes no starter has to name who does instead, and
+    // there is no tree here for anything to build.
+    if (!manifest.sample) {
+      assert.ok(manifest.hint, row.id + " writes no starter and names nobody who can write one");
+      await t.test(row.id + " starter builds and tests clean",
+        { skip: "the " + row.id + " edition writes no starter — " + manifest.hint }, () => {});
+      continue;
+    }
+    assert.ok(spec, row.id + " writes a starter that no release gate ever builds");
+
+    const missing = [...new Set(spec.runs.map((argv) => argv[0]))].filter((exe) => !runnable(exe));
+    await t.test(row.id + " starter builds and tests clean", {
+      skip: missing.length ? missing.join(" and ") + " is not on this machine's PATH" : false,
+    }, () => {
+      const root = scaffoldStarter(row.id, spec.manager);
+      // What the edition declared and what landed are two different claims.
+      // A file the edition writes only for one tool is not one this scaffold
+      // ticked — it plans no toolchain at all — so it has nothing to say here.
+      for (const file of manifest.starter.filter((f) => !f.tool)) {
+        assert.ok(fs.existsSync(path.join(root, file.path)),
+          row.id + " declares the starter file " + file.path + ", and the scaffold wrote no such file");
+      }
+      let output = "";
+      for (const argv of spec.runs) {
+        // Without stripping it, `node --test` sees this suite's own context and
+        // prints "run() is being called recursively … skipping running files"
+        // — an exit 0 over nothing at all, on the arm whose whole job is to run
+        // the starter's test.
+        const env = { ...process.env };
+        delete env.NODE_TEST_CONTEXT;
+        const run = spawnSync(argv[0], argv.slice(1), {
+          cwd: root, shell: false, windowsHide: true, encoding: "utf8", env,
+          timeout: 300000, maxBuffer: 8 * 1024 * 1024,
+        });
+        output = String(run.stdout || "") + String(run.stderr || "");
+        assert.equal(run.status, 0, row.id + ": `" + argv.join(" ") + "` exited " + run.status +
+          " on a starter jig had just written\n" + output);
+      }
+      // Exit 0 is also what a runner that discovered nothing prints.
+      if (spec.proves) {
+        assert.match(output, spec.proves,
+          row.id + ": the test command exited 0 without running the starter's own test\n" + output);
+      }
+    });
   }
 });

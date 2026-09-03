@@ -354,6 +354,30 @@ test("a folder with no project in it plans the starter file before any install",
   assert.equal(plan.greenfield[0].edition, "python");
 });
 
+// The other half of the same promise. A `pyproject.toml` with no package
+// directory builds an empty wheel and a `Cargo.toml` with no `src/lib.rs` is a
+// manifest cargo exits 101 on — so the starter is the whole smallest tree, and
+// each file in it is its own approved change rather than a folder that appears.
+test("a starter is the whole tree its build needs, one approved change per file", () => {
+  const root = project({});
+  const plan = planOf(root, {
+    edition: "python", "package-manager": "uv", tools: "ruff", select: "python/silenced-test",
+  });
+  const written = JSON.parse(fs.readFileSync(path.join(root, plan.plan), "utf8"));
+  for (const rel of ["src/example_app/__init__.py", "tests/test_smoke.py"]) {
+    const change = written.changes.find((c) => c.path === rel);
+    assert.ok(change, rel + " is not planned: " + pathsOf(plan).join(", "));
+    assert.equal(change.kind, "write-side-file");
+    assert.match(change.rationale, /part of the starter python project/);
+    assert.ok(change.content.length > 0, rel + " is planned empty");
+  }
+  // And only where the owner named the edition, which is what makes the write
+  // a stated intent rather than an extension match.
+  const unnamed = planOf(project({}), { "package-manager": "uv", tools: "ruff", select: "python/silenced-test" });
+  assert.equal(unnamed.changes.some((c) => c.path.startsWith("src/example_app")), false,
+    "an unnamed edition was scaffolded a source tree: " + pathsOf(unnamed).join(", "));
+});
+
 test("four python tools sharing pyproject.toml produce one composed file, not four", () => {
   const root = project({});
   const plan = planOf(root, {

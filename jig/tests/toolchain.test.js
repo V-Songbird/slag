@@ -221,6 +221,89 @@ test("a package install with no uninstall is refused before the owner ever sees 
   );
 });
 
+// The refusal reads the install, not the label on it. A kind the engine does
+// not recognise is a claim about where the bytes land that jig cannot check, so
+// it gets the same answer a package does.
+test("an install of an unrecognised kind with no uninstall is refused too", () => {
+  const root = tmpProject({});
+  const synthetic = {
+    edition: "synthetic",
+    detect: { packageManagers: ["npm"] },
+    toolchain: [{ id: "mislabelled", role: "build", installKind: "bootstrap", install: { npm: "npm exec mislabelled" }, configPath: ".mislabelledrc", configSample: "{}\n" }],
+  };
+  assert.throws(
+    () => toolchain.proposeInstalls(root, synthetic, ["mislabelled"], "npm"),
+    (err) => err.expected === true && /never leaves an install it cannot undo/.test(err.message) &&
+      /"bootstrap"/.test(err.message),
+  );
+});
+
+// And the kinds whose whole effect lands inside the project root keep being
+// offered without one: the journal is their way back out. The membership is
+// pinned here rather than one sample kind, because `installKind === "package"`
+// — the predicate this replaced — already let `scaffold` through, so a test
+// that only asserted `scaffold` proved nothing about the change.
+const oneTool = (installKind, command) => ({
+  edition: "synthetic",
+  detect: { packageManagers: ["npm"] },
+  toolchain: [{ id: "wrapperish", role: "build", installKind, install: { npm: command },
+    configPath: ".wrapperishrc", configSample: "{}\n" }],
+});
+
+test("exactly the journal-reversible kinds are offered without an uninstall", () => {
+  const root = tmpProject({});
+  assert.deepEqual([...toolchain.JOURNAL_REVERSIBLE_KINDS].sort(), ["audit", "builtin", "scaffold"]);
+  for (const kind of toolchain.JOURNAL_REVERSIBLE_KINDS) {
+    const [item] = toolchain.proposeInstalls(root, oneTool(kind, "npm exec wrapperish"), ["wrapperish"], "npm");
+    assert.equal(item.uninstallCommand, null, kind + " was refused for want of an uninstall");
+  }
+  for (const kind of ["package", "bootstrap"]) {
+    assert.throws(() => toolchain.proposeInstalls(root, oneTool(kind, "npm exec wrapperish"), ["wrapperish"], "npm"),
+      (err) => err.expected === true && /never leaves an install it cannot undo/.test(err.message),
+      kind + " was offered with no way back out");
+  }
+});
+
+// The kind is a claim, and the command is the fact. A row saying `builtin` and
+// then installing a toolchain into ~/.rustup was an install jig could not undo,
+// offered under the kind that says it needs no undoing.
+test("a journal-reversible kind whose command leaves the project root is refused anyway", () => {
+  const root = tmpProject({});
+  for (const command of ["rustup toolchain install stable --profile default",
+    "dotnet nuget add source https://example.invalid/v3/index.json -n example",
+    "npm install -g wrapperish"]) {
+    assert.equal(toolchain.escapesRoot(command), true, command);
+    assert.throws(() => toolchain.proposeInstalls(root, oneTool("builtin", command), ["wrapperish"], "npm"),
+      (err) => err.expected === true && /writes outside the project root/.test(err.message),
+      command + " was offered with no way back out");
+  }
+  // And with a way out stated it is offered, like any other install that has one.
+  const withExit = oneTool("builtin", "rustup toolchain install stable");
+  withExit.toolchain[0].uninstall = { npm: "rustup toolchain uninstall stable" };
+  const [item] = toolchain.proposeInstalls(root, withExit, ["wrapperish"], "npm");
+  assert.equal(item.uninstallCommand, "rustup toolchain uninstall stable");
+  // A command that stays inside the root is not caught by the reading.
+  assert.equal(toolchain.escapesRoot("dotnet new globaljson --sdk-version 9.0.100"), false);
+  assert.equal(toolchain.escapesRoot("gradle wrapper --gradle-version 9.1.0"), false);
+});
+
+// Release gate G8. The catalogue is held to the same reading: a shipped row
+// whose install reaches past the project root has to state the way back out,
+// whatever kind it claims to be.
+test("release gate G8: no shipped install leaves the project root with no way back", () => {
+  for (const row of shippedEditions()) {
+    for (const tool of row.edition.toolchain) {
+      for (const [manager, command] of Object.entries(tool.install || {})) {
+        if (!toolchain.escapesRoot(command)) continue;
+        const exit = (tool.uninstall || {})[manager];
+        assert.equal(typeof exit === "string" && exit !== "", true,
+          row.id + "/" + tool.id + " installs under " + manager + " by running `" + command +
+          "`, which writes outside the project root, and states no uninstall for it");
+      }
+    }
+  }
+});
+
 test("an unknown tool id names what the edition actually has", () => {
   const root = tmpProject({});
   assert.throws(() => toolchain.proposeInstalls(root, edition("python"), ["blackish"], "pip"), /it has: ruff/);
@@ -271,6 +354,44 @@ test("a tool jig cannot offer is refused by name, and never silently dropped", (
     }
   }
   assert.deepEqual([...new Set(refused)].sort(), CANNOT_BE_OFFERED);
+});
+
+// SCOPE, "May jig scaffold jvm and dotnet": by writing a starter itself, NOT by
+// running a generator, because a generator creates a tree nobody listed. These
+// are the project generators the shelf reached for; `dotnet new globaljson` and
+// `dotnet new editorconfig` are not on the list because each writes one named
+// file, not a project.
+const PROJECT_GENERATORS = [/\bdotnet new (?!globaljson|editorconfig)/, /\bgradle init\b/, /\bcargo (new|init)\b/, /\bnpm init\b/];
+
+test("no shipped install command generates a project tree", () => {
+  for (const row of shippedEditions()) {
+    for (const tool of row.edition.toolchain) {
+      for (const [manager, command] of Object.entries(tool.install || {})) {
+        for (const pattern of PROJECT_GENERATORS) {
+          assert.equal(pattern.test(command), false,
+            row.id + "/" + tool.id + " installs under " + manager + " by running a generator: " + command);
+        }
+      }
+    }
+  }
+});
+
+// The half that replaced it: the dotnet test project is bytes the plan names.
+test("the dotnet edition writes its test project instead of generating one", () => {
+  const dotnet = shippedEditions().find((row) => row.id === "dotnet").edition;
+  const starter = dotnet.detect.manifest.starter.files.map((f) => f.path);
+  assert.deepEqual(starter.sort(), ["App.sln", "tests/App.Tests.csproj", "tests/SmokeTests.cs"]);
+  const csproj = dotnet.detect.manifest.starter.files.find((f) => f.path === "tests/App.Tests.csproj").body;
+  assert.match(csproj, /PackageReference Include="xunit"/);
+  // And the project file at the root must not compile them itself, or a
+  // starter's first build fails on a library that never referenced xunit.
+  assert.match(dotnet.detect.manifest.sample, /<Compile Remove="tests\/\*\*" \/>/);
+  // The solution is what makes the test project reachable at all: `dotnet test`
+  // beside a lone `App.csproj` resolves that one project, runs nothing and
+  // exits 0 — with TreatNoTestsAsError set, on the tree jig just wrote.
+  const sln = dotnet.detect.manifest.starter.files.find((f) => f.path === "App.sln").body;
+  assert.match(sln, /"App\.csproj"/);
+  assert.match(sln, /App\.Tests\.csproj/);
 });
 
 test("an edition whose install jig cannot offer still offers everything else it has", () => {

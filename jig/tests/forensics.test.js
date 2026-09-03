@@ -234,6 +234,112 @@ test("a deleted test file is an incident once a second signal clears with it", (
   }
 });
 
+// ---------------------------------------------------------------------------
+// Stale pairs — the relation git carries for free
+// ---------------------------------------------------------------------------
+
+// A pair that co-changed `n` times and then let one side drift `alone` commits
+// on its own. `n` and `alone` are what the thresholds are read against.
+function pairHistory(root, n, alone) {
+  for (let i = 0; i < n; i++) {
+    commit(root, {
+      "src/flags.js": "// flag " + i + "\n",
+      "docs/flags.md": "flag " + i + "\n",
+    }, "add flag " + i);
+  }
+  for (let i = 0; i < alone; i++) {
+    commit(root, { "src/flags.js": "// flag drift " + i + "\n" }, "change a flag " + i);
+  }
+}
+
+test("two files that changed together five times and then diverged are a stale pair", () => {
+  const root = newRepo();
+  filler(root, 4);
+  pairHistory(root, 5, 3);
+  const pairs = forensics.stalePairs(forensics.readLog(root, 500), forensics.THRESHOLDS);
+  assert.equal(pairs.length, 1);
+  assert.deepEqual(pairs[0].paths, ["docs/flags.md", "src/flags.js"]);
+  assert.equal(pairs[0].moved, "src/flags.js");
+  assert.equal(pairs[0].stale, "docs/flags.md");
+  assert.equal(pairs[0].coChanges, 5);
+  assert.equal(pairs[0].drifted, 3);
+  // Correlation is the whole of the evidence, and the row says so itself.
+  assert.match(pairs[0].confidence, /^best-effort —/);
+});
+
+test("a pair four commits deep, or drifting only twice, is not yet a stale pair", () => {
+  const shallow = newRepo();
+  pairHistory(shallow, 4, 5);
+  assert.deepEqual(forensics.stalePairs(forensics.readLog(shallow, 500), forensics.THRESHOLDS), []);
+
+  const barely = newRepo();
+  pairHistory(barely, 6, 2);
+  assert.deepEqual(forensics.stalePairs(forensics.readLog(barely, 500), forensics.THRESHOLDS), []);
+});
+
+test("a pair still changing together has not diverged", () => {
+  const root = newRepo();
+  pairHistory(root, 6, 3);
+  commit(root, { "src/flags.js": "// back\n", "docs/flags.md": "back\n" }, "document the drift");
+  assert.deepEqual(forensics.stalePairs(forensics.readLog(root, 500), forensics.THRESHOLDS), []);
+});
+
+test("both files moving alone since the last co-change is drift, not a lapsed relation", () => {
+  const root = newRepo();
+  pairHistory(root, 6, 3);
+  commit(root, { "docs/flags.md": "an unrelated edit\n" }, "tidy the doc");
+  assert.deepEqual(forensics.stalePairs(forensics.readLog(root, 500), forensics.THRESHOLDS), []);
+});
+
+test("two busy files that also change alone between co-changes are not a pair", () => {
+  const root = newRepo();
+  // Five co-changes, but src/hot.js also moved alone between every one of
+  // them. That is a churning package, not a relation: the support ratio is the
+  // only thing that tells the two shapes apart.
+  for (let i = 0; i < 5; i++) {
+    commit(root, { "src/hot.js": "// hot " + i + "\n", "docs/flags.md": "note " + i + "\n" }, "touch both " + i);
+    commit(root, { "src/hot.js": "// hot alone " + i + "\n" }, "touch hot alone " + i);
+  }
+  // Enough drift on the end that only the support ratio is left to reject it.
+  for (let i = 0; i < 3; i++) commit(root, { "src/hot.js": "// drift " + i + "\n" }, "drift " + i);
+  assert.deepEqual(forensics.stalePairs(forensics.readLog(root, 500), forensics.THRESHOLDS), []);
+});
+
+test("a sweeping commit relates everything to everything and is skipped for pairing", () => {
+  const root = newRepo();
+  for (let i = 0; i < 6; i++) {
+    const sweep = {};
+    for (let f = 0; f < 25; f++) sweep["src/wide" + f + ".js"] = "// v" + i + "\n";
+    commit(root, sweep, "reformat everything " + i);
+  }
+  for (let i = 0; i < 3; i++) commit(root, { "src/wide0.js": "// drift " + i + "\n" }, "edit one of them " + i);
+  assert.deepEqual(forensics.stalePairs(forensics.readLog(root, 500), forensics.THRESHOLDS), []);
+});
+
+test("a stale pair is an incident, and it counts as one cleared signal", () => {
+  const root = newRepo();
+  filler(root, 4);
+  pairHistory(root, 5, 3);
+
+  // src/flags.js lands in eight commits here, which is a churn hotspot too, so
+  // this fixture reads the pair on its own by lifting churn out of the way.
+  const only = { thresholds: { minCommits: 4, churn: 20 } };
+
+  // On its own it is one signal, and one signal is a coincidence.
+  const alone = forensics.runForensics(root, only);
+  assert.deepEqual(alone.cleared, ["stale-pair"]);
+  assert.equal(alone.fallback, "below-threshold");
+
+  commit(root, { "tests/thing.test.js": "assert.ok(true);\n" }, "add a test");
+  commit(root, { "tests/thing.test.js": null }, "drop the flaky test");
+  const out = forensics.runForensics(root, only);
+  assert.equal(out.usable, true);
+  const stale = out.incidents.filter((i) => i.kind === "stale-pair");
+  assert.equal(stale.length, 1);
+  assert.deepEqual(stale[0].paths, ["docs/flags.md", "src/flags.js"]);
+  assert.equal(stale[0].actors.human, 5);
+});
+
 test("a test diff that removes more assertions than it adds is a weakened assertion", () => {
   const root = newRepo();
   filler(root, 4);

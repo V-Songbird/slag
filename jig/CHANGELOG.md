@@ -4,6 +4,23 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.12.0] — 2026-09-02
+
+### Added
+
+- A scaffolded project builds. jig used to write the file that makes a directory a project and stop there — a `Cargo.toml` cargo refused because it named no targets, a `pyproject.toml` with no package beside it, a `package.json` whose test command passed having run nothing. Each edition now writes the smallest tree its own build and tests actually pass on: a source file, one smoke test, and whatever the ecosystem needs to resolve them. A release gate scaffolds every edition on every run and refuses to ship if the build, the lint, the type check or the tests come back anything but clean — and where a toolchain is missing on the machine running it, it says which edition it skipped and why, rather than passing quietly.
+- 18 new checks across the six languages, and five corrections to ones that were already there. The new ones cover the thing that has been missing all along: the harness being loosened rather than the code being broken — a coverage threshold lowered, `allowOnly` switched on, a `--cov-fail-under` dropped, over exactly the config files that edition writes. Alongside them, stub function bodies, tautological assertions, sleeps in tests, suppressed compiler warnings, and a snapshot file updated wholesale in a committed script.
+- The interview asks about the ways around the harness, not just the mistakes in the code. Four standing offers for anyone working with AI sessions: the hook bypassed, a force-push to the default branch, a script piped into a shell, the harness switched off. You pick which ones matter; the check is written for your repository and proved against its own fixtures like every other one.
+- `/jig:jig` offers you a pair of files from your own history that used to change together and stopped. That is the doc-sync mistake in the abstract made concrete — you no longer have to think of the pair yourself before jig will ask about it.
+- The removal detector now runs at commit time, reading the staged change set including whole files deleted. Until now it could only see a deletion as a session made it; a deletion that arrived any other way had no lane.
+
+### Fixed
+
+- An install could touch files jig never recorded, so `revert` could not put them back. Glob patterns in an edition's file list were dropped rather than resolved, so a `*.csproj` edit had no saved copy; and anything a command created — a Gradle wrapper, a lock file — was invisible to the journal. jig now takes a picture of the directory before and after and records what appeared, so revert removes it.
+- jig no longer offers an install it cannot undo. The rule used to be read off a label; it is now read off the command, so a tool whose install writes outside your project without saying how to remove it is refused, and a release gate holds every shipped tool to it.
+- The .NET test project is written rather than generated. `dotnet new xunit` created a tree jig had not named, which is the one thing its own contract forbids — and the project it created still reported a green run over no tests at all.
+- The coverage table read only the plan in front of it, so running the interview a second time reported your linter as uncovered when it had been running in CI since the first time. It reads what is installed too.
+
 ## [2.11.0] — 2026-09-02
 
 ### Added

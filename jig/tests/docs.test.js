@@ -185,3 +185,56 @@ test("the interview's CI answer names the project's own test script as a lane st
   assert.match(yes, /`test` script/,
     "the CI answer never mentions the test script the lane list adds when no test runner is ticked");
 });
+
+// DERAIL-PASS N12b: the four routes around the harness are interview text, not
+// catalogue rows — SCOPE:205 keeps session levers authored, so nothing in the
+// engine fails when an offer goes missing from round one. Pin all four, and pin
+// the force-push row's refspec claim against the parser that decides it.
+const guardLib = require("../hooks/jig-lib.js");
+const STANDING_OFFERS = ["hook-bypassed", "force-push-to-default", "pipe-to-shell", "harness-switched-off"];
+
+test("round one offers all four routes around the harness, leading on the agent persona", () => {
+  const interview = read("skills", "jig", "references", "interview.md");
+  const round = interview.slice(
+    interview.indexOf("**Question three**, header `\"Guard against\"`"),
+    interview.indexOf("**Question four**, header"));
+  assert.ok(round.startsWith("**Question three**"), "question three is gone from the interview reference");
+  for (const offer of STANDING_OFFERS) {
+    assert.ok(round.includes("`" + offer + "`"), "question three never offers `" + offer + "`");
+  }
+  assert.match(round, /`Me and my AI sessions` persona they lead the list/,
+    "the standing offers do not lead the list on the persona whose sessions take these routes");
+  assert.match(round, /Ticking one of those installs nothing/,
+    "question three does not say that ticking a standing offer installs nothing");
+});
+
+test("SKILL.md authors each standing offer against a lever the engine has", () => {
+  const skill = read("skills", "jig", "SKILL.md");
+  const section = skill.slice(
+    skill.indexOf("### When the mistake is a route around the harness"),
+    skill.indexOf("Write the drafted checks to `.jig/authored.json`"));
+  assert.ok(section.startsWith("### When the mistake is a route around the harness"),
+    "step 4 no longer describes the routes around the harness");
+  for (const offer of STANDING_OFFERS) {
+    assert.ok(section.includes("`" + offer + "`"), "step 4 says nothing about authoring `" + offer + "`");
+  }
+  for (const lever of new Set(section.match(/`(?:bash|edit)-guard`/g) || [])) {
+    assert.ok(Object.keys(guardLib.LEVER_TOOLS).includes(lever.replace(/`/g, "")),
+      "step 4 points a standing offer at " + lever + ", which is not a lever the engine runs");
+  }
+
+  // The refspec spellings the section promises are one branch are exactly the
+  // ones `pushBranch` folds together, and the pair it prints is separable by
+  // the scope the row declares. A pair that is not is admitted and catches
+  // nothing.
+  for (const spelling of ["+main", "HEAD:main", ":main", "refs/heads/main"]) {
+    assert.ok(section.includes("`" + spelling + "`"),
+      "the force-push row does not name the refspec spelling " + spelling);
+    assert.equal(guardLib.pushBranch("git push --force origin " + spelling), "main",
+      "the section promises " + spelling + " reads as the default branch, and the parser disagrees");
+  }
+  assert.equal(guardLib.branchInScope("git push --force origin HEAD:main", ["<default>"], {}), true,
+    "the force-push violation falls outside the scope the row declares");
+  assert.equal(guardLib.branchInScope("git push --force origin refs/heads/spike", ["<default>"], {}), false,
+    "the force-push near miss is in scope too, so the pair proves nothing");
+});

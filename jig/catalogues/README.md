@@ -28,6 +28,21 @@ template: it carries a placeholder name and a comment saying to rename it. The j
 starters build with no source files in them at all — the .NET one is a library rather than an
 executable for exactly that reason — because the first thing jig does after writing one is run the
 checks against it, and a starter that fails its own first check would be a harness that cries wolf.
+
+Four ecosystems need more than the project file to get there, and they say so in
+`detect.manifest.starter.files`: a list of `path` and `body` pairs jig writes beside the manifest,
+each as its own approved change. Rust needs a `src/lib.rs` and a `Cargo.lock`, because cargo exits
+101 on a `[package]` with no target and `--locked` refuses a lockfile that is not there; python
+needs the package directory hatchling builds from; JavaScript needs a module and a test, because
+`node --test` over an empty tree passes without running anything; .NET needs a test project and a
+solution file, because `dotnet test` beside a lone `App.csproj` resolves that one project and exits
+0 having run nothing. A file may name the `tool` it belongs to and is then written only where that
+tool is in the plan — JavaScript's two smoke tests are why, since `node --test` and vitest read
+different files and neither can read the other's. Each list is the smallest tree
+that makes that ecosystem's own build and test commands exit 0, and
+`node --test jig/tests/release-gates.test.js` (gate G7) scaffolds every edition whose toolchain is
+on the machine and runs those commands over the result — an edition whose toolchain is absent is
+skipped by name with the reason, never silently.
 Choosing an application template is the owner's job and always was; getting to a green check without
 one is jig's.
 
@@ -134,16 +149,16 @@ Three of those vocabularies are only partly used, and the unused half is the hon
 
 - No detector in any edition names `claude-session` or `codex-session`. Every detector is either a
   `check-driver` pattern run for `human-editor` or a `tool-rule` run for `human-ci`. Actor and
-  lever are paired in all 303 detectors; nothing mixes them.
-- No class is `experiment-supported` or `inherited`. 122 are `documented`, 25 are `reasoned`.
+  lever are paired in all 327 detectors; nothing mixes them.
+- No class is `experiment-supported` or `inherited`. 133 are `documented`, 32 are `reasoned`.
 - `agentModes` is free text, not a vocabulary. It is required when the class carries the `agent`
   axis and empty otherwise.
 
 `installKind` says what the `install` command does, which is not always an install:
 
 - `package` — adds a dependency or a binary. 20 entries, each with an `uninstall`.
-- `scaffold` — writes project files the tool then reads. 5 entries.
-- `builtin` — ships with the language toolchain; the command only runs it. 5 entries.
+- `scaffold` — writes project files the tool then reads. 4 entries.
+- `builtin` — ships with the language toolchain; the command only runs it. 6 entries.
 - `audit` — the command runs the tool rather than installing it, because the project's own build
   configuration is what brings it in. 7 entries, 6 of them in `jvm`.
 
@@ -168,20 +183,24 @@ discarded `Result` in Rust. `type-widened-to-any` is `any`, `Any`, `interface{}`
 `dyn Any` and `dynamic`. The id is the same because the mistake is: the checker was silenced
 instead of satisfied.
 
-Twenty-six of the seventy-seven distinct ids are shared:
+Thirty of the eighty distinct ids are shared:
 
 | Shared id | Editions |
 | --- | --- |
 | `blanket-lint-suppression` | all six |
+| `debug-artifact-left-behind` | all six |
 | `hardcoded-secret` | all six |
 | `skipped-test` | all six |
+| `sleep-based-test-synchronisation` | all six |
 | `softened-assertion` | all six |
 | `swallowed-exception` | all six |
+| `test-config-loosened` | all six |
+| `test-count-dropped` | all six |
 | `type-widened-to-any` | all six |
-| `debug-artifact-left-behind` | go, javascript-typescript, jvm, python, rust |
+| `emptied-test-body` | dotnet, go, javascript-typescript, python, rust |
 | `hardcoded-config-value` | dotnet, javascript-typescript, jvm, python, rust |
 | `invented-import-or-api` | dotnet, go, javascript-typescript, python, rust |
-| `emptied-test-body` | go, javascript-typescript, python, rust |
+| `unimplemented-stub-shipped` | dotnet, go, javascript-typescript, jvm, python |
 | `catch-all-exception` | dotnet, jvm, python |
 | `non-null-assertion` | dotnet, javascript-typescript, jvm |
 | `test-without-assertion` | dotnet, javascript-typescript, jvm |
@@ -199,7 +218,7 @@ Twenty-six of the seventy-seven distinct ids are shared:
 | `unclosed-resource` | go, jvm |
 | `zero-tests-treated-as-pass` | dotnet, jvm |
 
-The other fifty-one ids appear in one edition each, and they stay that way on purpose. A mistake
+The other fifty ids appear in one edition each, and they stay that way on purpose. A mistake
 that only exists because of a language's rules gets its own id: `undocumented-unsafe`,
 `redundant-clone-to-appease-borrowck`, `equals-without-hashcode`, `mutable-default-argument`,
 `bare-recover-swallows-panic`, `async-void-method`, `phantom-dependency`,
@@ -218,14 +237,14 @@ converts and can truncate; a double cast only lies about the type.
 
 | Edition | Classes | Toolchain |
 | --- | --- | --- |
-| `dotnet` — C# / .NET (dotnet CLI, csproj, NuGet) | 25 | csc, dotnet-analyzers, dotnet-format, xunit-analyzers, dotnet-test, nuget-audit, sonaranalyzer-csharp |
-| `go` — Go (go modules, go toolchain) | 24 | golangci-lint, gofumpt, go-vet, go-test, go-build, govulncheck |
-| `javascript-typescript` — JavaScript & TypeScript | 26 | eslint, typescript, vitest, prettier, audit |
-| `jvm` — Java & Kotlin (Gradle / Maven) | 22 | gradle, checkstyle, pmd, errorprone, detekt, spotbugs, junit5 |
-| `python` — Python | 26 | ruff, ruff-format, mypy, pytest, pip-audit, build |
-| `rust` — Rust (cargo / Cargo.toml / workspaces) | 24 | clippy, rustfmt, cargo-check, cargo-nextest, cargo-deny, cargo |
+| `dotnet` — C# / .NET (dotnet CLI, csproj, NuGet) | 30 | csc, dotnet-analyzers, dotnet-format, xunit-analyzers, dotnet-test, nuget-audit, sonaranalyzer-csharp |
+| `go` — Go (go modules, go toolchain) | 27 | golangci-lint, gofumpt, go-vet, go-test, go-build, govulncheck |
+| `javascript-typescript` — JavaScript & TypeScript | 30 | eslint, typescript, vitest, prettier, audit |
+| `jvm` — Java & Kotlin (Gradle / Maven) | 23 | gradle, checkstyle, pmd, errorprone, detekt, spotbugs, junit5 |
+| `python` — Python | 29 | ruff, ruff-format, mypy, pytest, pip-audit, build |
+| `rust` — Rust (cargo / Cargo.toml / workspaces) | 26 | clippy, rustfmt, cargo-check, cargo-nextest, cargo-deny, cargo |
 
-147 classes, 303 detectors, 78 distinct ids.
+165 classes, 327 detectors, 80 distinct ids.
 
 ## index.json
 
@@ -245,16 +264,16 @@ extension without opening half a megabyte of class rows. Nothing else is duplica
 
 ## What this data does not claim
 
-- **No class is measured.** 122 rows are `documented`, meaning a tool's own reference confirms the
-  rule id, the flag or the syntax the row asserts. 25 are `reasoned`, meaning nothing but the
+- **No class is measured.** 133 rows are `documented`, meaning a tool's own reference confirms the
+  rule id, the flag or the syntax the row asserts. 32 are `reasoned`, meaning nothing but the
   argument in `evidence.source` stands behind them. Nothing here says which of these classes
   actually costs projects the most, because that has not been measured.
 - **Coverage is uneven across editions.** A shared id does not mean equal detection. The same class
   can carry two tool rules and a pattern in one edition and a single heuristic pattern in another.
-- **65 of 303 detectors are heuristic**, per detector rather than per lever. A deterministic lever
+- **79 of 327 detectors are heuristic**, per detector rather than per lever. A deterministic lever
   carries heuristic patterns in several places, which is why `confidence` sits on the detector.
-- **`dotnet` is the thinnest edition.** It has the fewest detectors per class (1.56 against 2.55
-  for `jvm`) and the highest heuristic share (14 of 39). `go` is second thinnest on the same
+- **`dotnet` is the thinnest edition.** It has the fewest detectors per class (1.57 against 2.48
+  for `jvm`) and the highest heuristic share (18 of 47). `go` is second thinnest on the same
   measures.
 - **`verify` blocks are declared, not executed.** Every tool in every edition carries an `argv`, an
   `expected` string and an `expectedExit`. None of the 37 has been run, and neither has any `seed`

@@ -487,13 +487,14 @@ over the same file that keeps it:
 Three limits to tell the user before they approve it, because together they
 decide what it is worth:
 
-- The lever is the session one. An `edit-guard` reads an Edit's `old_string`
-  against its `new_string` and sees the deletion; the committed check driver
-  reads the tree as it is, has no earlier version to count against, and reports a
-  removal detector **skipped** on every run. So a removal on `check-driver` is
-  proven by its pair and caught by nothing — the plan grades that cell `GAP` and
-  stops counting it towards the host-neutral floor. Put the removal on the edit
-  lever.
+- Two lanes see it, and neither is the walk. An `edit-guard` reads an Edit's
+  `old_string` against its `new_string` and sees the deletion as it is proposed;
+  the commit lane counts the index against HEAD, deletions included, so a suite
+  that lost cases in the commit is a finding there. A pathless run reads the tree
+  as it is, has no earlier version to count against, and reports a removal
+  detector **skipped**. So a removal on `check-driver` alone is caught at commit
+  time and nowhere else — put it on both levers if the mistake is worth stopping
+  before the bytes land.
 - A **Write** payload carries no prior text at all, so a whole-file rewrite that
   drops half the suite never fires it. That is a disclosed miss, not something to
   work around.
@@ -501,22 +502,51 @@ decide what it is worth:
   two calls later, and a deletion is sometimes right — behaviour that genuinely
   went away takes its tests with it.
 
-### When the mistake is jig itself being switched off
+### When the mistake is a route around the harness
 
-Everything above sits behind four files nothing watches. `.jig/config.json` says
-which guards are armed, `.jig/checks/**` holds what they run, `.jig/off` silences
-the session lane by existing, and the CI workflow is the floor for everyone who
-never runs a session at all. An agent that edits any of them turns the harness
-off, and until the owner reads a report nothing says so.
+Every check above catches a mistake in the code. Four routes go around the code
+entirely: a commit that skips the hook, a force push that rewrites the default
+branch, a download piped into a shell, and jig itself being switched off. None
+of them is a language's mistake, so no edition ranks them and no owner should
+have to think of all four unaided.
 
-So round one offers `jig's own guards being switched off` as a standing option
-(references/interview.md). It is offered on every project, because it is about
-jig rather than about a language — and it is only ever **offered**: nothing here
-is authored unless the owner ticked it, and each check is approved by name at
-step 6 like every other write.
+So round one carries them as four standing offers — `hook-bypassed`,
+`force-push-to-default`, `pipe-to-shell` and `harness-switched-off`, leading the
+mistake list on the `Me and my AI sessions` persona
+(references/interview.md). They are offered on every project, because they are
+about the harness rather than about a language — and they are only ever
+**offered**: nothing here is authored unless the owner ticked it, each one is
+proved against its own pair at admission, and each is approved by name at step 6
+like every other write.
 
-Ticked, write these as ordinary authored checks. Nothing about them is special;
-they are levers already described above, pointed at jig:
+The first three are one `bash-guard` detector each, because all three are a
+command a session runs:
+
+| Offer | Lever | The pair |
+| --- | --- | --- |
+| `hook-bypassed` | `bash-guard` | violation: `git commit --no-verify -m "wip"`; near miss: `git commit -m "verify the refspec parser"`, which reads like it and skips nothing |
+| `force-push-to-default` | `bash-guard`, `onlyBranches: ["<default>"]` | violation: `git push --force origin HEAD:main`; near miss: `git push --force origin refs/heads/spike` |
+| `pipe-to-shell` | `bash-guard` | violation: `curl -sSL https://example.test/install.sh \| sh`; near miss: `curl -sSL https://example.test/install.sh -o install.sh`, fetched and not run |
+
+Three things decide whether those three are worth anything:
+
+- **Nothing is blanked on this lever**, so a pattern loose enough to read a
+  quoted argument fires on the commit message that merely mentions the flag.
+  That is what each near miss above is for.
+- **A branch-scoped guard is proven by a push that names a branch.** A fixture
+  with a bare `git push` in it admits nothing: the runner refuses it, because a
+  push naming no branch passes an armed guard at runtime too. Write the
+  violation with the refspec spelling in it, and know the guard reads
+  `+main`, `HEAD:main`, `:main` and `refs/heads/main` as the same branch.
+- **`--no-verify` is not the only way past a hook**, so say what the pattern
+  covers and what it does not rather than implying the route is closed.
+
+`harness-switched-off` is four checks, not one. Everything jig installs sits
+behind four files nothing watches: `.jig/config.json` says which guards are
+armed, `.jig/checks/**` holds what they run, `.jig/off` silences the session lane
+by existing, and the CI workflow is the floor for everyone who never runs a
+session at all. Write these as ordinary authored checks too; nothing about them
+is special, they are levers already described above, pointed at jig:
 
 | What it watches | Lever | The pair |
 | --- | --- | --- |

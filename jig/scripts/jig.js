@@ -991,9 +991,25 @@ function installTouchPaths(root, change) {
   const editionId = change.install && change.install.edition;
   if (editionId) {
     const row = editionsLib.loadIndex(PLUGIN_ROOT).editions.find((e) => e.id === editionId);
-    for (const p of (row && row.detect && row.detect.files) || []) if (!p.includes("*")) rels.add(p);
+    const patterns = (row && row.detect && row.detect.files) || [];
+    // A glob names files that are already on disk, so it is resolved against the
+    // tree here, at intent time, exactly like a literal path. Skipping it left
+    // the dotnet edition's `*.csproj` edits with no pre-image at all.
+    const files = patterns.some((p) => p.includes("*")) ? editionsLib.walkFiles(root) : [];
+    for (const p of patterns) {
+      if (!p.includes("*")) rels.add(p);
+      else for (const f of files) if (editionsLib.fileMatches(p, f.base)) rels.add(f.rel);
+    }
   }
   return [...rels];
+}
+
+// Every path under the project root an install could create. The walk is
+// detection's own, so it skips `.git`, `.jig` and the dependency stores —
+// what a package manager puts in `node_modules/` or `target/` is undone by the
+// reconcile command, not by deleting files one at a time.
+function installSnapshot(root) {
+  return new Set(editionsLib.walkFiles(root).map((f) => f.rel));
 }
 
 // The one change that runs a command instead of writing bytes — and it is
@@ -1015,6 +1031,8 @@ function applyInstall(root, ctx, change) {
     });
   }
 
+  const before = installSnapshot(root);
+
   // The approval is the item's own id and its command character for character.
   // Both come off the plan the owner read; nothing here re-assembles either.
   let run;
@@ -1034,7 +1052,35 @@ function applyInstall(root, ctx, change) {
     throw err;
   }
 
-  for (const rel of touched) {
+  // What the command created that nobody named: `gradle wrapper` writes
+  // `gradlew`, `gradlew.bat` and `gradle/wrapper/*`, and without these rows
+  // `revert` leaves every one of them behind. This is the one place the
+  // crash-ordering rule cannot hold, and it costs nothing: a path that did not
+  // exist before the command ran has no pre-image to lose, and `null` is the
+  // only pre-image it could ever have had.
+  //
+  // Never off a truncated walk. The walk stops at its file cap wherever the
+  // count ran out, so on a repository above it the two lists are cut in
+  // different places and a file that was only ever missing from `before` would
+  // be journalled as created — with a null pre-image, which is `revert`'s
+  // instruction to DELETE somebody's file. So a capped walk claims nothing:
+  // the repository is left where it was before 2.12.0, with the reconcile
+  // command as its way out, rather than handed a revert that removes files the
+  // install never touched.
+  const afterWalk = installSnapshot(root);
+  const capped = before.size >= editionsLib.WALK_MAX_FILES || afterWalk.size >= editionsLib.WALK_MAX_FILES;
+  const created = [];
+  for (const rel of capped ? [] : afterWalk) {
+    if (before.has(rel) || touched.includes(rel)) continue;
+    if (targetProblem(root, change.kind, rel)) continue;
+    appendJournal(root, {
+      event: "intent", tx: ctx.tx, plan: ctx.plan, change: change.id, kind: change.kind, path: rel,
+      preImage: null, hashBefore: null, reconcile: item.uninstallCommand || null,
+    });
+    created.push(rel);
+  }
+
+  for (const rel of touched.concat(created)) {
     const after = readIfExists(path.join(root, rel));
     appendJournal(root, {
       event: "outcome", tx: ctx.tx, plan: ctx.plan, change: change.id, path: rel,
@@ -2322,6 +2368,31 @@ function draftFromTemplates(root, opts, checks) {
     });
   }
 
+  // The rest of the starter. A `Cargo.toml` with no `src/lib.rs` is a manifest
+  // cargo refuses to parse — jig's first act on a project it just scaffolded is
+  // to run the checks over it, and a red build there is a harness crying wolf.
+  // The edition names the smallest tree its own build and test commands exit 0
+  // on; each file is its own approved change, and a path a tool's config
+  // already claims is left to the composition that owns it.
+  //
+  // A starter file may name the tool it belongs to. The JavaScript edition's
+  // two smoke tests are why: `node --test` and vitest read different files and
+  // neither can read the other's, so writing the vitest one into a project that
+  // ticked no test runner would leave an import nothing resolves.
+  const claimed = new Set(changes.map((c) => c.path));
+  const ticked = new Set(usable.map((row) => row.item.id));
+  for (const m of manifests) {
+    if (!m.sample) continue;
+    for (const file of m.starter) {
+      if (file.tool && !ticked.has(file.tool)) continue;
+      if (claimed.has(file.path)) continue;
+      claimed.add(file.path);
+      add({ name: "starter-" + file.path, version: "1.0.0", target: file.path, kind: "write-side-file", ownership: "file" },
+        file.body, selection,
+        "part of the starter " + m.edition + " project, so it builds and its tests run before anything else is added");
+    }
+  }
+
   for (const row of usable) {
     // A tool whose config was composed above has already had its say in that
     // one file, so the install itself must not write a second copy over it.
@@ -2644,13 +2715,14 @@ function driverBlindDir(det) {
   return blind.every(Boolean) ? blind[0] : null;
 }
 
-// The other thing the driver cannot see, and for the same reason the fixture
-// pair cannot show it: a removal is a count going down between two versions of a
-// file, and the driver reads the tree as it is. Such a detector proves itself on
-// its fenced pair, is reported skipped on every real run, and catches nothing —
-// so it is not an artifact and not a floor. Only when it is the detector's ONLY
-// kind: a module that also names patterns is evaluated on every run.
-function driverBlindRemoval(det) {
+// A driver detector whose only kind is a removal. Since 2.12.0 the driver does
+// count removals — but only under `--staged`, which is the commit lane and
+// nothing else: `run.mjs` counts nothing on a pathless walk and the CI workflow
+// runs it pathless. So this is not "blind" any more, it is "one lane", and
+// `commitLaneLive` below is what says whether that lane exists here.
+// Only when it is the detector's ONLY kind: a module that also names patterns
+// is evaluated on every run.
+function removalOnlyDetector(det) {
   if (!det || det.lever !== "check-driver") return false;
   const p = det.params || {};
   const has = (k) => Array.isArray(p[k]) && p[k].length > 0;
@@ -2659,15 +2731,16 @@ function driverBlindRemoval(det) {
 
 // The floor: something a person or a CI runner can run
 // with no agent host involved, and that cannot be wrong about what it found.
-function hostNeutralFloor(cls) {
+function hostNeutralFloor(cls, lane) {
   return cls.detectors.some((d) => {
     const lever = leverOf(d.lever);
-    // A driver detector the walk never reaches is not a floor, and neither is
-    // one the run has no earlier version to evaluate. Both are host neutral on
-    // paper and catch nothing anywhere, which is the enforcement gap this field
-    // exists to report.
+    // A driver detector the walk never reaches is host neutral on paper and
+    // catches nothing anywhere, which is the enforcement gap this field exists
+    // to report. A removal-only one is the same story with a different reason:
+    // host neutral, deterministic, and evaluated by nothing at all until a
+    // pre-commit hook runs the driver with `--staged`.
     return !!lever && lever.hostNeutral && d.confidence === "deterministic" &&
-      !driverBlindDir(d) && !driverBlindRemoval(d);
+      !driverBlindDir(d) && (!removalOnlyDetector(d) || lane === true);
   });
 }
 
@@ -2675,8 +2748,8 @@ function hostNeutralFloor(cls) {
 // no — a class nothing catches is a disclosed gap, not a refusal). The sentence
 // is unchanged; what changed is that it is printed on the plan the owner reads
 // instead of thrown before they see anything.
-function floorNote(cls) {
-  if (hostNeutralFloor(cls)) return null;
+function floorNote(cls, lane) {
+  if (hostNeutralFloor(cls, lane)) return null;
   return cls.id + " has no host-neutral deterministic lever in this plan. Nothing a human or a CI runner can run" +
     " catches it, so whatever else the matrix says about it depends on an agent host being in the loop.";
 }
@@ -2706,10 +2779,41 @@ function verifiesTool(changes, tool) {
   return !!entries && entries.some((e) => e.id === tool && Array.isArray(e.lanes) && e.lanes.includes("ci"));
 }
 
+// The installed half of a tool rule: the tool's config artifact in the manifest,
+// and the ci-lane entries `.jig/verify.json` already holds. A plan is an
+// interview about what to ADD, so a re-plan that ticks no tool proposes neither
+// — and grading the cell off this plan's changes alone told an owner their
+// linter was uncovered while it sat configured and running in CI. `configFace`
+// and `verifyFace` already read the installed side for the files they write;
+// this is the matrix reading it for the cell it grades.
+function installedToolFace(root) {
+  const config = new Map();
+  for (const a of readManifest(root).artifacts) {
+    const name = a.template && a.template.name;
+    if (typeof name !== "string") continue;
+    // `toolchain-config-<path>` is a composed file, named after the path rather
+    // than a tool, and a plan never gives a composed tool an artifact either.
+    if (name.startsWith("toolchain-config-")) continue;
+    const prefix = ["toolchain-", "install-"].find((p) => name.startsWith(p));
+    if (prefix) config.set(name.slice(prefix.length), a.path);
+  }
+  const raw = readIfExists(path.join(root, STATE_DIR, VERIFY_FILE));
+  const entries = raw === null ? null : proposedVerifyEntries(raw.toString("utf8"));
+  const ci = (entries || []).filter((e) => Array.isArray(e.lanes) && e.lanes.includes("ci")).map((e) => e.id);
+  // The commit lane, read the same way: a removal is counted by `--staged` and
+  // by nothing else, so a removal cell that named its check module in a
+  // repository with no hook would be claiming a lane nobody runs.
+  // `--wire-commit` is its own plan carrying no coverage, so this can never
+  // come from the changes this plan proposes — only from what is installed.
+  return { config, ci: new Set(ci), commitLane: commitLane(root).runsChecks };
+}
+
+const NO_INSTALLED_TOOLS = { config: new Map(), ci: new Set(), commitLane: false };
+
 // Which artifact does the catching, read off the plan's own changes so a cell
 // can never name a file this plan does not write. A hook detector names its
 // guard row in the generated config, which is the id the ledger will carry.
-function detectorArtifact(cls, det, index, changes, guards) {
+function detectorArtifact(cls, det, index, changes, guards, installed) {
   const templated = (name) => {
     const hit = changes.find((c) => c.template && c.template.name === name);
     return hit ? hit.path : null;
@@ -2718,7 +2822,12 @@ function detectorArtifact(cls, det, index, changes, guards) {
     // A module the driver will never run this detector's paths through catches
     // nothing, whatever the plan installs. Named before the artifact lookup, so
     // no cell can point at a check module as proof of a lane it does not reach.
-    if (driverBlindDir(det) || driverBlindRemoval(det)) return null;
+    if (driverBlindDir(det)) return null;
+    // Both halves or nothing, exactly as a tool rule needs its config AND a
+    // lane that runs it: a removal is counted under `--staged`, so the module
+    // is coverage only where a pre-commit hook runs the driver. The shipped CI
+    // workflow runs it pathless, which counts no removals at all.
+    if (removalOnlyDetector(det) && !(installed || NO_INSTALLED_TOOLS).commitLane) return null;
     // By what the change is FOR rather than what it was called: an authored
     // check module is named after its own slug, and a cell that keyed on a
     // template name could not see it. The driver itself is deliberately not a
@@ -2745,12 +2854,16 @@ function detectorArtifact(cls, det, index, changes, guards) {
     // And a config is not a lane. Until 2.9.0 this cell read DET off the config
     // file alone, so the matrix printed `DET eslint.config.mjs` for a CI job
     // that ran the check driver and nothing else — a rule nobody executes,
-    // named after a file. Both halves or nothing: the config the plan writes,
-    // and an entry in `.jig/verify.json` that a lane actually runs.
+    // named after a file. Both halves or nothing: a config, and an entry in
+    // `.jig/verify.json` that a lane actually runs. Either half may come from
+    // this plan or from what is already installed — a re-plan proposes neither
+    // and the tool is no less covered for it.
     const tool = det.params && det.params.tool;
+    const face = installed || NO_INSTALLED_TOOLS;
     const hit = changes.find((c) => c.template &&
       (c.template.name === "toolchain-" + tool || c.template.name === "install-" + tool));
-    return hit && verifiesTool(changes, tool) ? hit.path : null;
+    const config = hit ? hit.path : (face.config.get(tool) || null);
+    return config && (verifiesTool(changes, tool) || face.ci.has(tool)) ? config : null;
   }
   if (det.lever === "agents-region") {
     const hit = changes.find((c) => c.kind === "write-agents-region");
@@ -2762,9 +2875,9 @@ function detectorArtifact(cls, det, index, changes, guards) {
 // One detector's cell. `armable` is set on every deny-capable detector whatever
 // the cell grades to, because whether a guard CAN block is a different question
 // from how well this particular lever happens to be doing.
-function detectorCell(cls, det, index, provenance, changes, guards) {
+function detectorCell(cls, det, index, provenance, changes, guards, installed) {
   const lever = leverOf(det.lever);
-  const artifact = detectorArtifact(cls, det, index, changes, guards);
+  const artifact = detectorArtifact(cls, det, index, changes, guards, installed);
   let grade = detectorGrade(det);
   let why = null;
   if (grade === "GAP") {
@@ -2781,8 +2894,9 @@ function detectorCell(cls, det, index, provenance, changes, guards) {
     // worse than saying nothing.
     const blind = driverBlindDir(det);
     why = blind ? "the check driver never walks " + blind + "/"
-      : driverBlindRemoval(det) ? "the check driver reads the tree as it is and has no earlier version to count" +
-        " against, so it reports this class skipped on every run"
+      : removalOnlyDetector(det) ? "a removal is only visible between two versions of a file, so only the" +
+        " commit lane counts it — and no pre-commit hook here runs the driver. `jig plan --wire-commit`" +
+        " is what turns this cell on"
       : det.lever === "tool-rule"
         ? "no lane runs " + ((det.params && det.params.tool) || det.lever)
         : "this plan writes no " + det.lever + " artifact for " + cls.id;
@@ -2801,13 +2915,13 @@ function detectorCell(cls, det, index, provenance, changes, guards) {
   };
 }
 
-function matrixRow(cls, provenance, changes, guards) {
+function matrixRow(cls, provenance, changes, guards, installed) {
   const cells = {};
   for (const actor of ACTORS) {
     const found = cls.detectors
       .map((det, i) => ({ det, i }))
       .filter(({ det }) => det.actor === actor)
-      .map(({ det, i }) => detectorCell(cls, det, i, provenance, changes, guards));
+      .map(({ det, i }) => detectorCell(cls, det, i, provenance, changes, guards, installed));
     // Best-of, not first-of: a class with both a shipping lever and a later one
     // for the same actor is covered today by the one that ships today.
     cells[actor] = found.length
@@ -2815,7 +2929,7 @@ function matrixRow(cls, provenance, changes, guards) {
       : { grade: "GAP", lever: null, artifact: null, ceiling: null, armable: null,
         why: "no detector on this class names " + actor };
   }
-  const floorCleared = hostNeutralFloor(cls);
+  const floorCleared = hostNeutralFloor(cls, (installed || NO_INSTALLED_TOOLS).commitLane);
   return {
     classId: cls.id,
     edition: cls.edition || null,
@@ -2828,7 +2942,7 @@ function matrixRow(cls, provenance, changes, guards) {
     // deterministic lever catches IS the enforcement gap, said once.
     enforcementGap: !floorCleared,
     floorCleared,
-    floorNote: floorNote(cls),
+    floorNote: floorNote(cls, (installed || NO_INSTALLED_TOOLS).commitLane),
     // The edition's own words about what this class cannot see. Carried through
     // so the matrix can print research instead of jig's paraphrase of it.
     gapNotes: cls.gapNotes || null,
@@ -2971,7 +3085,7 @@ function bestGrade(cls) {
 // it and a menu nobody wrote down is a menu that has to be rebuilt from scratch
 // every time. Ids are namespaced, so a backlog row from the Go edition and one
 // from the Python edition are never the same row.
-function backlogFor(loaded, selection) {
+function backlogFor(loaded, selection, lane) {
   const rows = [];
   for (const edition of loaded) {
     for (const cls of edition.classes || []) {
@@ -2985,7 +3099,7 @@ function backlogFor(loaded, selection) {
         title: cls.title,
         severity: cls.severity,
         axes: cls.axes,
-        enforcementGap: !hostNeutralFloor(adapted),
+        enforcementGap: !hostNeutralFloor(adapted, lane),
         best: bestGrade(adapted),
         reason: "not selected",
       });
@@ -3033,8 +3147,9 @@ function buildReview(payload, generated, root) {
     enforcementGap: c.enforcementGap,
     ...consentFor(c, guards, generated.installedGuards || []),
   }));
-  const backlog = backlogFor(generated.loaded || [], selection);
-  const rows = classes.map((cls) => matrixRow(cls, provenance, payload.changes, guards));
+  const installedTools = installedToolFace(root);
+  const backlog = backlogFor(generated.loaded || [], selection, installedTools.commitLane);
+  const rows = classes.map((cls) => matrixRow(cls, provenance, payload.changes, guards, installedTools));
   // The exact sentence each armable guard hands back, composed by the hook
   // library itself so the plan cannot describe words other than the ones that
   // ship. Nothing else on this plan shows the owner the text a blocked agent
@@ -5351,7 +5466,7 @@ module.exports = {
   ACTORS, LEVERS, PLUGIN_ROOT, GIT_DIR, GIT_SETTING, GIT_SETTING_PATH, commitLane,
   leverOf, leverAvailable, toolchainFacts, toolchainToolFor, RELEASE_ORDER,
   denyCapable, hostNeutralFloor, floorNote, detectorGrade, detectorCeiling, DRIVER_SKIPS, driverBlindDir,
-  driverBlindRemoval,
+  removalOnlyDetector,
   detectorCell, matrixRow, consentFor, bestGrade, backlogFor, buildReview, cellText, renderReviewMd,
   resolveEditions, editionClassById, AUTHORED_RUNNERS, adaptAuthoredDetector, readAuthored, admitAuthored, checkSlug,
   authoredChecksIn, readFromFile, toolchainProposal, toolchainRow, installTouchPaths, guardEvidence,
@@ -5367,7 +5482,7 @@ module.exports = {
   cmdReview, cmdInventory, cmdArm, cmdDisarm, cmdFp, cmdRerun, cmdRetire,
   activationFace,
   templateIndex, templateBody, draftFromTemplates, configFromSelection, permissionsProposal,
-  verifyEntriesFor, verifyFace, ciVerifySteps, proposedVerifyEntries, verifiesTool,
+  verifyEntriesFor, verifyFace, ciVerifySteps, proposedVerifyEntries, verifiesTool, installedToolFace,
   readManifest, manifestStates, occupancyProblem,
   matcherMatches, hookRows, collectHooks, nodeOnPath, stackFacts, ruleCorpus, conflictPreflight, readProfile,
   cmdScan, cmdToolchain, cmdAdmit, cmdPlan, cmdApply, cmdStatus, cmdRevert, cmdSelftest, main,

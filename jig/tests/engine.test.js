@@ -912,3 +912,135 @@ test("every command runs through the real CLI entry, not just through require", 
   assert.equal(cli(["rerun"]).status, 0);
   assert.equal(cli(["status"]).status, 0);
 });
+
+// ---------------------------------------------------------------------------
+// What an install touched
+// ---------------------------------------------------------------------------
+
+// A synthetic install whose command is node itself, so the test can say exactly
+// what the package manager does to the tree without needing one on the machine.
+function installPlan(root, item) {
+  fs.writeFileSync(path.join(root, "draft.json"), JSON.stringify({
+    changes: [{ id: "install-" + item.id, kind: "run-install", path: item.configPath, install: item }],
+  }));
+  const plan = engine.cmdPlan(root, { _: [], change: [], from: "draft.json" });
+  engine.cmdApply(root, { _: [], change: [plan.changes[0].id], path: [item.configPath] });
+  return plan.changes[0].id;
+}
+
+function syntheticInstall(edition, script, extra) {
+  return {
+    id: "wrapperish",
+    role: "build",
+    edition,
+    installKind: "scaffold",
+    packageManager: "npm",
+    command: "wrapperish install",
+    argv: [process.execPath, "-e", script],
+    configPath: "wrapperish.json",
+    configBody: "{}\n",
+    wiring: null,
+    ciStep: null,
+    uninstallCommand: null,
+    uninstallArgv: null,
+    timeoutMs: 20000,
+    ...extra,
+  };
+}
+
+test("a file the install created is journalled, so revert can take it away again", () => {
+  const root = tmpProject({ "package.json": "{ \"private\": true }\n" });
+  // `gradle wrapper` in one line: the three paths that used to land with no
+  // journal row at all, because nothing named them before the command ran.
+  const item = syntheticInstall("javascript-typescript",
+    "const fs=require('fs');fs.writeFileSync('gradlew','wrapper');" +
+    "fs.writeFileSync('gradlew.bat','wrapper');" +
+    "fs.mkdirSync('gradle/wrapper',{recursive:true});" +
+    "fs.writeFileSync('gradle/wrapper/gradle-wrapper.properties','distributionUrl=x');");
+  const changeId = installPlan(root, item);
+
+  const wrapper = ["gradlew", "gradlew.bat", "gradle/wrapper/gradle-wrapper.properties"];
+  for (const rel of wrapper) assert.ok(fs.existsSync(path.join(root, rel)), "the install did not write " + rel);
+
+  const state = engine.cmdStatus(root).changes.find((c) => c.id === changeId);
+  assert.equal(state.state, "applied", "a created path with no outcome row leaves the change interrupted");
+  for (const rel of wrapper) {
+    assert.ok(state.files.includes(rel), rel + " landed with no journal row, so revert would leave it behind");
+  }
+
+  engine.cmdRevert(root, { _: [], change: [], all: true });
+  for (const rel of wrapper) {
+    assert.equal(fs.existsSync(path.join(root, rel)), false, rel + " survived a full revert");
+  }
+  assert.equal(fs.existsSync(path.join(root, "gradle")), false, "the reverted install left an empty directory behind");
+});
+
+// The dependency store is the package manager's, not jig's: `revert` restores
+// the manifest and hands back the reconcile command, and deleting somebody's
+// `node_modules/` a file at a time is not what undoing an install means.
+test("what an install put in the dependency store is not journalled as a created path", () => {
+  const root = tmpProject({ "package.json": "{ \"private\": true }\n" });
+  // Both halves in one command, because "no node_modules rows" is trivially
+  // true of an install that journals nothing at all: the file beside the store
+  // has to be journalled in the same run that leaves the store alone.
+  const item = syntheticInstall("javascript-typescript",
+    "const fs=require('fs');fs.mkdirSync('node_modules/dep',{recursive:true});" +
+    "fs.writeFileSync('node_modules/dep/index.js','1');" +
+    "fs.writeFileSync('installed-beside-the-store.txt','1');");
+  const changeId = installPlan(root, item);
+  const state = engine.cmdStatus(root).changes.find((c) => c.id === changeId);
+  assert.deepEqual(state.files.filter((f) => f.startsWith("node_modules/")), []);
+  assert.ok(state.files.includes("installed-beside-the-store.txt"),
+    "nothing was journalled as created, so the node_modules filter proved nothing");
+  assert.equal(fs.existsSync(path.join(root, "node_modules", "dep", "index.js")), true);
+
+  engine.cmdRevert(root, { _: [], change: [], all: true });
+  assert.equal(fs.existsSync(path.join(root, "installed-beside-the-store.txt")), false);
+  assert.equal(fs.existsSync(path.join(root, "node_modules", "dep", "index.js")), true,
+    "revert deleted the package manager's own store a file at a time");
+});
+
+// The cap is the one thing that makes the before/after diff unsafe. The walk
+// stops wherever its file count runs out, so on a repository above the cap the
+// two lists are cut in different places and a file that was only ever missing
+// from `before` reads as one the install created — journalled with a null
+// pre-image, which is `revert`'s instruction to delete it.
+test("a walk that hit its file cap journals no created paths, rather than guessing at them", () => {
+  const editions = require("../scripts/editions.js");
+  const cap = editions.WALK_MAX_FILES;
+  const root = tmpProject({ "package.json": "{ \"private\": true }\n", "already-here.txt": "mine\n" });
+  const item = syntheticInstall("javascript-typescript",
+    "require('fs').writeFileSync('made-by-the-install.txt','1');");
+  try {
+    editions.WALK_MAX_FILES = 1;
+    const changeId = installPlan(root, item);
+    const state = engine.cmdStatus(root).changes.find((c) => c.id === changeId);
+    assert.deepEqual(state.files.filter((f) => f.endsWith(".txt")), [],
+      "a capped walk was differenced anyway, so a pre-existing file could be journalled as created");
+  } finally {
+    editions.WALK_MAX_FILES = cap;
+  }
+
+  engine.cmdRevert(root, { _: [], change: [], all: true });
+  assert.equal(fs.readFileSync(path.join(root, "already-here.txt"), "utf-8"), "mine\n",
+    "revert deleted a file the install never touched");
+});
+
+test("a glob in an edition's detect.files is resolved at intent time, so the file it names has a pre-image", () => {
+  const before = "<Project Sdk=\"Microsoft.NET.Sdk\" />\n";
+  const root = tmpProject({ "App.csproj": before, "global.json": "{}\n" });
+  // The dotnet edition detects on `*.csproj`, and an install that edits one is
+  // the case the non-glob filter used to drop on the floor.
+  const item = syntheticInstall("dotnet",
+    "require('fs').writeFileSync('App.csproj','edited by the package manager');",
+    { installKind: "package", packageManager: "dotnet", uninstallCommand: "dotnet remove package wrapperish" });
+  const changeId = installPlan(root, item);
+
+  const state = engine.cmdStatus(root).changes.find((c) => c.id === changeId);
+  assert.ok(state.files.includes("App.csproj"), "the *.csproj the install edited was never journalled");
+  assert.notEqual(fs.readFileSync(path.join(root, "App.csproj"), "utf-8"), before);
+
+  engine.cmdRevert(root, { _: [], change: [], all: true });
+  assert.equal(fs.readFileSync(path.join(root, "App.csproj"), "utf-8"), before,
+    "the edited project file could not be put back");
+});

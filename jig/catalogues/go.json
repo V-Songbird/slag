@@ -1419,10 +1419,154 @@
         "violation": "package billing\n\nimport \"testing\"\n\nfunc TestTotalDueSingleLine(t *testing.T) {\n\tif got := TotalDue([]Line{{\"seat\", 1200}}); got != 1200 {\n\t\tt.Fatalf(\"got %d, want 1200\", got)\n\t}\n}\n\nfunc TestTotalDueAnnualDiscount(t *testing.T) {\n\tif got := TotalDueTerm([]Line{{\"seat\", 1200}}, \"annual\"); got != 1080 {\n\t\tt.Fatalf(\"got %d, want 1080\", got)\n\t}\n}\n\nfunc TestTotalDueRejectsNegative(t *testing.T) {\n\tif _, err := TotalDueChecked([]Line{{\"seat\", -1}}); err == nil {\n\t\tt.Fatal(\"want an error for a negative line\")\n\t}\n}\n--- after\npackage billing\n\nimport \"testing\"\n\nfunc TestTotalDueSingleLine(t *testing.T) {\n\tif got := TotalDue([]Line{{\"seat\", 1200}}); got != 1200 {\n\t\tt.Fatalf(\"got %d, want 1200\", got)\n\t}\n}\n",
         "nearMiss": "package billing\n\nimport \"testing\"\n\nfunc TestTotalDueSingleLine(t *testing.T) {\n\tif got := TotalDue([]Line{{\"seat\", 1200}}); got != 1200 {\n\t\tt.Fatalf(\"got %d, want 1200\", got)\n\t}\n}\n\nfunc TestTotalDueRejectsNegative(t *testing.T) {\n\tif got := TotalDue([]Line{{\"seat\", -1}}); got != 0 {\n\t\tt.Fatalf(\"got %d, want 0\", got)\n\t}\n}\n--- after\npackage billing\n\nimport \"testing\"\n\nfunc TestTotalDueSingleLine(t *testing.T) {\n\tif got := TotalDue([]Line{{\"seat\", 1200}}); got != 1200 {\n\t\tt.Fatalf(\"got %d, want 1200\", got)\n\t}\n}\n\nfunc TestTotalDueRejectsNegative(t *testing.T) {\n\tif _, err := TotalDueChecked([]Line{{\"seat\", -1}}); err == nil {\n\t\tt.Fatal(\"want an error for a negative line\")\n\t}\n}\n"
       },
-      "gapNotes": "A removal is not in any file's content \u2014 the deleted case is absent from the file that is left, so the committed check driver reports this class skipped on a normal run and proves it only from the fixture pair, which carries the file before the edit and the file after it. Nothing in this catalogue watches it — a catalogue never carries a session guard — so the class ships as a named mistake with a proven pair and no lane, and the plan grades that cell GAP. The lane is an authored `edit-guard` on the same removal rule, which reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a test file is seen, and a Write payload carries none, so a whole-file rewrite that drops a test file is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right \u2014 behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
+      "gapNotes": "A removal is not in any file's content \u2014 the deleted case is absent from the file that is left, so a pathless check-driver run reports this class skipped and proves it only from the fixture pair, which carries the file before the edit and the file after it. The commit lane is the run that holds both versions: `--staged` counts the index against HEAD, a file deleted outright included, so a commit that shrinks the suite is a finding there. The earlier lane is an authored `edit-guard` on the same removal rule — a catalogue never carries a session guard, so that half is the owner's to author. It reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a test file is seen, and a Write payload carries none, so a whole-file rewrite that drops a test file is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right \u2014 behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
       "evidence": {
         "tier": "reasoned",
         "source": "No tool in the Go ecosystem gates on a drop in test count between two revisions; the runners report what they discovered, never what they stopped discovering. The judgement that a shrinking suite is a defect is jig's own."
+      }
+    },
+    {
+      "id": "unimplemented-stub-shipped",
+      "title": "Stub left panicking while the task is reported done",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Leaves panic(\"not implemented\") in a function whose signature and callers it already wrote",
+        "Marks the missing half with a TODO comment and reports the change complete",
+        "Returns the zero value and a nil error from a function it did not write, so callers compile and the suite passes vacuously"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "panic\\s*\\(\\s*\"(?:TODO|not implemented|unimplemented|not yet implemented)"
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "//\\s*(?:TODO|FIXME|XXX|HACK)\\b"
+            ],
+            "paths": [
+              "**/*.go"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package reporting\n\nimport \"time\"\n\nfunc (r *Report) LineItems(start time.Time) []LineItem {\n\treturn r.repo.Between(start, start.AddDate(0, 3, 0))\n}\n\n// TODO: sum the line items once the ledger schema is settled\nfunc (r *Report) RunningBalance(start time.Time) (Money, error) {\n\tpanic(\"not implemented\")\n}\n",
+        "nearMiss": "package reporting\n\nimport \"time\"\n\nconst todoReviewLimit = 25\n\nfunc (r *Report) TodoItems() []LineItem {\n\treturn r.repo.Flagged(todoReviewLimit)\n}\n\nfunc (r *Report) LineItems(start time.Time) []LineItem {\n\treturn r.repo.Between(start, start.AddDate(0, 3, 0))\n}\n\n// RunningBalance sums every line item in the quarter that starts at start.\nfunc (r *Report) RunningBalance(start time.Time) (Money, error) {\n\tbalance := Money{}\n\tfor _, item := range r.LineItems(start) {\n\t\tbalance = balance.Plus(item.Amount)\n\t}\n\treturn balance, nil\n}\n"
+      },
+      "gapNotes": "Both tokens are also the correct code somewhere: a panic on an unreachable branch is idiomatic Go, and a TODO comment is often a note about a later improvement over finished code — so this reports a guess about intent, not a fact. The message half must run with string bodies visible, which makes it the one detector in this edition reading inside quotes; a panic whose message is built with fmt.Sprintf carries no literal and is missed. The quietest form has no token at all: `return Money{}, nil` written because the session did not know what to compute, which only a test asserting the real value catches. golangci-lint's godox linter would name the comment half, but it is not in the enable list jig installs, so no tool-rule detector is claimed. The near miss is the trap: `todoReviewLimit` and `TodoItems` are code, not markers.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "panic is a documented Go builtin; the judgement that a panic carrying a stub message is unfinished work is jig's own, and the godox linter that would cover the comment half is not enabled in the .golangci.yml jig installs — hence no tool-rule detector."
+      }
+    },
+    {
+      "id": "sleep-based-test-synchronisation",
+      "title": "Sleep standing in for a real wait condition in a test",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Adds time.Sleep to make an intermittently failing concurrent test pass on the machine it is running on",
+        "Increases an existing sleep when the test fails again, rather than waiting on the condition",
+        "Sleeps because it does not know which channel or WaitGroup the package already exposes"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\btime\\.Sleep\\s*\\(",
+              "<-\\s*time\\.After\\s*\\("
+            ],
+            "paths": [
+              "**/*_test.go"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "package queueing\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestDrainsAsynchronously(t *testing.T) {\n\tq := New()\n\tq.Submit(\"a\")\n\tq.Submit(\"b\")\n\ttime.Sleep(500 * time.Millisecond)\n\t<-time.After(250 * time.Millisecond)\n\tif got := q.PendingCount(); got != 0 {\n\t\tt.Fatalf(\"pending = %d, want 0\", got)\n\t}\n}\n",
+        "nearMiss": "package queueing\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestDrainsAsynchronously(t *testing.T) {\n\tq := New()\n\tdrained := make(chan struct{}, 2)\n\tq.OnComplete(func(Job) { drained <- struct{}{} })\n\tq.Submit(\"a\")\n\tq.Submit(\"b\")\n\tdeadline := time.NewTimer(5 * time.Second)\n\tdefer deadline.Stop()\n\tfor i := 0; i < 2; i++ {\n\t\tselect {\n\t\tcase <-drained:\n\t\tcase <-deadline.C:\n\t\t\tt.Fatal(\"queue did not drain within 5s\")\n\t\t}\n\t}\n\tif got := q.PendingCount(); got != 0 {\n\t\tt.Fatalf(\"pending = %d, want 0\", got)\n\t}\n}\n\nfunc TestReportsSleepBudget(t *testing.T) {\n\tif got := New().SleepBudget(); got != 0 {\n\t\tt.Fatalf(\"sleep budget = %v, want 0\", got)\n\t}\n}\n"
+      },
+      "gapNotes": "The call site is matched exactly, but whether the call is a defect is not decidable from the text: a sleep is correct when the test is deliberately exercising timing, so this is a project-policy class whose value comes from the ledger rather than the match. No golangci-lint rule bans it and none honestly could, so there is no tool-rule detector — forbidigo could be pointed at time.Sleep per project, which is the owner's call rather than a shipped claim. It reads two spellings: a sleep behind a package helper, a busy-wait loop over an atomic, and `testing.T.Deadline` misuse all carry neither. The near miss holds the traps — a `time.NewTimer` deadline in a select is a real condition wait on the same import, and `SleepBudget` names sleeping without doing it.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "time.Sleep and time.After are documented standard-library calls; the judgement that their use inside a test is a synchronisation smell is jig's policy, backed by no enabled rule id — hence no tool-rule detector."
+      }
+    },
+    {
+      "id": "test-config-loosened",
+      "title": "Lint and test harness config relaxed instead of the failure fixed",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Turns run.tests off so the analyzers stop reading _test.go files at all",
+        "Lets nolint directives go unexplained and unscoped after failing to satisfy a linter",
+        "Edits the .golangci.yml jig installed rather than the code that made it fail"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "\\btests\\s*:\\s*false\\b",
+              "\\ballow-unused\\s*:\\s*true\\b",
+              "\\brequire-explanation\\s*:\\s*false\\b",
+              "\\brequire-specific\\s*:\\s*false\\b"
+            ],
+            "paths": [
+              ".golangci.yml",
+              ".golangci.yaml",
+              "**/.golangci.yml",
+              "**/.golangci.yaml"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "version: \"2\"\nrun:\n  timeout: 5m\n  tests: false\nlinters:\n  default: none\n  enable:\n    - govet\n  settings:\n    nolintlint:\n      require-explanation: false\n      require-specific: false\n      allow-unused: true\n",
+        "nearMiss": "version: \"2\"\nrun:\n  timeout: 5m\n  tests: true\nlinters:\n  default: none\n  enable:\n    - errcheck\n    - govet\n    - nolintlint\n    - staticcheck\n    - unused\n  settings:\n    nolintlint:\n      require-explanation: true\n      require-specific: true\n      allow-unused: false\n"
+      },
+      "gapNotes": "The near miss is the run and nolintlint sections of the .golangci.yml jig writes, verbatim, so this class fails the moment it would fire on jig's own install; the rest of that file is trimmed out of the fixture and is therefore not what the pair proves. It reads values, never a diff, and the loudest loosening leaves no value at all — a linter deleted from the `enable` list, or `default: none` with the list emptied, has no token to match. A regex over YAML, not a parser: the same settings written under a different nesting, or supplied on the command line with --tests=false, are invisible. Go has no separate test-runner config file, so the sibling loosening — dropping -race or -count=1 from the Makefile target — is the `toothless-test-command` class in this edition, not this one.",
+      "evidence": {
+        "tier": "documented",
+        "source": "run.tests and the nolintlint settings require-explanation, require-specific and allow-unused are all documented keys of the golangci-lint v2 configuration reference; the near miss is jig's own installed configSample for this edition."
       }
     }
   ]

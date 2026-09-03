@@ -49,8 +49,11 @@
 // the schema. It reads the git index, so it has something to say at commit time
 // and reports itself skipped anywhere nothing is staged. A removal detector
 // counts what STOPPED being there, which needs a file before an edit and the
-// same file after it; this run reads the tree as it is, so it reports that class
-// skipped and the selftest proves it from the fixture that carries both halves.
+// same file after it. `--staged` is the one run that holds both — the index is
+// the file after, HEAD is the file before — so the commit lane counts the drop,
+// a deleted file included. Every other run reads the tree as it is and reports
+// that class skipped; the selftest proves it from the fixture carrying both
+// halves, so the check is proven where the lane cannot run it.
 
 import fs from "node:fs";
 import os from "node:os";
@@ -330,24 +333,26 @@ function gitOut(root, args) {
   return run.error || run.status !== 0 ? null : run.stdout;
 }
 
-// The staged file list. `--relative` for the same reason `changed()` uses it:
-// git names paths from the repository root and a check's globs are written
-// against ROOT, and below the root the two namespaces differ. `--diff-filter`
-// drops deletions, which have no staged content left to read. SKIP_DIRS applies
-// here as it does to the walk — staging a check module must not point the check
-// at the fixture inside it.
+// The staged file list, under whichever `--diff-filter` the caller needs.
+// `--relative` for the same reason `changed()` uses it: git names paths from the
+// repository root and a check's globs are written against ROOT, and below the
+// root the two namespaces differ. The pattern kinds ask for `ACMR`, because a
+// deleted file has no staged content left to read; the removal kind adds `D`,
+// because a file git will commit the removal of is the plainest removal there
+// is. SKIP_DIRS applies here as it does to the walk — staging a check module
+// must not point the check at the fixture inside it.
 // null, not an empty list, when git will not answer: an index nobody could read
 // and an index with nothing in it are the same silence otherwise, and reporting
 // the second for the first is a commit lane that rubber-stamps everything.
-function stagedFiles(root) {
-  const out = gitOut(root, ["diff", "--cached", "--name-only", "--relative", "--diff-filter=ACMR"]);
+function stagedFiles(root, filter) {
+  const out = gitOut(root, ["diff", "--cached", "--name-only", "--relative", "--diff-filter=" + filter]);
   if (out === null) return null;
   return out.split("\n").map((s) => s.trim()).filter(Boolean)
     .filter((rel) => !rel.split("/").some((seg) => SKIP_DIRS.has(seg)));
 }
 
 function makeContext(root, only, staged) {
-  const list = staged ? stagedFiles(root) : null;
+  const list = staged ? stagedFiles(root, "ACMR") : null;
   // A git that will not answer is a partial scan exactly like a walk that hit
   // the ceiling, and it exits non-zero for the same reason: 0 is the only thing
   // a hook reads, and there it says the project was checked.
@@ -442,6 +447,21 @@ function makeContext(root, only, staged) {
       const list = run.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
       return list.length ? list : null;
     },
+    // The change set a removal detector counts over, and the file as HEAD has
+    // it. Deletions are in this list and out of the other one: a file the commit
+    // removes outright is the plainest removal there is, and it is precisely the
+    // one a pattern can never see. Null where nothing is staged, like
+    // `changed()`, so the caller reports a skip rather than a pass.
+    removedChanged() {
+      const list = stagedFiles(root, "ACMRD");
+      return list && list.length ? list : null;
+    },
+    // The version this commit replaces. Null when HEAD does not carry the path,
+    // which is a file this commit ADDS — an addition removes nothing.
+    head(rel) {
+      const text = gitOut(root, ["show", "HEAD:./" + rel]);
+      return text === null ? null : text.replace(/^﻿/, "");
+    },
   };
 }
 
@@ -526,15 +546,46 @@ function fencedHalves(text) {
 }
 
 // The rule: some pattern the detector names is in the before text more times
-// than in the after text. Both halves are blanked the way the pattern kind
-// blanks a file, at the path this detector's own globs derive, so a declaration
-// that only ever lived in a comment is not a removal.
-function removedHits(det, halves) {
-  const rel = fixturePath(det);
+// than in the after text, and by how much. Both halves are blanked the way the
+// pattern kind blanks a file, at the path the count is taken over, so a
+// declaration that only ever lived in a comment is not a removal.
+function removedDrop(det, rel, halves) {
   const before = blankRegions(halves.before, rel, det.params);
   const after = blankRegions(halves.after, rel, det.params);
   const count = (text, p) => (text.match(new RegExp(p, "g")) || []).length;
-  return det.params.removed.some((p) => count(before, p) > count(after, p)) ? 1 : 0;
+  for (const p of det.params.removed) {
+    const drop = count(before, p) - count(after, p);
+    if (drop > 0) return { pattern: p, drop };
+  }
+  return null;
+}
+
+// The selftest's reading of it: the fixture carries both halves, so the path is
+// the one this detector's own globs derive.
+function removedHits(det, halves) {
+  return removedDrop(det, fixturePath(det), halves) ? 1 : 0;
+}
+
+// The commit lane's reading of it, and the only lane that has two versions of a
+// real file: the index is the file after, HEAD is the file before. The finding
+// names the file at line 1, like a paired one — what is wrong is an absence, and
+// there is no line left in the file to point at.
+function countFloorFindings(ctx, mod, det, changed) {
+  const p = det.params;
+  const out = [];
+  for (const rel of changed.filter((r) => matchesAny(r, p.paths || []))) {
+    const before = ctx.head(rel);
+    if (before === null) continue;
+    const after = ctx.read(rel);
+    // A staged deletion reads back null, which is the same absence as an empty
+    // file and counted as one.
+    const found = removedDrop(det, rel, { before, after: after === null ? "" : after });
+    if (found) {
+      out.push(ctx.finding(mod.id, rel, 1, "removed:" + found.pattern,
+        found.drop + " fewer than the version this commit replaces"));
+    }
+  }
+  return out;
 }
 
 // The fixture pair is stored inline, so the driver has to invent the path it
@@ -594,6 +645,7 @@ async function runChecks(root, only, staged) {
   // Read once, for every paired detector in the run. Asking git per check would
   // spawn a process per module to learn the same fact.
   let changed;
+  let dropped;
   for (const mod of await loadChecks()) {
     if (mod.broken) { broken.push({ id: mod.id, why: mod.broken }); continue; }
     const mine = driverDetectors(mod);
@@ -603,13 +655,13 @@ async function runChecks(root, only, staged) {
       skipped.push({ id: mod.id, why: "no detector this driver runs — it is watched elsewhere", command: null });
       continue;
     }
-    // A removal needs the file as it was as well as the file as it is, and this
-    // run only has the second. Said out loud rather than counted as clean: a
+    // A removal needs the file as it was as well as the file as it is, and a
+    // walk only has the second. Said out loud rather than counted as clean: a
     // class nobody could evaluate is not a class that came back with nothing.
     // Only when the module carries nothing else this run reads. A module with a
     // pattern detector beside its removal one IS evaluated, and reporting it
     // skipped as well would make the word mean two things in one run.
-    if (removed.length && !mine.length && !paired.length) {
+    if (removed.length && !staged && !mine.length && !paired.length) {
       // Where it IS watched, said only when the module carries the lever that
       // does it. A removal reaches a lane through an edit guard reading one
       // call's two halves; a module with none is watched nowhere at all, and
@@ -619,8 +671,9 @@ async function runChecks(root, only, staged) {
       skipped.push({
         id: mod.id,
         why: "a removal is only visible between two versions of a file, and this run reads the tree as it is" +
-          (session ? " — this class is watched where the edit happens"
-            : " — and this check carries no session guard either, so nothing watches it"),
+          " — the commit lane counts it against HEAD" +
+          (session ? ", and this class is watched where the edit happens"
+            : ", and this check carries no session guard either, so nothing watches it as it is typed"),
         command: null,
       });
     }
@@ -640,6 +693,21 @@ async function runChecks(root, only, staged) {
           });
         } else {
           for (const det of paired) findings.push(...pairedFindings(ctx, mod, det, changed));
+        }
+      }
+      // The count floor, and the commit lane's alone. It is the one run holding
+      // the file before the change as well as the file after it, so it is the
+      // one run that can say the suite lost cases in this commit.
+      if (removed.length && staged) {
+        if (dropped === undefined) dropped = ctx.removedChanged();
+        if (dropped === null) {
+          skipped.push({
+            id: mod.id,
+            why: "nothing is staged, so there is no earlier version to count against",
+            command: null,
+          });
+        } else {
+          for (const det of removed) findings.push(...countFloorFindings(ctx, mod, det, dropped));
         }
       }
     } catch (err) {

@@ -267,6 +267,57 @@ function forManager(value, manager) {
   return typeof held === "string" && held !== "" ? held : null;
 }
 
+// The rest of the starter. A project file on its own is not a project: a
+// `Cargo.toml` with no `src/lib.rs` is a manifest cargo refuses to parse, and a
+// `pyproject.toml` with no package directory builds an empty wheel. SCOPE's
+// starter row says a starter must build with no source files in it, so
+// `starter.files` is the smallest tree that makes the ecosystem's own build and
+// test commands exit 0 — one source file and one smoke test — keyed by package
+// manager wherever `sample` is, for the same reason.
+function starterFilesFor(value, manager) {
+  if (Array.isArray(value)) return value;
+  if (!isObject(value)) return [];
+  return Array.isArray(value[manager]) ? value[manager] : [];
+}
+
+// Every starter file is a byte jig writes into somebody's repository, so the
+// path is checked here rather than at the write: a catalogue that named
+// `../../.bashrc` would be a supply chain, not a starter.
+function validateStarter(record, file, manifest, manager, hasSample, where) {
+  if (manifest.starter === undefined) return;
+  if (!isObject(manifest.starter)) {
+    throw expected("the " + record.edition + " edition at " + file + " declares a detect.manifest.starter" +
+      " that is not an object");
+  }
+  const files = starterFilesFor(manifest.starter.files, manager);
+  if (files.length && !hasSample) {
+    throw expected("the " + record.edition + " edition offers starter files" + where +
+      " for a project file it does not write, so nothing would ever lay them down");
+  }
+  for (const entry of files) {
+    if (!isObject(entry) || typeof entry.path !== "string" || entry.path === "" || typeof entry.body !== "string") {
+      throw expected("the " + record.edition + " edition's detect.manifest.starter.files" + where +
+        " must each carry a `path` and a `body`, and one carries " + JSON.stringify(entry));
+    }
+    // A starter file may belong to one tool rather than to the edition — the
+    // JavaScript smoke tests are two files because `node --test` and vitest
+    // read different ones. It has to name a tool this edition actually offers,
+    // or the file would be unreachable and nobody would ever find out.
+    if (entry.tool !== undefined) {
+      const offered = (Array.isArray(record.toolchain) ? record.toolchain : []).map((t) => isObject(t) && t.id);
+      if (!offered.includes(entry.tool)) {
+        throw expected("the " + record.edition + " edition's starter file `" + entry.path + "`" + where +
+          " is written only for the tool " + JSON.stringify(entry.tool) + ", which this edition does not offer");
+      }
+    }
+    const rel = entry.path;
+    if (rel.startsWith("/") || rel.includes("\\") || /^[A-Za-z]:/.test(rel) || rel.split("/").includes("..")) {
+      throw expected("the " + record.edition + " edition's starter file `" + rel + "`" + where +
+        " is not a relative path inside the project");
+    }
+  }
+}
+
 function validateManifest(record, file) {
   const manifest = record.detect && record.detect.manifest;
   if (!isObject(manifest)) {
@@ -295,6 +346,7 @@ function validateManifest(record, file) {
         " jig can write or a `hint` naming what the owner runs instead — it carries " +
         (hasSample ? "both" : "neither"));
     }
+    validateStarter(record, file, manifest, manager, hasSample, where);
   }
 }
 
@@ -315,6 +367,7 @@ function manifestFor(edition, manager) {
     path: forManager(m.path, key),
     sample: forManager(m.sample, key),
     hint: forManager(m.hint, key),
+    starter: starterFilesFor(isObject(m.starter) ? m.starter.files : null, key),
   };
 }
 
@@ -526,4 +579,15 @@ module.exports = {
   commentSyntaxFor,
   manifestFor,
   projectExists,
+  // Detection's own bounded walk and its pattern matcher, exported because the
+  // engine has to answer the same two questions an install poses: which files a
+  // glob in `detect.files` names right now, and what the tree held before the
+  // package manager ran.
+  walkFiles: walk,
+  // The walk's file cap, exported for the one caller that DIFFERS two walks. A
+  // truncated list is cut wherever the count ran out, so two of them put
+  // different files on either side of the cut and a path that was only ever
+  // missing from the first would read as a path the install created.
+  WALK_MAX_FILES: MAX_FILES,
+  fileMatches,
 };

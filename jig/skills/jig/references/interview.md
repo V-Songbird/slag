@@ -91,7 +91,11 @@ Walk these sources and write one numbered finding per hit, in plain words:
    no loaded surface references. The doc exists and every session is blind to
    it. The decision it seeds: wire it in, or accept that it is documentation
    for humans only.
-7. No edition matched, or several did. One means every check is written from
+7. Every `stale-pair` incident — two files this history changed together and
+   then stopped, named as the paths they actually are. The owner never listed
+   this pair, because nobody lists a pair they have not noticed lapse. The
+   decision it seeds: guard the relation, or say the two are no longer related.
+8. No edition matched, or several did. One means every check is written from
    scratch with nothing to calibrate against; several mean class ids arrive
    namespaced per edition and the same mistake may be guarded twice.
 
@@ -119,7 +123,8 @@ the frontier is empty; nothing is left silently assumed.
 - **Round one** — no prerequisites: the language and package manager when there
   is no project here yet, then persona, phase, the mistake list, the
   agent-damage anchor.
-- **Round two** — unlocked by round one: the worst-bug free text; the toolchain
+- **Round two** — unlocked by round one: the worst-bug free text; the stale pair
+  forensics found, when it found one; the toolchain
   multi-select; the CI workflow decision; the hook-weave offer when the scan
   found a committed pre-commit; any decision a blind-spot finding seeded that
   round one's answers left standing.
@@ -169,19 +174,31 @@ for.
 
 When no edition matched, there are no class rows to draw from. Ask the mistakes
 as free text instead — "Describe the mistakes you want caught, one per line" —
-and keep the two standing options below, which need no edition.
+and keep the standing offers below, which need no edition.
 
-Two options are always there, whatever the editions matched. The first is a
-standing offer about jig itself, and it goes last but one:
+**The standing offers.** Four options are always there, whatever the editions
+matched. They are routes around the harness rather than mistakes in the code, so
+no edition ranks them and no forensics pass counts them — an owner who never
+thought of them would otherwise have to describe all four from scratch. On the
+`Me and my AI sessions` persona they lead the list, above the class rows, because
+that persona is the one whose sessions can take every one of these routes. On the
+other two personas they go last, after the class rows.
 
-- `jig's own guards being switched off` — "An agent edits `.jig/config.json`,
-  guts a check under `.jig/checks/`, drops `.jig/off` in place or defuses the CI
-  workflow, and the harness is off with nothing saying so. Four checks, written
-  and proved like any other."
+- `hook-bypassed` — "A session commits with `--no-verify`, or reaches past the
+  hook another way, and the commit lane never runs on what lands."
+- `force-push-to-default` — "A force push rewrites the default branch and takes
+  history nobody kept with it, under whichever refspec spelling names it."
+- `pipe-to-shell` — "A command pipes a download straight into a shell, so what
+  runs is whatever the server sent and nothing recorded what that was."
+- `harness-switched-off` — "An agent edits `.jig/config.json`, guts a check under
+  `.jig/checks/`, drops `.jig/off` in place or defuses the CI workflow, and the
+  harness is off with nothing saying so. Four checks, written and proved like any
+  other."
 
-Nothing about that row is installed by ticking it — it is the same authoring,
-admission and per-item approval as every other check, and SKILL.md step 4 holds
-the four shapes and the limits to read out. Then, last:
+Ticking one of those installs nothing. The model authors each offer the owner
+picks, admission proves it against its own pair like every other check, and the
+owner approves it by name at the item tier — SKILL.md step 4 holds the shapes
+each one takes and the limits to read out. Then, last:
 
 - `Something else — I'll describe it` — "Type it in your own words. jig writes
   the check, and proves it against a violation and a near-miss before it counts
@@ -209,6 +226,23 @@ day?"
 - `Something the list above covers` — "Take the selection as it stands."
 - `Something else` — "Describe it and jig will write a check for it."
 - `Skip this` — "Move on to the plan."
+
+**Question five-a**, header `"Stale pair"`, asked only when forensics reported a
+`stale-pair` incident, once, for the leading one: "`<moved>` has changed
+`<drifted>` times since `<stale>` last moved with it, after `<coChanges>`
+commits that carried both. Should jig watch that pair?"
+
+- `Yes, warn when one moves without the other (Recommended)` — "A check over the
+  two paths, proved against a violation and a near-miss like every other."
+- `They are not related any more` — "Take the pair off the table. Nothing is
+  installed and the incident stays in the report as history."
+- `Ask me about a different pair` — "Name the two files yourself; the rest of
+  the incident list is in the forensics output."
+
+Ask this about a pair from the report, never about doc sync in the abstract —
+the whole reason this question exists is that the owner would have to know the
+pair by name before they could ever raise it themselves. Print the incident's
+own `confidence` line with the question.
 
 **Question six**, header `"Toolchain"`, `multiSelect: true`, built from the
 matched edition's `toolchain` rows: "Which of these should jig install and wire
@@ -315,6 +349,15 @@ Print these the moment they become true, not in a summary at the end.
 > check: it will sometimes report something that is fine. That is why it is
 > disclosed here rather than discovered later, and why observe mode is worth
 > considering for it.
+
+**A `stale-pair` incident is put to the owner:**
+
+> These two files are a pair because this history changed them together and then
+> stopped, and that is the whole of the evidence — co-change is correlation, not
+> a declared relation. git carries nothing that says they are meant to move
+> together, so the question is yours to answer and jig installs nothing until
+> you do. The counts and the attribution on the row are best-effort for the same
+> reason.
 
 **A hook slot in `occupied` covers a mistake the user named:**
 

@@ -86,8 +86,8 @@ Every check jig runs is measured the same way it is admitted: it must fire on it
 
 | What | Score |
 | --- | --- |
-| Checks jig runs, each passing its own pair | **129 of 129** |
-| Mistake classes across the six editions | 147 |
+| Checks jig runs, each passing its own pair | **147 of 147** |
+| Mistake classes across the six editions | 165 |
 | Cross-sample hits, disclosed | 8 |
 
 > [!NOTE]

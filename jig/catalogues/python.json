@@ -7,7 +7,19 @@
     "manifest": {
       "path": "pyproject.toml",
       "sample": "# Starter project file. Rename the project before you publish it.\n[project]\nname = \"example-app\"\nversion = \"0.1.0\"\nrequires-python = \">=3.11\"\n\n[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n",
-      "hint": null
+      "hint": null,
+      "starter": {
+        "files": [
+          {
+            "path": "src/example_app/__init__.py",
+            "body": "\"\"\"Starter package. Rename it before you publish it.\"\"\"\n\n__all__ = [\"name\"]\n\n\ndef name() -> str:\n    \"\"\"The package's name, so the starter has one thing its own test can check.\"\"\"\n    return \"example-app\"\n"
+          },
+          {
+            "path": "tests/test_smoke.py",
+            "body": "\"\"\"Smoke test, so a new project's test command has something to run.\n\nWritten on `unittest` and reading the tree rather than importing it: nothing\nis installed yet, so `import example_app` would fail until the owner runs\n`pip install -e .`. pytest collects a TestCase unchanged.\n\"\"\"\n\nimport unittest\nfrom pathlib import Path\n\n\nclass SmokeTest(unittest.TestCase):\n    def test_the_package_directory_is_here(self) -> None:\n        package = Path(__file__).resolve().parent.parent / \"src\" / \"example_app\"\n        self.assertTrue(package.is_dir())\n"
+          }
+        ]
+      }
     },
     "ignore": [
       "__pycache__/",
@@ -1630,10 +1642,156 @@
         "violation": "import pytest\n\nfrom billing.invoice import total_due\n\n\ndef test_totals_a_single_line():\n    assert total_due([(\"seat\", 1200)]) == 1200\n\n\ndef test_applies_the_annual_discount():\n    assert total_due([(\"seat\", 1200)], term=\"annual\") == 1080\n\n\ndef test_rejects_a_negative_line():\n    with pytest.raises(ValueError):\n        total_due([(\"seat\", -1)])\n--- after\nimport pytest\n\nfrom billing.invoice import total_due\n\n\ndef test_totals_a_single_line():\n    assert total_due([(\"seat\", 1200)]) == 1200\n",
         "nearMiss": "import pytest\n\nfrom billing.invoice import total_due\n\n\ndef test_totals_a_single_line():\n    assert total_due([(\"seat\", 1200)]) == 1200\n\n\ndef test_rejects_a_negative_line():\n    assert total_due([(\"seat\", -1)]) == 0\n--- after\nimport pytest\n\nfrom billing.invoice import total_due\n\n\ndef test_totals_a_single_line():\n    assert total_due([(\"seat\", 1200)]) == 1200\n\n\ndef test_rejects_a_negative_line():\n    with pytest.raises(ValueError):\n        total_due([(\"seat\", -1)])\n"
       },
-      "gapNotes": "A removal is not in any file's content — the deleted case is absent from the file that is left, so the committed check driver reports this class skipped on a normal run and proves it only from the fixture pair, which carries the file before the edit and the file after it. Nothing in this catalogue watches it — a catalogue never carries a session guard — so the class ships as a named mistake with a proven pair and no lane, and the plan grades that cell GAP. The lane is an authored `edit-guard` on the same removal rule, which reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a test module is seen, and a Write payload carries none, so a whole-file rewrite that drops a test module is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right — behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
+      "gapNotes": "A removal is not in any file's content — the deleted case is absent from the file that is left, so a pathless check-driver run reports this class skipped and proves it only from the fixture pair, which carries the file before the edit and the file after it. The commit lane is the run that holds both versions: `--staged` counts the index against HEAD, a file deleted outright included, so a commit that shrinks the suite is a finding there. The earlier lane is an authored `edit-guard` on the same removal rule — a catalogue never carries a session guard, so that half is the owner's to author. It reads one edit at a time: an Edit payload carries the text it replaced, so a case deleted out of a test module is seen, and a Write payload carries none, so a whole-file rewrite that drops a test module is not. Author it to observe: one call cannot see the case being put back two calls later, and a deletion can be right — behaviour that genuinely went away takes its tests with it, which is a judgement no count can make.",
       "evidence": {
         "tier": "reasoned",
         "source": "No tool in the Python ecosystem gates on a drop in test count between two revisions; the runners report what they discovered, never what they stopped discovering. The judgement that a shrinking suite is a defect is jig's own."
+      }
+    },
+    {
+      "id": "unimplemented-stub-shipped",
+      "title": "Stub left raising while the task is reported done",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Leaves `raise NotImplementedError` in a function whose signature and callers it already wrote",
+        "Marks the missing half with a TODO comment and reports the change complete",
+        "Returns None or an empty list from a function it did not write, so callers run and the suite passes vacuously"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\braise\\s+NotImplementedError\\b"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        },
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "#\\s*(?:TODO|FIXME|XXX|HACK)\\b"
+            ],
+            "paths": [
+              "**/*.py"
+            ],
+            "stripComments": false,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "from datetime import date, timedelta\n\nfrom billing import Ledger, LineItem, Money\n\n\ndef line_items(ledger: Ledger, quarter_start: date) -> list[LineItem]:\n    return ledger.between(quarter_start, quarter_start + timedelta(days=90))\n\n\ndef running_balance(ledger: Ledger, quarter_start: date) -> Money:\n    # TODO: sum the line items once the ledger schema is settled\n    raise NotImplementedError\n",
+        "nearMiss": "from abc import ABC, abstractmethod\nfrom datetime import date, timedelta\n\nfrom billing import LineItem, Money\n\nTODO_REVIEW_LIMIT = 25\n\n\nclass Ledger(ABC):\n    @abstractmethod\n    def between(self, start: date, end: date) -> list[LineItem]:\n        \"\"\"Return the line items in the half-open interval.\"\"\"\n\n\ndef todo_items(ledger: Ledger) -> list[LineItem]:\n    # every flagged item, newest first\n    return ledger.flagged(TODO_REVIEW_LIMIT)\n\n\ndef running_balance(ledger: Ledger, quarter_start: date) -> Money:\n    balance = Money.zero()\n    for item in ledger.between(quarter_start, quarter_start + timedelta(days=90)):\n        balance += item.amount\n    return balance\n"
+      },
+      "gapNotes": "Both tokens are also the correct code somewhere: `raise NotImplementedError` is the documented body of an abstract method, and a TODO comment is often a note about a later improvement over finished code — so this reports a guess about intent, not a fact, and needs a wave-off path. The near miss is the trap it does avoid: an @abstractmethod that declares its contract with a docstring rather than a raise, and a module constant named TODO_REVIEW_LIMIT that is code rather than a marker. The quietest form has no token at all — a body of `...`, `pass`, or a return of `None` written because the session did not know what to compute. Ruff's flake8-fixme rules (FIX001-FIX004) would name the comment half, but they are not in the select list jig installs, so no tool-rule detector is claimed for them.",
+      "evidence": {
+        "tier": "documented",
+        "source": "NotImplementedError is documented in the Python built-in exceptions reference as the signal for an unimplemented abstract method; the comment markers are jig's own convention and carry no enabled rule id."
+      }
+    },
+    {
+      "id": "sleep-based-test-synchronisation",
+      "title": "sleep standing in for a real wait condition in a test",
+      "axes": [
+        "human",
+        "agent"
+      ],
+      "agentModes": [
+        "Adds time.sleep to make an intermittently failing async test pass on the machine it is running on",
+        "Increases an existing sleep when the test fails again, rather than waiting on the condition",
+        "Sleeps because it does not know which awaiting primitive the project already has"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "heuristic",
+          "params": {
+            "patterns": [
+              "\\btime\\.sleep\\s*\\(",
+              "\\basyncio\\.sleep\\s*\\("
+            ],
+            "paths": [
+              "**/tests/**/*.py",
+              "**/test_*.py",
+              "**/*_test.py"
+            ],
+            "stripComments": true,
+            "stripStrings": true,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "import asyncio\nimport time\n\nfrom queueing import DispatchQueue\n\n\ndef test_drains_synchronously() -> None:\n    queue = DispatchQueue()\n    queue.submit(\"a\")\n    queue.submit(\"b\")\n    time.sleep(0.5)\n    assert queue.pending_count() == 0\n\n\nasync def test_drains_asynchronously() -> None:\n    queue = DispatchQueue()\n    queue.submit(\"a\")\n    await asyncio.sleep(0.25)\n    assert queue.pending_count() == 0\n",
+        "nearMiss": "import asyncio\n\nfrom queueing import DispatchQueue\n\n\ndef test_reports_sleep_budget() -> None:\n    assert DispatchQueue().sleep_budget_millis() == 0\n\n\nasync def test_drains_asynchronously() -> None:\n    queue = DispatchQueue()\n    queue.submit(\"a\")\n    queue.submit(\"b\")\n    await asyncio.wait_for(queue.drained(), timeout=5)\n    assert queue.pending_count() == 0\n"
+      },
+      "gapNotes": "The call site is matched exactly, but whether the call is a defect is not decidable from the text: a sleep is correct when the test is deliberately exercising timing, so this is a project-policy class whose value comes from the ledger rather than the match. No ruff rule bans it and none honestly could, so there is no tool-rule detector. It reads two spellings — a sleep imported directly (`from time import sleep`), a `trio.sleep`, an anyio sleep, or a busy-wait loop all carry neither. Scoped to the test paths, so the same sleep in a fixture module outside them is missed. The near miss holds the trap: `sleep_budget_millis` mentions sleeping without doing it, and `asyncio.wait_for` is a real condition wait on the same import.",
+      "evidence": {
+        "tier": "reasoned",
+        "source": "time.sleep and asyncio.sleep are documented standard-library calls; the judgement that their use inside a test is a synchronisation smell is jig's policy, backed by no rule id — hence no tool-rule detector."
+      }
+    },
+    {
+      "id": "test-config-loosened",
+      "title": "Test harness config relaxed instead of the failure fixed",
+      "axes": [
+        "agent"
+      ],
+      "agentModes": [
+        "Lowers the coverage threshold to whatever the current run happens to reach, then reports the suite green",
+        "Flips the switch that makes a focused or empty run fail, so a narrowed suite stops being an error",
+        "Edits the harness config jig installed rather than the code that made it fail"
+      ],
+      "severity": "safety",
+      "detectors": [
+        {
+          "lever": "check-driver",
+          "actor": "human-editor",
+          "confidence": "deterministic",
+          "params": {
+            "patterns": [
+              "--cov-fail-under\\s*=\\s*(?:\\d|[1-4]\\d)(?!\\d)",
+              "\\bxfail_strict\\s*=\\s*false\\b",
+              "--no-cov\\b",
+              "\\bfail_under\\s*=\\s*(?:\\d|[1-4]\\d)(?!\\d)"
+            ],
+            "paths": [
+              "**/pyproject.toml",
+              "**/pytest.ini",
+              "**/tox.ini",
+              "**/setup.cfg"
+            ],
+            "stripComments": true,
+            "stripStrings": false,
+            "perLine": false
+          }
+        }
+      ],
+      "fixtures": {
+        "violation": "[tool.pytest.ini_options]\nminversion = \"8.0\"\ntestpaths = [\"tests\"]\naddopts = \"--strict-markers --import-mode=importlib -ra --cov=src --cov-fail-under=0 --no-cov\"\nxfail_strict = false\nfilterwarnings = [\"default\"]\n\n[tool.coverage.report]\nfail_under = 25\n",
+        "nearMiss": "[tool.pytest.ini_options]\nminversion = \"8.0\"\ntestpaths = [\"tests\"]\naddopts = \"--strict-markers --strict-config --import-mode=importlib -ra --cov=src --cov-report=term-missing --cov-fail-under=85\"\nxfail_strict = true\nfilterwarnings = [\"error\"]\nmarkers = [\n  \"slow: takes longer than a second\",\n]\n"
+      },
+      "gapNotes": "The near miss is the pytest block jig writes into pyproject.toml, character for character, so this class fails the moment it would fire on jig's own install. It reads values, never a diff: `--cov-fail-under=70` is a real loosening from 85 and matches nothing here, because only a threshold under 50 is distinguishable from a project that never set one high. The commonest loosening of all leaves no value to read — the flag deleted from addopts entirely, or the whole `[tool.pytest.ini_options]` table removed. It must run with string bodies visible, because addopts is one TOML string, which means anything quoted in these files is read as config. A threshold passed on the command line or in a CI step is out of its scope.",
+      "evidence": {
+        "tier": "documented",
+        "source": "--cov-fail-under and --no-cov are documented pytest-cov flags, fail_under is a documented coverage.py report option, and xfail_strict is a documented pytest ini option; the near miss is jig's own installed configSample for this edition."
       }
     }
   ]

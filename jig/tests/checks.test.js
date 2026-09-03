@@ -361,28 +361,56 @@ test("only a skipped directory blinds a driver detector, never a file that share
   assert.equal(engine.driverBlindDir({ lever: "bash-guard", params: { patterns: ["x"] } }), null);
 });
 
-test("a removal on the check driver is a gap, not a lane, and never the floor", () => {
-  // The driver reads the tree as it is and reports a removal detector skipped on
-  // every run, so a cell naming the installed module would claim a lane nothing
-  // reaches — the same shape `driverBlindDir` names, for the same reason.
-  const removal = (params) => ({ lever: "check-driver", confidence: "deterministic",
-    params: { paths: ["**/*.test.js"], ...params } });
-  assert.equal(engine.driverBlindRemoval(removal({ removed: [A.TEST_COUNT_PATTERN] })), true);
-  // Not when the driver has something else on the same detector to evaluate.
-  assert.equal(engine.driverBlindRemoval(removal({ removed: [A.TEST_COUNT_PATTERN], patterns: ["x"] })), false);
-  assert.equal(engine.driverBlindRemoval({ lever: "edit-guard", params: { removed: ["x"] } }), false);
+test("a removal on the check driver names the module only where the commit lane runs it", () => {
+  // Until the count floor shipped, a removal detector was reported skipped on
+  // every run and the cell was graded GAP because nothing anywhere counted it.
+  // `--staged` counts the index against HEAD — but `--staged` is the pre-commit
+  // hook and nothing else: the workflow runs `run.mjs` pathless and a pathless
+  // run counts no removals. So the cell reads BOTH halves, the way a tool rule
+  // reads its config AND a lane that runs it.
+  const removal = (params, confidence) => ({ lever: "check-driver", actor: "human-editor",
+    confidence: confidence || "deterministic", params: { paths: ["**/*.test.js"], ...params } });
 
   const cls = { id: "tests-deleted", detectors: [removal({ removed: [A.TEST_COUNT_PATTERN] })] };
-  assert.equal(engine.hostNeutralFloor(cls), false, "a class nothing evaluates cleared the floor");
-  assert.match(engine.floorNote(cls), /no host-neutral deterministic lever/);
+  assert.equal(engine.hostNeutralFloor(cls, true), true,
+    "a removal the commit lane counts did not clear the host-neutral floor");
+  assert.equal(engine.floorNote(cls, true), null);
+  assert.equal(engine.hostNeutralFloor(cls, false), false,
+    "a removal cleared the floor in a repository whose commit lane does not exist");
+  assert.match(engine.floorNote(cls, false), /no host-neutral deterministic lever/);
+  // Confidence still decides, and a count going down is a judgement: the shipped
+  // classes are heuristic and stay off the floor for that reason and no other.
+  const heuristic = { id: "x", detectors: [removal({ removed: [A.TEST_COUNT_PATTERN] }, "heuristic")] };
+  assert.equal(engine.hostNeutralFloor(heuristic, true), false);
 
+  // Unwired, which is where every install starts: the module is on disk and
+  // nothing runs it with an index to read, so the cell names no artifact.
   const root = nodeProject();
+  spawnSync("git", ["init", "-q"], { cwd: root });
   install(root, { "no-ci": true }, [A.TESTS_DELETED]);
-  const row = JSON.parse(fs.readFileSync(path.join(root, ".jig", "plan.json"), "utf-8"))
+  const rowOf = () => JSON.parse(fs.readFileSync(path.join(root, ".jig", "plan.json"), "utf-8"))
     .rows.find((r) => r.classId === "tests-deleted");
-  assert.equal(row.cells["human-editor"].grade, "GAP");
-  assert.equal(row.cells["human-editor"].artifact, null);
-  assert.match(row.cells["human-editor"].why, /no earlier version to count against/);
+  assert.equal(engine.commitLane(root).runsChecks, false);
+  const unwired = rowOf();
+  assert.equal(unwired.cells["human-editor"].grade, "GAP");
+  assert.equal(unwired.cells["human-editor"].artifact, null,
+    "the matrix named a check module as coverage for a lane this repository does not run");
+  assert.match(unwired.cells["human-editor"].why, /only the commit lane counts it/);
+  assert.match(unwired.cells["human-editor"].why, /--wire-commit/);
+  // And the module is installed all the same: an unwired lane is a disclosed
+  // gap, not a discard, exactly as a blind directory is.
+  assert.ok(fs.existsSync(path.join(root, ".jig", "checks", "tests-deleted.check.mjs")));
+
+  // Wired, and the same class is coverage: the artifact is the module the hook
+  // runs, and the grade falls out of the detector's own confidence.
+  wireCommit(root);
+  assert.equal(engine.commitLane(root).runsChecks, true);
+  engine.cmdPlan(root, { _: [], change: [], authored: A.writeChecks(root, [A.TESTS_DELETED]),
+    provenance: "elicited", "no-ci": true });
+  const wired = rowOf();
+  assert.equal(wired.cells["human-editor"].grade, "PROB");
+  assert.equal(wired.cells["human-editor"].artifact, ".jig/checks/tests-deleted.check.mjs");
+  assert.equal(wired.cells["human-editor"].why, null);
 });
 
 test("a plan with neither a selection nor an authored check is a refusal", () => {
@@ -969,6 +997,117 @@ test("the selftest proves a removal check from the two halves of its own fixture
   assert.equal(result.hits, 1);
   assert.equal(result.nearMissHits, 0);
   assert.equal(result.seeded, "fixture.test.js");
+});
+
+// ---------------------------------------------------------------------------
+// The count floor: the one lane that holds both versions of a file
+// ---------------------------------------------------------------------------
+//
+// A commit is a before and an after. HEAD is the file the commit replaces, the
+// index is the file it writes, and `--staged` is the only run holding both — so
+// it is the only run that can say the suite lost cases. Both shapes were
+// reproduced against the shipped driver before this was written: an edit that
+// dropped two of three cases and a wholesale file deletion each came back
+// "No findings." and exit 0 in the lane installed to gate the commit.
+
+const THREE_CASES = "it('a', () => { expect(1).toBe(1); });\n" +
+  "it('b', () => { expect(2).toBe(2); });\nit('c', () => { expect(3).toBe(3); });\n";
+
+// HEAD, which `stage` alone does not give: a repository whose only version of a
+// file is the staged one has nothing for the floor to count against.
+function committed(root, files) {
+  stage(root, files);
+  git(root, ["commit", "-qm", "base"]);
+}
+
+// The state every test below starts from: the removal check installed, and a
+// three-case suite already in HEAD for the index to be counted against.
+function countFloor(root) {
+  install(root, { "no-ci": true }, [A.TESTS_DELETED]);
+  committed(root, { "src/cron.test.js": THREE_CASES });
+}
+
+test("a staged edit that drops test cases is a finding in the commit lane", () => {
+  const root = nodeProject();
+  countFloor(root);
+  stage(root, { "src/cron.test.js": "it('a', () => { expect(1).toBe(1); });\n" });
+  const { status, out } = driverJson(root, ["--staged"]);
+  assert.equal(status, 1, "the commit lane passed a commit that deletes two of three cases");
+  assert.deepEqual(out.findings.map((f) => [f.classId, f.path, f.line]),
+    [["tests-deleted", "src/cron.test.js", 1]]);
+  assert.equal(out.findings[0].note, "2 fewer than the version this commit replaces");
+  assert.deepEqual(out.skipped, [], "the class was reported found and skipped in the same run");
+});
+
+// The half `--diff-filter=ACMR` cannot reach: a deleted file has no staged
+// content for a pattern to read, and is the plainest removal there is.
+test("a staged wholesale deletion of a test file is a finding", () => {
+  const root = nodeProject();
+  countFloor(root);
+  git(root, ["rm", "-q", "--", "src/cron.test.js"]);
+  const { status, out } = driverJson(root, ["--staged"]);
+  assert.equal(status, 1, "the commit lane passed a commit that deletes the whole suite");
+  assert.deepEqual(out.findings.map((f) => [f.classId, f.path]), [["tests-deleted", "src/cron.test.js"]]);
+  assert.equal(out.findings[0].note, "3 fewer than the version this commit replaces");
+});
+
+test("a staged edit that keeps the count is silent", () => {
+  const root = nodeProject();
+  countFloor(root);
+  stage(root, { "src/cron.test.js": THREE_CASES.replace("expect(1).toBe(1)", "expect(one()).toBe(1)") });
+  const { status, out } = driverJson(root, ["--staged"]);
+  assert.deepEqual(out.findings, []);
+  assert.equal(status, 0);
+});
+
+// A file HEAD does not carry is a file this commit adds, and an addition removes
+// nothing. Without this every new test file would be a finding against an empty
+// before, which is a count floor that fires on somebody writing tests.
+test("a test file the commit adds removes nothing", () => {
+  const root = nodeProject();
+  countFloor(root);
+  // The drop rides along, so a floor that stopped counting altogether fails
+  // here instead of passing: the added file must be silent in the same run the
+  // gutted one is a finding.
+  stage(root, {
+    "src/parse.test.js": THREE_CASES,
+    "src/cron.test.js": "it('a', () => { expect(1).toBe(1); });\n",
+  });
+  const { status, out } = driverJson(root, ["--staged"]);
+  assert.deepEqual(out.findings.map((f) => f.path), ["src/cron.test.js"],
+    "an added file counted as a removal, or the drop beside it was never counted");
+  assert.equal(status, 1);
+});
+
+// The same divergence `--staged` exists for, on this kind: what the commit
+// carries is the index, and a suite gutted on disk but never staged is not in
+// the commit the lane is gating.
+test("the count floor reads the index, not the file on disk", () => {
+  const root = nodeProject();
+  countFloor(root);
+  // A real staged drop rides along, or the lane never runs at all and this
+  // passes for the wrong reason: with an empty index `removedChanged()` returns
+  // null and the module is skipped before a count is ever taken.
+  committed(root, { "src/parse.test.js": THREE_CASES });
+  stage(root, { "src/parse.test.js": "it('a', () => { expect(1).toBe(1); });\n" });
+  fs.writeFileSync(path.join(root, "src", "cron.test.js"), "it('a', () => {});\n");
+  const { status, out } = driverJson(root, ["--staged"]);
+  assert.deepEqual(out.findings.map((f) => f.path), ["src/parse.test.js"],
+    "the gutting nobody staged was counted, or the staged one was never counted at all");
+  assert.equal(status, 1);
+});
+
+// And the disclosure the walk still owes: the tree as it is has no earlier
+// version, so a pathless run says so rather than counting the class clean.
+test("a run with no index still reports the removal class skipped, and names the lane that counts it", () => {
+  const root = nodeProject();
+  countFloor(root);
+  git(root, ["rm", "-q", "--", "src/cron.test.js"]);
+  const { status, out } = driverJson(root);
+  assert.deepEqual(out.findings, []);
+  assert.equal(status, 0);
+  assert.equal(out.skipped[0].id, "tests-deleted");
+  assert.match(out.skipped[0].why, /the commit lane counts it against HEAD/);
 });
 
 // ---------------------------------------------------------------------------
