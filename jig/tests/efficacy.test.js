@@ -13,10 +13,14 @@
 // six editions ship 165 pairs between them. A score over four of those would be
 // a smaller claim dressed as the same one.
 //
-// Two numbers, per edition and in total:
+// Three numbers, per edition and in total:
 //
 //   pairs        every class fires on its own violation and stays silent on its
 //                own near miss. A single failure is a check that ships broken.
+//   patterns     one proof per pattern a class NAMES, not one per detector
+//                (2.14.0). A detector's patterns used to be evaluated together
+//                on three of the four kinds, so a second pattern rode in on the
+//                first one's hit and shipped as coverage nothing exercised.
 //   cross hits   every admitted check run against every OTHER check's near miss
 //                in the same edition. The pair test cannot see a check that
 //                fires on everything, because such a check still passes its own
@@ -88,6 +92,7 @@ function measure() {
   const index = editions.loadIndex(PLUGIN_ROOT);
   const rows = [];
   let pairs = 0;
+  const patterns = { proved: 0, owed: 0 };
   const failures = [];
   const cross = [];
 
@@ -106,6 +111,13 @@ function measure() {
       const result = admission.ownPair(cls, blankRegions);
       if (result.passes) passed++;
       else failures.push(row.id + "/" + cls.id + ": " + result.why);
+      // One hit per PATTERN since 2.14.0: proved over owed, so a class that
+      // misses a spelling shows up in the published figure rather than shrinking
+      // both sides of it. `patternCount` is admission's own reckoning of what a
+      // check owes; release gate G9 is what holds THAT to the patterns the
+      // catalogue names, which is the half this file cannot check itself.
+      patterns.proved += result.violationHits;
+      patterns.owed += admission.patternCount(cls);
     }
 
     for (const hit of admission.crossNearMiss(driven, blankRegions)) {
@@ -121,7 +133,7 @@ function measure() {
     });
   }
 
-  measured = { rows, pairs, failures, cross: [...new Set(cross)].sort() };
+  measured = { rows, pairs, patterns, failures, cross: [...new Set(cross)].sort() };
   return measured;
 }
 
@@ -154,11 +166,13 @@ function cell(readme, label) {
 }
 
 test("the README benchmark table publishes the figures this suite measures", () => {
-  const { rows, pairs, cross } = measure();
+  const { rows, pairs, patterns, cross } = measure();
   const readme = fs.readFileSync(path.join(PLUGIN_ROOT, "README.md"), "utf8");
   const driven = rows.reduce((n, r) => n + r.driven, 0);
 
   assert.equal(cell(readme, "Checks jig runs, each passing its own pair"), driven + " of " + driven);
+  assert.equal(cell(readme, "Patterns those checks name, each proved on its own"),
+    patterns.proved + " of " + patterns.owed);
   assert.equal(cell(readme, "Mistake classes across the six editions"), String(pairs));
   assert.equal(cell(readme, "Cross-sample hits, disclosed"), String(cross.length));
 });
@@ -168,7 +182,7 @@ test("the README benchmark table publishes the figures this suite measures", () 
 // ---------------------------------------------------------------------------
 
 test("release gate: every shipped pair passes its own admission, per edition", () => {
-  const { rows, failures, pairs } = measure();
+  const { rows, failures, pairs, patterns } = measure();
   assert.deepEqual(failures, [],
     "a shipped check misses its own violation or fires on its own near miss:\n  " + failures.join("\n  "));
 
@@ -181,6 +195,8 @@ test("release gate: every shipped pair passes its own admission, per edition", (
   }
   SCORE.push("efficacy: total — " + driven + " of " + driven + " driver-backed pairs proved, over " +
     pairs + " shipped pairs");
+  SCORE.push("efficacy: " + patterns.proved + " of " + patterns.owed +
+    " patterns those checks name proved on their own");
 });
 
 test("release gate: every cross-class false positive is a disclosed known limit", () => {

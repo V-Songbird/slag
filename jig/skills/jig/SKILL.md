@@ -14,7 +14,7 @@ description: >-
   prompt text — rules, skill descriptions or agent instructions: this installs
   checks that run against a codebase.
 argument-hint: "[--quick] [--edition <id>] [--select <classId,…>] [--no-ci] [--observe]"
-allowed-tools: Bash, Read, Write, AskUserQuestion
+allowed-tools: Bash, PowerShell, Read, Write, AskUserQuestion
 ---
 
 # jig:jig
@@ -331,6 +331,15 @@ Each authored check carries, in one module:
     meaning the repository's own. It may set `teach: true` like the edit levers:
     since 2.13.0 teaching is a property of the guard, not of the event it runs
     on, so every PreToolUse and PostToolUse guard can carry it.
+    **The command line is the sending tool's, not always bash's.** A host may
+    call its shell `Bash` or `PowerShell`, and may offer both at once; since
+    2.14.0 jig watches both names, so the guard runs either way — but it matches
+    the line as sent. A pattern that only reads POSIX idiom (`&&`, `2>/dev/null`,
+    `| sh`) evaluates on a PowerShell line and passes, which is not coverage.
+    Write the patterns for every shell an agent may reach for here, and say
+    which syntaxes the check reads when you offer it. Do not infer the answer
+    from the operating system — `/jig:inventory` reports the tools jig has
+    actually seen (`lanes.session.shell.seen`), and nothing else knows.
   - `edit-guard` — a PreToolUse guard over an Edit or a Write, which denies
     before the host writes the bytes. Its `params.patterns` are matched against
     the text going in, blanked by the same two switches the driver uses; `paths`
@@ -413,6 +422,14 @@ blanker, the guard's through the session runner — and either lever missing its
 violation or firing on its near miss discards the whole check. Two detectors do
 not need two pairs; they need one pair that is true of both.
 
+That holds one pattern at a time, not one detector at a time. Every pattern a
+detector names — `patterns`, `removed`, `extract`, on any lever — is run against
+the violation on its own and has to fire on its own. So a second spelling added
+beside one the fixture already trips is not admitted on that first one's hit:
+the violation has to exercise every spelling the detector names, or the check is
+discarded naming the one it did not. Where two spellings cannot share a fixture
+— two languages under one glob set — write two checks.
+
 Two limits to tell the user:
 
 - The two detectors are one module and one approval, and the proof hash binds
@@ -473,8 +490,9 @@ shape being present. Write it when the user describes a mistake as something
 disappearing rather than something appearing.
 
 Its fixtures carry both texts, one side per fixture, with `--- after` on a line
-of its own between them. The violation drops the count; the near miss is an edit
-over the same file that keeps it:
+of its own between them. The violation drops the count — every count, one per
+pattern the detector names — and the near miss is an edit over the same file
+that keeps them:
 
 ```json
 {

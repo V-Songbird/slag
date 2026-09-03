@@ -30,8 +30,11 @@ executable for exactly that reason — because the first thing jig does after wr
 checks against it, and a starter that fails its own first check would be a harness that cries wolf.
 
 Four ecosystems need more than the project file to get there, and they say so in
-`detect.manifest.starter.files`: a list of `path` and `body` pairs jig writes beside the manifest,
-each as its own approved change. Rust needs a `src/lib.rs` and a `Cargo.lock`, because cargo exits
+`detect.manifest.starter.files`: a list of entries jig writes beside the manifest, each as its own
+approved change. An entry carries a `path`, a `body`, and the `version` and `sha256` that put the
+body under the same discipline every other file jig writes is under — the loader hashes the body and
+refuses the edition when it does not match, so a starter cannot be edited without restamping both
+and a manifest row can say which version an install received. Rust needs a `src/lib.rs` and a `Cargo.lock`, because cargo exits
 101 on a `[package]` with no target and `--locked` refuses a lockfile that is not there; python
 needs the package directory hatchling builds from; JavaScript needs a module and a test, because
 `node --test` over an empty tree passes without running anything; .NET needs a test project and a

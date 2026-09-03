@@ -559,6 +559,26 @@ test("a starter file naming a tool the edition does not offer is refused at load
   assert.throws(() => editions.loadEdition(root, "x"), /which this edition does not offer/);
 });
 
+// A starter body is generated content jig writes into somebody's repository,
+// so it is under the same discipline as a template: the catalogue records the
+// version and the hash of the bytes that version shipped, and a body edited
+// without restamping both never reaches a plan.
+test("a starter file with no version and sha256 is refused at load", () => {
+  const root = starterShelf({
+    path: "package.json", sample: "{}\n", hint: null,
+    starter: { files: [{ path: "src/index.js", body: "x\n" }] },
+  });
+  assert.throws(() => editions.loadEdition(root, "x"), /carries no `version` and `sha256`/);
+});
+
+test("a starter body that does not match its recorded hash is refused at load", () => {
+  const root = starterShelf({
+    path: "package.json", sample: "{}\n", hint: null,
+    starter: { files: [{ path: "src/index.js", body: "x\n", version: "1.0.0", sha256: "0".repeat(64) }] },
+  });
+  assert.throws(() => editions.loadEdition(root, "x"), /does not match the hash its catalogue recorded/);
+});
+
 test("the shipped JavaScript starter keeps one smoke test per runner", () => {
   const js = editions.loadEdition(PLUGIN_ROOT, "javascript-typescript");
   const starter = editions.manifestFor(js, "npm").starter;

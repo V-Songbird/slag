@@ -12,10 +12,14 @@
         "files": [
           {
             "path": "src/example_app/__init__.py",
+            "version": "1.0.0",
+            "sha256": "738559d765ac12de3a266b9614a343c76d8a9cccca48e0f35c6229a746153d8f",
             "body": "\"\"\"Starter package. Rename it before you publish it.\"\"\"\n\n__all__ = [\"name\"]\n\n\ndef name() -> str:\n    \"\"\"The package's name, so the starter has one thing its own test can check.\"\"\"\n    return \"example-app\"\n"
           },
           {
             "path": "tests/test_smoke.py",
+            "version": "1.0.0",
+            "sha256": "606082258d85b6b4128776a11d3a2f12da6e98d1f46b1c6b40759aecd910575d",
             "body": "\"\"\"Smoke test, so a new project's test command has something to run.\n\nWritten on `unittest` and reading the tree rather than importing it: nothing\nis installed yet, so `import example_app` would fail until the owner runs\n`pip install -e .`. pytest collects a TestCase unchanged.\n\"\"\"\n\nimport unittest\nfrom pathlib import Path\n\n\nclass SmokeTest(unittest.TestCase):\n    def test_the_package_directory_is_here(self) -> None:\n        package = Path(__file__).resolve().parent.parent / \"src\" / \"example_app\"\n        self.assertTrue(package.is_dir())\n"
           }
         ]

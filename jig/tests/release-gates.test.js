@@ -425,6 +425,55 @@ test("release gate: a hook fired below the project root silently guards nothing"
 });
 
 // ---------------------------------------------------------------------------
+// The shell tool the host names
+// ---------------------------------------------------------------------------
+//
+// 2.14.0 / roadmap 237. Measured, not suspected: on Claude Code 2.1.257 on
+// win32 the session's tool list carries `PowerShell` and no `Bash` at all
+// (`docs/research/jig/HOST-PROBE-2026-09-02.md`, section 3). Every jig matcher
+// named `Bash`, so on that platform no command guard evaluated and no
+// verification run was witnessed — while the lane report said the session lane
+// was live. One list is the fix, and this gate is what keeps it one: a literal
+// re-introduced in `hooks.json`, in the witness gate or on the lever fails the
+// release rather than going quiet on somebody's machine.
+test("release gate: every shell-tool matcher comes off SHELL_TOOLS, and nothing re-spells one", () => {
+  const { SHELL_TOOLS } = require("../scripts/vocab.js");
+  // The literal, not `SHELL_TOOLS` compared against itself. Every other
+  // assertion here derives its expectation from the list under test, so
+  // narrowing the list back to `["Bash"]` — the exact regression this gate
+  // exists to stop — left all of them green. CI runs on ubuntu, where nothing
+  // else would notice either.
+  assert.deepEqual(SHELL_TOOLS, ["Bash", "PowerShell"]);
+  const shell = SHELL_TOOLS.join("|");
+  const wiring = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, "hooks", "hooks.json"), "utf-8"));
+  assert.equal(wiring.hooks.PreToolUse[0].matcher, shell + "|Edit|Write");
+  assert.equal(wiring.hooks.PostToolUse[0].matcher, shell + "|Edit|Write");
+  assert.equal(wiring.hooks.PostToolUseFailure[0].matcher, shell);
+
+  for (const tool of SHELL_TOOLS) {
+    assert.ok(lib.EVENT_TOOLS.PreToolUse.includes(tool), `PreToolUse drops ${tool}`);
+    assert.ok(lib.LEVER_TOOLS["bash-guard"].includes(tool), `the command lever drops ${tool}`);
+    assert.equal(lib.isWitnessEvent("PostToolUse", tool), true, `${tool} is not witnessed`);
+  }
+  // A guard must never evaluate on the witness event, whichever name it wears.
+  assert.deepEqual(lib.EVENT_TOOLS.PostToolUse, ["Edit", "Write"]);
+
+  // The skills are driven entirely by `node .../jig.js` from a shell tool, so a
+  // skill whose frontmatter names only `Bash` is unusable on the very host this
+  // release was written for. The gate that catches a `Bash` literal going quiet
+  // has to read them too, or three of them sit outside it.
+  for (const name of ["inventory", "jig", "review"]) {
+    const front = fs.readFileSync(path.join(PLUGIN_ROOT, "skills", name, "SKILL.md"), "utf-8")
+      .split("\n").find((l) => l.startsWith("allowed-tools:"));
+    assert.ok(front, `${name} declares no allowed-tools`);
+    const declared = front.slice("allowed-tools:".length).split(",").map((t) => t.trim());
+    for (const tool of SHELL_TOOLS) {
+      assert.ok(declared.includes(tool), `skills/${name}/SKILL.md does not allow ${tool}`);
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Deny, restated as a release gate
 // ---------------------------------------------------------------------------
 //
@@ -517,6 +566,54 @@ test("release gate G1: no check ships whose fixture pair fails — all 165 pairs
   }
   assert.deepEqual(failures, [], "a shipped check fires on its own near miss or misses its own violation");
   assert.equal(pairs, 165, "the six editions ship " + pairs + " pairs and this gate is written for 165");
+});
+
+// ---------------------------------------------------------------------------
+// G9 — one proof per pattern, not one per detector
+// ---------------------------------------------------------------------------
+//
+// G1 asks whether a check passed. It cannot ask whether every pattern the check
+// NAMES was what passed it, and until 2.14.0 the answer was no for three of the
+// four kinds: the removal, extract and session evaluations each ran a whole
+// detector at once, so a second pattern rode in on the first one's hit. jvm's
+// `deleted-test` shipped a `class \w*Tests?` rule the pair never dropped.
+//
+// The count below is taken off the catalogue JSON rather than out of admission,
+// because a gate that asks admission how many proofs it owes cannot catch
+// admission owing too few.
+function namedPatterns(cls) {
+  let n = 0;
+  for (const det of (cls.detectors || []).filter((d) => d.lever === "check-driver")) {
+    const p = det.params || {};
+    for (const key of ["patterns", "removed", "extract"]) {
+      n += (p[key] || []).filter((s) => typeof s === "string" && s.length).length;
+    }
+    // The paired kind names two glob sets and no patterns, so the detector is
+    // the smallest thing there is to prove. An extract detector names
+    // `pairedWith` too and means something else by it.
+    if (!(p.extract || []).length && (p.paths || []).length && (p.pairedWith || []).length) n++;
+  }
+  return n;
+}
+
+test("release gate G9: every pattern a shipped check names is proved on its own", () => {
+  const index = editions.loadIndex(PLUGIN_ROOT);
+  const short = [];
+  let named = 0;
+  for (const row of index.editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    for (const cls of edition.classes) {
+      const owed = namedPatterns(cls);
+      if (!owed) continue;
+      named += owed;
+      const result = admission.ownPair({ ...cls, commentSyntax: edition.detect.commentSyntax }, lib.blankRegions);
+      if (result.violationHits !== owed) {
+        short.push(row.id + "/" + cls.id + ": " + result.violationHits + " of " + owed + " proved — " + result.why);
+      }
+    }
+  }
+  assert.deepEqual(short, [], "a shipped pattern rode in on a sibling's hit and was never proved");
+  assert.equal(named, 256, "the six editions name " + named + " patterns and this gate is written for 256");
 });
 
 // ---------------------------------------------------------------------------
@@ -661,6 +758,32 @@ test("release gate G4: every shipped edition parses, is at schemaVersion 4, and 
         row.id + " detects on " + ext + " and declares no commentSyntax for it");
     }
   }
+});
+
+// Starter bodies are most of a greenfield install, and until 2.14.0 they were
+// the one thing jig wrote under a synthetic template row: version 1.0.0, no
+// hash, nothing to bump. This is the gate that makes the catalogue's own
+// recorded version mean something — a body edited without restamping it fails
+// the release rather than shipping as a version that never existed.
+test("release gate: every shipped starter body hashes to what its catalogue's recorded version claims", () => {
+  let checked = 0;
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    const managers = edition.detect.packageManagers || [null];
+    for (const manager of managers) {
+      for (const file of editions.manifestFor(edition, manager).starter) {
+        assert.match(file.version, /^\d+\.\d+\.\d+$/,
+          row.id + " starter " + file.path + " carries no version a manifest row could record");
+        const found = crypto.createHash("sha256").update(Buffer.from(file.body, "utf8")).digest("hex");
+        assert.equal(found, file.sha256,
+          row.id + " starter " + file.path + " does not hash to the sha256 recorded beside it");
+        checked++;
+      }
+    }
+  }
+  // Four editions ship a starter tree, and each is read once per package
+  // manager. A zero here would be this gate passing by checking nothing.
+  assert.ok(checked >= 10, "the gate found only " + checked + " starter bodies to check");
 });
 
 test("release gate G6: every lever the engine can author is named in SKILL.md section 4, and no other", () => {

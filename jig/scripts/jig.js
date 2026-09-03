@@ -88,7 +88,7 @@ const sectionsLib = require("./sections.js");
 // module so a hook can name a constant without requiring this file, which a
 // hook spawn would otherwise parse in full on every tool call.
 const {
-  SCHEMA_VERSION, STATE_DIR, VERIFY_FILE,
+  SCHEMA_VERSION, STATE_DIR, VERIFY_FILE, SHELL_TOOLS,
   isObject, stripBom, proposedVerifyEntries, fixturePath,
 } = require("./vocab.js");
 
@@ -2387,7 +2387,11 @@ function draftFromTemplates(root, opts, checks) {
       if (file.tool && !ticked.has(file.tool)) continue;
       if (claimed.has(file.path)) continue;
       claimed.add(file.path);
-      add({ name: "starter-" + file.path, version: "1.0.0", target: file.path, kind: "write-side-file", ownership: "file" },
+      // The template row is derived, not invented: the edition and the path
+      // name it, and the version is the one the catalogue recorded beside the
+      // body. A hand-written "1.0.0" here would claim a version no install
+      // could check, on files that are most of a greenfield tree.
+      add({ name: "starter-" + m.edition + "-" + file.path, version: file.version, target: file.path, kind: "write-side-file", ownership: "file" },
         file.body, selection,
         "part of the starter " + m.edition + " project, so it builds and its tests run before anything else is added");
     }
@@ -3205,6 +3209,14 @@ function buildReview(payload, generated, root) {
     // session lane at all, which is the thing an owner who works through agents
     // is approving.
     sessionGuards: guards.map((g) => g.id),
+    // 2.14.0. A command guard's patterns are matched against the line the shell
+    // tool that sent it wrote, and that tool is not always `Bash`. The matrix
+    // grades a command guard the same either way — it was proven on its own
+    // fixture — so the honest thing is to say so on the page the coverage claim
+    // is made. Which tools THIS host sends is not knowable at plan time, and is
+    // not guessed here: the ledger answers it once the guards have run.
+    commandGuards: classes.some((cls) => (cls.detectors || [])
+      .some((d) => require("../hooks/jig-lib.js").isShellLever(d))),
     rows,
     artifacts,
     consent: {
@@ -3275,6 +3287,24 @@ function renderReviewMd(review, backlog) {
     out.push("have landed — and never in the session that wrote them. An edition class carries no");
     out.push("session detector, so a `--select` run installs none: watching one of these in session");
     out.push("means authoring the class a second detector and the fixture pair that proves it.");
+    out.push("");
+  }
+
+  if (review.commandGuards) {
+    out.push("## The shell tool a command guard meets here");
+    out.push("");
+    out.push("A command guard matches its patterns against the command line exactly as the tool that");
+    out.push("sent it wrote it, and that tool is not always called `Bash`: jig's hooks are registered");
+    out.push("for " + SHELL_TOOLS.map((t) => "`" + t + "`").join(" and ") + ", and a host that names its shell anything else is a host where these");
+    out.push("guards do not evaluate at all.");
+    out.push("");
+    out.push("It cannot translate one syntax into another, either: a pattern written in POSIX shell");
+    out.push("idiom (`&&`, `2>/dev/null`, `| sh`) will not fire on a PowerShell line that does the same");
+    out.push("thing. A guard that evaluates and passes is not the same coverage as one that catches, so");
+    out.push("read every command guard's patterns against the syntax an agent will actually send here.");
+    out.push("");
+    out.push("Which of those names this host sends cannot be read before a guard has run, and is not");
+    out.push("guessed: `/jig:inventory` reports the ones jig's own hooks have since been seen to record.");
     out.push("");
   }
 
@@ -3556,6 +3586,7 @@ function cmdApply(root, opts, internal) {
   const paths = (Array.isArray(opts.path) ? opts.path : opts.path === undefined ? [] : [opts.path])
     .filter((p) => typeof p === "string" && p);
   let selected = [];
+  let skipped = [];
   let planId = null;
   if (named.length) {
     if (paths.length !== named.length) {
@@ -3576,7 +3607,29 @@ function cmdApply(root, opts, internal) {
   } else if (typeof opts.plan === "string") {
     const record = findPlan(root, opts.plan);
     planId = record.planId;
-    selected = record.changes;
+    // A change this repository already carries is not part of this approval.
+    // Without the filter the item-tier refusal below fires for ever: once the
+    // owner has approved every item pair by name, the batch half of the same
+    // plan — the config, the activation note, the driver, the shim — stays
+    // unreachable by `--plan`, which is the batch tier's whole point, and the
+    // refusal's "Approve each one by name" is then a promise it does not keep.
+    // What is skipped is named back on the result rather than dropped in
+    // silence (SCOPE, "May a batch approval skip a change already applied").
+    const journal = replayJournal(readJournal(root));
+    skipped = record.changes.filter((c) => {
+      const state = journal.get(c.id);
+      if (state === undefined || changeState(state) !== "applied") return false;
+      // The journal records what jig did, not what the repository still has. A
+      // file jig wrote and somebody later deleted replays as `applied` for ever,
+      // so skipping on that record alone would end re-apply repair: running the
+      // approved plan again would report `ok` having written nothing back, and
+      // `.jig/checks/run.mjs`, `.jig/config.json` and `.jig/activation.md` would
+      // be unrecoverable by the one route that used to restore them. The disk is
+      // the authority. A setting is not a file and has no path to stat.
+      return [...state.writes.values()]
+        .every((w) => w.path === GIT_SETTING_PATH || fs.existsSync(path.join(root, w.path)));
+    });
+    selected = record.changes.filter((c) => !skipped.includes(c));
     // The widened form SCOPE forbids. A plan id names no path, so approving one
     // approves every destination in it sight unseen — which is exactly the
     // "one approval that lands many writes" the write boundary exists to stop.
@@ -3632,6 +3685,10 @@ function cmdApply(root, opts, internal) {
     tx,
     plan: planId,
     applied: results,
+    // Changes this plan carries that the repository already has. Named, never
+    // silent: a batch approval that quietly dropped half its list would be the
+    // coverage claim SCOPE forbids.
+    skipped: skipped.map((c) => ({ change: c.id, path: c.path })),
     enforcementGaps: results.filter((r) => r.enforcementGap).map((r) => r.path),
     manifest: manifest ? STATE_DIR + "/" + MANIFEST_FILE : null,
     // Everything the user now has to do by hand, in one place: whatever jig
@@ -3884,11 +3941,14 @@ function guardProbe(guard, record) {
   // Which tool call to build is the detector's lever's answer, not the event's:
   // a bash guard and an edit guard both run at PreToolUse, and probing one with
   // the other's payload reports `caught: false` for a healthy guard.
-  const { LEVER_TOOLS } = require("../hooks/jig-lib.js");
+  const { LEVER_TOOLS, isShellLever } = require("../hooks/jig-lib.js");
   const det = (Array.isArray(mod.detectors) ? mod.detectors : [])
     .find((d) => d && d.runner === guard.runner && LEVER_TOOLS[d.lever]) || {};
-  if ((LEVER_TOOLS[det.lever] || []).includes("Bash")) {
-    return { event: guard.runner, tool: "Bash", input: { command: violation }, what };
+  if (isShellLever(det)) {
+    // Any name on the shared list evaluates the same guard, so the first is as
+    // good as the last; what matters is that the payload is a shell call rather
+    // than an edit.
+    return { event: guard.runner, tool: SHELL_TOOLS[0], input: { command: violation }, what };
   }
   // The blanker reads comment and string syntax off a filename, and the guard
   // reads its own `paths` off it too, so the seeded path is derived from the
@@ -4303,7 +4363,10 @@ const FILE_SLOTS = [
 
 // The two hook registrations jig's single-dispatch runner takes.
 const HOOK_SLOTS = [
-  { id: "PreToolUse:Bash", event: "PreToolUse", tools: ["Bash"], what: "the command guard" },
+  // Every shell tool a host may name, so a repository whose own PreToolUse hook
+  // is registered for `PowerShell` reports the slot occupied instead of taking
+  // a second registration that does not chain with it.
+  { id: "PreToolUse:Bash", event: "PreToolUse", tools: SHELL_TOOLS, what: "the command guard" },
   { id: "PostToolUse:Edit|Write", event: "PostToolUse", tools: ["Edit", "Write"], what: "the edit guard" },
 ];
 
@@ -5103,10 +5166,19 @@ function lanesOf(root, rows) {
   if (off) {
     try { offSince = fs.statSync(path.join(root, STATE_DIR, "off")).mtime.toISOString(); } catch { /* an unreadable mtime is not a reason to hide the switch */ }
   }
+  // Which shell tools this repository has been seen to send, disclosed with the
+  // lane rather than left for an owner to discover. jig watches every name on
+  // the shared list, so the lane is live either way — but a command guard's
+  // patterns are matched against whatever the sending tool wrote, and PowerShell
+  // syntax is not shell idiom. `seen` is read off jig's own ledger rows and is
+  // empty until a guard has evaluated; the platform is never asked, because on
+  // win32 it answers `PowerShell` for a session that also offers `Bash`
+  // (HOST-PROBE-2026-09-02, sections 3 and 4).
+  const shell = { seen: require("../hooks/jig-lib.js").shellToolsSeen(root), watched: SHELL_TOOLS };
   return {
     session: off
-      ? { runs: false, observing: false, off: true, offSince }
-      : { runs: rows.some((r) => r.mode === "armed"), observing: rows.some((r) => r.mode === "observe"), off: false, offSince: null },
+      ? { runs: false, observing: false, off: true, offSince, shell }
+      : { runs: rows.some((r) => r.mode === "armed"), observing: rows.some((r) => r.mode === "observe"), off: false, offSince: null, shell },
     commit: {
       runs: lane.state === "live",
       state: lane.state,

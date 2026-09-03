@@ -12,7 +12,7 @@ description: >-
   invokes /jig:review. Do NOT use to install or set up guardrails — that is
   /jig:jig.
 argument-hint: "[fp <guardId>] [fp <guardId> --clear] [arm <guardId>] [disarm <guardId>] [retire <guardId>] [rerun]"
-allowed-tools: Bash, Read, AskUserQuestion
+allowed-tools: Bash, PowerShell, Read, AskUserQuestion
 ---
 
 # jig:review
@@ -91,6 +91,12 @@ rather than remembered from the install:
 - `lanes.session` — the guards above, inside a Claude session. `off: true` means
   `.jig/off` is present and NOTHING in this lane runs, whatever the guard rows
   say; `offSince` is when the switch went on. Report that before anything else.
+  `shell.watched` is every tool name jig's hooks match and `shell.seen` is the
+  ones a guard has actually met here. Report `seen` beside any command guard's
+  catch count: it says which syntax that count was earned against, and a command
+  guard armed with zero catches on a `seen` of `["PowerShell"]` and POSIX-idiom
+  patterns has been evaluating and passing, not covering. An empty `seen` is
+  "not yet observed" — never fill it in from the operating system.
 - `lanes.commit` — the git hook. `runs` is the whole answer; `state` says why
   when it is false, and `fix` is the one thing to do about it. `executable` is
   whether git can run the hook at all — `false` is a live-looking lane that does

@@ -12,14 +12,20 @@
         "files": [
           {
             "path": "src/index.js",
+            "version": "1.0.0",
+            "sha256": "48d319311a84f95f3871e2098dda9b552c0986cf0fbc0b8aafafe1971d3dd5ff",
             "body": "// Starter module. Replace it with your own code.\n\nexport function name() {\n  return \"example-app\";\n}\n"
           },
           {
             "path": "test/smoke.js",
+            "version": "1.0.0",
+            "sha256": "18c49aace3ab59dfc919547137c2ee2c5c1d746d0f0cabec3f66ecb8748679cc",
             "body": "// Smoke test, so a new project's test command has something to run. Node's own\n// runner discovers every file under `test/`, and there is no `.test.` in the\n// name, so a vitest added later collects its own files and not this one too.\nimport assert from \"node:assert/strict\";\nimport test from \"node:test\";\n\nimport { name } from \"../src/index.js\";\n\nawait test(\"the starter module loads\", () => {\n  assert.equal(name(), \"example-app\");\n});\n"
           },
           {
             "path": "tests/smoke.spec.js",
+            "version": "1.0.0",
+            "sha256": "d8f892e885e337a6055da9b652e0c5bf04d6bf514bbcc7d0260bcb55c21e1eca",
             "tool": "vitest",
             "body": "// Smoke test for the runner this project installed, so `npm test` has\n// something to collect. `node --test` never sees it: a `tests/` directory and\n// a `.spec.` name are vitest discovery, not node's, so the two runners each\n// have one file of their own and neither reads the other's.\nimport { expect, test } from 'vitest';\n\nimport { name } from '../src/index.js';\n\ntest('the starter module loads', () => {\n  expect(name()).toBe('example-app');\n});\n"
           }

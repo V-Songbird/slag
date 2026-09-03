@@ -13,7 +13,7 @@ description: >-
   invokes /jig:inventory. Do NOT use to report what jig has CAUGHT or to change a
   guard — that is /jig:review — or to install anything, which is /jig:jig.
 argument-hint: "[guards] [checks] [files] [lanes]"
-allowed-tools: Bash, Read
+allowed-tools: Bash, PowerShell, Read
 ---
 
 # jig:inventory
@@ -138,6 +138,13 @@ here.
   observing. `off: true` means `.jig/off` is present and NOTHING in this lane
   runs, whatever the guard rows above say; `offSince` is when the switch went
   on. Report that before anything else about the guards.
+- `lanes.session.shell` — `watched` is every name jig's hooks match, and `seen`
+  is the ones a guard has actually recorded on this host. Report both wherever a
+  command guard is reported: `seen` is the syntax that guard's patterns have
+  really met. An empty `seen` is "not yet observed" — say that, never guess from
+  the operating system. When `seen` carries anything but `Bash`, say so plainly:
+  a pattern written in POSIX shell idiom evaluates on that line and passes
+  rather than catching, and passing is not coverage.
 - `lanes.commit` — the git hook. `runs` says the hook invokes the checks and
   `executable` says git can actually run it: `false` is a live-looking lane that
   does nothing, and `null` means win32, where the question does not apply. Both

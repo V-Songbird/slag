@@ -29,7 +29,8 @@ const path = require("path");
 // thousand lines it never called into (`tests/runner.test.js` holds this
 // boundary open).
 const {
-  SCHEMA_VERSION, STATE_DIR, VERIFY_FILE, stripBom, fixturePath, proposedVerifyEntries,
+  SCHEMA_VERSION, STATE_DIR, VERIFY_FILE, SHELL_TOOLS,
+  stripBom, fixturePath, proposedVerifyEntries,
 } = require("../scripts/vocab.js");
 // The one function that says what binds a proof to the check it proves. A
 // second copy of that hashing rule here would be a second answer to the
@@ -45,7 +46,7 @@ const CHECKS_DIR = "checks";
 // point of a closed set is that a teammate cannot introduce a new execution
 // point by editing a JSON file.
 const HOOK_RUNNERS = ["PreToolUse", "PostToolUse"];
-const EVENT_TOOLS = { PreToolUse: ["Bash", "Edit", "Write"], PostToolUse: ["Edit", "Write"] };
+const EVENT_TOOLS = { PreToolUse: [...SHELL_TOOLS, "Edit", "Write"], PostToolUse: ["Edit", "Write"] };
 
 // Which tools each session lever reads. Two levers share PreToolUse now — a
 // shell command and an edit payload arrive on the same event — so the EVENT can
@@ -55,7 +56,10 @@ const EVENT_TOOLS = { PreToolUse: ["Bash", "Edit", "Write"], PostToolUse: ["Edit
 // until its owner migrates it, because the proof hash recorded for it binds the
 // lever it was admitted on.
 const LEVER_TOOLS = {
-  "bash-guard": ["Bash"],
+  // Every shell tool a host may name, not the one lever's name. A command is a
+  // command whichever tool ran it, and the patterns are the author's problem —
+  // a lever that never evaluates is the worse failure.
+  "bash-guard": SHELL_TOOLS,
   "edit-guard": ["Edit", "Write"],
   "edit-observe-guard": ["Edit", "Write"],
 };
@@ -513,6 +517,13 @@ function leverTools(det) {
   return (det && LEVER_TOOLS[det.lever]) || [];
 }
 
+// A command lever, whichever shell tool the host names. Asked here rather than
+// spelled `includes("Bash")` at each call site: three files used to carry that
+// literal, and one of them being missed is how the win32 lane went quiet.
+function isShellLever(det) {
+  return SHELL_TOOLS.some((t) => leverTools(det).includes(t));
+}
+
 // The check may state one deny reply for itself or one per detector; either way
 // all three parts are required. Null means this guard cannot arm at all.
 function denyOf(mod, det) {
@@ -907,7 +918,7 @@ function evaluateGuard(dets, payload, config, failed, rel) {
   for (const det of dets) {
     const tools = leverTools(det);
     if (!tools.length) continue;
-    const matched = tools.includes("Bash")
+    const matched = isShellLever(det)
       ? evalBash(det, payload, config, bad)
       : evalEdit(det, payload, bad, file);
     if (matched) return { det, matched };
@@ -926,7 +937,7 @@ function evaluateGuard(dets, payload, config, failed, rel) {
 // The lever picks the payload shape, not the runner: `edit-guard` and
 // `bash-guard` share PreToolUse and read nothing alike.
 function evalSessionDetector(det, text) {
-  if (leverTools(det).includes("Bash")) {
+  if (isShellLever(det)) {
     // `branchInScope` passes a push that names no branch, because a bare
     // `git push` cannot be read for one. That is right at runtime and it is not
     // a proof: a fixture naming no branch would admit a guard scoped to a
@@ -994,10 +1005,13 @@ function ledgerRow(base, extra) {
 // will not run are disclosed, never a reason to hold a tool call or a stop.
 
 function isWitnessEvent(event, tool) {
-  // PostToolUseFailure is registered for Bash alone, so it is a witness however
-  // the payload names its tool. PostToolUse carries the edit guards too, and
-  // only the Bash half of it is a witness — a guard must never evaluate here.
-  return event === "PostToolUseFailure" || (event === "PostToolUse" && tool === "Bash");
+  // PostToolUseFailure is registered for the shell tools alone, so it is a
+  // witness however the payload names its tool. PostToolUse carries the edit
+  // guards too, and only its shell half is a witness — a guard must never
+  // evaluate here. A verification run is a verification run whichever shell
+  // tool ran it: gating this on `Bash` alone left every win32 session with
+  // nothing to witness and `lastGreen` permanently null.
+  return event === "PostToolUseFailure" || (event === "PostToolUse" && SHELL_TOOLS.includes(tool));
 }
 
 // The lane entries as installed, or none. Read through the engine's own reader
@@ -1071,6 +1085,35 @@ function verifyRows(root) {
     }
   }
   return rows;
+}
+
+// Which shell tools this repository has actually been seen to send, off the
+// rows jig's own hooks wrote. Every payload names its tool and every row records
+// it, so this is an observation. `process.platform` is not one: it was wrong on
+// the first machine it was asked about, where an interactive session offers a
+// `Bash` tool and a `PowerShell` tool at once while a headless one on the same
+// OS offers only `PowerShell`. Nothing seen yet returns an empty list, which the
+// surfaces report as "not yet observed" rather than defaulting to a guess —
+// SCOPE, "It never silently substitutes a default for an answer the owner did
+// not give".
+//
+// A third full-file pass over a ledger that never rotates, on the same terms
+// `verifyRows` states above: paid on every review and every inventory, by a
+// repository that has a session lane at all.
+function shellToolsSeen(root) {
+  let lines = [];
+  try {
+    lines = fs.readFileSync(statePath(root, LEDGER_FILE), "utf-8").split("\n").filter((l) => l.trim());
+  } catch {
+    return [];
+  }
+  const seen = new Set();
+  for (const line of lines) {
+    let row;
+    try { row = JSON.parse(line); } catch { continue; }
+    if (SHELL_TOOLS.includes(row.tool)) seen.add(row.tool);
+  }
+  return SHELL_TOOLS.filter((t) => seen.has(t));
 }
 
 // The last green run per entry id. Pure, and taken from the row's own timestamp
@@ -1372,7 +1415,7 @@ function runEvent(root, event, payload, warn) {
 }
 
 module.exports = {
-  HOOK_RUNNERS, HOOK_EVENTS, STOP_EVENTS,
+  HOOK_RUNNERS, HOOK_EVENTS, STOP_EVENTS, isShellLever,
   EVENT_TOOLS, LEVER_TOOLS, DEFAULT_MODE, CONFIG_KEYS, CONFIG_MODES, GUARD_KEYS, MATCHER_KEYS,
   DEFAULT_BRANCHES, PROVENANCES, DENY_PARTS,
   CONFIG_FILE, LEDGER_FILE, OFF_FILE, CHECKS_DIR,
@@ -1384,4 +1427,5 @@ module.exports = {
   appendLedger, runEvent,
   isWitnessEvent, verifyEntries, verifyEntryFor, exitCodeOf,
   verifyRows, lastGreenRuns, staleVerification, porcelainPath, changedPaths,
+  shellToolsSeen,
 };

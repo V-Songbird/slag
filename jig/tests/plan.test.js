@@ -323,6 +323,24 @@ test("a starter file belonging to a tool lands only where that tool is ticked", 
     "the edition's own smoke test is not a tool's and must land either way");
 });
 
+// The template row a starter is written under is derived from the edition and
+// the path, and its version is the one the catalogue recorded beside the body —
+// not a hand-written 1.0.0 no install could check against anything.
+test("a starter's template row names its edition and carries the catalogue's version", () => {
+  const root = project({});
+  install(root, {
+    select: "javascript-typescript/focused-test", edition: "javascript-typescript",
+    "package-manager": "npm", "no-ci": true,
+  });
+  const row = readJson(root, ".jig/manifest.json").artifacts.find((a) => a.path === "src/index.js");
+  const recorded = editions.manifestFor(editions.loadEdition(PLUGIN_ROOT, "javascript-typescript"), "npm")
+    .starter.find((f) => f.path === "src/index.js");
+  assert.equal(row.template.name, "starter-javascript-typescript-src/index.js");
+  assert.equal(row.template.version, recorded.version);
+  // The bytes on disk, hashed at write time, are the bytes that version shipped.
+  assert.equal(row.hash, recorded.sha256);
+});
+
 test("a real plan that ticks a tool covers the CI cell, and one that skips CI does not", () => {
   const root = nodeProject();
   planOnly(root, { select: "javascript-typescript/focused-test", edition: "javascript-typescript",
@@ -758,6 +776,26 @@ test("apply --plan refuses the item tier and names the token for every change in
   assert.equal(fs.existsSync(path.join(root, ".jig", "manifest.json")), false);
 });
 
+// Roadmap 234: the refusal above used to fire for ever. `selected` was the
+// whole plan, so a plan whose item tier had already landed still carried it,
+// and the batch half was unreachable by `--plan` on every real install.
+test("apply --plan carries the batch tier once every item-tier change has landed", () => {
+  const root = nodeProject();
+  const plan = planOnly(root, { "no-ci": true });
+  const matrix = readJson(root, ".jig/plan.json");
+  const item = matrix.artifacts.filter((a) => a.tier === "item");
+  const batch = matrix.artifacts.filter((a) => a.tier === "batch");
+  assert.ok(item.length && batch.length);
+  engine.cmdApply(root, { _: [], change: item.map((a) => a.id), path: item.map((a) => a.path) });
+
+  const rest = engine.cmdApply(root, { _: [], change: [], plan: plan.planId });
+  assert.deepEqual(rest.applied.map((r) => r.path).sort(), batch.map((a) => a.path).sort());
+  for (const r of rest.applied) assert.equal(r.outcome, "applied");
+  // Named, not silently dropped: SCOPE, "May a batch approval skip a change
+  // already applied".
+  assert.deepEqual(rest.skipped.map((s) => s.path).sort(), item.map((a) => a.path).sort());
+});
+
 test("apply --plan still carries a plan whose every change only reports", () => {
   const root = nodeProject();
   fs.writeFileSync(path.join(root, "draft.json"), JSON.stringify({
@@ -1108,6 +1146,55 @@ function armProject() {
 function configRow(root, id) {
   return readJson(root, ".jig/config.json").guards.find((g) => g.id === (id || GUARD));
 }
+
+// 2.14.0 / roadmap 237. Widening the matchers makes a command guard EVALUATE
+// on a PowerShell line where it used to never run — which is the honest
+// direction and not the same as catching, so both surfaces that make a coverage
+// claim disclose the syntax question.
+//
+// `shell.seen` is an observation off the ledger and nothing else. It replaced a
+// `process.platform === "win32" ? "PowerShell" : "Bash"` inference that the two
+// surfaces printed as measured fact and that is wrong on the machine it was
+// written for: an interactive Claude Code session on win32 offers a `Bash` tool
+// and a `PowerShell` tool at once, so the platform names one of two.
+test("the lanes report the shell tools actually seen, and never guess one", () => {
+  const vocab = require("../scripts/vocab.js");
+  const root = armProject();
+  const fresh = engine.cmdInventory(root).lanes.session.shell;
+  assert.deepEqual(fresh.watched, vocab.SHELL_TOOLS);
+  // Nothing has run, so nothing is claimed. This is the assertion the platform
+  // inference could not make.
+  assert.deepEqual(fresh.seen, []);
+
+  // One evaluated call on each name, through the runner, is the only thing that
+  // fills it in — and it fills in exactly what the payloads carried.
+  const ledger = path.join(root, ".jig", "ledger.jsonl");
+  fs.appendFileSync(ledger, JSON.stringify({ decision: "pass", tool: "PowerShell", guardId: GUARD }) + "\n");
+  assert.deepEqual(engine.cmdInventory(root).lanes.session.shell.seen, ["PowerShell"]);
+  fs.appendFileSync(ledger, JSON.stringify({ decision: "deny", tool: "Bash", guardId: GUARD }) + "\n");
+  assert.deepEqual(engine.cmdInventory(root).lanes.session.shell.seen, ["Bash", "PowerShell"]);
+  // A tool nobody watches is not a shell tool jig saw.
+  fs.appendFileSync(ledger, JSON.stringify({ decision: "pass", tool: "Write", guardId: GUARD }) + "\n");
+  assert.deepEqual(engine.cmdInventory(root).lanes.session.shell.seen, ["Bash", "PowerShell"]);
+});
+
+// The matrix is rendered at plan time, before any guard has run, so it can name
+// no host tool at all. What it owes is the syntax warning — the only user-facing
+// payload of this disclosure — and it owed it on every platform: the warning
+// used to sit behind a `!== "Bash"` branch that is dead code on the ubuntu
+// runner CI grades the release on.
+test("the coverage matrix warns about shell syntax on every platform", () => {
+  const vocab = require("../scripts/vocab.js");
+  const root = armProject();
+  const md = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
+  assert.match(md, /## The shell tool a command guard meets here/);
+  for (const tool of vocab.SHELL_TOOLS) assert.ok(md.includes("`" + tool + "`"), tool);
+  assert.match(md, /POSIX shell\nidiom .* will not fire on a PowerShell line/s);
+  assert.match(md, /evaluates and passes is not the same coverage as one that catches/);
+  // No claim about which tool this host sends: the matrix cannot know.
+  assert.ok(!md.includes("This host's shell tool is"),
+    "the matrix asserts a host tool it has not observed");
+});
 
 test("review reports which lanes actually run, and the one fix for a dead one", () => {
   const root = armProject();
@@ -1490,7 +1577,10 @@ test("inventory reports what each guard watches, and counts the matchers rather 
   const row = inv.guards.find((g) => g.guardId === GUARD);
 
   assert.equal(row.watches.event, "PreToolUse");
-  assert.deepEqual(row.watches.tools, ["Bash"]);
+  // Both shell tools, because the host names its own: a command guard that
+  // reported `Bash` alone on a win32 host would be naming a tool that host does
+  // not have (2.14.0).
+  assert.deepEqual(row.watches.tools, require("../scripts/vocab.js").SHELL_TOOLS);
   assert.ok(row.watches.patterns > 0, "the guard reports no matchers at all");
   assert.ok(row.watches.deny && row.watches.deny.reason, "an armable guard with no deny reply");
   assert.equal(row.provable, true);

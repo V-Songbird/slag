@@ -117,6 +117,10 @@ const SESSION_KINDS = { "bash-guard": "bash", "edit-guard": "edit", "edit-observ
 // patterns' proof and refuse calls nobody demonstrated.
 const SESSION_PARAMS = ["patterns", "removed"];
 
+// One unit per PATTERN, not per detector: the evaluator ORs a detector's
+// patterns together, so a second pattern added beside one the fixture already
+// fires would be admitted on the first one's hit and never proved. The evaluator
+// is handed a copy of the detector carrying that one pattern instead.
 function sessionUnits(check) {
   const units = [];
   (check.detectors || []).forEach((det, i) => {
@@ -135,11 +139,17 @@ function sessionUnits(check) {
     for (const key of keys) {
       const only = { ...params };
       for (const other of SESSION_PARAMS) if (other !== key) delete only[other];
-      units.push({
-        id: keys.length > 1 ? id + " (" + key + ")" : id,
-        kind,
-        key,
-        det: { ...det, params: only },
+      // The suffix names only what is ambiguous — the key when the detector has
+      // both, the index when that key has several — so a one-pattern lever's id
+      // reads the way it always has, in a discard and in a cross row alike.
+      params[key].forEach((pattern, at) => {
+        const suffix = params[key].length > 1 ? key + "[" + at + "]" : (keys.length > 1 ? key : "");
+        units.push({
+          id: suffix ? id + " (" + suffix + ")" : id,
+          kind,
+          key,
+          det: { ...det, params: { ...only, [key]: [pattern] } },
+        });
       });
     }
   });
@@ -190,11 +200,10 @@ const PAIRED_FENCE = "paired";
 // driver cannot answer it differently: some pattern this detector names is in
 // the before text more times than it is in the after text.
 //
-// `.some()` over the patterns rather than each one in turn, the way the paired
-// rule counts once for its whole unit. A removal detector's patterns are
-// alternative spellings of one declaration — JUnit's `@Test` and a Kotlin test
-// function, `it(` and `test(` — and no single fixture can drop every dialect at
-// once, so per-pattern accounting would make a two-dialect check unwritable.
+// `.some()` because that is what the driver does at run time — any one spelling
+// dropping is a finding. Admission does NOT read it that way: it hands this one
+// pattern at a time, so a spelling the fixture never drops is discarded instead
+// of riding in on a sibling's count.
 function removedFires(units, halves, blank) {
   return units.some((u) => {
     const before = blank(halves.before, u.filename, u.opts);
@@ -240,13 +249,15 @@ function extractFires(units, halves) {
     extractMisses({ params: { extract: u.patterns } }, halves.before, [halves.after]).length > 0);
 }
 
-// What a passing check has to have fired. One per pattern, plus one for the
-// paired rule if the check carries one — the same total `ownPair` counts up to,
-// because a mismatch between the two would discard every check silently.
+// What a passing check has to have fired: one hit for every pattern the check
+// names, in whatever kind names it, plus one per paired detector — that kind
+// names two glob sets and no patterns, so the detector is the smallest thing
+// there is to prove. `ownPair` counts up to this same number, because a mismatch
+// between the two would discard every check silently.
 function patternCount(check) {
-  return driverUnits(check).reduce((n, u) => n + u.patterns.length, 0) +
-    (pairedUnits(check).length ? 1 : 0) + (removedUnits(check).length ? 1 : 0) +
-    (extractUnits(check).length ? 1 : 0) + sessionUnits(check).length;
+  const flat = (units) => units.reduce((n, u) => n + u.patterns.length, 0);
+  return flat(driverUnits(check)) + pairedUnits(check).length + flat(removedUnits(check)) +
+    flat(extractUnits(check)) + sessionUnits(check).length;
 }
 
 function checkId(check) {
@@ -355,56 +366,73 @@ function ownPair(check, blank, match, evaluate) {
 
   // The paired half. Its fixtures are read as change sets, and the pair means
   // the same thing it means for a pattern check: the violation must fire it and
-  // the near miss must not. One unit, one hit, so the totals stay comparable.
-  if (paired.length) {
-    if (pairedFires(paired, changeSet(violation), match)) violationHits++;
-    else missed.push("paired-change");
-    if (pairedFires(paired, changeSet(nearMiss), match)) {
+  // the near miss must not. One hit per DETECTOR, because a paired detector
+  // names glob sets and no patterns — a second detector added beside the first
+  // rides in on its hit otherwise.
+  paired.forEach((unit, at) => {
+    const label = paired.length > 1 ? `paired-change[${at}]` : "paired-change";
+    if (pairedFires([unit], changeSet(violation), match)) violationHits++;
+    else missed.push(label);
+    if (pairedFires([unit], changeSet(nearMiss), match)) {
       nearMissHits++;
-      falsePositives.push("paired-change");
+      falsePositives.push(label);
     }
-  }
+  });
 
   // The removal half. Each side of the pair is one file before an edit and the
   // same file after it, and the rule is the difference between the two counts:
-  // the violation deleted something the near miss kept. One unit, one hit, so
-  // the totals stay comparable with the other two kinds.
+  // the violation deleted something the near miss kept. One hit per PATTERN: a
+  // second spelling added to a detector whose fixture already drops the first
+  // would otherwise be admitted having never been dropped by anything.
   if (removed.length) {
     const halves = { violation: fencedHalves(violation), nearMiss: fencedHalves(nearMiss) };
-    let onViolation;
-    let onNearMiss;
-    try {
-      onViolation = removedFires(removed, halves.violation, blank);
-      onNearMiss = removedFires(removed, halves.nearMiss, blank);
-    } catch (err) {
-      throw new Error(`admission: check "${id}" has an unusable removal pattern — ${err.message}`);
-    }
-    if (onViolation) violationHits++;
-    else missed.push("removal");
-    if (onNearMiss) {
-      nearMissHits++;
-      falsePositives.push("removal");
+    for (const unit of removed) {
+      for (const pattern of unit.patterns) {
+        const one = [{ ...unit, patterns: [pattern] }];
+        let onViolation;
+        let onNearMiss;
+        try {
+          onViolation = removedFires(one, halves.violation, blank);
+          onNearMiss = removedFires(one, halves.nearMiss, blank);
+        } catch (err) {
+          throw new Error(`admission: check "${id}" has an unusable removal pattern — ${err.message}`);
+        }
+        const label = `removal /${pattern}/`;
+        if (onViolation) violationHits++;
+        else missed.push(label);
+        if (onNearMiss) {
+          nearMissHits++;
+          falsePositives.push(label);
+        }
+      }
     }
   }
 
   // The content half. Each side of the pair is a doc and the union its names
   // have to appear in, and the rule is the one the driver runs: the violation
   // names something the union does not have, the near miss names nothing it
-  // lacks. One unit, one hit, so the totals stay comparable with the other kinds.
+  // lacks. One hit per PATTERN, for the reason the removal half counts that way.
   if (extract.length) {
-    let onViolation;
-    let onNearMiss;
-    try {
-      onViolation = extractFires(extract, fencedHalves(violation, PAIRED_FENCE));
-      onNearMiss = extractFires(extract, fencedHalves(nearMiss, PAIRED_FENCE));
-    } catch (err) {
-      throw new Error(`admission: check "${id}" has an unusable extract pattern — ${err.message}`);
-    }
-    if (onViolation) violationHits++;
-    else missed.push("extract");
-    if (onNearMiss) {
-      nearMissHits++;
-      falsePositives.push("extract");
+    const halves = { violation: fencedHalves(violation, PAIRED_FENCE), nearMiss: fencedHalves(nearMiss, PAIRED_FENCE) };
+    for (const unit of extract) {
+      for (const pattern of unit.patterns) {
+        const one = [{ patterns: [pattern] }];
+        let onViolation;
+        let onNearMiss;
+        try {
+          onViolation = extractFires(one, halves.violation);
+          onNearMiss = extractFires(one, halves.nearMiss);
+        } catch (err) {
+          throw new Error(`admission: check "${id}" has an unusable extract pattern — ${err.message}`);
+        }
+        const label = `extract /${pattern}/`;
+        if (onViolation) violationHits++;
+        else missed.push(label);
+        if (onNearMiss) {
+          nearMissHits++;
+          falsePositives.push(label);
+        }
+      }
     }
   }
 
@@ -422,8 +450,7 @@ function ownPair(check, blank, match, evaluate) {
     }
   }
 
-  const total = units.reduce((n, u) => n + u.patterns.length, 0) + (paired.length ? 1 : 0) +
-    (removed.length ? 1 : 0) + (extract.length ? 1 : 0) + session.length;
+  const total = patternCount(check);
   const passes = violationHits === total && nearMissHits === 0;
   const reasons = [];
   if (missed.length) {
@@ -699,6 +726,7 @@ module.exports = {
   SESSION_KINDS,
   SESSION_PARAMS,
   fencedHalves,
+  patternCount,
   ownPair,
   crossNearMiss,
   admit,

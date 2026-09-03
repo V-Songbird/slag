@@ -10,6 +10,7 @@
 // answers three questions — which editions does this project look like, what
 // does one of them say, and what is the stable name of a thing inside it.
 
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
@@ -314,6 +315,22 @@ function validateStarter(record, file, manifest, manager, hasSample, where) {
     if (rel.startsWith("/") || rel.includes("\\") || /^[A-Za-z]:/.test(rel) || rel.split("/").includes("..")) {
       throw expected("the " + record.edition + " edition's starter file `" + rel + "`" + where +
         " is not a relative path inside the project");
+    }
+    // The same discipline every other file jig writes is under: a starter body
+    // is generated content with a version an install records, so it carries the
+    // version and the hash of the bytes that version shipped. A body edited
+    // without restamping both is refused here — before a plan exists — exactly
+    // as a template whose file no longer matches `templates.json` is.
+    if (typeof entry.version !== "string" || entry.version === "" || typeof entry.sha256 !== "string") {
+      throw expected("the " + record.edition + " edition's starter file `" + entry.path + "`" + where +
+        " carries no `version` and `sha256`, so an install could not say which body it received");
+    }
+    const found = crypto.createHash("sha256").update(Buffer.from(entry.body, "utf8")).digest("hex");
+    if (found !== entry.sha256) {
+      throw expected("the " + record.edition + " edition's starter file `" + entry.path + "`" + where +
+        " does not match the hash its catalogue recorded for it (recorded " + entry.sha256.slice(0, 12) +
+        ", found " + found.slice(0, 12) + "). Bump the file's `version` and restamp its `sha256` rather" +
+        " than shipping a body nothing gates.");
     }
   }
 }

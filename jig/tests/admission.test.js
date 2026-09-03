@@ -910,3 +910,82 @@ test("a deny stated on the detector is read by admission, not just the check's o
   assert.deepEqual(admission.admit([perDetector({ ...DENY, reason: "This one was written for the detector." })],
     blank).discarded, []);
 });
+
+// ---------------------------------------------------------------------------
+// One hit per pattern, not one per detector (2.14.0, roadmap 235)
+// ---------------------------------------------------------------------------
+//
+// The removal, extract and session kinds each counted ONE hit for a whole
+// detector, because each ran its evaluation over every pattern at once. So a
+// second pattern added beside one the fixture already fires rode in on the
+// first one's hit and was never proved — which is how jvm's `deleted-test`
+// shipped a `class \w*Tests?` rule no fixture ever dropped. Each pattern is now
+// handed to its own evaluation, and a spelling the pair does not exercise
+// discards the check that names it.
+
+test("a second removed pattern the violation never drops is discarded, not carried by the first", () => {
+  const two = removed({
+    detectors: [{
+      lever: "check-driver",
+      params: { removed: ["\\b(?:it|test)\\s*\\(", "\\bdescribe\\s*\\("], paths: ["**/*.test.js"] },
+    }],
+  });
+  const result = admission.ownPair(two, blank);
+  assert.equal(result.passes, false, "the second spelling rode in on the first one's count");
+  assert.equal(result.violationHits, 1);
+  assert.match(result.why, /1 of 2 pattern\(s\)/);
+  assert.match(result.why, /removal \/\\bdescribe/, "the unproven spelling is named, not just the detector");
+  assert.deepEqual(admission.admit([two], blank).admitted, []);
+});
+
+test("a second extract pattern the violation's doc never trips is discarded", () => {
+  const two = extract({
+    detectors: [{
+      lever: "check-driver",
+      params: {
+        paths: ["docs/**/*.md"],
+        extract: ["`(--[a-z][a-z0-9-]*)`", "\\b(--flag-[a-z]+)\\b"],
+        pairedWith: ["src/**/*.js"],
+      },
+    }],
+  });
+  const result = admission.ownPair(two, blank);
+  assert.equal(result.passes, false);
+  assert.equal(result.violationHits, 1);
+  assert.match(result.why, /extract \/\\b\(--flag/);
+  assert.deepEqual(admission.admit([two], blank).admitted, []);
+});
+
+test("a second session pattern the violation command never matches is discarded", () => {
+  const two = guarded({
+    detectors: [
+      { lever: "bash-guard", params: { patterns: [PIPE, "wget[^|\\n]*\\|\\s*(?:ba)?sh\\b"] } },
+      guarded().detectors[1],
+    ],
+  });
+  const result = admission.ownPair(two, blank, undefined, evalSessionDetector);
+  assert.equal(result.passes, false, "the wget spelling rode in on the curl one's hit");
+  assert.equal(result.violationHits, 2);
+  assert.match(result.why, /bash-guard-0 \(patterns\[1\]\)/, "the unproven pattern is named, not just the lever");
+  assert.deepEqual(admission.admit([two], blank, { evaluate: evalSessionDetector }).admitted, []);
+
+  // A lever naming one pattern keeps the bare id, so a discard and a cross row
+  // read the way they always have.
+  assert.match(admission.ownPair(guarded({
+    detectors: [{ lever: "bash-guard", params: { patterns: ["zzz-never-\\d+"] } }, guarded().detectors[1]],
+  }), blank, undefined, evalSessionDetector).why, /: bash-guard-0$/);
+});
+
+test("a second paired detector the violation change set never trips is discarded", () => {
+  const two = paired({
+    detectors: [
+      paired().detectors[0],
+      { lever: "check-driver", params: { paths: ["migrations/**"], pairedWith: ["docs/**/*.md"] } },
+    ],
+  });
+  const result = admission.ownPair(two, blank, match);
+  assert.equal(result.passes, false, "the second detector rode in on the first one's hit");
+  assert.equal(result.violationHits, 1);
+  assert.match(result.why, /paired-change\[1\]/);
+  assert.deepEqual(admission.admit([two], blank, { match }).admitted, []);
+});

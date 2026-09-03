@@ -21,6 +21,19 @@ const STATE_DIR = ".jig";
 // the config and the checks — CI reads it, so it is committed and never ignored.
 const VERIFY_FILE = "verify.json";
 
+// The host's shell tool is not called `Bash` everywhere, and a host may offer
+// more than one. Measured on Claude Code 2.1.257, win32: a headless session's
+// tool list carried `PowerShell` and no `Bash` at all, while an interactive
+// session on the same machine carried both (`docs/research/jig/
+// HOST-PROBE-2026-09-02.md`, sections 3 and 4). So the set is per session, not
+// per platform, and nothing here infers it. This is the one source for the
+// matchers in `hooks.json`, the witness gate and the command lever — a bare
+// `Bash` literal in any of them is a lane that reports live and never runs,
+// which is the coverage claim SCOPE forbids. It lives here because the engine
+// and the hooks both name it and this module is what they share; a release
+// gate pins `hooks.json` to it.
+const SHELL_TOOLS = ["Bash", "PowerShell"];
+
 function isObject(v) {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }
@@ -81,6 +94,6 @@ function fixturePath(det) {
 }
 
 module.exports = {
-  SCHEMA_VERSION, STATE_DIR, VERIFY_FILE,
+  SCHEMA_VERSION, STATE_DIR, VERIFY_FILE, SHELL_TOOLS,
   isObject, stripBom, proposedVerifyEntries, concreteSegment, fixturePath,
 };

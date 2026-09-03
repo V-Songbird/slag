@@ -20,6 +20,7 @@ const HOOKS_DIR = path.join(__dirname, "..", "hooks");
 const RUNNER = path.join(HOOKS_DIR, "runner.js");
 const HOOKS_JSON = path.join(HOOKS_DIR, "hooks.json");
 const lib = require("../hooks/jig-lib");
+const { SHELL_TOOLS } = require("../scripts/vocab.js");
 const admission = require("../scripts/admission.js");
 const A = require("./authored.js");
 
@@ -228,13 +229,16 @@ test("hooks.json registers one shell-free node entry per event", () => {
     ["PostToolUse", "PostToolUseFailure", "PreToolUse", "Stop", "SubagentStop"]);
   // PreToolUse carries both session kinds since 2.11.0: a bash-guard over the
   // command, and an edit-guard over the edit BEFORE the host writes it. The
-  // Bash half of PostToolUse and the whole of PostToolUseFailure are the witness
-  // registrations, and its Edit/Write half still runs the older
+  // shell half of PostToolUse and the whole of PostToolUseFailure are the
+  // witness registrations, and its Edit/Write half still runs the older
   // `edit-observe-guard` installs that have not migrated. Stop and SubagentStop
   // take no matcher because they name no tool. Every one of them is the same
   // shell-free node entry.
+  // Since 2.14.0 the shell half names every tool a host may call its shell, not
+  // just `Bash` — read off the shared list, never spelled here.
+  const shell = SHELL_TOOLS.join("|");
   const expected = {
-    PreToolUse: "Bash|Edit|Write", PostToolUse: "Bash|Edit|Write", PostToolUseFailure: "Bash",
+    PreToolUse: shell + "|Edit|Write", PostToolUse: shell + "|Edit|Write", PostToolUseFailure: shell,
     Stop: undefined, SubagentStop: undefined,
   };
   for (const [event, matcher] of Object.entries(expected)) {
@@ -435,6 +439,21 @@ test("a piped installer is recorded as a would-deny", () => {
   assert.equal(rows[0].decision, "would-deny");
   assert.equal(rows[0].classId, "piped-installer");
   assert.equal(rows[0].guardId, "g-piped-installer");
+});
+
+// 2.14.0 / roadmap 237. The host does not always call its shell tool `Bash`:
+// on win32 Claude Code offers `PowerShell` and no `Bash` at all, so a command
+// guard gated on the one name never evaluated on the owner's own platform while
+// `/jig:inventory` reported the session lane live. The guard runs on whatever
+// shell tool arrives; the patterns are the author's problem, and the SKILL and
+// the matrix say so.
+test("a command guard evaluates on the host's shell tool, whatever it is called", () => {
+  const root = guarded([A.PIPED_INSTALLER]);
+  for (const tool of SHELL_TOOLS) {
+    const out = run(root, "PreToolUse", { ...PIPE_CALL, tool_name: tool });
+    assert.equal(JSON.parse(out.stdout).jig.decision, "would-deny", `${tool} never reached the guard`);
+  }
+  assert.deepEqual(ledger(root).map((r) => r.tool), SHELL_TOOLS);
 });
 
 test("downloading without piping into a shell passes", () => {
@@ -1321,6 +1340,20 @@ test("a Bash call that ran a verify entry leaves a green row naming it", () => {
   assert.equal(rows[0].decision, "verified");
   assert.equal(rows[0].verify, "test-script");
   assert.equal(rows[0].guardId, null, "a witness row is not a guard row");
+});
+
+// 2.14.0 / roadmap 237. A verification run is a verification run whichever
+// shell tool ran it. Gated on `Bash` alone, the green half of the witness never
+// fired on win32 — where the tool is `PowerShell` — so `lastGreen` could never
+// be set from a session there and 2.10.0's Stop line had nothing to read.
+test("the witness sees a verify run on every shell tool, not just Bash", () => {
+  for (const tool of SHELL_TOOLS) {
+    const root = verified(guarded([]));
+    const out = run(root, "PostToolUse", { ...ranBash("npm test"), tool_name: tool });
+    assert.deepEqual(JSON.parse(out.stdout).jig.verify,
+      { entry: "test-script", passed: true, exitCode: null }, `${tool} was not witnessed`);
+    assert.equal(ledger(root)[0].decision, "verified");
+  }
 });
 
 test("the failure event is what makes a run red, not a code read off the payload", () => {

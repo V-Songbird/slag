@@ -82,11 +82,12 @@ Takes effect next session. Nothing to configure — the interview is the configu
 
 ## Benchmarks
 
-Every check jig runs is measured the same way it is admitted: it must fire on its own planted violation and stay silent on a near miss built to look like one.
+Every check jig runs is measured the same way it is admitted: it must fire on its own planted violation and stay silent on a near miss built to look like one. Every pattern inside a check is held to that separately, so a second pattern cannot be counted as covered because the one beside it matched.
 
 | What | Score |
 | --- | --- |
 | Checks jig runs, each passing its own pair | **147 of 147** |
+| Patterns those checks name, each proved on its own | **256 of 256** |
 | Mistake classes across the six editions | 165 |
 | Cross-sample hits, disclosed | 8 |
 
