@@ -85,6 +85,46 @@ test("presence never throws on absence", () => {
   );
 });
 
+test("presence asks about a module inside its interpreter, not about the interpreter", () => {
+  const root = tmpProject({});
+  // `python -m build` reported present, at python's own version, on a machine
+  // with no build module: the interpreter answered for it. The same shape here
+  // on the one interpreter a test can be sure of — node has no `-m`, so nothing
+  // can answer, and an interpreter that runs is not the module being there.
+  const found = toolchain.presence(root, nodeTool({
+    id: "jig-absent-module",
+    verify: { argv: [process.execPath, "-m", "jig_absent_module", "--wheel"], expectedExit: 0 },
+  }));
+  assert.deepEqual(found, { present: false, version: null, how: "absent" });
+});
+
+test("the probe names the tool: a dispatched subcommand as itself, a fetching runner not at all", () => {
+  const rust = edition("rust");
+  // `cargo --version` answers on every machine with rust, whether or not the
+  // `cargo-nextest` binary was ever installed.
+  const nextest = rust.toolchain.find((t) => t.id === "cargo-nextest");
+  assert.deepEqual(toolchain.probeArgv(nextest, nextest.verify.argv), ["cargo", "nextest", "--version"]);
+  // A builtin IS its host, and `cargo build --version` is an argument error.
+  const cargo = rust.toolchain.find((t) => t.id === "cargo");
+  assert.deepEqual(toolchain.probeArgv(cargo, cargo.verify.argv), ["cargo", "--version"]);
+  // And a verb of the tool's own program stays the tool's own program: asking
+  // `ruff check --version` asks ruff about an argument it does not take.
+  const ruff = edition("python").toolchain.find((t) => t.id === "ruff");
+  assert.deepEqual(toolchain.probeArgv(ruff, ruff.verify.argv), ["ruff", "--version"]);
+
+  // `npx eslint --version` INSTALLS eslint, and presence writes nothing, so
+  // there is no query to ask: the answer is a disclosed unknown.
+  const eslint = edition("javascript-typescript").toolchain.find((t) => t.id === "eslint");
+  assert.equal(toolchain.probeArgv(eslint, eslint.verify.argv), null);
+  assert.deepEqual(toolchain.presence(tmpProject({}), eslint),
+    { present: false, version: null, how: "unprobeable" });
+  // The manifest is the one reading left for it, and it is enough on a project
+  // that declares the tool.
+  assert.equal(toolchain.presence(tmpProject({
+    "package.json": JSON.stringify({ devDependencies: { eslint: "^9.0.0" } }),
+  }), eslint).how, "manifest");
+});
+
 test("presence refuses a tool entry with no verify.argv", () => {
   const root = tmpProject({});
   assert.throws(() => toolchain.presence(root, { id: "broken" }), /verify\.argv/);
@@ -383,14 +423,20 @@ test("the dotnet edition writes its test project instead of generating one", () 
   assert.deepEqual(starter.sort(), ["App.sln", "tests/App.Tests.csproj", "tests/SmokeTests.cs"]);
   const csproj = dotnet.detect.manifest.starter.files.find((f) => f.path === "tests/App.Tests.csproj").body;
   assert.match(csproj, /PackageReference Include="xunit"/);
-  // And the project file at the root must not compile them itself, or a
-  // starter's first build fails on a library that never referenced xunit.
-  assert.match(dotnet.detect.manifest.sample, /<Compile Remove="tests\/\*\*" \/>/);
+  assert.match(csproj, /ProjectReference Include="\.\.\/src\/App\.csproj"/);
+  // The library lives under `src/`, which is what keeps the root to exactly one
+  // MSBuild workspace: with `App.csproj` beside `App.sln`, `dotnet format` — the
+  // formatter this edition installs — refuses the tree jig just wrote with
+  // "Both a MSBuild project file and solution file found". It is also what keeps
+  // the SDK's default glob off `tests/`, so the library never tries to compile
+  // sources that reference an xunit it does not have.
+  assert.equal(dotnet.detect.manifest.path, "src/App.csproj");
+  assert.doesNotMatch(dotnet.detect.manifest.sample, /<Compile Remove=/);
   // The solution is what makes the test project reachable at all: `dotnet test`
   // beside a lone `App.csproj` resolves that one project, runs nothing and
   // exits 0 — with TreatNoTestsAsError set, on the tree jig just wrote.
   const sln = dotnet.detect.manifest.starter.files.find((f) => f.path === "App.sln").body;
-  assert.match(sln, /"App\.csproj"/);
+  assert.match(sln, /"src\\App\.csproj"/);
   assert.match(sln, /App\.Tests\.csproj/);
 });
 
@@ -837,6 +883,32 @@ function tickedRow(id, role, ed) {
   return { item: { id, role, edition: ed || "javascript-typescript" } };
 }
 
+// 2.14.0. `toolchain.js` refuses a tool that ships no `configSample` on the
+// stated grounds that otherwise "the owner would be approving an install with
+// no config to read" — and then `toolchainRow`, the row `jig.js toolchain`
+// returns and the skill puts to the owner, dropped both the sample and the
+// edition's `why`. The owner was shown a config PATH and asked to approve the
+// bytes at it sight unseen, which is the first thing SCOPE forbids.
+test("the row an owner ticks a tool from carries the bytes it would write", () => {
+  const root = tmpProject({});
+  for (const row of shippedEditions()) {
+    const ed = row.edition;
+    for (const tool of ed.toolchain) {
+      let item;
+      try {
+        [item] = toolchain.proposeInstalls(root, ed, [tool.id], ed.detect.packageManagers[0]);
+      } catch (err) {
+        assert.equal(err.expected, true);
+        continue;
+      }
+      const emitted = engine.toolchainRow({ item, present: false, how: null, version: null });
+      assert.equal(emitted.configSample, tool.configSample,
+        ed.edition + "/" + tool.id + " is approved with no config to read");
+      assert.equal(emitted.why, tool.why, ed.edition + "/" + tool.id + " is offered with no reason on the row");
+    }
+  }
+});
+
 test("parseCommand is exported, so an install and a lane entry meet one parser", () => {
   assert.deepEqual(toolchain.parseCommand("npx eslint .", "x"), ["npx", "eslint", "."]);
   assert.throws(() => toolchain.parseCommand("eslint . && tsc", "the lane entry"),
@@ -933,7 +1005,15 @@ test("a tool already on the machine keeps its wiring and its CI step through the
   assert.equal(change.ciStep, "npm run lint");
 
   const md = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
-  assert.ok(md.includes("- CI step: `npm run lint`"), "the CI step is not on the page the owner approves from");
+  assert.ok(md.includes("`npm run lint`"), "the CI line is not on the page the owner approves from");
+  // And it is not labelled as the step the owner's CI runs. `ciStep` is the
+  // edition's hand-written line for a workflow somebody wires themselves; the
+  // workflow jig writes runs the check driver per `.jig/verify.json` entry and
+  // this command nowhere, so "CI step: `npm run lint`" named a command no CI
+  // here ever executes (SCOPE: it never claims coverage it has not demonstrated).
+  assert.ok(!md.includes("- CI step: `npm run lint`"), "the page still calls it the CI step");
+  assert.match(md, /jig runs this nowhere/);
+  assert.match(md, /run\.mjs --verify --lane ci` per `\.jig\/verify\.json` entry/);
 });
 
 test("an install refused at apply time is finished, not `interrupted` for ever", () => {

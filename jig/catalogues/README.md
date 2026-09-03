@@ -33,19 +33,26 @@ Four ecosystems need more than the project file to get there, and they say so in
 `detect.manifest.starter.files`: a list of entries jig writes beside the manifest, each as its own
 approved change. An entry carries a `path`, a `body`, and the `version` and `sha256` that put the
 body under the same discipline every other file jig writes is under — the loader hashes the body and
-refuses the edition when it does not match, so a starter cannot be edited without restamping both
-and a manifest row can say which version an install received. Rust needs a `src/lib.rs` and a `Cargo.lock`, because cargo exits
+refuses the edition when the `sha256` does not match, so a starter cannot be edited without
+restamping the hash, and the `version` beside it is what a manifest row records so an install can say
+which body it received. Bumping that version is a maintainer's discipline rather than a gate: only
+the hash is a fact about the bytes, and nothing here binds the version to them. Rust needs a `src/lib.rs` and a `Cargo.lock`, because cargo exits
 101 on a `[package]` with no target and `--locked` refuses a lockfile that is not there; python
 needs the package directory hatchling builds from; JavaScript needs a module and a test, because
 `node --test` over an empty tree passes without running anything; .NET needs a test project and a
 solution file, because `dotnet test` beside a lone `App.csproj` resolves that one project and exits
-0 having run nothing. A file may name the `tool` it belongs to and is then written only where that
+0 having run nothing — and the library goes under `src/`, because a root holding both `App.sln` and
+`App.csproj` is two MSBuild workspaces and `dotnet format`, the formatter this edition installs,
+refuses to choose between them. A file may name the `tool` it belongs to and is then written only where that
 tool is in the plan — JavaScript's two smoke tests are why, since `node --test` and vitest read
 different files and neither can read the other's. Each list is the smallest tree
 that makes that ecosystem's own build and test commands exit 0, and
 `node --test jig/tests/release-gates.test.js` (gate G7) scaffolds every edition whose toolchain is
 on the machine and runs those commands over the result — an edition whose toolchain is absent is
-skipped by name with the reason, never silently.
+skipped by name with the reason, never silently. Gate G10 scaffolds each one again with its
+formatter, linter and type checker ticked and runs those over the tree too, because a starter is
+also judged by the tools jig installs beside it: the JavaScript starter shipped in the quote style
+its own `.prettierrc.json` rejects, and no gate had ever run a formatter over a starter.
 Choosing an application template is the owner's job and always was; getting to a green check without
 one is jig's.
 
@@ -74,7 +81,7 @@ driver and the runner. Nothing in an edition gates an install — catalogues inf
 { schemaVersion: 4, edition, displayName, researchedOn,
   detect:    { manifest: { path, sample, hint }, ignore, files, extensions, commentSyntax, packageManagers },
   toolchain: [{ id, role, why, installKind, install, uninstall, configPath, configSample,
-                wiring, ciStep, seed: { path, sample },
+                ignorePath?, ignoreSample?, wiring, ciStep, seed: { path, sample },
                 verify: { argv, expected, expectedExit } }],
   classes:   [ … ] }
 ```
@@ -104,6 +111,13 @@ build file is worse than no feature. Two things keep the four honest. Compositio
 for a file the project already owns, so every body merged is one this catalogue shipped; and release
 gate G5 composes every shared path in every edition and fails if a single line of any sample is
 lost or if two tools dispute one key.
+
+`ignorePath` and `ignoreSample` are the tool's own ignore file, written beside its config as one
+more approved change. They are optional and stated together or not at all: only a tool that walks
+by path rather than by extension needs one. Prettier is the single entry that does — `prettier
+--check .` reports every file under `.jig/`, which is jig's state and not the project's code,
+whereas ruff sees no `.py` there and gofumpt no `.go`. ESLint walks the same way and says it in its
+own flat config instead, because that file already has a `globalIgnores`.
 
 `detect.ignore` is what a project in this ecosystem never commits — `node_modules/`, `target/`,
 `__pycache__/`. jig composes a root `.gitignore` from it when it scaffolds a starter, and writes

@@ -519,7 +519,8 @@ function leverTools(det) {
 
 // A command lever, whichever shell tool the host names. Asked here rather than
 // spelled `includes("Bash")` at each call site: three files used to carry that
-// literal, and one of them being missed is how the win32 lane went quiet.
+// literal, and one of them being missed is how the lane went quiet in the
+// session the probe measured, which was offered `PowerShell` and no `Bash`.
 function isShellLever(det) {
   return SHELL_TOOLS.some((t) => leverTools(det).includes(t));
 }
@@ -658,14 +659,21 @@ function zoneForcesObserve(zones, filePath) {
   return matchesPathGlobs(zones.observe, filePath);
 }
 
-// evidence: { proof, deny, falsePositive } — the hash computed from the check
-// on disk, the complete deny reply that check ships (null when it ships none),
+// evidence: { problem, proof, deny, falsePositive } — why the check could not
+// be used at all (null when it could), the hash computed from the check on
+// disk, the complete deny reply that check ships (null when it ships none),
 // and whether a false positive stands against this guard. Returns { mode, why }
 // — `why` is the bar that held, so a review surface can say why a guard is
 // observing without re-deriving it.
 function effectiveState(guard, config, filePath, evidence) {
   const e = evidence || {};
   if ((guard.mode || DEFAULT_MODE) !== "armed") return { mode: "observe", why: "not asked to arm" };
+  // Asked before the deny triple, because a module that will not load ships no
+  // deny reply either and the two are different reports: one is an authoring
+  // defect in the check, the other is a file that is gone. Graded as the first,
+  // a deleted check was reported as "ships no complete deny reply" — untrue of
+  // the check, and the review skill prints this reason verbatim.
+  if (e.problem) return { mode: "observe", why: e.problem };
   // The backstop. A check with an incomplete deny triple is not armable and
   // should have been discarded at admission; reaching here means something
   // wrote a guard for a check that never earned one.
@@ -737,8 +745,15 @@ function ledgerStats(root) {
     if (!key) continue;
     const s = stats[key] || (stats[key] = {
       standingFalsePositive: false, pendingFalsePositive: false, falsePositives: 0, fired: 0,
-      denied: 0, wouldDeny: 0, evaluated: 0, lastFired: null,
+      denied: 0, wouldDeny: 0, evaluated: 0, evaluatedOn: [], lastFired: null,
     });
+    // Which shell tools THIS guard's evaluated calls arrived on. The tool name
+    // rides on every row that feeds `evaluated`, so the per-guard half of the
+    // shell question costs a set rather than a second pass — and it is the half
+    // that matters: `shellToolsSeen` is repository-wide, so a `PowerShell` row
+    // written by some other guard would otherwise be read as this guard's
+    // syntax, and a `Bash` row from a guard retired months ago as a live one.
+    const counted = s.evaluated;
     if (row.decision === "false-positive") {
       s.falsePositives++;
       s.standingFalsePositive = true;
@@ -760,7 +775,13 @@ function ledgerStats(root) {
       // coverage nobody had, on the row `problem` separately calls broken.
       s.evaluated++;
     }
+    if (s.evaluated > counted && SHELL_TOOLS.includes(row.tool) && !s.evaluatedOn.includes(row.tool)) {
+      s.evaluatedOn.push(row.tool);
+    }
   }
+  // Reported in the shared list's own order, the way `shellToolsSeen` reports
+  // its set, so two surfaces never name the same pair in two orders.
+  for (const s of Object.values(stats)) s.evaluatedOn = SHELL_TOOLS.filter((t) => s.evaluatedOn.includes(t));
   return stats;
 }
 
@@ -1009,8 +1030,11 @@ function isWitnessEvent(event, tool) {
   // witness however the payload names its tool. PostToolUse carries the edit
   // guards too, and only its shell half is a witness — a guard must never
   // evaluate here. A verification run is a verification run whichever shell
-  // tool ran it: gating this on `Bash` alone left every win32 session with
-  // nothing to witness and `lastGreen` permanently null.
+  // tool ran it: gating this on `Bash` alone left the headless win32 session
+  // the probe measured with nothing to witness and `lastGreen` null there
+  // (HOST-PROBE-2026-09-02, section 3). Which names a session sends is that
+  // session's, not its platform's — section 4 is an interactive session on the
+  // same machine carrying both — so the gate reads the list, never the OS.
   return event === "PostToolUseFailure" || (event === "PostToolUse" && SHELL_TOOLS.includes(tool));
 }
 

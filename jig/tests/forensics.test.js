@@ -773,12 +773,61 @@ test("a hook already registered for the same tool occupies the slot, with the re
     }),
   });
   const out = engine.cmdScan(root);
-  assert.deepEqual(out.occupied, ["PreToolUse:Bash"]);
-  const slot = out.slots.find((s) => s.slot === "PreToolUse:Bash");
+  // The literal, not `SHELL_TOOLS` joined back against itself: the slot id is a
+  // report string an owner reads, and 2.14.0 widened it off `Bash` alone.
+  assert.deepEqual(out.occupied, ["PreToolUse:Bash|PowerShell"]);
+  const slot = out.slots.find((s) => s.slot === "PreToolUse:Bash|PowerShell");
   assert.equal(slot.free, false);
   assert.ok(slot.occupiedBy[0].includes(".claude/settings.json"));
   assert.ok(slot.occupiedBy[0].includes("node ./guard.js"));
   assert.ok(out.disclosures.some((d) => d.includes("do not chain")));
+});
+
+// 2.14.0 / roadmap 237. Widening `HOOK_SLOTS[0].tools` to every shell tool is a
+// behaviour change on the install path, not only on the guard path: a foreign
+// hook registered for `PowerShell` alone used to leave the command-guard slot
+// free, and jig would have registered a second PreToolUse hook beside it.
+// Registrations do not chain, so one of the two would silently never fire.
+test("a foreign hook on the other shell tool takes the command-guard slot too", () => {
+  const root = project({
+    ".claude/settings.json": JSON.stringify({
+      hooks: {
+        PreToolUse: [{ matcher: "PowerShell", hooks: [{ type: "command", command: "node", args: ["./ps-guard.js"] }] }],
+      },
+    }),
+  });
+  const out = engine.cmdScan(root);
+  assert.deepEqual(out.occupied, ["PreToolUse:Bash|PowerShell"]);
+  const slot = out.slots.find((s) => s.slot === "PreToolUse:Bash|PowerShell");
+  assert.ok(slot.occupiedBy[0].includes("node ./ps-guard.js"));
+  assert.ok(out.disclosures.some((d) => d.includes("do not chain")));
+
+  // SCOPE, "Is a foreign hook on one shell tool a full occupancy": yes, whole,
+  // because the session's tool list is not knowable from here and jig's matcher
+  // is one static registration covering both names. What the owner is owed is
+  // WHICH name is contested — a flat "taken" over a slot named for two tools is
+  // the report claiming more than jig knows, and this hook holds only one.
+  assert.deepEqual(slot.overlap, ["PowerShell"]);
+  assert.ok(out.disclosures.some((d) => d.includes("held on PowerShell only, not on Bash")),
+    "the owner is refused a guard without being told which name the hook holds");
+});
+
+// The other direction: a foreign hook on the matcher jig's own slot covers whole
+// contends for both names, and there is no partial hold to disclose.
+test("a foreign hook covering every shell tool holds the whole slot with nothing to qualify", () => {
+  const root = project({
+    ".claude/settings.json": JSON.stringify({
+      hooks: {
+        PreToolUse: [{ matcher: "Bash|PowerShell", hooks: [{ type: "command", command: "node", args: ["./both.js"] }] }],
+      },
+    }),
+  });
+  const out = engine.cmdScan(root);
+  const slot = out.slots.find((s) => s.slot === "PreToolUse:Bash|PowerShell");
+  assert.equal(slot.free, false);
+  assert.deepEqual(slot.overlap, ["Bash", "PowerShell"]);
+  assert.ok(!out.disclosures.some((d) => d.includes("only, not on")),
+    "a hook holding both names is qualified as if it held one");
 });
 
 test("a wildcard matcher takes every slot for its event", () => {
@@ -822,7 +871,7 @@ test("an in-tree plugin's hooks are inventoried alongside settings", () => {
   });
   const out = engine.cmdScan(root);
   assert.deepEqual(out.guardrails.hooks.map((h) => h.source), ["otherplugin/hooks/hooks.json"]);
-  assert.deepEqual(out.occupied, ["PreToolUse:Bash"]);
+  assert.deepEqual(out.occupied, ["PreToolUse:Bash|PowerShell"]);
 });
 
 test("unreadable settings are skipped rather than crashing the scan", () => {

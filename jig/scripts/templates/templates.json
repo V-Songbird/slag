@@ -3,13 +3,13 @@
   "templates": [
     {
       "name": "check-driver",
-      "version": "1.14.0",
+      "version": "1.15.0",
       "file": "run.mjs",
       "target": ".jig/checks/run.mjs",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "f326bc85c9cadb2b2ed82e9a27c145762680da7576175ed843d94ba043dc5f54"
+      "sha256": "7ea5862cece17685d7586c0b4b05e9ac56e07661f1ce87d15b3b52d9e8c3bc8b"
     },
     {
       "name": "ci-workflow",

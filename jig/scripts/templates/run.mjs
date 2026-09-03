@@ -20,15 +20,20 @@
 //   node .jig/checks/run.mjs --json          machine-readable report
 //
 // Exit code is 1 when anything was found and 0 when nothing was. A selftest
-// exits 1 when a check failed to catch its own seeded violation, when a check
-// claims this driver and carries no pair it can run, and when there is no check
-// module at all — an empty checks directory proves nothing, and exiting 0 on it
-// would report coverage that does not exist. A check whose detectors all belong
-// to the session lane is a disclosed skip rather than a failure: it is proven
-// where it runs. A walk that hit the file ceiling exits 1 too: it read part of
-// the project, and 0 would say it read all of it. The one failure that exits 0
-// is this file itself crashing — that is a coverage gap, disclosed on stderr
-// and in .jig/lane.log, and never a reason to stop somebody committing.
+// exits 1 when a check failed to catch its own seeded violation, and when a
+// check claims this driver and carries no pair it can run. An empty checks
+// directory is neither of those: no check failed, and none was proven either,
+// so the report says nothing here is proven and the exit code stays 0. The
+// workflow ships with this step in it, and an install whose coverage is a
+// linter and a starter lands exactly that directory — exiting 1 on it was a CI
+// lane red on its first push, on a tree jig had just written. The exit code
+// answers "did a check fail here"; only the report answers "what is proven".
+// A check whose detectors all belong to the session lane is a disclosed skip
+// rather than a failure: it is proven where it runs. A walk that hit the file
+// ceiling exits 1 too: it read part of the project, and 0 would say it read
+// all of it. The one failure that exits 0 is this file itself crashing — that
+// is a coverage gap, disclosed on stderr and in .jig/lane.log, and never a
+// reason to stop somebody committing.
 //
 // A `--verify` run exits 1 when a command the lane names exited on anything but
 // the code the entry expects, and when the lane could not start one at all. A
@@ -1183,7 +1188,11 @@ async function main(argv) {
   if (argv.includes("--selftest")) {
     const results = await runSelftest();
     process.stdout.write((json ? JSON.stringify({ selftest: results }, null, 2) : selftestReport(results)) + "\n");
-    return results.some((r) => r.caught === false) || !results.length ? 1 : 0;
+    // A check that failed is the only thing this exit code reports. Nothing to
+    // run is not a failure of anything: the report above already says nothing
+    // is proven, and exiting 1 on it made the shipped CI workflow red on every
+    // install whose checks directory holds only this file.
+    return results.some((r) => r.caught === false) ? 1 : 0;
   }
   const out = await runChecks(ROOT, paths, argv.includes("--staged"));
   if (ledger) ledgerFindings(ledger, out.findings);

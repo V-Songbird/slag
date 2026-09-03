@@ -14,10 +14,12 @@
 //      is "run this yourself", not a subshell. No shipped edition carries such
 //      a command, and a release gate holds that true.
 //   2. presence() and proposeInstalls() change nothing. proposeInstalls spawns
-//      nothing at all; presence spawns exactly one thing, `<tool> --version`,
-//      which is what SCOPE's "how is tool presence determined" decision asks
-//      for and is the only invocation in this file that needs no approval,
-//      because a version probe cannot write.
+//      nothing at all; presence spawns exactly one thing, a version query for
+//      the tool itself, which is what SCOPE's "how is tool presence determined"
+//      decision asks for and is the only invocation in this file that needs no
+//      approval, because a version probe cannot write. A tool whose version
+//      query WOULD write — `npx <pkg> --version` installs `<pkg>` — is not
+//      probed at all rather than probed loosely.
 //   3. Execution is gated on an approval record naming the item's id AND its
 //      command verbatim. There is no force flag, no environment override and no
 //      "assume yes" path: an approval that does not match the command about to
@@ -214,29 +216,76 @@ function manifestMentions(root, names) {
   return null;
 }
 
+// Runners that FETCH whatever they are asked to run. Measured on 2026-09-02:
+// `npx eslint --version` on a machine with no eslint installs eslint and then
+// answers. presence() writes nothing, so a tool behind one of these is not
+// probed at all — the manifest is the only honest reading left, and where even
+// that is silent the answer is "unprobeable", not "absent".
+const FETCHING_RUNNERS = ["npx", "pnpx", "bunx", "uvx"];
+
+// Hosts that dispatch a subcommand to a separately installed program of its
+// own: `cargo nextest` runs the `cargo-nextest` binary, and cargo answers
+// `--version` whether or not that binary was ever installed — which is how all
+// six rust tools read present on a machine carrying four of them. Only a host
+// whose subcommand is its own program belongs here: `ruff check` and `go vet`
+// are verbs of one program, and asking `ruff check --version` asks ruff about
+// an argument it does not take.
+const SUBCOMMAND_HOSTS = ["cargo"];
+
+// The version query that proves THIS tool, derived from the verify argv the
+// edition already carries (SCOPE, "How is tool presence determined"). null
+// where the query cannot be asked without installing something.
+function probeArgv(tool, argv) {
+  if (FETCHING_RUNNERS.includes(argv[0])) return null;
+  // A builtin IS its host — `cargo check` and `go vet` ship inside the program
+  // that answers for them — so the host's own answer is the tool's.
+  if (tool.installKind === "builtin") return [argv[0], "--version"];
+  // A module lives inside an interpreter the machine already has, so the
+  // interpreter's version says nothing about it: `python --version` answered
+  // for `python -m build` on a machine with no build module.
+  if (argv[1] === "-m" && nonEmptyString(argv[2])) return [argv[0], "-m", argv[2], "--version"];
+  if (SUBCOMMAND_HOSTS.includes(argv[0]) && argv[1] && !argv[1].startsWith("-")) return [argv[0], argv[1], "--version"];
+  return [argv[0], "--version"];
+}
+
 // Absence is an answer, never an exception: the whole point of asking is that
 // the tool is probably missing. A malformed edition entry still throws, because
 // that is a bug in data jig shipped and silence would hide it.
 function presence(projectRoot, tool) {
   const root = requireRoot(projectRoot);
   requireTool(tool);
-  const exe = verifyExecutable(tool)[0];
+  const argv = verifyExecutable(tool);
+  const probeCmd = probeArgv(tool, argv);
 
-  // The single execution on the read-only path. It carries a fixed argv, no
-  // shell, and a short leash — there is no input from the project in it beyond
-  // the executable name the edition itself supplies.
-  const probe = spawnSync(exe, ["--version"], {
-    cwd: root, shell: false, windowsHide: true, encoding: "utf8", timeout: PROBE_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES,
-  });
-  // A tool that ran at all is installed, whatever it thought of `--version`:
-  // `go --version` exits non-zero and is still proof that go is on the machine.
-  if (!probe.error) {
-    return { present: true, version: firstVersion(probe.stdout) || firstVersion(probe.stderr), how: "probe" };
+  if (probeCmd) {
+    // The single execution on the read-only path. It carries a fixed argv, no
+    // shell, and a short leash — there is no input from the project in it beyond
+    // the executable name the edition itself supplies.
+    const probe = spawnSync(probeCmd[0], probeCmd.slice(1), {
+      cwd: root, shell: false, windowsHide: true, encoding: "utf8", timeout: PROBE_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES,
+    });
+    // Where the probe is the executable itself, running at all is proof it is
+    // installed, whatever it thought of `--version`: `go --version` exits
+    // non-zero and go is still on the machine. Where the probe asks a host
+    // about something else — a module, a dispatched subcommand — the host runs
+    // either way, so only an answer counts: `cargo nextest --version` exits 101
+    // saying `no such command`, and that is the tool being absent.
+    const answered = probeCmd.length > 2 ? !probe.error && probe.status === 0 : !probe.error;
+    if (answered) {
+      return { present: true, version: firstVersion(probe.stdout) || firstVersion(probe.stderr), how: "probe" };
+    }
   }
 
-  const names = [...new Set([tool.id, exe])];
+  // What a manifest would have to name is the tool's own program, never the
+  // host it is dispatched through: `npx` in a scripts block is not eslint, and
+  // a Cargo.toml saying `cargo` is not nextest.
+  const subject = probeCmd ? probeCmd[probeCmd.length - 2] : argv[1] || argv[0];
+  const names = [...new Set([tool.id, subject])];
   if (manifestMentions(root, names)) return { present: true, version: null, how: "manifest" };
-  return { present: false, version: null, how: "absent" };
+  // Nothing could be asked and nothing was declared: jig does not know, and
+  // says so rather than calling it absent. Either way it plans the install,
+  // which is the direction the owner can decline.
+  return { present: false, version: null, how: probeCmd ? "absent" : "unprobeable" };
 }
 
 // ---------------------------------------------------------------------------
@@ -392,12 +441,23 @@ function proposeInstalls(projectRoot, edition, toolIds, packageManager) {
       throw refuse(id + " carries no configPath and configSample, so the owner would be approving an install with no config to read");
     }
 
+    // An ignore file is optional, but half of one is a path with nothing to put
+    // in it or a body with nowhere to go — either way an owner would approve a
+    // write jig could not perform.
+    if (nonEmptyString(tool.ignorePath) !== (typeof tool.ignoreSample === "string")) {
+      throw refuse(id + " states one half of an ignore file: ignorePath and ignoreSample are written together or not at all");
+    }
+
     // Frozen because an item is shown, approved, and only then run. Anything
     // that could edit `command` between those steps would make the approval
     // describe a command that is no longer the one about to execute.
     items.push(Object.freeze({
       id,
       role: tool.role || null,
+      // The edition's own case for the tool. Carried onto the item because the
+      // owner is asked to tick it, and a role alone ("linter") is a category,
+      // not a reason to install anything.
+      why: nonEmptyString(tool.why) ? tool.why : null,
       edition: edition.edition || null,
       installKind: tool.installKind || null,
       packageManager: manager,
@@ -405,6 +465,11 @@ function proposeInstalls(projectRoot, edition, toolIds, packageManager) {
       argv: Object.freeze(argv),
       configPath: tool.configPath,
       configBody: tool.configSample,
+      // Where the tool is told what NOT to read. Only a tool that walks by path
+      // rather than by extension needs one, which is why it is optional: prettier
+      // reports every file under `.jig/`, ruff and gofumpt never see them.
+      ignorePath: nonEmptyString(tool.ignorePath) ? tool.ignorePath : null,
+      ignoreBody: typeof tool.ignoreSample === "string" ? tool.ignoreSample : null,
       wiring: nonEmptyString(tool.wiring) ? tool.wiring : null,
       // The item is the whole tool, and CI is part of it. Carried here so the
       // route that installs a tool and the route that only configures one hand
@@ -652,6 +717,10 @@ module.exports = {
   // is one parser and one refusal for both.
   parseCommand,
   presence,
+  // Exported for release gate G10, which asked its own version of this question
+  // and got a different answer: it skipped ruff on a machine carrying ruff and
+  // would have run nextest on one carrying none. One reading, one export.
+  probeArgv,
   pickPackageManager,
   proposeInstalls,
   // Exported for release gate G8: the catalogue is held to the same reading of

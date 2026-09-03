@@ -189,6 +189,33 @@ test("re-applying an applied change is a no-op, not a staleness refusal", () => 
   assert.deepEqual(fs.readFileSync(path.join(root, ".jig", "config.json")), first);
 });
 
+// The repair route the skill documents: a file jig wrote and somebody deleted
+// comes back through the same `--change/--path` pair the plan refusal prints.
+// Graded as drift, that pair was refused — "jig never writes over an edit it did
+// not see" said of a file that was not there — and putting one deleted check
+// back took four commands and a full re-plan.
+test("a deleted target is put back, and an edited one is still refused", () => {
+  const root = tmpProject({});
+  seedFixture(root, "crlf.json", ".jig/config.json");
+  draft(root, [{ id: "c1", kind: "write-config", path: ".jig/config.json", content: '{"mode":"observe"}\n' }]);
+  const file = path.join(root, ".jig", "config.json");
+
+  assert.equal(apply(root, ["c1"]).applied[0].outcome, "applied");
+  const written = fs.readFileSync(file);
+  fs.rmSync(file);
+
+  const back = apply(root, ["c1"]);
+  assert.equal(back.applied[0].outcome, "restored", "an absent path is graded as an edit");
+  assert.deepEqual(fs.readFileSync(file), written);
+
+  // As strict as ever for a file that IS there and reads differently: that one
+  // is somebody's edit, and SCOPE forbids writing over it.
+  const mine = Buffer.from('{"mode":"armed"}\n', "utf8");
+  fs.writeFileSync(file, mine);
+  assert.throws(() => apply(root, ["c1"]), /has changed since it was fingerprinted/);
+  assert.deepEqual(fs.readFileSync(file), mine, "the edit was written over");
+});
+
 // ---------------------------------------------------------------------------
 // Revert
 // ---------------------------------------------------------------------------

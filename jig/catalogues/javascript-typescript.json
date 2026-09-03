@@ -12,15 +12,15 @@
         "files": [
           {
             "path": "src/index.js",
-            "version": "1.0.0",
-            "sha256": "48d319311a84f95f3871e2098dda9b552c0986cf0fbc0b8aafafe1971d3dd5ff",
-            "body": "// Starter module. Replace it with your own code.\n\nexport function name() {\n  return \"example-app\";\n}\n"
+            "version": "1.1.0",
+            "sha256": "0d5fab70bf873a794a7489ce44bcdd848076c983cba9851803239af08dd64aac",
+            "body": "// Starter module. Replace it with your own code.\n\nexport function name() {\n  return 'example-app';\n}\n"
           },
           {
             "path": "test/smoke.js",
-            "version": "1.0.0",
-            "sha256": "18c49aace3ab59dfc919547137c2ee2c5c1d746d0f0cabec3f66ecb8748679cc",
-            "body": "// Smoke test, so a new project's test command has something to run. Node's own\n// runner discovers every file under `test/`, and there is no `.test.` in the\n// name, so a vitest added later collects its own files and not this one too.\nimport assert from \"node:assert/strict\";\nimport test from \"node:test\";\n\nimport { name } from \"../src/index.js\";\n\nawait test(\"the starter module loads\", () => {\n  assert.equal(name(), \"example-app\");\n});\n"
+            "version": "1.1.0",
+            "sha256": "6ddb938f6203c98aa178b946ea800c96d1edf803aca9a8717e6139472f3713d0",
+            "body": "// Smoke test, so a new project's test command has something to run. Node's own\n// runner discovers every file under `test/`, and there is no `.test.` in the\n// name, so a vitest added later collects its own files and not this one too.\nimport assert from 'node:assert/strict';\nimport test from 'node:test';\n\nimport { name } from '../src/index.js';\n\nawait test('the starter module loads', () => {\n  assert.equal(name(), 'example-app');\n});\n"
           },
           {
             "path": "tests/smoke.spec.js",
@@ -93,7 +93,7 @@
         "bun": "bun remove eslint @eslint/js typescript typescript-eslint eslint-plugin-import-x eslint-plugin-n eslint-plugin-security @vitest/eslint-plugin"
       },
       "configPath": "eslint.config.mjs",
-      "configSample": "import js from '@eslint/js';\nimport { defineConfig, globalIgnores } from 'eslint/config';\nimport tseslint from 'typescript-eslint';\nimport { importX } from 'eslint-plugin-import-x';\nimport n from 'eslint-plugin-n';\nimport security from 'eslint-plugin-security';\nimport vitest from '@vitest/eslint-plugin';\n\nexport default defineConfig([\n  globalIgnores(['dist/**', 'coverage/**', 'node_modules/**', '.jig/**', '*.config.{js,mjs,cjs,ts,mts,cts}']),\n  {\n    files: ['**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],\n    extends: [\n      js.configs.recommended,\n      tseslint.configs.strictTypeChecked,\n      importX.flatConfigs.recommended,\n      security.configs.recommended,\n    ],\n    plugins: { n },\n    languageOptions: {\n      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },\n    },\n    rules: {\n      'eqeqeq': ['error', 'always'],\n      'no-console': ['error', { allow: ['error', 'warn'] }],\n      'no-debugger': 'error',\n      'no-eval': 'error',\n      'no-implied-eval': 'error',\n      'no-empty': ['error', { allowEmptyCatch: false }],\n      'no-unused-vars': 'off',\n      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],\n      '@typescript-eslint/no-explicit-any': 'error',\n      '@typescript-eslint/no-non-null-assertion': 'error',\n      '@typescript-eslint/no-floating-promises': 'error',\n      '@typescript-eslint/no-misused-promises': 'error',\n      '@typescript-eslint/ban-ts-comment': ['error', { 'ts-expect-error': 'allow-with-description' }],\n      '@typescript-eslint/only-throw-error': 'error',\n      '@typescript-eslint/switch-exhaustiveness-check': 'error',\n      'import-x/no-unresolved': 'error',\n      'import-x/no-extraneous-dependencies': 'error',\n      'import-x/no-cycle': 'error',\n      'n/no-process-exit': 'error',\n    },\n  },\n  {\n    files: ['**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],\n    plugins: { vitest },\n    rules: {\n      ...vitest.configs.recommended.rules,\n      'vitest/no-focused-tests': 'error',\n      'vitest/no-disabled-tests': 'error',\n      'vitest/no-commented-out-tests': 'error',\n      'vitest/expect-expect': 'error',\n      'vitest/no-conditional-expect': 'error',\n      'vitest/no-identical-title': 'error',\n      'vitest/no-standalone-expect': 'error',\n    },\n  },\n]);\n",
+      "configSample": "import js from '@eslint/js';\nimport { defineConfig, globalIgnores } from 'eslint/config';\nimport tseslint from 'typescript-eslint';\nimport { importX } from 'eslint-plugin-import-x';\nimport n from 'eslint-plugin-n';\nimport security from 'eslint-plugin-security';\nimport vitest from '@vitest/eslint-plugin';\n\nexport default defineConfig([\n  globalIgnores([\n    'dist/**',\n    'coverage/**',\n    'node_modules/**',\n    '.jig/**',\n    '*.config.{js,mjs,cjs,ts,mts,cts}',\n  ]),\n  {\n    files: ['**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],\n    extends: [\n      js.configs.recommended,\n      tseslint.configs.strictTypeChecked,\n      importX.flatConfigs.recommended,\n      security.configs.recommended,\n    ],\n    plugins: { n },\n    languageOptions: {\n      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },\n    },\n    rules: {\n      eqeqeq: ['error', 'always'],\n      'no-console': ['error', { allow: ['error', 'warn'] }],\n      'no-debugger': 'error',\n      'no-eval': 'error',\n      'no-implied-eval': 'error',\n      'no-empty': ['error', { allowEmptyCatch: false }],\n      'no-unused-vars': 'off',\n      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],\n      '@typescript-eslint/no-explicit-any': 'error',\n      '@typescript-eslint/no-non-null-assertion': 'error',\n      '@typescript-eslint/no-floating-promises': 'error',\n      '@typescript-eslint/no-misused-promises': 'error',\n      '@typescript-eslint/ban-ts-comment': [\n        'error',\n        { 'ts-expect-error': 'allow-with-description' },\n      ],\n      '@typescript-eslint/only-throw-error': 'error',\n      '@typescript-eslint/switch-exhaustiveness-check': 'error',\n      'import-x/no-unresolved': 'error',\n      'import-x/no-extraneous-dependencies': 'error',\n      'import-x/no-cycle': 'error',\n      'n/no-process-exit': 'error',\n    },\n  },\n  {\n    files: ['**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],\n    plugins: { vitest },\n    rules: {\n      ...vitest.configs.recommended.rules,\n      'vitest/no-focused-tests': 'error',\n      'vitest/no-disabled-tests': 'error',\n      'vitest/no-commented-out-tests': 'error',\n      'vitest/expect-expect': 'error',\n      'vitest/no-conditional-expect': 'error',\n      'vitest/no-identical-title': 'error',\n      'vitest/no-standalone-expect': 'error',\n    },\n  },\n]);\n",
       "wiring": "\"lint\": \"eslint . --max-warnings 0 --report-unused-disable-directives\"",
       "ciStep": "npm run lint",
       "verify": {
@@ -207,6 +207,8 @@
       },
       "configPath": ".prettierrc.json",
       "configSample": "{\n  \"semi\": true,\n  \"singleQuote\": true,\n  \"trailingComma\": \"all\",\n  \"printWidth\": 100,\n  \"endOfLine\": \"lf\"\n}\n",
+      "ignorePath": ".prettierignore",
+      "ignoreSample": "# jig's own state. Plans, the manifest and the check modules are jig's files,\n# not this project's code, and prettier walks by path rather than by extension\n# so it reads every one of them. Without this line the first commit after an\n# install fails on files the owner never wrote.\n.jig/\n",
       "wiring": "\"format:check\": \"prettier --check .\"",
       "ciStep": "npm run format:check",
       "verify": {

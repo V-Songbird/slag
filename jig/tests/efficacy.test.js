@@ -111,11 +111,17 @@ function measure() {
       const result = admission.ownPair(cls, blankRegions);
       if (result.passes) passed++;
       else failures.push(row.id + "/" + cls.id + ": " + result.why);
-      // One hit per PATTERN since 2.14.0: proved over owed, so a class that
-      // misses a spelling shows up in the published figure rather than shrinking
-      // both sides of it. `patternCount` is admission's own reckoning of what a
-      // check owes; release gate G9 is what holds THAT to the patterns the
-      // catalogue names, which is the half this file cannot check itself.
+      // One hit per PATTERN since 2.14.0: what `owed` counts is the size of the
+      // obligation rather than the number of detectors, so adding a spelling to
+      // a shipped rule grows the denominator instead of riding on a hit the
+      // fixture already had. It is not a ratio that can vary — `ownPair` passes
+      // only when every pattern hit, so a class that misses one is in
+      // `failures` and the gate below refuses the release before this figure is
+      // published. The two sides are equal in every run that ships, and the
+      // number the README carries is the denominator. `patternCount` is
+      // admission's own reckoning of what a check owes; release gate G9 is what
+      // holds THAT to the patterns the catalogue names, which is the half this
+      // file cannot check itself.
       patterns.proved += result.violationHits;
       patterns.owed += admission.patternCount(cls);
     }

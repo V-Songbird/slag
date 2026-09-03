@@ -429,11 +429,15 @@ test("release gate: a hook fired below the project root silently guards nothing"
 // ---------------------------------------------------------------------------
 //
 // 2.14.0 / roadmap 237. Measured, not suspected: on Claude Code 2.1.257 on
-// win32 the session's tool list carries `PowerShell` and no `Bash` at all
-// (`docs/research/jig/HOST-PROBE-2026-09-02.md`, section 3). Every jig matcher
-// named `Bash`, so on that platform no command guard evaluated and no
+// win32 a headless session's tool list carried `PowerShell` and no `Bash` at
+// all (`docs/research/jig/HOST-PROBE-2026-09-02.md`, section 3; section 4 has
+// an interactive session on that same machine carrying both, which is why the
+// set is per session and never inferred from the platform). Every jig matcher
+// named `Bash`, so in that session no command guard evaluated and no
 // verification run was witnessed — while the lane report said the session lane
-// was live. One list is the fix, and this gate is what keeps it one: a literal
+// was live. How many sessions are shaped like it was never measured, and the
+// fix does not rest on the count: one such session is one lane reporting live
+// where nothing could run. One list is the fix, and this gate keeps it one: a literal
 // re-introduced in `hooks.json`, in the witness gate or on the lever fails the
 // release rather than going quiet on somebody's machine.
 test("release gate: every shell-tool matcher comes off SHELL_TOOLS, and nothing re-spells one", () => {
@@ -471,6 +475,47 @@ test("release gate: every shell-tool matcher comes off SHELL_TOOLS, and nothing 
       assert.ok(declared.includes(tool), `skills/${name}/SKILL.md does not allow ${tool}`);
     }
   }
+
+  // The maintainer probe registers a hook and writes permission rules of its
+  // own, and a shell tool spelled there is the same defect wearing a worse
+  // outcome: a rule and a matcher naming a tool the session does not have match
+  // nothing, so the call the arm exists to see refused runs instead and every
+  // arm goes RED having measured nothing. It is not shipped wiring, so the
+  // assertions above cannot see it.
+  const probe = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "probes", "permissions.js"), "utf-8");
+  assert.ok(probe.includes("SHELL_TOOLS"), "the permissions probe does not read the shared list");
+  // Every quoting a shell tool can be spelled in, not just the double-quoted one:
+  // `'Bash('` and a template literal would have walked straight past the first
+  // spelling of this gate, which read `/"Bash(\(|")/` and saw one of the three.
+  // Comment lines are dropped first — the disclosure above the code names both
+  // tools on purpose, and a gate that could not tell prose from a literal would
+  // have to choose between reading one spelling and forbidding the disclosure.
+  const probeCode = probe.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  for (const spelling of [/["'`]Bash\(/, /["'`]Bash["'`]/, /\$\{[^}]*\}Bash/]) {
+    assert.ok(!spelling.test(probeCode), "the permissions probe spells a shell tool itself: " + spelling);
+  }
+  // The probe's own arms, which no shipped surface covers. Every one of the
+  // three can go quiet having measured nothing — P1 and P3 read absent output
+  // as a refusal, P2 reads its answer off whether a command ran — so each
+  // carries an `inconclusive` verdict and `green` requires the absence of one.
+  assert.match(probe, /function probeP2\(p1\)/, "P2 does not take P1's result, so an inert deny reads as precedence");
+  assert.match(probe, /checks\.every\(\(c\) => c\.pass && !c\.inconclusive\)/,
+    "the probe series unlocks write-settings on an arm that concluded nothing");
+  for (const arm of ["P1", "P2", "P3"]) {
+    assert.match(probe, new RegExp('id: "' + arm + '"[\\s\\S]{0,400}?inconclusive'),
+      arm + " reports no inconclusive verdict");
+  }
+  // And none of them may state that verdict as a constant. P1 shipped
+  // `inconclusive: false` — an assertion that the arm always concluded, on the
+  // one arm whose silence P2's whole verdict is derived from. The word has to
+  // be computed from the transcript or it is prose, not a measurement.
+  assert.ok(!/inconclusive:\s*(false|true)\b/.test(probeCode),
+    "an arm hard-codes its own inconclusive verdict instead of reading the transcript for it");
+
+  // The slot ids an owner is shown name their tools. Unlike the `bash-guard`
+  // lever name they are report strings bound into no config and no proof hash,
+  // so the naming carve-out above them does not reach here.
+  assert.deepEqual(engine.HOOK_SLOTS.map((s) => s.id), ["PreToolUse:Bash|PowerShell", "PostToolUse:Edit|Write"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -591,6 +636,15 @@ function namedPatterns(cls) {
     // The paired kind names two glob sets and no patterns, so the detector is
     // the smallest thing there is to prove. An extract detector names
     // `pairedWith` too and means something else by it.
+    //
+    // Measured over the six shipped catalogues on 2026-09-03: this branch
+    // counts ZERO — no shipped check names a paired detector, and all 256 come
+    // from `patterns`/`removed`/`extract`. So this gate does not prove the
+    // paired counting rule on real catalogues; admission.test.js's synthetic
+    // "one hit per paired detector" case is the only proof of that kind. It is
+    // kept as forward cover: without it the day a paired detector ships, `owed`
+    // would run one short of what admission proves and G9 would fail for a
+    // reason that names the wrong thing.
     if (!(p.extract || []).length && (p.paths || []).length && (p.pairedWith || []).length) n++;
   }
   return n;
@@ -736,6 +790,19 @@ test("release gate G3: revert undoes a tool install, manifest and lockfile pre-i
   // the exact command rather than running it behind their back.
   assert.deepEqual(reverted.reconcile, [item.uninstallCommand]);
   assert.ok(reverted.notes.some((n) => n.includes(item.uninstallCommand)));
+
+  // And the note does not contradict the rows beside it. The lockfile did not
+  // exist before the install command created it, so there is no pre-image and
+  // the undo is a delete — "The manifest and lockfile are restored" was a fixed
+  // sentence printed over a row that says `removed`, and on a greenfield install
+  // where jig's own command wrote the manifest too it is false about both.
+  assert.equal(reverted.reverted.find((r) => r.path === "package-lock.json").outcome, "removed");
+  assert.equal(reverted.reverted.find((r) => r.path === "package.json").outcome, "restored");
+  for (const note of reverted.notes) {
+    assert.ok(!/The manifest and lockfile are restored/.test(note), "the note claims an undo the rows deny");
+  }
+  assert.ok(reverted.notes.some((n) => n.includes("Every path that install wrote is on `reverted`")),
+    "the note does not point at the rows that carry the per-path verb");
 });
 
 // ---------------------------------------------------------------------------
@@ -760,12 +827,38 @@ test("release gate G4: every shipped edition parses, is at schemaVersion 4, and 
   }
 });
 
+// The premise the schemaVersion answer rests on (SCOPE, "Does requiring
+// `version` and `sha256` bump the edition schemaVersion"): required keys added
+// at an unchanged schemaVersion are safe only while every edition file ships
+// inside the plugin, in the same commit as the loader. The moment `loadEdition`
+// is pointed at a root somebody else owns, an edition written for an older jig
+// is on disk and the bump is owed — so the call site is pinned rather than
+// remembered.
+test("release gate: every edition is loaded from the plugin's own root, never from a repository", () => {
+  const dir = path.join(PLUGIN_ROOT, "scripts");
+  let calls = 0;
+  for (const name of fs.readdirSync(dir).filter((f) => f.endsWith(".js") && f !== "editions.js")) {
+    const source = fs.readFileSync(path.join(dir, name), "utf8");
+    for (const call of source.match(/loadEdition\(\s*[^,]+,/g) || []) {
+      calls++;
+      assert.match(call, /loadEdition\(\s*(jig\.)?PLUGIN_ROOT,/,
+        "scripts/" + name + " loads an edition from " + call + " — SCOPE's schemaVersion answer assumes " +
+        "every edition file ships with the loader that reads it");
+    }
+  }
+  assert.ok(calls >= 4, "the gate found only " + calls + " loadEdition call sites");
+});
+
 // Starter bodies are most of a greenfield install, and until 2.14.0 they were
 // the one thing jig wrote under a synthetic template row: version 1.0.0, no
-// hash, nothing to bump. This is the gate that makes the catalogue's own
-// recorded version mean something — a body edited without restamping it fails
-// the release rather than shipping as a version that never existed.
-test("release gate: every shipped starter body hashes to what its catalogue's recorded version claims", () => {
+// hash, nothing to bump. This is the gate on the half that is a fact about the
+// bytes: a body edited without restamping its `sha256` fails the release rather
+// than shipping under a hash that covers different bytes. The `version` beside
+// it is checked for shape only — nothing here binds it to the body, because a
+// version is a claim about history and only the hash is a claim about the file.
+// Bumping it when a body changes is the maintainer's, as it is for
+// `templates.json`.
+test("release gate: every shipped starter body hashes to the sha256 recorded beside it", () => {
   let checked = 0;
   for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
     const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
@@ -893,15 +986,34 @@ const STARTER_BUILDS = {
 // The scaffold a person drives, minus the installs: applying a `run-install`
 // change spawns a package manager, and the claim here is about the tree jig
 // writes rather than about npm.
-function scaffoldStarter(edition, manager) {
+function scaffoldStarter(edition, manager, tools, extra) {
   const root = tmpProject();
   const plan = engine.cmdPlan(root, {
     _: [], change: [], authored: authored.writeChecks(root, CHECKS), provenance: "elicited",
     edition, "package-manager": manager, "no-ci": true,
+    ...(tools && tools.length ? { tools: tools.join(",") } : {}),
+    // G12 turns the workflow back on and drops the authored checks, because the
+    // shape it exists to catch is the plan that admits none.
+    ...(extra || {}),
   });
   const payload = engine.planFiles(root).map(engine.readPlan).find((p) => p.planId === plan.planId);
   const keep = payload.changes.filter((c) => c.kind !== "run-install");
   engine.cmdApply(root, { _: [], change: keep.map((c) => c.id), path: keep.map((c) => c.path) });
+  // A tool jig has to INSTALL carries its config inside the install change, so
+  // dropping the install used to drop the config with it — and a config that
+  // never lands is a config nothing here can read. That is how the rust `cargo`
+  // row shipped `members = ["crates/*"]` into a tree with no crates/ directory.
+  // The bytes are jig's own composed body off the plan, written in plan order
+  // exactly as `applyInstall` writes them; only the package manager is skipped.
+  for (const change of payload.changes) {
+    if (change.kind !== "run-install") continue;
+    for (const [rel, body] of [[change.install.configPath, change.install.configBody],
+      [change.install.ignorePath, change.install.ignoreBody]]) {
+      if (typeof rel !== "string" || typeof body !== "string") continue;
+      fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+      fs.writeFileSync(path.join(root, rel), body);
+    }
+  }
   return root;
 }
 
@@ -955,5 +1067,376 @@ test("release gate G7: every edition's starter scaffolds into a tree its own bui
           row.id + ": the test command exited 0 without running the starter's own test\n" + output);
       }
     });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// G10 — the toolchain reads the starter
+// ---------------------------------------------------------------------------
+//
+// G7 scaffolds every edition and ticks no tool, so until 2.14.0 no formatter,
+// linter or type checker jig installs had ever read the tree jig writes. Two
+// defects shipped behind that gap and only a real greenfield install found
+// them: the JavaScript starter was written in the quote style its own
+// `.prettierrc.json` rejects, and nothing told prettier to leave `.jig/` alone,
+// so `prettier --check .` reported eleven of jig's own files. Between them they
+// landed a repository whose first commit failed on lines the owner never wrote.
+//
+// Widened in 2.14.0, because that first version ticked only the tools this
+// machine already carried and ran only three roles, and four more defects went
+// out through the two holes that left. A tool jig would have to install got no
+// config written for anything to read, and a role nobody ran got no run:
+//
+//   rust `cargo`  — role `build`, never ticked, so `members = ["crates/*"]`
+//                   never reached a Cargo.toml here. On a real install it put
+//                   that beside a tree with no crates/ directory and took all
+//                   six lane entries down, `configConflicts` empty.
+//   javascript    — eslint is not on this machine, so `eslint.config.mjs` was
+//                   never written and prettier had nothing to read. It rejects
+//                   two lines over its own `printWidth` and one quoted key.
+//   python ruff   — ruff was not here either, so `PT009` on the `self.assertTrue`
+//                   in jig's own starter test was never asked about.
+//   python pytest — a `test-runner`, a role this gate did not run at all, so
+//                   nothing noticed `--cov-fail-under=85` over a starter test
+//                   that never imported the package it was measuring.
+//
+// So the scaffold now ticks EVERY tool the edition offers, whatever its role
+// and whether or not it is here, and the run list gains the test runners.
+//
+// Two roles still cannot be RUN offline, and G7 covers the ground they would:
+//
+//   build            — `python -m build --wheel` fetches hatchling from PyPI and
+//                      `./gradlew` is a wrapper the starter does not carry.
+//                      G7's `spec.runs` builds every starter with the
+//                      ecosystem's own command instead.
+//   security-scanner — every one of them queries an advisory database over the
+//                      network, and what it reports is the state of the world
+//                      today rather than anything about the tree jig wrote.
+//
+// Their CONFIGS still land, which is the half that was actually failing.
+const STARTER_TOOL_ROLES = ["formatter", "linter", "type-checker", "test-runner"];
+
+// The argv jig runs, minus the package runner in front of it. `npx <tool>` would
+// FETCH `<tool>`, and this gate installs nothing — so the only tool that can run
+// over the starter is one already on the machine.
+function toolArgv(tool) {
+  const argv = tool.verify.argv;
+  return argv[0] === "npx" ? argv.slice(1) : argv;
+}
+
+// jig's own reading of "is this tool here", not a second one. This gate had a
+// second one and it disagreed with the engine in both directions: it asked
+// `ruff check --version`, which ruff rejects as an argument it does not take,
+// and skipped ruff on a machine carrying ruff.
+//
+// Two differences from a plain `presence()` call, both because this gate
+// installs nothing and reads no project. The package runner comes off the front
+// — `npx <tool>` would FETCH `<tool>`, which is why the engine refuses to probe
+// through one at all — and only `how === "probe"` counts, because a manifest
+// naming a tool is a claim about a project rather than about this machine.
+const emptyRoots = [];
+function toolPresent(tool) {
+  const argv = toolArgv(tool);
+  const key = argv.join(" ");
+  if (!runnableCache.has(key)) {
+    if (!emptyRoots.length) emptyRoots.push(tmpProject());
+    const seen = toolchain.presence(emptyRoots[0], { ...tool, verify: { ...tool.verify, argv } });
+    runnableCache.set(key, seen.present && seen.how === "probe");
+  }
+  return runnableCache.get(key);
+}
+
+test("release gate G10: every tool an edition installs exits clean over the starter jig just wrote", async (t) => {
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    const spec = STARTER_BUILDS[row.id] || null;
+    // An edition with no starter has no tree for anything to read, and G7
+    // already names who writes one instead.
+    if (!spec || !editions.manifestFor(edition, spec.manager).sample) continue;
+
+    // Every tool, every role, present or not: the scaffold's job is to write
+    // every config this edition can write, and a config only lands for a tool
+    // the plan was asked for.
+    const root = scaffoldStarter(row.id, spec.manager, edition.toolchain.map((tool) => tool.id));
+    // A config the plan named and never wrote is the hole this gate closed, so
+    // it is an assertion rather than a skip.
+    for (const tool of edition.toolchain) {
+      assert.ok(fs.existsSync(path.join(root, tool.configPath)),
+        row.id + ": " + tool.id + " was ticked and " + tool.configPath + " never landed, so no tool" +
+        " here reads the config jig writes for it");
+    }
+
+    const candidates = edition.toolchain.filter((tool) => STARTER_TOOL_ROLES.includes(tool.role));
+    const ran = new Set(spec.runs.map((argv) => argv.join(" ")));
+    for (const tool of candidates) {
+      const argv = toolArgv(tool);
+      // Five dotnet tools and two rust ones share one command. Running it five
+      // times would say the same thing five times and cost five restores.
+      if (ran.has(argv.join(" "))) continue;
+      ran.add(argv.join(" "));
+      await t.test(row.id + ": " + tool.id + " over the starter", {
+        // Named, never silent: a release cut here has to say which tools nobody
+        // ran. The reason is presence alone, so a runner carrying the toolchain
+        // runs every one of these.
+        skip: toolPresent(tool)
+          ? false
+          : argv[0] + " is not on this machine, so " + tool.id + " read nothing here",
+      }, () => {
+        const run = spawnSync(argv[0], argv.slice(1), {
+          cwd: root, shell: false, windowsHide: true, encoding: "utf8",
+          timeout: 600000, maxBuffer: 8 * 1024 * 1024,
+        });
+        assert.equal(run.status, 0, row.id + ": `" + argv.join(" ") + "` exited " + run.status +
+          " over a starter jig had just written, with the config jig wrote for " + tool.id + "\n" +
+          String(run.stdout || "") + String(run.stderr || ""));
+      });
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// G11 — no tool jig installs reads jig's own state
+// ---------------------------------------------------------------------------
+//
+// jig writes its plans, its manifest and its check modules into `.jig/`, and
+// then installs a tool that walks the project from `.`. Prettier read all of
+// them: eleven `[warn]` lines about files the owner never wrote, on a folder
+// that had nothing in it before jig ran, and a first commit that could not
+// pass. Nothing said this could not happen, so it did.
+//
+// A tool that walks the tree is one whose own verify command names the whole
+// project. Such a tool is safe here two ways only: it was told to skip `.jig/`,
+// or nothing under `.jig/` is a file it would open at all. The second is what
+// keeps ruff and gofumpt off this list — no `.py` and no `.go` is ever written
+// there — and the extensions are the edition's own claim about what its tools
+// read, which is why an edition that widens them has to answer here.
+//
+// This gate reads a declaration and never runs anything, so `.jig/` is the only
+// thing it can speak for: jig also writes `.github/workflows/jig.yml`, a
+// `.gitignore` and every tool's own config into the tree, and a walker that
+// choked on one of those would pass here untouched. G10 is the run that covers
+// them — since 2.14.0 it scaffolds with every tool ticked and walks the whole
+// starter, `.github/` included.
+test("release gate G11: no tool an edition installs walks jig's own state", () => {
+  const root = tmpProject({
+    "package.json": "{ \"name\": \"host\", \"private\": true }\n",
+    "src/index.js": "module.exports = 1;\n",
+  });
+  install(root);
+  const state = listFiles(root, ["node_modules", ".git"])
+    .filter((rel) => rel.startsWith(engine.STATE_DIR + "/"));
+  assert.ok(state.length, "the gate read an install that wrote nothing into " + engine.STATE_DIR + "/");
+
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    const reachable = state.filter((rel) => edition.detect.extensions.some((ext) => rel.endsWith(ext)));
+    if (!reachable.length) continue;
+    for (const tool of edition.toolchain) {
+      const argv = tool.verify.argv;
+      if (!argv.some((arg) => arg === "." || arg === "./...")) continue;
+      assert.ok((tool.configSample + (tool.ignoreSample || "")).includes(engine.STATE_DIR),
+        row.id + "/" + tool.id + " runs `" + argv.join(" ") + "` over the whole project and is told nothing" +
+        " about " + engine.STATE_DIR + "/, so it reads jig's own " + reachable.join(", "));
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// G12 — the workflow jig writes is green on the tree jig just wrote
+// ---------------------------------------------------------------------------
+//
+// SCOPE's starter row again, one level up: jig runs the checks against what it
+// has written the moment it has written it, and a harness whose first push is
+// red is a harness that cries wolf. G7 proves the ECOSYSTEM's build over the
+// starter; nothing proved jig's own workflow over it, because `scaffoldStarter`
+// passes `no-ci` and the workflow was never written at all.
+//
+// It shipped red. `--selftest` exited 1 on an empty checks directory, and a
+// `--select` plan and a toolchain-only plan both land exactly that directory —
+// the driver, the hook, the workflow, and no check module — so the second step
+// of the workflow failed on every such install, on a tree jig had just written.
+//
+// Both shapes run here for that reason: with the checks a plan admitted, and
+// with none. Every step is plain node, so this gate needs no toolchain and
+// never skips.
+test("release gate G12: every step of the workflow jig writes exits 0 on the tree jig just wrote", async (t) => {
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    const spec = STARTER_BUILDS[row.id] || null;
+    // An edition with no starter has no tree to write the workflow over, and
+    // G7 already names who writes one instead.
+    if (!spec || !editions.manifestFor(edition, spec.manager).sample) continue;
+
+    const shapes = [
+      ["with the checks it admitted", {}],
+      // A plan generated from the catalogue rather than from authored checks:
+      // the classes are selected, the coverage matrix discloses them as gaps,
+      // and `.jig/checks/` holds nothing but the driver.
+      ["with no check module at all", { authored: undefined, select: edition.classes[0].id }],
+    ];
+    for (const [shape, extra] of shapes) {
+      await t.test(row.id + " workflow " + shape, () => {
+        const root = scaffoldStarter(row.id, spec.manager, null, { "no-ci": false, ...extra });
+        const workflow = path.join(root, ".github", "workflows", "jig.yml");
+        assert.ok(fs.existsSync(workflow), row.id + ": this plan wrote no CI workflow to run");
+        const steps = fs.readFileSync(workflow, "utf-8").split("\n")
+          .filter((line) => /^\s*run:\s*node\s/.test(line))
+          .map((line) => line.replace(/^\s*run:\s*/, "").trim());
+        assert.ok(steps.length >= 2, row.id + ": the workflow runs " + steps.length + " node steps");
+        for (const step of steps) {
+          const run = spawnSync(process.execPath, step.split(/\s+/).slice(1), {
+            cwd: root, shell: false, windowsHide: true, encoding: "utf-8", timeout: 300000,
+          });
+          assert.equal(run.status, 0, row.id + " " + shape + ": `" + step + "` exited " + run.status +
+            " on a tree jig had just written\n" + String(run.stdout || "") + String(run.stderr || ""));
+        }
+      });
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// G13 — a presence probe answers for the tool, never for its host
+// ---------------------------------------------------------------------------
+//
+// presence() spawned `verify.argv[0] --version` and read whatever came back as
+// the tool's answer. For a tool its host merely dispatches to, that is the host
+// answering: all six rust tools read present on a machine carrying four, and
+// `python -m build` read present, at python's own version, on a machine with no
+// build module. jig then planned no install for a tool the owner had ticked and
+// wired a lane entry that exits 101 — a red lane on a tree jig just wrote, and
+// the owner was never offered the install that would have fixed it.
+//
+// G10 could not catch it: a tool that is not on this machine is skipped there,
+// and a tool the probe invented is precisely one that is not.
+//
+// The hosts are named HERE rather than imported from the engine. A gate that
+// reads its rule out of the code it is gating asserts nothing, and this one has
+// to keep firing if that code goes back to asking the host.
+const DISPATCHING_HOSTS = ["cargo", "npx", "pnpx", "bunx", "uvx"];
+
+// The version query that would answer for the host instead of the tool, or null
+// where there is no host in the way: a `builtin` IS its host (`cargo check`
+// ships inside cargo), and a tool invoked by its own name answers for itself.
+function hostQuery(tool) {
+  const argv = tool.verify.argv;
+  if (tool.installKind === "builtin") return null;
+  if (argv[1] === "-m") return [argv[0], "--version"];
+  return DISPATCHING_HOSTS.includes(argv[0]) ? [argv[0], "--version"] : null;
+}
+
+test("release gate G13: no presence probe answers with the version of the tool's host", async (t) => {
+  const empty = tmpProject();
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    for (const tool of edition.toolchain) {
+      const query = hostQuery(tool);
+      if (!query) continue;
+      const host = spawnSync(query[0], query.slice(1), {
+        shell: false, windowsHide: true, encoding: "utf-8", timeout: 60000,
+      });
+      const hostVersion = host.error ? null
+        : (String(host.stdout || "") + String(host.stderr || "")).match(/(\d+\.\d+(?:\.\d+)*)/);
+      await t.test(row.id + ": " + tool.id + " is not answered for by " + query[0], {
+        // A host this machine does not carry cannot answer for anything, so
+        // there is nothing here to catch. Named, never silent.
+        skip: hostVersion ? false : query[0] + " does not answer --version on this machine",
+      }, () => {
+        const seen = toolchain.presence(empty, tool);
+        // Absent and unprobeable are both honest here: jig plans the install
+        // and the owner declines it. Only `present` is a claim.
+        if (!seen.present) return;
+        assert.notEqual(seen.version, hostVersion[1],
+          row.id + "/" + tool.id + " is reported present at " + seen.version + ", which is " +
+          query.join(" ") + "'s own version — the host answered, not the tool");
+      });
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// G14 — the plan page claims no lane this repository does not run
+// ---------------------------------------------------------------------------
+//
+// Three armed headers in a row answered "what blocks here" for the whole table,
+// and each was false for a shape the previous one was right about. The last of
+// them said a check marked `[proven by its fixture pair]` "is the one that
+// blocks from install; nothing else here blocks" — printed over a `check-driver`
+// cell on a repository whose commit lane is wired, where `run.mjs` exits 1 on a
+// finding, the shim exits 1 on that, and the commit does not happen.
+//
+// No page-level sentence can answer it: what a row refuses is the lever's answer
+// AND this repository's lanes, and the two differ per cell on one row. So the
+// rule that replaced the sentence is the gate — the armed header claims nothing
+// and points at the cells, and every claim a cell makes names a lane
+// `review.lanes` says is live. A fourth wrong sentence in the header fails the
+// first half; a marker that overclaims fails the second.
+//
+// Driven on all four shapes, because a gate run on one of them is how the last
+// three corrections each passed.
+function planShape(checks, opts, wire) {
+  const root = tmpProject({ "package.json": "{ \"private\": true }\n", "src/a.ts": "export const a = 1;\n" });
+  if (wire) spawnSync("git", ["init", "-q"], { cwd: root, windowsHide: true });
+  authored.installChecks(engine, root, checks, { provenance: "elicited", ...opts });
+  if (wire) {
+    const wiring = engine.cmdPlan(root, { _: [], change: [], "wire-commit": true });
+    authored.applyPlan(engine, root, wiring);
+    assert.equal(engine.commitLane(root).state, "live");
+    // Re-planned, because the matrix an owner reads is the one written by the
+    // plan they approve — and the lane only exists from this run onwards.
+    authored.installChecks(engine, root, checks, { provenance: "elicited", ...opts });
+  }
+  return root;
+}
+
+test("release gate G14: no armed plan page claims a lane this repository does not run", () => {
+  const shapes = {
+    "a session guard and nothing else": planShape([authored.PIPED_INSTALLER], { "no-ci": true }, false),
+    "a check driver on an unwired repository": planShape([authored.DOC_LEFT_BEHIND], { "no-ci": true }, false),
+    "a check driver on a wired one": planShape([authored.DOC_LEFT_BEHIND], { "no-ci": true }, true),
+    "both levers, both lanes": planShape([authored.PIPED_INSTALLER], {}, true),
+  };
+  for (const [shape, root] of Object.entries(shapes)) {
+    const review = JSON.parse(fs.readFileSync(path.join(root, ".jig", "plan.json"), "utf-8"));
+    assert.equal(review.mode, "armed", shape + ": the header under test is the armed one");
+    const header = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8")
+      .split(/\r?\n/).find((line) => line.startsWith("- mode:"));
+    // The header may say what mode was taken and where to read the answer. Every
+    // other word here would be a claim it cannot make for every row.
+    for (const claim of ["block", "commit", "CI", "session", "fixture pair"]) {
+      assert.ok(!header.includes(claim),
+        shape + ": the armed header names `" + claim + "` — it is answering for the table again\n  " + header);
+    }
+    // And the prose under the matrix, which made the same blanket claim twenty
+    // lines lower: "caught by the check driver at commit time and in CI" on a
+    // plan run with `--no-ci` against a repository pointing git at nothing.
+    const prose = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8")
+      .split(/\r?\n/).filter((line) => !line.startsWith("| "));
+    for (const line of prose) {
+      if (line.includes("at commit time")) {
+        assert.equal(review.lanes.commit, true, shape + ": `" + line + "` — that lane is not live here");
+      }
+      if (line.includes("in CI")) {
+        assert.equal(review.lanes.ci, true, shape + ": `" + line + "` — that lane is not live here");
+      }
+    }
+    for (const row of review.rows) {
+      for (const [actor, cell] of Object.entries(row.cells)) {
+        const where = shape + " — " + row.classId + "/" + actor;
+        if (cell.grade === "GAP") {
+          assert.equal(cell.blocks, null, where + ": a GAP cell says what it refuses");
+          continue;
+        }
+        assert.ok(cell.blocks, where + ": coverage with nothing said about what it refuses, or where");
+        assert.ok(engine.cellText(cell).includes("[" + cell.blocks + "]"),
+          where + ": the rendered marker is not the cell's own answer");
+        if (/\bthe commit\b/.test(cell.blocks)) {
+          assert.equal(review.lanes.commit, true, where + ": claims the commit lane, which is not live here");
+        }
+        if (/\bCI\b/.test(cell.blocks)) {
+          assert.equal(review.lanes.ci, true, where + ": claims the CI lane, which is not live here");
+        }
+      }
+    }
   }
 });

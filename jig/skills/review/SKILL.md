@@ -62,6 +62,10 @@ read. Say `why` and stop; offer `/jig:jig` to install. Do not report the empty
   getting yet. `lastFired` is when the last catch was, or `null`; a guard that
   fired only long ago is as much a retirement candidate as one that never did.
   `wavedOff` — false positives recorded.
+- `evaluatedOn` — the shell tool names those `evaluated` calls arrived on, for
+  THIS guard. Empty means not yet observed. This is the per-guard field;
+  `lanes.session.shell.seen` below is repository-wide and answers a different
+  question.
 - `otherLanes` — catches of this guard's class at COMMIT time, where the check
   runs with no guard and no denominator, which is why it is not part of `fired`.
   A guard with `fired: 0` and a non-zero `otherLanes` is not a quiet guard: its
@@ -91,12 +95,17 @@ rather than remembered from the install:
 - `lanes.session` — the guards above, inside a Claude session. `off: true` means
   `.jig/off` is present and NOTHING in this lane runs, whatever the guard rows
   say; `offSince` is when the switch went on. Report that before anything else.
-  `shell.watched` is every tool name jig's hooks match and `shell.seen` is the
-  ones a guard has actually met here. Report `seen` beside any command guard's
-  catch count: it says which syntax that count was earned against, and a command
-  guard armed with zero catches on a `seen` of `["PowerShell"]` and POSIX-idiom
-  patterns has been evaluating and passing, not covering. An empty `seen` is
-  "not yet observed" — never fill it in from the operating system.
+  `shell.watched` is every tool name jig's hooks match. `shell.seen` is every
+  name ANY of jig's own ledger rows recorded in this repository — not per guard,
+  not per host, and not time-bounded: it carries a retired guard's rows, and a
+  committed `.jig/ledger.jsonl` carries another machine's. Report it as that.
+  The per-guard fact is on the guard row itself: `evaluatedOn` is the shell
+  tools that guard's own `evaluated` calls arrived on. Report `evaluatedOn`
+  beside any command guard's catch count — it says which syntax that count was
+  earned against, and a command guard armed with zero catches whose
+  `evaluatedOn` names a shell its patterns were not written for has been
+  evaluating and passing, not covering. An empty `evaluatedOn` or `seen` is "not
+  yet observed" — never fill either in from the operating system.
 - `lanes.commit` — the git hook. `runs` is the whole answer; `state` says why
   when it is false, and `fix` is the one thing to do about it. `executable` is
   whether git can run the hook at all — `false` is a live-looking lane that does

@@ -235,8 +235,13 @@ test("hooks.json registers one shell-free node entry per event", () => {
   // take no matcher because they name no tool. Every one of them is the same
   // shell-free node entry.
   // Since 2.14.0 the shell half names every tool a host may call its shell, not
-  // just `Bash` — read off the shared list, never spelled here.
-  const shell = SHELL_TOOLS.join("|");
+  // just `Bash`. Spelled out here rather than joined off `SHELL_TOOLS`: an
+  // expectation derived from the list under test stays green when the list and
+  // `hooks.json` are narrowed back together, which is the one regression this
+  // assertion exists to catch. The second line is what still ties the wiring to
+  // the shared list.
+  const shell = "Bash|PowerShell";
+  assert.equal(shell, SHELL_TOOLS.join("|"), "hooks.json and the shared shell list disagree");
   const expected = {
     PreToolUse: shell + "|Edit|Write", PostToolUse: shell + "|Edit|Write", PostToolUseFailure: shell,
     Stop: undefined, SubagentStop: undefined,
@@ -442,13 +447,20 @@ test("a piped installer is recorded as a would-deny", () => {
 });
 
 // 2.14.0 / roadmap 237. The host does not always call its shell tool `Bash`:
-// on win32 Claude Code offers `PowerShell` and no `Bash` at all, so a command
-// guard gated on the one name never evaluated on the owner's own platform while
-// `/jig:inventory` reported the session lane live. The guard runs on whatever
+// the headless win32 session the probe drove was offered `PowerShell` and no
+// `Bash` at all, so a command guard gated on the one name never evaluated in
+// that session while `/jig:inventory` reported the session lane live
+// (HOST-PROBE-2026-09-02, section 3; section 4 is an interactive session on the
+// same machine carrying both, which is why the set is per session and never
+// read off the platform). The guard runs on whatever
 // shell tool arrives; the patterns are the author's problem, and the SKILL and
 // the matrix say so.
 test("a command guard evaluates on the host's shell tool, whatever it is called", () => {
   const root = guarded([A.PIPED_INSTALLER]);
+  // A loop over the list under test degenerates to the pre-fix single-`Bash`
+  // assertion the moment the list narrows, so the name the measured session had
+  // and jig did not watch is spelled out here.
+  assert.ok(SHELL_TOOLS.includes("PowerShell"), "the shared shell list narrowed back to Bash");
   for (const tool of SHELL_TOOLS) {
     const out = run(root, "PreToolUse", { ...PIPE_CALL, tool_name: tool });
     assert.equal(JSON.parse(out.stdout).jig.decision, "would-deny", `${tool} never reached the guard`);
@@ -858,6 +870,16 @@ test("the truth table: every bar to arming holds in order", () => {
   // admission, and reaching here means something wrote a guard for one that
   // never earned a reply.
   assert.match(state({}, {}, { ...PROVEN, deny: null }).why, /no complete deny reply/);
+
+  // 2.14.0. A check that would not load ships no deny reply either, and grading
+  // that as the row above told the owner the check was authored wrong when the
+  // file was simply gone — a reason `/jig:review` prints verbatim. The bar is
+  // asked first and reports what actually happened.
+  const gone = "the installed check `piped-installer` could not be read (Cannot find module 'x')";
+  assert.equal(state({}, {}, { ...PROVEN, problem: gone, deny: null, proof: null }).why, gone);
+  assert.equal(state({}, {}, { ...PROVEN, problem: gone, deny: null, proof: null }).mode, "observe");
+  // And it does not fire on a check that loads: a null problem is the norm.
+  assert.match(state({}, {}, { ...PROVEN, problem: null }).why, /proof matches the check on disk/);
 
   assert.match(state({ proof: undefined }).why, /records no proof/);
   assert.match(state({ proof: "b".repeat(64) }).why, /does not match the check on disk/);
@@ -1344,9 +1366,13 @@ test("a Bash call that ran a verify entry leaves a green row naming it", () => {
 
 // 2.14.0 / roadmap 237. A verification run is a verification run whichever
 // shell tool ran it. Gated on `Bash` alone, the green half of the witness never
-// fired on win32 — where the tool is `PowerShell` — so `lastGreen` could never
-// be set from a session there and 2.10.0's Stop line had nothing to read.
+// fired in a session offered `PowerShell` and no `Bash` — the one the probe
+// measured — so `lastGreen` could never be set from a session shaped like that
+// and 2.10.0's Stop line had nothing to read.
 test("the witness sees a verify run on every shell tool, not just Bash", () => {
+  // As above: the loop proves nothing about `PowerShell` once `PowerShell` is
+  // no longer in the list, so the name the title promises is asserted.
+  assert.ok(SHELL_TOOLS.includes("PowerShell"), "the shared shell list narrowed back to Bash");
   for (const tool of SHELL_TOOLS) {
     const root = verified(guarded([]));
     const out = run(root, "PostToolUse", { ...ranBash("npm test"), tool_name: tool });

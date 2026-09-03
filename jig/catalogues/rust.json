@@ -209,7 +209,7 @@
       },
       "installKind": "builtin",
       "configPath": "Cargo.toml",
-      "configSample": "[workspace]\nmembers = [\"crates/*\"]\nresolver = \"2\"\n\n[workspace.package]\nedition = \"2021\"\nrust-version = \"1.85\"\n\n[workspace.lints.rust]\nunsafe_code = \"forbid\"\nunused_must_use = \"deny\"\n\n[workspace.lints.clippy]\nall = { level = \"deny\", priority = -1 }\n\n[profile.release]\noverflow-checks = true\ndebug = 1\n",
+      "configSample": "# No `members` list under [workspace]: jig writes one crate at the root and no\n# crates/ directory, and cargo refuses to load a member glob that matches nothing.\n# The bare table still pins the workspace root HERE, so the --workspace every lane\n# passes means this crate rather than one this directory happens to sit inside.\n[workspace]\nresolver = \"2\"\n\n[profile.release]\noverflow-checks = true\ndebug = 1\n",
       "wiring": "Cargo.lock is committed and every CI invocation passes --locked, so a manifest edit without a matching lockfile update fails the build instead of silently re-resolving.",
       "ciStep": "cargo build --workspace --all-targets --locked",
       "verify": {

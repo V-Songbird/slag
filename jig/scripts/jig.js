@@ -458,7 +458,7 @@ function ensureStateDir(root) {
   // already exists: jig extends an ignore file, it never rewrites or narrows one.
   const ignore = path.join(dir, ".gitignore");
   const want = [JOURNAL_FILE, PREIMAGE_DIR + "/", "ledger.jsonl", "profile.json", "off", "lane.log",
-    "plan.md", "plan.json", "plan-*.json", "backlog.json", "discarded.json", "authored.json",
+    "plan.md", "plan.json", "plan-*.json", "plan-*.md", "backlog.json", "discarded.json", "authored.json",
     // Where a `selftest --toolchain` run plants its seed. The directory is
     // removed the moment the tool has answered; the line is here for the run
     // that was killed between the two journal rows.
@@ -1244,7 +1244,15 @@ function applyChange(root, ctx, change) {
   // time exists precisely because the host may change between plan and apply,
   // and the marker plus the anchor refusals are its staleness semantics.
   const currentHash = current === null ? null : hashBytes(current);
-  if (change.kind !== "include-line" && change.kind !== "write-agents-region" && currentHash !== change.sourceHash) {
+  // An absent path is not an edit, and it is graded as its own case. The refusal
+  // exists so jig never writes over somebody's change (SCOPE:338); a file that is
+  // gone has no change in it to write over, and refusing here made the repair
+  // route the skill documents unfollowable — the `--change/--path` pair the plan
+  // refusal itself prints came back as drift, and putting one deleted check back
+  // took four commands and a full re-plan. Writing the approved bytes onto
+  // nothing is the create case, journalled with a null pre-image like any other.
+  const missing = current === null && change.sourceHash !== null;
+  if (change.kind !== "include-line" && change.kind !== "write-agents-region" && currentHash !== change.sourceHash && !missing) {
     const was = change.sourceHash === null ? "did not exist when the plan was made" : "was fingerprinted at plan time";
     appendJournal(root, { event: "reject", tx: ctx.tx, plan: ctx.plan, change: change.id, path: change.path, cause: "stale" });
     throw expected("Refusing to apply change " + change.id + ": " + change.path + " has changed since it " + was +
@@ -1264,7 +1272,10 @@ function applyChange(root, ctx, change) {
   return {
     change: change.id,
     path: change.path,
-    outcome: "applied",
+    // Named apart from a first write: the owner reading the result sees that
+    // this one put a file back that was there when the plan was made and is not
+    // there now, rather than reading it as a fresh install of something new.
+    outcome: missing ? "restored" : "applied",
     verifyBy: check.verifyBy,
     enforcementGap: check.gap,
   };
@@ -2368,6 +2379,19 @@ function draftFromTemplates(root, opts, checks) {
     });
   }
 
+  // A tool that walks by path rather than by extension reads `.jig/` too — the
+  // plans, the manifest and the check modules jig wrote itself. Reported back as
+  // findings, they are the whole of a red first commit on a folder that had
+  // nothing in it, so the tool's own ignore file lands beside its config and
+  // reverts with the rest of the install.
+  for (const row of usable) {
+    const item = row.item;
+    if (!item.ignorePath || item.ignoreBody === null) continue;
+    add({ name: "toolchain-ignore-" + item.id, version: item.edition || "1.0.0", target: toPosix(item.ignorePath), kind: "write-side-file", ownership: "file" },
+      item.ignoreBody, selection,
+      item.ignorePath + ", so " + item.id + " never reports jig's own state as this project's code");
+  }
+
   // The rest of the starter. A `Cargo.toml` with no `src/lib.rs` is a manifest
   // cargo refuses to parse — jig's first act on a project it just scaffolded is
   // to run the checks over it, and a red build there is a harness crying wolf.
@@ -2825,6 +2849,23 @@ function installedToolFace(root) {
 
 const NO_INSTALLED_TOOLS = { config: new Map(), ci: new Set(), commitLane: false };
 
+// The check module this plan writes for a class, if any. By what the change is
+// FOR rather than what it was called: an authored check module is named after
+// its own slug, and a cell that keyed on a template name could not see it. The
+// driver itself is deliberately not a match — `run.mjs` runs whatever modules
+// are there, and pointing a coverage cell at it would claim a class is caught by
+// the thing that would have run the check nobody wrote.
+//
+// Asked on its own because "is a module written" and "did the cell grade as
+// coverage" are different questions, and the plan page has to tell them apart:
+// `detectorArtifact` forces GAP for a removal-only detector with no commit lane
+// before it ever looks for the module.
+function checkModuleFor(cls, changes) {
+  const hit = changes.find((c) => (c.classIds || []).includes(cls.id) &&
+    toPosix(c.path).startsWith(STATE_DIR + "/checks/") && toPosix(c.path).endsWith(".check.mjs"));
+  return hit ? hit.path : null;
+}
+
 // Which artifact does the catching, read off the plan's own changes so a cell
 // can never name a file this plan does not write. A hook detector names its
 // guard row in the generated config, which is the id the ledger will carry.
@@ -2843,15 +2884,7 @@ function detectorArtifact(cls, det, index, changes, guards, installed) {
     // is coverage only where a pre-commit hook runs the driver. The shipped CI
     // workflow runs it pathless, which counts no removals at all.
     if (removalOnlyDetector(det) && !(installed || NO_INSTALLED_TOOLS).commitLane) return null;
-    // By what the change is FOR rather than what it was called: an authored
-    // check module is named after its own slug, and a cell that keyed on a
-    // template name could not see it. The driver itself is deliberately not a
-    // match — `run.mjs` runs whatever modules are there, and pointing a
-    // coverage cell at it would claim a class is caught by the thing that
-    // would have run the check nobody wrote.
-    const hit = changes.find((c) => (c.classIds || []).includes(cls.id) &&
-      toPosix(c.path).startsWith(STATE_DIR + "/checks/") && toPosix(c.path).endsWith(".check.mjs"));
-    return hit ? hit.path : null;
+    return checkModuleFor(cls, changes);
   }
   if (det.lever === "ci-workflow") return templated("ci-workflow");
   if (denyCapable(det)) {
@@ -2887,10 +2920,48 @@ function detectorArtifact(cls, det, index, changes, guards, installed) {
   return null;
 }
 
+// Which lanes will actually run the check driver once this plan is applied: what
+// this repository is wired for today, plus what these changes wire. A check
+// module is text on disk until a lane invokes it, so this is the whole of what a
+// `check-driver` row can refuse — and the page used to make one blanket claim
+// for every row regardless of it.
+function planLanes(root, changes) {
+  return {
+    commit: commitLane(root).state === "live" ||
+      changes.some((c) => c.kind === "set-git-config" || c.kind === "include-line"),
+    ci: ciLane(root).runs || changes.some((c) => c.template && c.template.name === "ci-workflow"),
+  };
+}
+
+const NO_LANES = { commit: false, ci: false };
+
+// What this cell can refuse, and where. Only the hook runners raise the arming
+// question; every other lever's answer is a LANE, and a lane nothing here runs
+// refuses nothing whatever module the plan writes. Answered per cell because the
+// answer is per cell: three page-level sentences in a row claimed one answer for
+// the whole table, and each was false for the rows the previous one was right
+// about.
+function cellBlocks(cls, det, grade, lanes) {
+  if (grade === "GAP") return null;
+  if (denyCapable(det)) {
+    return typeof cls.proof === "string"
+      ? "proven by its fixture pair — refuses the call in session"
+      : "observe only — no proof binds this check";
+  }
+  if (det.lever === "agents-region") return "prose an agent reads — it refuses nothing";
+  // Everything else is a lane. The commit lane counts for the driver alone: a
+  // tool rule and the workflow are CI's by the lever's own definition, and a
+  // pre-commit hook runs neither.
+  const where = [det.lever === "check-driver" && lanes.commit ? "the commit" : null,
+    lanes.ci ? "CI" : null].filter(Boolean);
+  return where.length ? "fails " + where.join(" and ")
+    : "installed, and no lane here runs it — nothing fails on it yet";
+}
+
 // One detector's cell. `armable` is set on every deny-capable detector whatever
 // the cell grades to, because whether a guard CAN block is a different question
 // from how well this particular lever happens to be doing.
-function detectorCell(cls, det, index, provenance, changes, guards, installed) {
+function detectorCell(cls, det, index, provenance, changes, guards, installed, lanes) {
   const lever = leverOf(det.lever);
   const artifact = detectorArtifact(cls, det, index, changes, guards, installed);
   let grade = detectorGrade(det);
@@ -2926,22 +2997,25 @@ function detectorCell(cls, det, index, provenance, changes, guards, installed) {
     // and decides nothing here — the runner does not read it either, so a cell
     // claiming it did would be a coverage claim nothing enforces.
     armable: denyCapable(det) ? typeof cls.proof === "string" : null,
+    // What this cell refuses and where, in the lanes this plan leaves live. The
+    // marker a person reads comes off this and nothing else.
+    blocks: cellBlocks(cls, det, grade, lanes || NO_LANES),
     why,
   };
 }
 
-function matrixRow(cls, provenance, changes, guards, installed) {
+function matrixRow(cls, provenance, changes, guards, installed, lanes) {
   const cells = {};
   for (const actor of ACTORS) {
     const found = cls.detectors
       .map((det, i) => ({ det, i }))
       .filter(({ det }) => det.actor === actor)
-      .map(({ det, i }) => detectorCell(cls, det, i, provenance, changes, guards, installed));
+      .map(({ det, i }) => detectorCell(cls, det, i, provenance, changes, guards, installed, lanes));
     // Best-of, not first-of: a class with both a shipping lever and a later one
     // for the same actor is covered today by the one that ships today.
     cells[actor] = found.length
       ? found.reduce((best, c) => (CELL_RANK[c.grade] > CELL_RANK[best.grade] ? c : best))
-      : { grade: "GAP", lever: null, artifact: null, ceiling: null, armable: null,
+      : { grade: "GAP", lever: null, artifact: null, ceiling: null, armable: null, blocks: null,
         why: "no detector on this class names " + actor };
   }
   const floorCleared = hostNeutralFloor(cls, (installed || NO_INSTALLED_TOOLS).commitLane);
@@ -2965,6 +3039,10 @@ function matrixRow(cls, provenance, changes, guards, installed) {
     // the coverage (SCOPE, "Is any near-miss hit a discard").
     expectedNearMissHits: cls.expectedNearMissHits || 0,
     proof: cls.proof || null,
+    // What this plan WRITES for the class, which is not what its cells graded:
+    // a GAP driver cell can mean "no module" or "a module, and a lane that is
+    // not wired yet", and those are different things to tell an owner.
+    checkModule: checkModuleFor(cls, changes),
     cells,
   };
 }
@@ -3060,7 +3138,15 @@ function consentFor(change, guards, installed) {
     return { tier: "item", why: "is the check driver every lane runs — its exit code is the commit and CI verdict" };
   }
   if (toPosix(change.path) === STATE_DIR + "/hooks/pre-commit") {
-    return { tier: "item", why: "is the hook git runs at commit time, so it decides whether a commit is checked at all" };
+    // "is the hook git runs" was a claim about this repository's git config, made
+    // by a function that never reads it — on a repository whose `core.hooksPath`
+    // is unset, and which scan had already reported as `no-hook`, the file jig
+    // writes here is run by nothing. What is true either way is what it becomes,
+    // and gate G14 is why it is worded without naming a lane: a consent line
+    // reads as a claim about this repository, so it says what the file IS and
+    // leaves what runs where to the cells, which know the lanes.
+    return { tier: "item", why: "is the hook git reaches for once `" + GIT_SETTING + "` points at " +
+      STATE_DIR + "/hooks — until it does, jig has written it and nothing runs it" };
   }
   // The lane list. Every command in it runs on somebody's machine or in
   // somebody's CI job, and a non-zero exit from any of them fails their build —
@@ -3131,6 +3217,14 @@ function toolchainRow(row) {
   return {
     id: item.id,
     role: item.role,
+    // The edition's case for the tool, and the bytes its config would be. Both
+    // were on the item and neither reached this row, so the surface the owner
+    // ticks a tool from named a config path and never what would be in it —
+    // `toolchain.js` refuses a tool that ships no `configSample` on exactly the
+    // grounds that the owner must have the config to read, and then nothing
+    // read it out (SCOPE: nothing is written that was not named first).
+    why: item.why || null,
+    configSample: typeof item.configBody === "string" ? item.configBody : null,
     edition: item.edition,
     installKind: item.installKind,
     present: row.present,
@@ -3164,7 +3258,8 @@ function buildReview(payload, generated, root) {
   }));
   const installedTools = installedToolFace(root);
   const backlog = backlogFor(generated.loaded || [], selection, installedTools.commitLane);
-  const rows = classes.map((cls) => matrixRow(cls, provenance, payload.changes, guards, installedTools));
+  const lanes = planLanes(root, payload.changes);
+  const rows = classes.map((cls) => matrixRow(cls, provenance, payload.changes, guards, installedTools, lanes));
   // The exact sentence each armable guard hands back, composed by the hook
   // library itself so the plan cannot describe words other than the ones that
   // ship. Nothing else on this plan shows the owner the text a blocked agent
@@ -3198,6 +3293,9 @@ function buildReview(payload, generated, root) {
     // check earns from its own fixture pair; `observe` is the owner asking for
     // it, never a probation jig imposes.
     mode,
+    // The lanes this plan leaves live, once applied. Every claim on the page
+    // about a commit or a CI run is read off these two booleans.
+    lanes,
     actors: ACTORS,
     editions,
     denyReplies,
@@ -3250,9 +3348,7 @@ function buildReview(payload, generated, root) {
 function cellText(cell) {
   if (cell.grade === "GAP") return "GAP — " + (cell.why || "nothing runs here");
   const head = cell.grade === "PROB" ? "PROB(" + cell.ceiling + ")" : "DET";
-  const arm = cell.armable === null ? ""
-    : cell.armable ? " [proven by its fixture pair]" : " [observe only — no proof binds this check]";
-  return head + " " + cell.artifact + arm;
+  return head + " " + cell.artifact + (cell.blocks ? " [" + cell.blocks + "]" : "");
 }
 
 function renderReviewMd(review, backlog) {
@@ -3263,8 +3359,21 @@ function renderReviewMd(review, backlog) {
   out.push("this plan writes. Nothing here is hand-written prose about coverage.");
   out.push("");
   out.push("- provenance: `" + review.provenance + "`");
+  // The mode is what every guard row takes, and taking it is not proving it. It
+  // is also not the answer to what refuses anything: that depends on the lever
+  // AND on which lanes this repository runs, which differs per row and per
+  // repository. Three page-level sentences tried to answer it for the whole
+  // table and each was false for the rows the previous one was right about — the
+  // last of them said "nothing else here blocks" over a `check-driver` cell on a
+  // wired commit lane, where `run.mjs` exits 1 and the commit does not happen.
+  // So the header names the mode, points at the cells, and claims nothing.
+  // And `armed` is the DEFAULT, not an answer anybody gave: `--observe` is the
+  // only one of the two a run asks for. "You asked for blocking" on a plan
+  // nobody was asked about is the same class of claim as the coverage ones.
   out.push("- mode: `" + review.mode + "` — " + (review.mode === "armed"
-    ? "every check below fired on its own violation and stayed silent on its near miss, so it blocks from install"
+    ? "the default; `--observe` is how you ask for the other one. Each cell below says what that" +
+      " row can refuse and where, because the answer is the lever's and this repository's together;" +
+      " a GAP cell installs nothing to refuse with"
     : "you asked for observe, so every guard records what it would have blocked and refuses nothing"));
   out.push("- editions read: " + ((review.editions || []).map((e) => "`" + e + "`").join(", ") || "none — every class here was authored"));
   out.push("");
@@ -3279,15 +3388,55 @@ function renderReviewMd(review, backlog) {
   out.push("");
 
   if (review.rows.length && !(review.sessionGuards || []).length) {
+    // Which classes the committed lane actually catches is read off the cell,
+    // not off the levers the class declares. This paragraph used to name every
+    // row as caught by the check driver at commit time and in CI while the
+    // matrix six lines above graded them GAP for writing no driver module at
+    // all — the coverage claim SCOPE forbids, on the page the claim is made.
+    const driven = review.rows.filter((r) => Object.values(r.cells)
+      .some((c) => c.lever === "check-driver" && c.grade !== "GAP"));
+    // And a GAP cell is not the same fact as "no module". `detectorArtifact`
+    // forces GAP for a removal-only detector until a commit lane is wired, on a
+    // plan that writes the class's check module and the pre-commit shim in the
+    // same breath — so keying this paragraph on the cell alone told the owner
+    // the driver gets no module while the change list two sections up named it.
+    // Ask what is written; the cell's own GAP reason says what is missing.
+    const written = review.rows.filter((r) => !driven.includes(r) && r.checkModule);
+    const nowhere = review.rows.filter((r) => !driven.includes(r) && !r.checkModule);
+    const names = (rs) => rs.map((r) => "`" + r.classId + "`").join(", ");
     out.push("## No session guard");
     out.push("");
-    out.push("This plan installs nothing that runs inside a session. Every detector behind " +
-      review.rows.map((r) => "`" + r.classId + "`").join(", ") + " is a committed-lane lever, so these");
-    out.push("mistakes are caught by the check driver at commit time and in CI — after the bytes");
-    out.push("have landed — and never in the session that wrote them. An edition class carries no");
+    out.push("This plan installs nothing that runs inside a session. An edition class carries no");
     out.push("session detector, so a `--select` run installs none: watching one of these in session");
     out.push("means authoring the class a second detector and the fixture pair that proves it.");
     out.push("");
+    if (driven.length) {
+      // Which lanes, not "both": the same claim the header stopped making. A
+      // plan run with `--no-ci` on a repository nothing points at the shim
+      // writes the module and leaves it in no lane at all.
+      const where = [review.lanes.commit ? "at commit time" : null, review.lanes.ci ? "in CI" : null].filter(Boolean);
+      if (where.length) {
+        out.push(names(driven) + " — caught by the check driver " + where.join(" and ") + ", after");
+        out.push("the bytes have landed, and never in the session that wrote them.");
+      } else {
+        out.push(names(driven) + " — their module is installed and **no lane here runs the driver**: no");
+        out.push("pre-commit hook invokes it and there is no CI workflow, so nothing evaluates their");
+        out.push("patterns until one of those exists. To wire the commit lane, " + WIRE_COMMIT_FIX + ".");
+      }
+      out.push("");
+    }
+    if (written.length) {
+      out.push(names(written) + " — **this plan writes their check module** and no cell above grades");
+      out.push("it as coverage yet. The module is on the change list; what is still missing is on that");
+      out.push("row's GAP reason in the matrix, and the module starts catching once that is gone.");
+      out.push("");
+    }
+    if (nowhere.length) {
+      out.push(names(nowhere) + " — **the check driver gets no module for these**, so neither the");
+      out.push("commit hook nor CI runs their patterns. Whatever the matrix above grades on their row");
+      out.push("is all the coverage they have, and a row that is GAP across it has none.");
+      out.push("");
+    }
   }
 
   if (review.commandGuards) {
@@ -3298,13 +3447,17 @@ function renderReviewMd(review, backlog) {
     out.push("for " + SHELL_TOOLS.map((t) => "`" + t + "`").join(" and ") + ", and a host that names its shell anything else is a host where these");
     out.push("guards do not evaluate at all.");
     out.push("");
-    out.push("It cannot translate one syntax into another, either: a pattern written in POSIX shell");
-    out.push("idiom (`&&`, `2>/dev/null`, `| sh`) will not fire on a PowerShell line that does the same");
-    out.push("thing. A guard that evaluates and passes is not the same coverage as one that catches, so");
-    out.push("read every command guard's patterns against the syntax an agent will actually send here.");
+    out.push("It matches text and not meaning, either: the same action spelled in another shell's");
+    out.push("syntax is a different string, and a pattern that only spells one of them evaluates on the");
+    out.push("other and passes. Which spellings actually differ between the shells a host offers is not");
+    out.push("measured here and jig does not guess it — it is the pattern author's to answer. A guard");
+    out.push("that evaluates and passes is not the same coverage as one that catches, so read every");
+    out.push("command guard's patterns against the syntax an agent will actually send here.");
     out.push("");
-    out.push("Which of those names this host sends cannot be read before a guard has run, and is not");
-    out.push("guessed: `/jig:inventory` reports the ones jig's own hooks have since been seen to record.");
+    out.push("Which of those names a session sends cannot be read before a guard has run, and is not");
+    out.push("guessed. Afterwards `/jig:review` reports `evaluatedOn` per guard — the names that guard's");
+    out.push("own calls arrived on — and `lanes.session.shell.seen`, which is every name any of jig's");
+    out.push("rows recorded in this repository and is not scoped to one guard, one host or one session.");
     out.push("");
   }
 
@@ -3350,7 +3503,13 @@ function renderReviewMd(review, backlog) {
         (t.present ? "already here (" + t.how + (t.version ? " " + t.version : "") + "), config only" : "`" + t.command + "`"));
       out.push("  - config: `" + t.configPath + "`");
       if (t.wiring) out.push("  - wiring: " + t.wiring);
-      if (t.ciStep) out.push("  - CI step: `" + t.ciStep + "`");
+      // `ciStep` is the edition's hand-written line for an owner wiring their own
+      // workflow, and jig runs it nowhere — the workflow jig writes runs the check
+      // driver once per `.jig/verify.json` CI entry instead. Labelled "CI step" it
+      // read as the command the owner's CI would run, which no CI ever runs.
+      if (t.ciStep) out.push("  - CI line if you wire your own workflow (jig runs this nowhere — jig's own" +
+        " workflow runs `" + STATE_DIR + "/checks/run.mjs --verify --lane ci` per `" +
+        STATE_DIR + "/" + VERIFY_FILE + "` entry): `" + t.ciStep + "`");
       out.push("  - undo: " + (t.uninstall ? "`" + t.uninstall + "`" : "nothing to uninstall — jig only writes its config"));
     }
     out.push("");
@@ -3412,7 +3571,7 @@ function renderReviewMd(review, backlog) {
 // it has to exist before consent does. Same discipline as the transaction plan
 // beside it — it is a review surface, not an installed artifact, so it does not
 // go through the journal and `revert` does not take it back out.
-function writeReview(root, review, backlog) {
+function writeReview(root, review, backlog, planId) {
   const write = (name, text) => {
     const rel = STATE_DIR + "/" + name;
     fs.writeFileSync(path.join(root, rel), text);
@@ -3420,9 +3579,14 @@ function writeReview(root, review, backlog) {
   };
   const backlogRel = write(BACKLOG_FILE,
     JSON.stringify({ schemaVersion: SCHEMA_VERSION, backlog }, null, 2) + "\n");
+  const page = renderReviewMd(review, backlog) + "\n";
+  // The page the owner read, kept under the id it was read at. The fixed name
+  // below is the latest plan's; this one is the one an approval refers back to.
+  const keptRel = write("plan-" + planId + ".md", page);
   return {
     review: write(PLAN_JSON_FILE, JSON.stringify(review, null, 2) + "\n"),
-    rendered: write(PLAN_MD_FILE, renderReviewMd(review, backlog) + "\n"),
+    rendered: write(PLAN_MD_FILE, page),
+    kept: keptRel,
     backlog: backlogRel,
   };
 }
@@ -3518,8 +3682,15 @@ function cmdPlan(root, opts) {
 
   ensureStateDir(root);
   const rel = STATE_DIR + "/plan-" + payload.planId + ".json";
-  fs.writeFileSync(path.join(root, rel), JSON.stringify(payload, null, 2) + "\n");
-  const written = built ? writeReview(root, built.review, built.backlog) : null;
+  // The record carries the review surface beside the changes, and the page is
+  // copied to `plan-<id>.md`. `.jig/plan.md` and `.jig/plan.json` are fixed paths
+  // the NEXT plan overwrites — and the skill orders a wiring plan immediately
+  // after the install — so the matrix the owner actually approved from was gone
+  // by the next documented command, with nothing on disk to rebuild it from. The
+  // per-plan copies are the durable ones; the fixed paths stay as "the latest".
+  fs.writeFileSync(path.join(root, rel),
+    JSON.stringify(built ? { ...payload, review: built.review } : payload, null, 2) + "\n");
+  const written = built ? writeReview(root, built.review, built.backlog, payload.planId) : null;
   return {
     ok: true,
     planId: payload.planId,
@@ -3527,6 +3698,8 @@ function cmdPlan(root, opts) {
     // The review surface, named on the result so a caller never has to guess
     // which of the files in `.jig/` is the one a person is meant to read.
     review: written ? written.rendered : null,
+    // The same page under this plan's id, which the next plan does not overwrite.
+    reviewKept: written ? written.kept : null,
     matrix: written ? written.review : null,
     backlog: written ? written.backlog : null,
     consent: built ? built.review.consent : null,
@@ -3626,8 +3799,17 @@ function cmdApply(root, opts, internal) {
       // `.jig/checks/run.mjs`, `.jig/config.json` and `.jig/activation.md` would
       // be unrecoverable by the one route that used to restore them. The disk is
       // the authority. A setting is not a file and has no path to stat.
-      return [...state.writes.values()]
-        .every((w) => w.path === GIT_SETTING_PATH || fs.existsSync(path.join(root, w.path)));
+      //
+      // Asked of the writes that LANDED, not of every row. An install journals
+      // an intent for every candidate the ecosystem might use — under npm that
+      // is `pnpm-lock.yaml`, `yarn.lock` and `bun.lock` — and its outcome row
+      // carries `hashAfter: null` for each one the command did not produce. A
+      // path that never held a file is evidence of nothing either way, and
+      // counting it made `.every` false for ever: no install was ever skipped,
+      // so the batch tier of any plan that ticks a tool stayed unreachable.
+      const landed = [...state.writes.values()].filter((w) => w.hashAfter !== null);
+      return landed.length > 0 &&
+        landed.every((w) => w.path === GIT_SETTING_PATH || fs.existsSync(path.join(root, w.path)));
     });
     selected = record.changes.filter((c) => !skipped.includes(c));
     // The widened form SCOPE forbids. A plan id names no path, so approving one
@@ -3895,18 +4077,48 @@ function cmdRevert(root, opts) {
       outcome: w.preImage !== null ? "restored" : there ? (setting ? "unset" : "removed") : "absent",
     });
   }
-  // The manifest and the lockfile are back as they were; the packages on this
-  // machine are not, and jig will not run that command behind your back
-  // (SCOPE, "How is an install undone").
+  // `revert --all` is the whole install coming out, and the fixed-name review
+  // surfaces mean "the plan for this repository as it stands". Once nothing is
+  // installed there is no such plan, and `.jig/plan.md` left behind is a
+  // coverage matrix — armed mode, a table of DET cells — for a harness that is
+  // gone (SCOPE: it never claims coverage it has not demonstrated). The
+  // id-stamped `plan-<id>.md`/`.json` copies beside them stay: those are the
+  // record an approval refers back to, and undoing an install is not a reason
+  // to lose the audit trail. Named on the result, never removed in silence.
+  const surfaces = [];
+  if (opts.all) {
+    for (const name of [PLAN_MD_FILE, PLAN_JSON_FILE, BACKLOG_FILE]) {
+      const p = statePath(root, name);
+      if (!fs.existsSync(p)) continue;
+      fs.rmSync(p);
+      surfaces.push(STATE_DIR + "/" + name);
+    }
+  }
+  // The files that command wrote are dealt with; the packages on this machine
+  // are not, and jig will not run that command behind your back (SCOPE, "How is
+  // an install undone"). The note used to say "the manifest and lockfile are
+  // restored" while the rows beside it said `removed`: on a greenfield install
+  // neither file existed before jig's own command created it, so there is no
+  // pre-image to restore and the undo is a delete. The rows already carry the
+  // per-path verb, so the note points at them instead of asserting one.
   const reconcile = [...new Set(live.map(({ w }) => w.reconcile).filter(Boolean))];
   return {
     ok: true,
     reverted: report,
+    removedSurfaces: surfaces,
     reconcile,
-    notes: reconcile.length
-      ? ["The manifest and lockfile are restored. The packages themselves are still installed — run each of these" +
-        " yourself to finish undoing it: " + reconcile.join(" ; ")]
-      : [],
+    notes: [
+      ...(reconcile.length
+        ? ["Every path that install wrote is on `reverted` with what happened to it — a file that existed" +
+          " before the command ran is restored, and one the command created is removed. The packages" +
+          " themselves are still installed — run each of these yourself to finish undoing it: " +
+          reconcile.join(" ; ")]
+        : []),
+      ...(surfaces.length
+        ? ["Removed the review surfaces for an install that is gone: " + surfaces.join(", ") +
+          ". Every `plan-<id>.md` and `plan-<id>.json` is kept — those record what was approved."]
+        : []),
+    ],
   };
 }
 
@@ -3933,7 +4145,7 @@ const DRIVER_PATH = STATE_DIR + "/checks/run.mjs";
 // no probe table in here any more — a table keyed on class names could only
 // ever witness the four classes jig 1.0.1 shipped, and a witnessed close that
 // cannot see an authored check is not a close at all.
-function guardProbe(guard, record) {
+function guardProbe(guard, record, seen) {
   const mod = record.mod || {};
   const violation = mod.fixtures && mod.fixtures.violation;
   if (typeof violation !== "string" || !violation.trim()) return null;
@@ -3945,10 +4157,16 @@ function guardProbe(guard, record) {
   const det = (Array.isArray(mod.detectors) ? mod.detectors : [])
     .find((d) => d && d.runner === guard.runner && LEVER_TOOLS[d.lever]) || {};
   if (isShellLever(det)) {
-    // Any name on the shared list evaluates the same guard, so the first is as
-    // good as the last; what matters is that the payload is a shell call rather
-    // than an edit.
-    return { event: guard.runner, tool: SHELL_TOOLS[0], input: { command: violation }, what };
+    // Any name on the shared list evaluates the same guard — `LEVER_TOOLS` holds
+    // the whole set — so which one the payload carries changes no verdict. It
+    // changes the `command` line the owner is handed to re-run by hand, and
+    // `SHELL_TOOLS[0]` spelled `Bash` there on a host measured as offering no
+    // `Bash` at all (HOST-PROBE-2026-09-02, section 3). So the reproduction
+    // names a tool this repository has actually recorded when there is one, and
+    // falls back to the first watched name only where nothing has run yet —
+    // which is a name jig watches, never a guess about the host.
+    const tool = (Array.isArray(seen) ? seen : []).find((t) => SHELL_TOOLS.includes(t)) || SHELL_TOOLS[0];
+    return { event: guard.runner, tool, input: { command: violation }, what };
   }
   // The blanker reads comment and string syntax off a filename, and the guard
   // reads its own `paths` off it too, so the seeded path is derived from the
@@ -4011,6 +4229,19 @@ function runDriverProbe(root, live) {
   const expected_ = "every check reports `caught`, and the command exits 0";
   const base = { probe: "check-driver", kind: "checks", command, expected: expected_ };
   if (!fs.existsSync(path.join(root, rel))) return { ...base, ran: false, why: rel + " is not installed here" };
+  // A checks directory holding nothing but the driver proves nothing, and since
+  // 2.14.0 the driver says so with exit 0 rather than leaving the shipped CI
+  // lane red for ever. Reading that 0 back as a catch would be jig reporting
+  // coverage it never watched, so the probe says it did not run and the close
+  // prints the reason.
+  let modules = [];
+  try {
+    modules = fs.readdirSync(path.join(root, STATE_DIR, "checks")).filter((n) => n.endsWith(".check.mjs"));
+  } catch { /* no checks directory at all is the same nothing */ }
+  if (!modules.length) {
+    return { ...base, ran: false,
+      why: "no check module is installed under " + STATE_DIR + "/checks/, so the driver has nothing to prove" };
+  }
   if (!live) return { ...base, ran: false, why: "selftest was not run with --live" };
 
   const run = spawnSync(process.execPath, [path.join(root, rel), "--selftest"], {
@@ -4258,11 +4489,14 @@ function cmdSelftest(root, opts) {
   const read = lib.readConfig(root);
   const guards = read.problems.length ? [] : lib.validateConfig(read.config).guards;
   const before = ledgerLines(root);
+  // Read once, before the probes append rows of their own, so every guard in
+  // this run is reproduced against the same observation.
+  const seen = lib.shellToolsSeen(root);
 
   const probes = [];
   for (const guard of guards) {
     const record = lib.loadCheck(root, guard.check);
-    const probe = record.problem ? null : guardProbe(guard, record);
+    const probe = record.problem ? null : guardProbe(guard, record, seen);
     if (!probe) {
       // A guard jig cannot seed a violation for is reported as unprobed, never
       // skipped: an installed guard nobody watched and a guard that cannot fire
@@ -4365,8 +4599,17 @@ const FILE_SLOTS = [
 const HOOK_SLOTS = [
   // Every shell tool a host may name, so a repository whose own PreToolUse hook
   // is registered for `PowerShell` reports the slot occupied instead of taking
-  // a second registration that does not chain with it.
-  { id: "PreToolUse:Bash", event: "PreToolUse", tools: SHELL_TOOLS, what: "the command guard" },
+  // a second registration beside it. Whether two registrations for one event
+  // both fire is not measured anywhere — nothing in HOST-PROBE-2026-09-02 bears
+  // on it — and the refusal does not rest on it: a session's tool list is not
+  // readable from a CLI, so "cannot conflict" is assumed and never shown
+  // (SCOPE, "Is a foreign hook on one shell tool a full occupancy"). The id says which tools
+  // that is, like its sibling below: unlike the `bash-guard` lever name it is a
+  // report string built fresh on every scan and written into no config and no
+  // proof hash, so SCOPE's stable-key reason for keeping `Bash` does not reach
+  // it, and an owner would be shown a slot named for a tool their host may not
+  // have.
+  { id: "PreToolUse:" + SHELL_TOOLS.join("|"), event: "PreToolUse", tools: SHELL_TOOLS, what: "the command guard" },
   { id: "PostToolUse:Edit|Write", event: "PostToolUse", tools: ["Edit", "Write"], what: "the edit guard" },
 ];
 
@@ -4569,6 +4812,12 @@ function conflictPreflight(root, hooks) {
       event: slot.event,
       tools: slot.tools,
       free: clashes.length === 0,
+      // WHICH of the slot's tools the foreign hook actually contends for. Since
+      // 2.14.0 a shell slot names two, and a hook registered for one of them
+      // takes the slot on a session that sends that name and no other — so an
+      // owner refused a guard is shown the contested name rather than a flat
+      // "taken" (SCOPE, "Is a foreign hook on one shell tool a full occupancy").
+      overlap: slot.tools.filter((t) => clashes.some((c) => matcherMatches(c.matcher, t))),
       occupiedBy: clashes.map((c) => c.source + " [" + (c.matcher || "*") + "] " + c.commands.join("; ")),
     });
   }
@@ -4724,6 +4973,19 @@ function cmdScan(root, opts) {
       "Hooks registered for the same event do not chain reliably across plugins. A guard jig adds beside one that" +
         " already runs here could silently never fire, which is why the occupied slot is refused rather than shared.",
     );
+  }
+  // A shell slot names two tools and a foreign hook may hold only one of them,
+  // on a session that may never send that name. jig cannot know which names a
+  // session will offer, and its own matcher is the plugin's static hooks.json
+  // rather than a per-repository write, so it cannot take the free half either.
+  // The refusal stands and the reason is stated, rather than the owner reading a
+  // slot named for both tools as a collision on both.
+  for (const slot of occupied.filter((s) => s.kind === "hook" && s.overlap && s.overlap.length < s.tools.length)) {
+    disclosures.push(slot.slot + " is held on " + slot.overlap.join(" and ") + " only, not on " +
+      slot.tools.filter((t) => !slot.overlap.includes(t)).join(" and ") + ". A session offered no " +
+      slot.overlap.join(" or ") + " tool would see no collision at all — but which tools a session offers is not" +
+      " knowable from here, and jig's matcher is one registration covering " + slot.tools.join(" and ") +
+      ", so it is refused whole rather than taken in part.");
   }
   for (const slot of occupied.filter((s) => s.kind === "file")) {
     disclosures.push(slot.path + " already exists — jig will not write over it, so " + slot.what + " has no slot here.");
@@ -4928,6 +5190,12 @@ function configuredGuards(root) {
 function guardEvidence(lib, root, guard, stats) {
   const record = lib.loadCheck(root, guard.check);
   const dets = record.problem ? [] : lib.sessionDetectors(record.mod, guard.runner);
+  // Why this check is unusable here, or null. Read twice — once as the row's
+  // own `problem`, once as the bar `effectiveState` grades on — from one place,
+  // so the report and the reason a guard is observing cannot say different
+  // things about the same missing file.
+  const problem = record.problem || (dets.length ? null : "the installed check `" + guard.check +
+    "` declares no " + guard.runner + " detector");
   const s = stats[guard.id] || {};
   // The same class, caught in a lane the session hook never saw. The commit
   // driver runs the check with no guard and no denominator, so its catches
@@ -4936,8 +5204,7 @@ function guardEvidence(lib, root, guard, stats) {
   // review skill makes off that count.
   const lane = stats[lib.CLASS_KEY + guard.classId] || {};
   return {
-    problem: record.problem || (dets.length ? null : "the installed check `" + guard.check +
-      "` declares no " + guard.runner + " detector"),
+    problem,
     det: dets[0] || null,
     // The module itself, for the readers that describe what a check watches
     // rather than what it has caught. Null when it would not load, because
@@ -4949,6 +5216,11 @@ function guardEvidence(lib, root, guard, stats) {
     // caught four out of four is a different guard from one that caught four
     // out of four thousand, and the report used to render both the same way.
     evaluated: s.evaluated || 0,
+    // The shell tools those evaluated calls actually arrived on, per guard.
+    // `lanes.session.shell.seen` is repository-wide and answers a different
+    // question; reading it as this guard's is the coverage claim SCOPE forbids,
+    // one guard over. Empty means not yet observed, never `Bash` by default.
+    evaluatedOn: s.evaluatedOn || [],
     otherLanes: lane.fired || 0,
     denied: s.denied || 0,
     wouldDeny: s.wouldDeny || 0,
@@ -4959,6 +5231,7 @@ function guardEvidence(lib, root, guard, stats) {
     // somebody who ran `fp` and walked away expects.
     pendingWaveOff: !!s.pendingFalsePositive,
     evidence: {
+      problem,
       proof: record.problem ? null : lib.checkProof(record),
       deny: record.problem ? null : lib.denyOf(record.mod, dets[0]),
       falsePositive: !!s.standingFalsePositive,
@@ -5096,6 +5369,10 @@ function cmdReview(root) {
       provenance: g.provenance,
       fired: e.fired,
       evaluated: e.evaluated,
+      // Which shell tools those calls arrived on, for THIS guard. The
+      // repository-wide `lanes.session.shell.seen` answers a different question
+      // and reading it as one guard's is the coverage claim SCOPE forbids.
+      evaluatedOn: e.evaluatedOn,
       // Catches of this guard's class at commit time, where the check runs
       // without a guard. Its own field rather than part of `fired`: that lane
       // has no denominator, and the two numbers answer different questions.
@@ -5166,13 +5443,16 @@ function lanesOf(root, rows) {
   if (off) {
     try { offSince = fs.statSync(path.join(root, STATE_DIR, "off")).mtime.toISOString(); } catch { /* an unreadable mtime is not a reason to hide the switch */ }
   }
-  // Which shell tools this repository has been seen to send, disclosed with the
+  // Which shell tools this REPOSITORY has been seen to send, disclosed with the
   // lane rather than left for an owner to discover. jig watches every name on
   // the shared list, so the lane is live either way — but a command guard's
-  // patterns are matched against whatever the sending tool wrote, and PowerShell
-  // syntax is not shell idiom. `seen` is read off jig's own ledger rows and is
-  // empty until a guard has evaluated; the platform is never asked, because on
-  // win32 it answers `PowerShell` for a session that also offers `Bash`
+  // patterns are matched as text against whatever the sending tool wrote, and
+  // one shell's spelling of an action is not another's. `seen` is a union over
+  // jig's own ledger rows with no per-guard, per-host or time scoping: a retired
+  // guard's rows are in it, and a committed `ledger.jsonl` carries the rows of
+  // whichever machine wrote them. The per-guard answer is `evaluatedOn` on the
+  // review's guard row. The platform is never asked either way, because on win32
+  // it answers `PowerShell` for a session that also offers `Bash`
   // (HOST-PROBE-2026-09-02, sections 3 and 4).
   const shell = { seen: require("../hooks/jig-lib.js").shellToolsSeen(root), watched: SHELL_TOOLS };
   return {
@@ -5566,7 +5846,7 @@ module.exports = {
   leverOf, leverAvailable, toolchainFacts, toolchainToolFor, RELEASE_ORDER,
   denyCapable, hostNeutralFloor, floorNote, detectorGrade, detectorCeiling, DRIVER_SKIPS, driverBlindDir,
   removalOnlyDetector,
-  detectorCell, matrixRow, consentFor, bestGrade, backlogFor, buildReview, cellText, renderReviewMd,
+  detectorCell, cellBlocks, planLanes, matrixRow, consentFor, bestGrade, backlogFor, buildReview, cellText, renderReviewMd,
   resolveEditions, editionClassById, AUTHORED_RUNNERS, adaptAuthoredDetector, readAuthored, admitAuthored, checkSlug,
   authoredChecksIn, readFromFile, toolchainProposal, toolchainRow, installTouchPaths, guardEvidence,
   PROFILE_KEYS, FILE_SLOTS, HOOK_SLOTS, RULE_FILES,

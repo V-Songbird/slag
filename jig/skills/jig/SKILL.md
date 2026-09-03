@@ -277,23 +277,32 @@ A row carrying `occupied` is a tool whose config file this project already has
 and jig did not write. **The tool is still installable** — only its config is
 not jig's to lay down, and step 6 hands that config back as a snippet.
 
-Every row is one named item: `role` and `why`, `installKind` (`package`,
-`scaffold`, `builtin` or `audit` — a scaffold command and a package install are
-not the same act, so do not describe them the same way), `install` and
-`uninstall` keyed by package manager, `configPath` and `configSample` (the exact
-bytes it would write), `wiring`, `ciStep`, `seed` and `verify`. `verify.argv` is
-what the lanes run: the plan writes it into `.jig/verify.json` with the exit code
-a clean run has, and the CI workflow gains a step per entry. `ciStep` is the
-edition's hand-written CI line for a project that wires its own workflow — it is
-text to show somebody who asks, and nothing jig ever runs.
+Every row is one named item, already resolved for this project's package
+manager: `role` and `why`, `installKind` (`package`, `scaffold`, `builtin` or
+`audit` — a scaffold command and a package install are not the same act, so do
+not describe them the same way), `present`/`how`/`version` for a tool already
+here, `command` and `uninstall` (each one flat string, the one that would run
+under `packageManager`), `configPath` and `configSample` (the exact bytes it
+would write), `wiring`, `ciStep` and `occupied`. `ciStep` is the edition's
+hand-written CI line for a project that wires its own workflow — it is text to
+show somebody who asks, and nothing jig ever runs. What the lanes run is not on
+this row: `plan` writes each tool's verify argv and its clean exit code into
+`.jig/verify.json`, and the CI workflow gains a step per entry.
 
-Put the proposal to the user as a multi-select, one line per tool: what it is
-for, the command that would run under this project's package manager, and the
-config path it would write. **Nothing is installed that the owner did not tick.**
+Put the proposal to the user as a multi-select, one line per tool: `why`, the
+`command` that would run, and the `configPath` it would write. Show
+`configSample` alongside for any tool the user asks about, or before they tick
+one that writes a config into a project that already has opinions — the bytes
+are on the row so nobody approves a file sight unseen. **Nothing is installed
+that the owner did not tick.**
 
-Hold the ticked ids for `--tools` at step 6. The plan probes each tool's own
-`--version` and then the manifest, so a tool the machine already carries comes
-back as present and is never installed again. A tool with no `uninstall` path
+Hold the ticked ids for `--tools` at step 6. The plan probes the thing that has
+to exist — the tool's own `--version`, a module through its interpreter, a
+dispatched subcommand as itself — and then the manifest, so a tool the machine
+already carries comes back as present and is never installed again. A tool
+behind a runner that would FETCH it to answer (`npx <tool>`) is not probed at
+all: it comes back `unprobeable` rather than absent, and jig plans an install
+the owner can decline. A tool with no `uninstall` path
 for the chosen package manager is refused there rather than installed — jig
 never leaves an install it cannot undo — and the refusal arrives on `refused`,
 reported and not hidden. The package manager is chosen by lockfile first, then
@@ -333,13 +342,18 @@ Each authored check carries, in one module:
     on, so every PreToolUse and PostToolUse guard can carry it.
     **The command line is the sending tool's, not always bash's.** A host may
     call its shell `Bash` or `PowerShell`, and may offer both at once; since
-    2.14.0 jig watches both names, so the guard runs either way — but it matches
-    the line as sent. A pattern that only reads POSIX idiom (`&&`, `2>/dev/null`,
-    `| sh`) evaluates on a PowerShell line and passes, which is not coverage.
-    Write the patterns for every shell an agent may reach for here, and say
-    which syntaxes the check reads when you offer it. Do not infer the answer
-    from the operating system — `/jig:inventory` reports the tools jig has
-    actually seen (`lanes.session.shell.seen`), and nothing else knows.
+    2.14.0 jig watches both names, and a host that names its shell anything else
+    is a host where this guard does not evaluate at all. Whether any host does
+    is not probed and is not guessed here. Where it does run it matches
+    the line as sent, as text and not as meaning. The same action spelled in
+    another shell's syntax is a different string, and a pattern that only spells
+    one of them evaluates on the other and passes, which is not coverage. Which
+    spellings differ is yours to answer for the patterns you write — jig has
+    measured none of them and names no examples. Write the patterns for every
+    shell an agent may reach for here, and say which syntaxes the check reads
+    when you offer it. Do not infer which shell that is from the operating
+    system — `/jig:review` reports the tools each guard was evaluated on
+    (`evaluatedOn` on the guard row), and nothing else knows.
   - `edit-guard` — a PreToolUse guard over an Edit or a Write, which denies
     before the host writes the bytes. Its `params.patterns` are matched against
     the text going in, blanked by the same two switches the driver uses; `paths`
@@ -712,7 +726,10 @@ quick start or any default they never saw. An absent or misspelled value
 silently becomes `assumed` rather than failing, so pass it explicitly every
 time.
 
-The result names `review` — that is `.jig/plan.md`. Read it and walk the user
+The result names `review` — that is `.jig/plan.md`. That path always holds the
+LATEST plan's page, and the next plan overwrites it, so the same page is kept
+under this plan's id at `reviewKept` — `.jig/plan-<planId>.md`. Quote that one
+back when somebody asks what they approved. Read the page and walk the user
 through it:
 
 - the **coverage matrix**: rows are the admitted checks, columns are the four
@@ -777,7 +794,7 @@ around it.
 
 ## 7. Apply
 
-The batch tier once the user approves it, then the item tier one id at a time:
+The item tier first, one id at a time:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" apply --change <id> --path <rel>
@@ -786,6 +803,36 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" apply --change <id> --path <rel>
 The approval token is the pair. A change id alone does not name a path, so an
 edited plan could point an approved id somewhere else; a mismatch is a refusal.
 Never widen it to a form that applies everything by default.
+
+Then the batch tier, in the one command the user already approved it as:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" apply --plan <planId>
+```
+
+**In that order, and never the other way round.** `--plan` names no path, so it
+refuses while any item-tier change in the plan is still unapplied and prints the
+`--change`/`--path` pair for each one — including a change the user declined,
+which is why a declined item leaves the batch half to be applied by name like
+any other change. Run `--plan` only once every item id the user ticked has
+landed.
+
+`--plan` skips what the repository already carries and **names every one it
+skipped** on `skipped`. Read that list out — a batch approval that quietly
+dropped half its list is the coverage claim the item tier exists to stop, and a
+skipped path is one the user approved on the plan and jig then did not write.
+A change counts as already carried when the journal records it applied AND every
+file it actually wrote is still on disk — an install's candidate lockfiles that
+its command never produced say nothing either way — so a change whose file
+somebody has since deleted is not skipped. A batch one is written straight back — that is what makes
+re-running the plan the repair route. An item-tier one comes back in the refusal
+above with its `--change`/`--path` pair, because a repair is a write and a write
+outside the batch tier is still approved by name; apply that pair as it is
+printed and the file comes back — reported as `restored` when the file was there
+when the plan was made, and as `applied` when it was not, which is every file jig
+itself created and so every check module in a fresh install. An absent path is not
+an edit, so nothing about it is refused as drift — a file that is THERE and has
+changed still is, and that refusal is the one jig never talks anybody past.
 
 Tool installs run here, each already approved by name at step 6. An install is
 one item — command, config and wiring together — so `revert` undoes the tool
@@ -861,9 +908,13 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" selftest --live --toolchain eslint,t
 
 Each named tool reports `verdict: verified` or `unverified`, and `baseline:
 clean` or `red` from a second run with no seed planted. A `red` baseline is the
-disclosure that matters: the repository was already failing its own linter before
-jig planted anything, and that is the owner's to hear before any of the rest. It
-is also never a catch — a tool that went red over a tree that was already red
+disclosure that matters, and it is the owner's to hear before any of the rest —
+but read the probe's `output` before naming a cause. It says the tool refused the
+tree with no seed in it, and that has more than one reading: the repository was
+already failing its own linter; or the tool is reporting files jig itself wrote,
+which on a folder that had nothing in it is the whole of the failure; or the tool
+and the config it was given disagree. Name the files the output names, and say
+which of those it is. It is also never a catch — a tool that went red over a tree that was already red
 reads `unverified` whatever its exit code was, because the seed proved nothing.
 A tool jig cannot start comes back `cannotRun: true` — `./gradlew` on Windows is
 `gradlew.bat`, which needs `cmd.exe`, and jig opens no shell — and that is never

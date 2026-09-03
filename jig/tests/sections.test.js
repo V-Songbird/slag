@@ -564,9 +564,12 @@ test("a greenfield .NET project gets a project file that compiles with nothing i
     tools: "csc,nuget-audit", select: "dotnet/swallowed-exception",
   });
   assert.deepEqual(plan.refused, []);
-  const starter = plan.changes.find((c) => c.path === "App.csproj" && c.kind === "write-side-file");
+  // Under `src/`, so the root holds one MSBuild workspace and not two — a root
+  // `App.csproj` beside `App.sln` is what `dotnet format` refuses to choose
+  // between on the tree jig just wrote.
+  const starter = plan.changes.find((c) => c.path === "src/App.csproj" && c.kind === "write-side-file");
   assert.ok(starter, pathsOf(plan).join(", "));
-  const body = bodyOf(root, plan, "App.csproj");
+  const body = bodyOf(root, plan, "src/App.csproj");
   assert.match(body, /<Project Sdk="Microsoft\.NET\.Sdk">/);
   // No entry point is written, so an executable would fail to build on the
   // first check jig runs. A library compiles with no source files at all.

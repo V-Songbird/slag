@@ -495,6 +495,29 @@ test("tsconfig's shipped include covers the tree the typescript seed lands in", 
     "tsc compiles " + dirs.join(", ") + " and the seed is at " + ts.seed.path + ", so it is never read");
 });
 
+// A starter lands in a folder with nothing in it and jig runs the checks over it
+// straight afterwards, so the starter and the formatter that will judge it cannot
+// disagree. They did: `.prettierrc.json` ships `"singleQuote": true` and two of
+// the three JavaScript starter files were written in double quotes, so
+// `prettier --check .` refused the tree jig had just written. Release gate G10
+// runs the real formatter wherever one is installed; this reads the two halves
+// against each other on every machine, because a release cut where prettier is
+// absent would otherwise be cut on a skip.
+test("the JavaScript starter is written in the quote style its own prettier config demands", () => {
+  const prettier = jsTool("prettier");
+  assert.equal(JSON.parse(prettier.configSample).singleQuote, true,
+    "the prettier sample no longer sets singleQuote, so this test reads nothing");
+  const scripts = new Set(JS.detect.extensions);
+  for (const file of JS.detect.manifest.starter.files) {
+    if (!scripts.has(path.extname(file.path))) continue;
+    // A comment is prose. Only the code answers to the formatter's quote style.
+    const code = file.body.split("\n").filter((line) => !line.trim().startsWith("//")).join("\n");
+    assert.equal(code.includes("\""), false,
+      file.path + " is written with double quotes while .prettierrc.json sets singleQuote, so " +
+      "`prettier --check .` refuses the starter jig just wrote");
+  }
+});
+
 // The seed's whole point is to be seen by the project's own tool, and no shipped
 // tool reads a jig state directory.
 test("no shipped seed is planted inside jig's own state directory", () => {

@@ -82,8 +82,8 @@ test("the driver's header comment states the selftest exit code the driver retur
     "the header blames an empty checks directory alone; an unproven check exits 1 too");
   assert.match(header, /claims this driver and carries no pair it can run/,
     "the header does not state the condition the selftest actually exits 1 on");
-  assert.match(header, /empty checks directory proves nothing/,
-    "the header does not say an empty checks directory is a failure");
+  assert.match(header, /the exit code stays 0/,
+    "the header does not say what an empty checks directory means to the exit code");
 
   // One check, loaded and run, claiming this driver and carrying no pair it can
   // run. Nothing threw and the directory is not empty, and the selftest still
@@ -100,8 +100,11 @@ test("the driver's header comment states the selftest exit code the driver retur
   });
   assert.equal(unproven.status, 1, "a check claiming this driver proved nothing and exited 0: " + unproven.stdout);
 
-  // And an empty checks directory, which is the case the sentence names.
-  assert.equal(driverRoot(driver, {}).status, 1);
+  // And an empty checks directory, which is the case the sentence names: the
+  // report says nothing is proven, and the exit code says nothing failed —
+  // this step ships in the workflow, and a `--select` or toolchain-only
+  // install lands exactly this directory.
+  assert.equal(driverRoot(driver, {}).status, 0);
   assert.match(driverRoot(driver, {}).stdout, /nothing here is proven/);
 });
 
@@ -139,6 +142,42 @@ test("both surfaces document every field of the one lanes payload they share", (
   }
 });
 
+// 2.14.0's surfaces said three things about the shell tools that the code
+// underneath cannot support. `shell.seen` is a union over the whole ledger, so
+// no surface may read it as one guard's or as this host's; and no surface may
+// name an idiom that fails to match, because nothing measured one —
+// HOST-PROBE-2026-09-02 records the host's shell as PowerShell 7, which
+// implements `&&` and `||` as pipeline chain operators.
+test("no surface reads shell.seen as per-guard or per-host, and none names an unmeasured idiom", () => {
+  const review = read("skills", "review", "SKILL.md");
+  const inventory = read("skills", "inventory", "SKILL.md");
+  const authoring = read("skills", "jig", "SKILL.md");
+
+  // The per-guard field exists, so both surfaces that report a guard's counts
+  // point at it rather than at the repository-wide one.
+  assert.match(review, /`evaluatedOn`/, "review/SKILL.md never names the per-guard shell field");
+  assert.match(inventory, /`evaluatedOn`/, "inventory/SKILL.md never names the per-guard shell field");
+  assert.match(authoring, /`evaluatedOn`/, "the authoring skill still sends an author to a repository-wide field");
+
+  for (const [name, text] of [["review", review], ["inventory", inventory]]) {
+    assert.doesNotMatch(text, /`seen` is the ones a guard has actually/,
+      name + "/SKILL.md reads the repository-wide `seen` as one guard's");
+    assert.doesNotMatch(text, /recorded on this host/,
+      name + "/SKILL.md reads a ledger with no host scoping as this host's");
+  }
+
+  // The examples 2.14.0 shipped, in every surface that carried them. `&&` is the
+  // one that is demonstrably wrong; the other two were never measured either.
+  for (const [name, text] of [["review", review], ["inventory", inventory], ["jig", authoring]]) {
+    // Not `| sh` — the authoring skill's fixture table carries it as the
+    // `pipe-to-shell` violation an admitted check actually fires on, which is a
+    // measured fact about a fixture and not a claim about a shell.
+    for (const idiom of ["2>/dev/null", "POSIX idiom", "POSIX shell idiom"]) {
+      assert.ok(!text.includes(idiom), "skills/" + name + "/SKILL.md names an idiom nothing measured: " + idiom);
+    }
+  }
+});
+
 test("the README describes the quick start and the kill switch as the engine has them", () => {
   const readme = read("README.md");
   const quick = readme.split("\n").find((l) => l.includes("/jig:jig --quick`"));
@@ -172,6 +211,39 @@ test("the item tier is asked as an enumerated multi-select, and applied one pair
   assert.match(consent, /label is the change id/, "the option label is not the change id");
   assert.match(consent, /--change <id> --path <rel>/,
     "the multi-select no longer says the token stays one pair per ticked id");
+});
+
+// Roadmap 234 made the batch half of a mixed plan reachable by `apply --plan`,
+// and SCOPE, "May a batch approval skip a change already applied", requires the
+// skipped ids to be named rather than dropped. Both are prose here: the engine
+// has no way to refuse a skill that never runs the command, and a `skipped`
+// list nobody reads out is the silence that row exists to forbid.
+test("the apply section names the command that carries the batch tier, and relays what it skipped", () => {
+  const skill = read("skills", "jig", "SKILL.md");
+  const apply = skill.slice(skill.indexOf("## 7. Apply"), skill.indexOf("## 8. Witnessed close"));
+  assert.ok(apply.includes("## 7. Apply"), "section 7 is gone from SKILL.md");
+  assert.match(apply, /jig\.js" apply --plan <planId>/,
+    "section 7 never runs `apply --plan`, so the batch tier it exists to reach has no caller");
+  // The order is the whole of it: `--plan` refuses while an item-tier change is
+  // unapplied, so a skill told to run it first only ever reads the refusal.
+  assert.match(apply, /The item tier first/, "section 7 does not apply the item tier first");
+  assert.match(apply, /refuses while any item-tier change in the plan is still unapplied/,
+    "section 7 does not say why `--plan` comes second");
+  assert.match(apply, /\*\*names every one it\s+skipped\*\*/,
+    "section 7 does not tell the model to relay `skipped`");
+  assert.match(apply, /`skipped`/, "section 7 never names the field the skipped list comes back on");
+
+  // 2.14.0. Section 7 said a repaired item comes back "reported as `restored`".
+  // `restored` needs a `sourceHash`, which only a file that EXISTED at plan time
+  // has: every file jig itself created — so every check module in a greenfield
+  // install — comes back `applied`, and a model told to expect one word reads the
+  // other as a failure. Pinned to the engine's own branch below.
+  assert.match(apply, /as `applied` when it was not/,
+    "section 7 names only one repair outcome, and the engine has two");
+  const outcome = read("scripts", "jig.js");
+  assert.match(outcome, /const missing = current === null && change\.sourceHash !== null;/,
+    "the branch section 7 describes has moved — re-read it before trusting the prose");
+  assert.match(outcome, /outcome: missing \? "restored" : "applied"/);
 });
 
 // Question seven is where CI is agreed to, and the CI lane runs the project's
@@ -237,4 +309,69 @@ test("SKILL.md authors each standing offer against a lever the engine has", () =
     "the force-push violation falls outside the scope the row declares");
   assert.equal(guardLib.branchInScope("git push --force origin refs/heads/spike", ["<default>"], {}), false,
     "the force-push near miss is in scope too, so the pair proves nothing");
+});
+
+// ---------------------------------------------------------------------------
+// The measured session, and what a surface may infer from it
+// ---------------------------------------------------------------------------
+//
+// 2.14.0. `docs/research/jig/HOST-PROBE-2026-09-02.md` section 3 measured ONE
+// headless win32 session offered `PowerShell` and no `Bash`; section 4 measured
+// an interactive session on the SAME machine carrying both, and calls section
+// 3's claim "false of this machine as a whole". SCOPE states the rule that
+// follows: the set is per session, not per platform. Three comments this
+// release added generalised the one session to the platform anyway — in the
+// release's own evidence files, which is where the generalisation does the most
+// damage. This gate reads jig's own source for the phrasings that do it.
+test("no jig source reads the measured session as a fact about the platform", () => {
+  const banned = [
+    /every win32 session/i,
+    /on win32,? (?:Claude Code )?offers/i,
+    /on that platform,? no command guard/i,
+    /on win32 — where the tool is/i,
+    /never evaluated on the owner's own platform/i,
+  ];
+  const files = [
+    ...["hooks/jig-lib.js", "hooks/jig-hook.js", "scripts/jig.js", "scripts/vocab.js"],
+    // Every suite but this one: the phrases are literals in the regexes above,
+    // so a gate that read its own source would fail on the thing it forbids.
+    ...fs.readdirSync(path.join(PLUGIN_ROOT, "tests"))
+      .filter((n) => n.endsWith(".test.js") && n !== "docs.test.js").map((n) => "tests/" + n),
+    ...fs.readdirSync(path.join(PLUGIN_ROOT, "skills")).map((n) => "skills/" + n + "/SKILL.md"),
+  ].filter((rel) => fs.existsSync(path.join(PLUGIN_ROOT, rel)));
+  assert.ok(files.length > 10, "the file list this gate reads collapsed, so it proves nothing");
+  for (const rel of files) {
+    const text = read(...rel.split("/"));
+    for (const phrase of banned) {
+      assert.doesNotMatch(text, phrase, rel + " infers the shell tool set from the platform: " + phrase);
+    }
+  }
+});
+
+// The other half of the same rule, on the surface an author reads. jig watches
+// two names; whether any host names its shell a third is recorded as NOT
+// probed, and plan.md discloses it. An authoring skill that says the guard runs
+// "either way" tells the author the set is exhaustive, which no run establishes.
+test("the authoring skill discloses the third name the probe never ruled out", () => {
+  const authoring = read("skills", "jig", "SKILL.md");
+  assert.ok(!authoring.includes("so the guard runs either way"),
+    "the authoring skill calls two names exhaustive, which HOST-PROBE-2026-09-02 marks as not probed");
+  assert.match(authoring, /names its shell anything else\s+is a host where this guard does not evaluate/,
+    "the authoring skill never tells an author where a command guard does not run at all");
+  assert.match(authoring, /not probed and is not guessed/,
+    "the authoring skill states the gap as known rather than as unmeasured");
+});
+
+// A citation is the only thing standing between a comment and folklore, so it
+// has to point at where the measurement is. The untrusted-workspace trap is in
+// the record's `## Method`; section 1 is `PostToolUseFailure`, and a reader who
+// followed the citation as written found a finding about something else. The
+// record itself is a local research file this suite cannot read, which is
+// exactly why the citation in the source has to be right.
+test("the permissions probe cites the section its trap was actually recorded in", () => {
+  const probe = read("scripts", "probes", "permissions.js");
+  const trap = probe.slice(probe.indexOf("A fresh mkdtemp root"), probe.indexOf("function tmpProject"));
+  assert.ok(trap.includes("permissions.allow"), "the untrusted-workspace note is gone from the probe");
+  assert.ok(!/section 1/.test(trap), "the note still cites section 1, which is `PostToolUseFailure`");
+  assert.match(trap, /`## Method`, the traps list/, "the note does not say where the trap is recorded");
 });

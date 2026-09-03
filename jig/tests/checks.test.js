@@ -1957,12 +1957,56 @@ test("without --live nothing runs, and every probe prints the command to run by 
   }
 });
 
+// The printed `command` is the one thing an owner is meant to copy, and it
+// hard-coded `SHELL_TOOLS[0]` — `Bash` — on a host HOST-PROBE-2026-09-02 section
+// 3 measured as offering no `Bash` tool at all. The guard itself was never wrong
+// (`LEVER_TOOLS["bash-guard"]` is the whole list), so nothing failed; the
+// reproduction line named a tool the session could not send.
+test("a guard's reproduction line names a shell this repository has actually recorded", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  // The shell half of the fixture pair — `EMPTY_CATCH` is an edit guard and its
+  // payload names `Write`, which no host renames.
+  const guardProbe = () => engine.cmdSelftest(root, { _: [], change: [] }).probes
+    .find((p) => p.kind === "guard" && p.command.includes('"tool_input":{"command"'));
+
+  // Nothing has run, so nothing is claimed beyond a name jig watches.
+  assert.match(guardProbe().command, /"tool_name":"Bash"/);
+
+  // One evaluated call on the other name is all it takes: the observation is
+  // the ledger's, not the platform's.
+  fs.appendFileSync(path.join(root, ".jig", "ledger.jsonl"), JSON.stringify({
+    ts: "2026-09-01T00:00:00.000Z", guardId: "piped-installer-bash-guard-0", decision: "pass", tool: "PowerShell",
+  }) + "\n");
+  const after = guardProbe();
+  assert.match(after.command, /"tool_name":"PowerShell"/);
+  assert.ok(!after.command.includes('"tool_name":"Bash"'),
+    "the owner is handed a reproduction naming a tool this repository has never sent");
+});
+
 test("selftest on a project with no guards says so and does not fail", () => {
   const root = project({});
   const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
   assert.equal(result.ok, true);
   assert.equal(result.witnessed, false);
   assert.ok(result.notes.some((n) => /No guards are installed/.test(n)));
+});
+
+test("the driver probe reports nothing proven where the checks directory holds only the driver", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  for (const name of fs.readdirSync(path.join(root, ".jig", "checks"))) {
+    if (name.endsWith(".check.mjs")) fs.rmSync(path.join(root, ".jig", "checks", name));
+  }
+  // The driver exits 0 on this directory now, so that the shipped CI lane is
+  // not red on every `--select` install. That 0 must not come back as a catch:
+  // it is jig watching nothing happen.
+  const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
+  const driverProbe = result.probes.find((p) => p.kind === "checks");
+  assert.equal(driverProbe.ran, false);
+  assert.match(driverProbe.why, /no check module is installed/);
+  assert.equal(driverProbe.caught, undefined);
+  assert.ok(result.notes.some((n) => n.includes("no check module is installed")));
 });
 
 test("a missing check driver degrades to the exact command, and the guards still run", () => {
@@ -2435,6 +2479,28 @@ test("a guard demoted out of armed is reported as demoted by review and inventor
   }
 });
 
+// 2.14.0. Deleting an installed check left `/jig:review` reporting the guard
+// demoted because "the check ships no complete deny reply, so it is not armable
+// at all" — untrue of the check, whose deny triple the same row prints under
+// `watches.deny`, and a reason the review skill instructs the agent to read out
+// verbatim. A missing module and an unarmable one are different reports.
+test("a guard whose check will not load is demoted for that, not for its deny reply", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  const armed = engine.cmdReview(root).guards.find((g) => g.mode === "armed");
+  assert.ok(armed, "the fixture installed no armed guard, so this proves nothing");
+
+  const gone = nodeProject();
+  install(gone, { "no-ci": true });
+  fs.rmSync(path.join(gone, ".jig", "checks", armed.check + ".check.mjs"));
+  const row = engine.cmdReview(gone).guards.find((g) => g.guardId === armed.guardId);
+  assert.equal(row.mode, "observe");
+  assert.ok(!/no complete deny reply/.test(row.demoted),
+    "a deleted check is reported as an authoring defect in the check that is not there");
+  assert.equal(row.demoted, row.problem, "the reason it is observing is not the problem the row reports");
+  assert.match(row.demoted, /could not be read/);
+});
+
 test("the git setting's state is read from git, not from a path nothing answers", () => {
   const root = nodeProject();
   spawnSync("git", ["init", "-q"], { cwd: root });
@@ -2502,7 +2568,7 @@ test("review answers plainly where nothing is installed instead of throwing ENOE
   assert.equal(refused.why, null);
 });
 
-test("a selftest over no runnable check exits 1 and says nothing was proven", () => {
+test("a selftest over no runnable check says nothing was proven and does not fail the lane", () => {
   const root = nodeProject();
   install(root, { "no-ci": true });
   assert.equal(driver(root, ["--selftest"]).status, 0);
@@ -2511,11 +2577,26 @@ test("a selftest over no runnable check exits 1 and says nothing was proven", ()
     if (name.endsWith(".check.mjs")) fs.rmSync(path.join(root, ".jig", "checks", name));
   }
   const run = driver(root, ["--selftest"]);
-  // Nothing ran is not the same as nothing failed, and the old report said the
-  // second about the first.
-  assert.equal(run.status, 1);
+  // A checks directory holding only the driver is what a `--select` plan and a
+  // toolchain-only plan both land, and the shipped workflow runs this step on
+  // it: exiting 1 here was a CI lane red on its first push, on a tree jig had
+  // just written. Nothing ran is still not the same as nothing failed, so the
+  // report says so and the exit code stays out of it.
+  assert.equal(run.status, 0, "an empty checks directory failed its own selftest: " + run.stdout);
   assert.equal(/Every runnable check caught its own violation/.test(run.stdout), false);
   assert.match(run.stdout, /nothing here is proven/);
+
+  // And a check that WAS admitted and then stopped catching still fails it —
+  // the exit code answers "did a check fail", and it must still say yes.
+  fs.writeFileSync(path.join(root, ".jig", "checks", "unproven.check.mjs"), [
+    "export const id = \"unproven\";",
+    "export const title = \"a check nobody admitted\";",
+    "export const severity = \"safety\";",
+    "export const detectors = [{ id: \"unproven-0\", lever: \"check-driver\", runner: \"checks\",",
+    "  kind: \"pattern\", paths: [\"src/**/*.js\"], pattern: \"eval\\\\(\", message: \"no eval\" }];",
+    "",
+  ].join("\n"));
+  assert.equal(driver(root, ["--selftest"]).status, 1);
 });
 
 test("a plan whose every check was discarded refuses rather than wiring empty lanes", () => {

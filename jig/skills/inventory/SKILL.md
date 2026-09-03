@@ -139,12 +139,18 @@ here.
   runs, whatever the guard rows above say; `offSince` is when the switch went
   on. Report that before anything else about the guards.
 - `lanes.session.shell` — `watched` is every name jig's hooks match, and `seen`
-  is the ones a guard has actually recorded on this host. Report both wherever a
-  command guard is reported: `seen` is the syntax that guard's patterns have
-  really met. An empty `seen` is "not yet observed" — say that, never guess from
-  the operating system. When `seen` carries anything but `Bash`, say so plainly:
-  a pattern written in POSIX shell idiom evaluates on that line and passes
-  rather than catching, and passing is not coverage.
+  is every name jig's own ledger rows have recorded IN THIS REPOSITORY: not per
+  guard, not per host, and not time-bounded, so it carries a retired guard's
+  rows and, where `.jig/ledger.jsonl` was committed, another machine's. Report
+  it in those words, never as "this host sends". An empty `seen` is "not yet
+  observed" — say that, never guess from the operating system. Which shell a
+  particular guard has met is `evaluatedOn` on that guard's own row, not this
+  field; report that one wherever a single guard is being described.
+  Wherever `seen` names more than one shell, say plainly that a command guard's
+  patterns are matched as text against the line as sent: a pattern spelling only
+  one shell's syntax evaluates on the other and passes, and passing is not
+  coverage. Name no example idiom — jig has measured which spellings differ on
+  no host.
 - `lanes.commit` — the git hook. `runs` says the hook invokes the checks and
   `executable` says git can actually run it: `false` is a live-looking lane that
   does nothing, and `null` means win32, where the question does not apply. Both

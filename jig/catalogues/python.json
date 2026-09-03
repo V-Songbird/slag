@@ -18,9 +18,16 @@
           },
           {
             "path": "tests/test_smoke.py",
+            "version": "1.1.0",
+            "sha256": "58b4b2bf28ec8f385b862b7982a3ada874b6df657ee9a2d3a2220c7a42c36ccb",
+            "body": "\"\"\"Smoke test, so a new project's test command has something to run.\n\nWritten on `unittest` and reading the tree rather than importing it: this file\nis written whether or not a runner was ticked, so it must pass under plain\n`python -m unittest` with nothing installed. pytest collects a TestCase\nunchanged. The assertion is a bare `assert` rather than `self.assertTrue`\nbecause ruff's PT009 — which jig's own ruff config selects — refuses the\nmethod form, and unittest runs either one.\n\"\"\"\n\nimport unittest\nfrom pathlib import Path\n\n\nclass SmokeTest(unittest.TestCase):\n    def test_the_package_directory_is_here(self) -> None:\n        package = Path(__file__).resolve().parent.parent / \"src\" / \"example_app\"\n        assert package.is_dir()\n"
+          },
+          {
+            "path": "tests/package_test.py",
             "version": "1.0.0",
-            "sha256": "606082258d85b6b4128776a11d3a2f12da6e98d1f46b1c6b40759aecd910575d",
-            "body": "\"\"\"Smoke test, so a new project's test command has something to run.\n\nWritten on `unittest` and reading the tree rather than importing it: nothing\nis installed yet, so `import example_app` would fail until the owner runs\n`pip install -e .`. pytest collects a TestCase unchanged.\n\"\"\"\n\nimport unittest\nfrom pathlib import Path\n\n\nclass SmokeTest(unittest.TestCase):\n    def test_the_package_directory_is_here(self) -> None:\n        package = Path(__file__).resolve().parent.parent / \"src\" / \"example_app\"\n        self.assertTrue(package.is_dir())\n"
+            "sha256": "a80796807be7dd23ecef23c6b202ffcc10047401fcec302cb8b39cec36dea8af",
+            "tool": "pytest",
+            "body": "\"\"\"Smoke test for the runner this project installed, so the package itself is\nexercised and the coverage floor in pytest's addopts is reachable on a tree\nwith nothing in it. The import resolves through the `pythonpath` entry pytest's\nown config carries. `python -m unittest` never sees this file: it discovers\n`test*.py`, and pytest discovers `*_test.py` too, so the two runners each have\none file of their own and neither reads the other's.\n\"\"\"\n\nfrom example_app import name\n\n\ndef test_the_package_reports_its_name() -> None:\n    assert name() == \"example-app\"\n"
           }
         ]
       }
@@ -186,7 +193,7 @@
         "pdm": "pdm remove -d -G dev pytest pytest-cov"
       },
       "configPath": "pyproject.toml",
-      "configSample": "[tool.pytest.ini_options]\nminversion = \"8.0\"\ntestpaths = [\"tests\"]\naddopts = \"--strict-markers --strict-config --import-mode=importlib -ra --cov=src --cov-report=term-missing --cov-fail-under=85\"\nxfail_strict = true\nfilterwarnings = [\"error\"]\nmarkers = [\n  \"slow: takes longer than a second\",\n]\n",
+      "configSample": "[tool.pytest.ini_options]\nminversion = \"8.0\"\ntestpaths = [\"tests\"]\npythonpath = [\"src\"]\naddopts = \"--strict-markers --strict-config --import-mode=importlib -ra --cov=src --cov-report=term-missing --cov-fail-under=85\"\nxfail_strict = true\nfilterwarnings = [\"error\"]\nmarkers = [\n  \"slow: takes longer than a second\",\n]\n",
       "wiring": "[tool.pdm.scripts] test = \"pytest\"  (addopts in pyproject.toml carries the strict flags, so a bare `pytest` is already strict)",
       "ciStep": "pytest --strict-markers --strict-config -ra",
       "seed": {
@@ -1790,7 +1797,7 @@
       ],
       "fixtures": {
         "violation": "[tool.pytest.ini_options]\nminversion = \"8.0\"\ntestpaths = [\"tests\"]\naddopts = \"--strict-markers --import-mode=importlib -ra --cov=src --cov-fail-under=0 --no-cov\"\nxfail_strict = false\nfilterwarnings = [\"default\"]\n\n[tool.coverage.report]\nfail_under = 25\n",
-        "nearMiss": "[tool.pytest.ini_options]\nminversion = \"8.0\"\ntestpaths = [\"tests\"]\naddopts = \"--strict-markers --strict-config --import-mode=importlib -ra --cov=src --cov-report=term-missing --cov-fail-under=85\"\nxfail_strict = true\nfilterwarnings = [\"error\"]\nmarkers = [\n  \"slow: takes longer than a second\",\n]\n"
+        "nearMiss": "[tool.pytest.ini_options]\nminversion = \"8.0\"\ntestpaths = [\"tests\"]\npythonpath = [\"src\"]\naddopts = \"--strict-markers --strict-config --import-mode=importlib -ra --cov=src --cov-report=term-missing --cov-fail-under=85\"\nxfail_strict = true\nfilterwarnings = [\"error\"]\nmarkers = [\n  \"slow: takes longer than a second\",\n]\n"
       },
       "gapNotes": "The near miss is the pytest block jig writes into pyproject.toml, character for character, so this class fails the moment it would fire on jig's own install. It reads values, never a diff: `--cov-fail-under=70` is a real loosening from 85 and matches nothing here, because only a threshold under 50 is distinguishable from a project that never set one high. The commonest loosening of all leaves no value to read — the flag deleted from addopts entirely, or the whole `[tool.pytest.ini_options]` table removed. It must run with string bodies visible, because addopts is one TOML string, which means anything quoted in these files is read as config. A threshold passed on the command line or in a CI step is out of its scope.",
       "evidence": {
