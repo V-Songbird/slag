@@ -209,6 +209,13 @@
         "expectedExit": [
           1,
           5
+        ],
+        "alsoProbe": [
+          [
+            "python",
+            "-c",
+            "import pytest_cov"
+          ]
         ]
       }
     },
@@ -230,7 +237,7 @@
         "pdm": "pdm remove -d -G dev pip-audit"
       },
       "configPath": "requirements.txt",
-      "configSample": "# pip-audit has no config file of its own. With no -r it audits the interpreter\n# that happens to be on PATH, which is a fact about the machine and not about\n# this project; -r pins the input to this file, so the audit is reproducible and\n# is about the code here. jig runs it that way in every lane.\nhttpx==0.28.1\npydantic==2.11.7\n",
+      "configSample": "# pip-audit has no config file of its own. With no -r it audits the interpreter\n# that happens to be on PATH, which is a fact about the machine and not about\n# this project; -r pins the input to this file, so the audit is reproducible and\n# is about the code here. jig runs it that way in every lane.\n#\n# Empty on purpose: jig does not know what this project depends on, and a pin\n# nobody chose is a dependency jig invented. Add your own here and the audit\n# reads them.\n",
       "wiring": "[tool.pdm.scripts] audit = \"pip-audit --strict -r requirements.txt\"  (uv/poetry projects: export first, e.g. `uv export --no-hashes -o requirements.txt`)",
       "ciStep": "pip-audit --strict -r requirements.txt",
       "seed": {
@@ -266,7 +273,7 @@
         "pdm": "pdm remove -d -G dev build"
       },
       "configPath": "pyproject.toml",
-      "configSample": "[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n\n[project]\nname = \"example-app\"\nversion = \"0.1.0\"\nrequires-python = \">=3.11\"\ndependencies = [\n  \"httpx>=0.28\",\n]\n\n[tool.hatch.build.targets.wheel]\npackages = [\"src/example_app\"]\n",
+      "configSample": "[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n\n[project]\nname = \"example-app\"\nversion = \"0.1.0\"\nrequires-python = \">=3.11\"\ndependencies = []\n\n[tool.hatch.build.targets.wheel]\npackages = [\"src/example_app\"]\n",
       "wiring": "[tool.pdm.scripts] dist = \"python -m build --wheel --sdist\"  (uv projects can use the native `uv build` instead)",
       "ciStep": "python -m build && python -m pip install --no-deps dist/*.whl && python -c \"import example_app\"",
       "seed": {

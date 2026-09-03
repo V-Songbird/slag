@@ -1942,3 +1942,50 @@ test("release gate G16: no tool's verify runs a package manager other than the o
   }
   assert.ok(checked > 0, "G16 examined no tool at all, so it asserts nothing");
 });
+
+// ---------------------------------------------------------------------------
+// G17 — a probe answers for every distribution the install names
+// ---------------------------------------------------------------------------
+//
+// Roadmap 245. G13 asks whether the probe answers for the tool rather than for
+// its host. It never asked whether one probe answers for a row that installs
+// SEVERAL things. `python -m pip install pytest pytest-cov` was proven by
+// `pytest --version`, so on a machine carrying pytest and no pytest-cov jig
+// planned no install, the owner was never offered one, and the lane jig wrote
+// failed on its first run: exit 4, "unrecognized arguments: --cov=src
+// --cov-report=term-missing --cov-fail-under=85", from pytest's own config.
+//
+// The distributions are read by intersecting the install commands across
+// managers, which is what makes the reading safe: `poetry add --group dev X`
+// puts `dev` where pip puts a package name, and only a word EVERY manager's
+// command carries is a distribution rather than one manager's flag value.
+//
+// Only rows a probe can answer at all are held to it. `npx eslint` fetches
+// what it runs, so presence never claims it from a probe and there is nothing
+// here to get wrong.
+function namedDistributions(tool) {
+  const cmds = Object.values(tool.install || {}).filter((c) => typeof c === "string" && c.trim());
+  if (cmds.length < 2) return [];
+  const sets = cmds.map((c) => new Set(c.trim().split(/\s+/).filter((w) => !w.startsWith("-"))));
+  return [...sets[0]].filter((w) => sets.every((s) => s.has(w)));
+}
+
+test("release gate G17: a probeable row that installs several distributions probes every one", () => {
+  let checked = 0;
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    for (const tool of edition.toolchain) {
+      const named = namedDistributions(tool);
+      if (named.length < 2) continue;
+      if (!toolchain.probeArgv(tool, tool.verify.argv)) continue;
+      checked++;
+      const also = (tool.verify.alsoProbe || []).length;
+      assert.equal(also, named.length - 1,
+        row.id + "/" + tool.id + " installs " + named.join(", ") + " and states " + also +
+        " extra probe(s). `" + tool.verify.argv[0] + " --version` answers for one of them, so the rest" +
+        " read present on a machine that carries none of them — declare a `verify.alsoProbe` argv per" +
+        " distribution with no program of its own.");
+    }
+  }
+  if (!checked) disclose("G17/probeable-multi", "no shipped row both installs several distributions and can be probed");
+});

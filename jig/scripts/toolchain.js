@@ -337,6 +337,34 @@ function probeArgv(tool, argv) {
   return [argv[0], "--version"];
 }
 
+// A package install may name several distributions and only one of them put a
+// program on PATH. `python -m pip install pytest pytest-cov` answered
+// `pytest --version` on a machine carrying no pytest-cov at all: jig planned no
+// install, the owner was never offered one, and the lane jig then wrote failed
+// on its first run — "unrecognized arguments: --cov=src --cov-report=..." from
+// pytest's own config, exit 4. So a row whose install names a distribution with
+// no program of its own states how to ask for that one, and every stated probe
+// has to answer before the tool reads present.
+//
+// The queries are the edition's, not derived: an install command's operands are
+// a distribution list under pip and a flag value under poetry, and no parser
+// tells the two apart. Each is a fixed argv spawned without a shell, exactly as
+// the version probe is.
+function alsoAnswered(root, tool) {
+  const also = tool.verify && tool.verify.alsoProbe;
+  if (!Array.isArray(also)) return true;
+  for (const argv of also) {
+    if (!Array.isArray(argv) || !argv.length || !argv.every(nonEmptyString)) {
+      throw refuse(tool.id + " states a verify.alsoProbe entry that is not an argv of non-empty strings");
+    }
+    const run = spawnSync(argv[0], argv.slice(1), {
+      cwd: root, shell: false, windowsHide: true, encoding: "utf8", timeout: PROBE_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES,
+    });
+    if (run.error || run.status !== 0) return false;
+  }
+  return true;
+}
+
 // Absence is an answer, never an exception: the whole point of asking is that
 // the tool is probably missing. A malformed edition entry still throws, because
 // that is a bug in data jig shipped and silence would hide it.
@@ -360,7 +388,7 @@ function presence(projectRoot, tool) {
     // either way, so only an answer counts: `cargo nextest --version` exits 101
     // saying `no such command`, and that is the tool being absent.
     const answered = probeCmd.length > 2 ? !probe.error && probe.status === 0 : !probe.error;
-    if (answered) {
+    if (answered && alsoAnswered(root, tool)) {
       return { present: true, version: firstVersion(probe.stdout) || firstVersion(probe.stderr), how: "probe" };
     }
   }

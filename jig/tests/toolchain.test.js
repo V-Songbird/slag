@@ -85,6 +85,35 @@ test("presence never throws on absence", () => {
   );
 });
 
+// Roadmap 245. `python -m pip install pytest pytest-cov` was proven by
+// `pytest --version` alone, so a machine carrying pytest and no pytest-cov read
+// present, jig planned no install, and the lane it wrote exited 4 on its first
+// run — pytest's own `--cov=src` from the config jig had just written.
+test("a distribution the install names and no probe answers for keeps the tool absent", () => {
+  const root = tmpProject({});
+  const found = toolchain.presence(root, nodeTool({
+    id: "jig-half-installed",
+    verify: {
+      argv: [process.execPath, "--version"], expectedExit: 0,
+      alsoProbe: [[process.execPath, "-e", "require('jig-absent-companion-xyz')"]],
+    },
+  }));
+  assert.deepEqual(found, { present: false, version: null, how: "absent" });
+});
+
+test("a companion probe that answers leaves the tool present", () => {
+  const root = tmpProject({});
+  const found = toolchain.presence(root, nodeTool({
+    id: "jig-fully-installed",
+    verify: {
+      argv: [process.execPath, "--version"], expectedExit: 0,
+      alsoProbe: [[process.execPath, "-e", "require('path')"]],
+    },
+  }));
+  assert.equal(found.present, true);
+  assert.equal(found.how, "probe");
+});
+
 test("presence asks about a module inside its interpreter, not about the interpreter", () => {
   const root = tmpProject({});
   // `python -m build` reported present, at python's own version, on a machine
