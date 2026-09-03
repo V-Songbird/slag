@@ -1213,6 +1213,58 @@ test("apply --plan skips an applied install whose candidate lockfiles never land
   assert.deepEqual(rest.applied.map((r) => r.path), [".jig/hand.json"]);
 });
 
+// The direction that filter must NOT reach: an install the ecosystem rejected.
+// It journals an outcome row for every candidate path before it reads the exit
+// code — the command may have created files, and a created path with no
+// pre-image is the one thing revert has to know about — so the replay read it as
+// `applied` and the batch tier skipped it as already installed. That is how
+// three dotnet analyzers whose `dotnet add package` exited 1 left a
+// `.jig/verify.json` naming them, and `dotnet build` then came back green over
+// analyzers no project referenced.
+test("apply --plan does not skip an install the ecosystem rejected", () => {
+  const root = nodeProject();
+  const item = {
+    id: "fakelint",
+    role: "linter",
+    edition: "javascript-typescript",
+    installKind: "package",
+    packageManager: "npm",
+    command: "fake install fakelint",
+    // Writes a marker file and THEN exits 1, which is the shape that fooled the
+    // replay: real outcome rows, and a rejection after all of them.
+    argv: [process.execPath, "-e", "require('fs').writeFileSync('package-lock.json','{}\\n');process.exit(1)"],
+    configPath: "fakelint.config.json",
+    configBody: "{}\n",
+    wiring: null,
+    ciStep: null,
+    uninstallCommand: "fake uninstall fakelint",
+    uninstallArgv: [process.execPath, "-e", "0"],
+    timeoutMs: 20000,
+  };
+  fs.writeFileSync(path.join(root, "draft.json"), JSON.stringify({
+    changes: [
+      { id: "install-fakelint", kind: "run-install", path: item.configPath, install: item },
+      { id: "batch-note", kind: "write-side-file", path: ".jig/hand.json", content: "{}\n" },
+    ],
+  }));
+  const plan = engine.cmdPlan(root, { _: [], change: [], from: "draft.json" });
+  const install = plan.changes.find((c) => c.kind === "run-install");
+  assert.throws(() => engine.cmdApply(root, { _: [], change: [install.id], path: [install.path] }),
+    /exited 1/);
+
+  const state = engine.replayJournal(engine.readJournal(root)).get(install.id);
+  assert.equal(engine.changeState(state), "refused");
+  assert.ok(!fs.existsSync(path.join(root, item.configPath)),
+    "the config landed for an install that failed");
+
+  // So the batch half is refused and names it, rather than skipping it as
+  // already installed and writing the lane over a tool that is not there.
+  assert.throws(() => engine.cmdApply(root, { _: [], change: [], plan: plan.planId }),
+    /Refusing to apply plan .* Approve each one by name[\s\S]*install-fakelint/);
+  assert.ok(!fs.existsSync(path.join(root, ".jig", "hand.json")),
+    "the batch tier landed over an install that never did");
+});
+
 // The other half of that filter: the journal records what jig did, the disk
 // records what the repository still has, and re-apply repair reads the disk.
 // A skip taken on the journal alone would make `--plan` report `ok` having

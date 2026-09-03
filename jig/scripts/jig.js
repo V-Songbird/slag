@@ -560,7 +560,12 @@ function replayJournal(rows) {
       const w = c.writes.get(row.path);
       if (w) { w.written = false; w.restored = true; w.order = ++order; }
     } else if (row.event === "reject") {
+      // Ordered like a write, because a rejection that arrives AFTER every write
+      // row of the change is the state of the change, and one that arrives
+      // before a later re-run under the same id is history. Without the order a
+      // change rejected once read as rejected for ever.
       c.rejected = true;
+      c.rejectedOrder = ++order;
     }
   }
   return changes;
@@ -575,6 +580,15 @@ function changeState(c) {
   // open list for ever, and nothing — not even `revert --all` — could take it
   // out, because there was no write to restore.
   if (c.rejected && writes.every((w) => !w.written)) return "refused";
+  // The same finish, one step later. A failed INSTALL journals its outcome rows
+  // first — the command may have created files before it exited, and a path with
+  // no pre-image is the one thing revert must know about — and only then the
+  // rejection. Those rows describe the tree, never that the tool landed, so a
+  // rejection after every one of them finishes the change too. Reading it as
+  // `applied` was how three dotnet analyzers whose install exited 1 were skipped
+  // by the batch tier as already installed, and the lane then ran green over
+  // linters that were not in any project.
+  if (c.rejected && writes.every((w) => w.order < c.rejectedOrder)) return "refused";
   if (writes.some((w) => !w.written && !w.restored)) return "interrupted";
   return "applied";
 }

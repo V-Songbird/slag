@@ -100,10 +100,10 @@
       "why": "The Roslyn CA (code quality) and IDE (code style) analyzers catch design, security and dead-code defects the compiler ignores entirely - swallowed exceptions, SQL concatenation, insecure randomness, unread assignments.",
       "installKind": "package",
       "install": {
-        "dotnet": "dotnet add package Microsoft.CodeAnalysis.NetAnalyzers"
+        "dotnet": "dotnet add src/App.csproj package Microsoft.CodeAnalysis.NetAnalyzers"
       },
       "uninstall": {
-        "dotnet": "dotnet remove package Microsoft.CodeAnalysis.NetAnalyzers"
+        "dotnet": "dotnet remove src/App.csproj package Microsoft.CodeAnalysis.NetAnalyzers"
       },
       "configPath": ".editorconfig",
       "configSample": "root = true\n\n[*.cs]\ndotnet_diagnostic.CA1031.severity = error\ndotnet_diagnostic.CA1062.severity = warning\ndotnet_diagnostic.CA2000.severity = warning\ndotnet_diagnostic.CA2007.severity = none\ndotnet_diagnostic.CA2016.severity = warning\ndotnet_diagnostic.CA2100.severity = error\ndotnet_diagnostic.CA2200.severity = error\ndotnet_diagnostic.CA2201.severity = warning\ndotnet_diagnostic.CA5350.severity = error\ndotnet_diagnostic.CA5351.severity = error\ndotnet_diagnostic.CA5394.severity = error\ndotnet_diagnostic.IDE0005.severity = warning\ndotnet_diagnostic.IDE0035.severity = warning\ndotnet_diagnostic.IDE0051.severity = warning\ndotnet_diagnostic.IDE0059.severity = warning\ndotnet_diagnostic.IDE0079.severity = warning\n",
@@ -159,10 +159,10 @@
       "why": "Only the xUnit analyzers understand test intent: they flag a skipped test, a public method that was never marked as a test, an unused Theory parameter and an unawaited async assertion - none of which the compiler or the CA rules see.",
       "installKind": "package",
       "install": {
-        "dotnet": "dotnet add package xunit.analyzers"
+        "dotnet": "dotnet add tests/App.Tests.csproj package xunit.analyzers"
       },
       "uninstall": {
-        "dotnet": "dotnet remove package xunit.analyzers"
+        "dotnet": "dotnet remove tests/App.Tests.csproj package xunit.analyzers"
       },
       "configPath": ".editorconfig",
       "configSample": "root = true\n\n[*.cs]\ndotnet_diagnostic.xUnit1004.severity = error\ndotnet_diagnostic.xUnit1013.severity = error\ndotnet_diagnostic.xUnit1026.severity = warning\ndotnet_diagnostic.xUnit1031.severity = error\ndotnet_diagnostic.xUnit1049.severity = error\ndotnet_diagnostic.xUnit2020.severity = error\ndotnet_diagnostic.xUnit2021.severity = error\n",
@@ -248,14 +248,14 @@
       "why": "Carries three checks nothing else in this ecosystem has: S2699 fails a test that contains no assertion at all, S108 fails any empty nested block, and S125 flags commented-out code - catching the 'make it green' shapes the CA rules miss.",
       "installKind": "package",
       "install": {
-        "dotnet": "dotnet add package SonarAnalyzer.CSharp"
+        "dotnet": "dotnet add src/App.csproj package SonarAnalyzer.CSharp"
       },
       "uninstall": {
-        "dotnet": "dotnet remove package SonarAnalyzer.CSharp"
+        "dotnet": "dotnet remove src/App.csproj package SonarAnalyzer.CSharp"
       },
       "configPath": ".editorconfig",
       "configSample": "root = true\n\n[*.cs]\ndotnet_diagnostic.S108.severity = error\ndotnet_diagnostic.S125.severity = warning\ndotnet_diagnostic.S2699.severity = error\n",
-      "wiring": "<PackageReference Include=\"SonarAnalyzer.CSharp\" PrivateAssets=\"all\" /> in Directory.Build.props so it applies to every project, with the three severities pinned in .editorconfig. S125 is pinned at warning rather than error because SonarSource's own tracker documents false positives in its commented-out-code heuristic.",
+      "wiring": "The install writes the <PackageReference Include=\"SonarAnalyzer.CSharp\" /> into the project it names; move it into a Directory.Build.props with PrivateAssets=\"all\" to apply it to every project. The three severities are pinned in .editorconfig. S125 is pinned at warning rather than error because SonarSource's own tracker documents false positives in its commented-out-code heuristic.",
       "ciStep": "dotnet build --configuration Release -warnaserror",
       "verify": {
         "argv": [

@@ -1266,6 +1266,27 @@ test("release gate G10: every tool an edition installs exits clean over the star
           row.id + " under " + manager + " proposes " + change.install.id + " through " + through +
           ", which builds a different project (" + editions.manifestFor(edition, through).path + "): `" +
           change.install.command + "`");
+
+        // And it has to be runnable from where jig runs it: the repository
+        // root. `dotnet add package X` resolves its project against the working
+        // directory, and jig's own dotnet scaffold puts every csproj under src/
+        // and tests/ — so all three package installs exited 1 with "Could not
+        // find any project in ...", the batch tier then wrote the lane anyway,
+        // and `dotnet build` came back green over analyzers no project
+        // referenced. Only a `package` install needs a project (`dotnet new
+        // editorconfig` does not), and only where the edition's project file is
+        // not at the root.
+        if (change.install.installKind === "package" && mine.includes("/")) {
+          const named = change.install.argv.slice(1).filter((a) => !a.startsWith("-") && a.includes("/"));
+          assert.ok(named.length, row.id + " under " + manager + ": " + change.install.id +
+            " installs a package with `" + change.install.command + "`, which resolves its project against the" +
+            " working directory — and this edition's project file is " + mine + ", not at the root");
+          for (const rel of named) {
+            assert.ok(fs.existsSync(path.join(root, rel)), row.id + " under " + manager + ": " +
+              change.install.id + " names " + rel + ", which is not on the tree jig just wrote: `" +
+              change.install.command + "`");
+          }
+        }
       }
       if (manager !== spec.manager) continue;
 
