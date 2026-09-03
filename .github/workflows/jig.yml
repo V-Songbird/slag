@@ -7,10 +7,17 @@
 # manager, where the agent host is not installed, and where nobody pasted the
 # pre-commit activation line.
 #
-# One honest limit: the staged-deletion check reads the git index, and a CI
-# checkout has nothing staged. That class is covered here only for what is
-# already committed — the pre-commit and agent-session guards are what see a
-# deletion as it happens.
+# Below the two steps here, jig appends one step per tool the CI lane runs —
+# the linter, the type checker and the test runner the owner ticked, each named
+# in .jig/verify.json and spawned from it with no shell. A tool has to be
+# installed for its step to pass: this job checks the repository out and sets
+# node up, and whatever else your tools need is yours to add above them.
+#
+# One honest limit: a check that reads the git index — the staged-deletion
+# class, and every paired-change detector — has nothing to read in a CI
+# checkout, where nothing is staged. Those report themselves skipped here rather
+# than passing, and the pre-commit lane is what sees them. The selftest step
+# still proves them, because a change-set fixture needs no index at all.
 
 name: jig checks
 

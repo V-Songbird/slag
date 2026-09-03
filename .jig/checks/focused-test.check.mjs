@@ -29,7 +29,7 @@ export const detectors = [
 
 export const deny = {
   "reason": "Focused test left in the suite. Adds .only to iterate on one failure and never removes it, so CI silently runs one test.",
-  "alternative": "Run the one case locally with the runner's own filter flag, then drop the .only before you commit. If this guard is wrong about this file, narrow its paths in .jig/config.json.",
+  "alternative": "Remove the `.only` so the whole suite runs again, or narrow this check's `paths` if it is wrong about this file.",
   "override": "Change the paths on this check, or retire it in /jig:review, if it turns out to be wrong here more often than right."
 };
 
