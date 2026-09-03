@@ -578,14 +578,28 @@ function pairedDetectors(mod) {
     Array.isArray(det.params.paths) && det.params.paths.length);
 }
 
+// The paired detector's whole rule, written once so admission and the shipped
+// driver cannot answer it differently: the set touched something in `paths` and
+// nothing in `pairedWith`.
+function pairedFires(units, set, match) {
+  return units.some((u) => set.some((rel) => matchesAny(rel, u.paths, match)) &&
+    !set.some((rel) => matchesAny(rel, u.pairedWith, match)));
+}
+
 // The finding names the file that moved without its pair, at line 1. The
 // mistake is the absence of another file, so there is no line in this one to
 // point at, and pretending otherwise would send somebody to an innocent line.
+//
+// The caller answers first whether the `pairedWith` glob names anything in the
+// project at all, and reports the class skipped when it does not: a pair that
+// exists nowhere is not a pair this change left behind. The fixture pair cannot
+// catch that — its change set is inline text, so a `pairedWith` glob is never
+// compiled against a real tree — so without that gate a check the pair certified
+// reports every touch of `paths` as a doc left behind, for ever.
 function pairedFindings(ctx, mod, det, changed) {
   const p = det.params;
   const touched = changed.filter((rel) => matchesAny(rel, p.paths));
-  if (!touched.length) return [];
-  if (changed.some((rel) => matchesAny(rel, p.pairedWith))) return [];
+  if (!pairedFires([p], changed, globToRegExp)) return [];
   const note = "changed with nothing matching " + p.pairedWith.join(" or ");
   return touched.map((rel) => ctx.finding(mod.id, rel, 1, "paired:" + p.pairedWith.join(","), note));
 }
@@ -617,25 +631,33 @@ function fencedHalves(text, label) {
 // spell it differently.
 const PAIRED_FENCE = "paired";
 
-// The rule: some pattern the detector names is in the before text more times
-// than in the after text, and by how much. Both halves are blanked the way the
-// pattern kind blanks a file, at the path the count is taken over, so a
-// declaration that only ever lived in a comment is not a removal.
-function removedDrop(det, rel, halves) {
-  const before = blankRegions(halves.before, rel, det.params);
-  const after = blankRegions(halves.after, rel, det.params);
-  const count = (text, p) => (text.match(new RegExp(p, "g")) || []).length;
-  for (const p of det.params.removed) {
-    const drop = count(before, p) - count(after, p);
+// The removal detector's whole rule, written once so admission and the shipped
+// driver cannot answer it differently: some pattern this detector names is in
+// the before text more times than in the after text, and by how much.
+function removedDrop(before, after, patterns) {
+  for (const p of patterns) {
+    const drop = countOf(before, p) - countOf(after, p);
     if (drop > 0) return { pattern: p, drop };
   }
   return null;
 }
 
+function countOf(text, pattern) {
+  return (text.match(new RegExp(pattern, "g")) || []).length;
+}
+
+// Both halves are blanked the way the pattern kind blanks a file, at the path
+// the count is taken over, so a declaration that only ever lived in a comment is
+// not a removal.
+function removedDropAt(det, rel, halves) {
+  return removedDrop(blankRegions(halves.before, rel, det.params),
+    blankRegions(halves.after, rel, det.params), det.params.removed);
+}
+
 // The selftest's reading of it: the fixture carries both halves, so the path is
 // the one this detector's own globs derive.
 function removedHits(det, halves) {
-  return removedDrop(det, fixturePath(det), halves) ? 1 : 0;
+  return removedDropAt(det, fixturePath(det), halves) ? 1 : 0;
 }
 
 // The commit lane's reading of it, and the only lane that has two versions of a
@@ -651,7 +673,7 @@ function countFloorFindings(ctx, mod, det, changed) {
     const after = ctx.read(rel);
     // A staged deletion reads back null, which is the same absence as an empty
     // file and counted as one.
-    const found = removedDrop(det, rel, { before, after: after === null ? "" : after });
+    const found = removedDropAt(det, rel, { before, after: after === null ? "" : after });
     if (found) {
       out.push(ctx.finding(mod.id, rel, 1, "removed:" + found.pattern,
         found.drop + " fewer than the version this commit replaces"));
@@ -826,7 +848,32 @@ async function runChecks(root, only, staged) {
             command: null,
           });
         } else {
-          for (const det of paired) findings.push(...pairedFindings(ctx, mod, det, changed));
+          for (const det of paired) {
+            // The relation half, read against the real tree. A `pairedWith`
+            // glob nothing matches is not a pair this change left behind, and
+            // reporting it as one turns the check into a firehose the fixture
+            // pair certified — the same defect `extract` had, on a different
+            // relation.
+            const union = ctx.union(det.params.pairedWith);
+            if (union === null) {
+              skipped.push({
+                id: mod.id,
+                why: "git could not list what the index holds, so there was nothing to say whether this class's pair is there at all",
+                command: null,
+              });
+              break;
+            }
+            if (!union.length) {
+              skipped.push({
+                id: mod.id,
+                why: "no file matching " + det.params.pairedWith.join(" or ") +
+                  " exists here, so nothing in this commit could have been changed alongside it",
+                command: null,
+              });
+              continue;
+            }
+            findings.push(...pairedFindings(ctx, mod, det, changed));
+          }
         }
       }
       // The content relation. Every lane reads it — the doc and the union both

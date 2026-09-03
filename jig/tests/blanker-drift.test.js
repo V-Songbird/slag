@@ -76,6 +76,24 @@ const BLOCKS = [
     to: "  return out;\n}",
   },
   {
+    // The paired-change rule, roadmap 247. Admission decides a check is coverage
+    // by it and the shipped driver reports findings by it, and the two used to be
+    // written out separately — the same hand-kept second copy `extract` had.
+    what: "the paired-change rule",
+    files: [DRIVER, ADMISSION],
+    from: "function pairedFires(units, set, match) {",
+    to: "    !set.some((rel) => matchesAny(rel, u.pairedWith, match)));\n}",
+  },
+  {
+    // The removal count rule, roadmap 247. Same story: admission counted the
+    // drop in `removedFires` and the driver counted it again in its own loop,
+    // under a comment promising one copy.
+    what: "the removal count rule",
+    files: [DRIVER, ADMISSION],
+    from: "function removedDrop(before, after, patterns) {",
+    to: '  return (text.match(new RegExp(pattern, "g")) || []).length;\n}',
+  },
+  {
     // The lanes run the same argv the installer runs, and on Windows `npx` is a
     // batch shim neither of them may open a shell for. The engine learned the
     // route first; the driver carries the second copy because it imports

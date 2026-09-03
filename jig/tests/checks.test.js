@@ -893,8 +893,12 @@ function stage(root, files) {
   }
 }
 
+// The project carries a doc, because since roadmap 247 a `pairedWith` glob that
+// names nothing in the project at all reports the class skipped rather than
+// every touch of `paths`. The mistake this asserts is a doc left behind, which
+// needs a doc to leave.
 test("a staged change that touches the engine and leaves the docs alone is a finding", () => {
-  const root = nodeProject();
+  const root = nodeProject({ "docs/engine.md": "# engine\n" });
   install(root, { "no-ci": true }, [A.DOC_LEFT_BEHIND]);
   stage(root, { "src/engine/solver.ts": "export const solve = () => 1;\n" });
   const { status, out } = driverJson(root);
@@ -928,6 +932,8 @@ test("a paired check fires for an install below the git root", () => {
   fs.mkdirSync(path.join(root, "src"), { recursive: true });
   fs.writeFileSync(path.join(root, "package.json"), "{ \"private\": true }\n");
   fs.writeFileSync(path.join(root, "src", "a.ts"), "export const a = 1;\n");
+  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(root, "docs", "engine.md"), "# engine\n");
   install(root, { "no-ci": true }, [A.DOC_LEFT_BEHIND]);
   const violation = path.join(root, "src", "engine", "solver.ts");
   fs.mkdirSync(path.dirname(violation), { recursive: true });
@@ -960,6 +966,38 @@ test("with no change set to read the class is skipped, not passed", () => {
   assert.equal(out.skipped.length, 1);
   assert.equal(out.skipped[0].id, "doc-left-behind");
   assert.match(out.skipped[0].why, /nothing is staged/);
+});
+
+// Roadmap 247. The pair nothing matches, which is the paired kind's own version
+// of the firehose `extract` had: admission cannot see it — the fixture's change
+// set is inline text, so a `pairedWith` glob is never compiled against a tree —
+// so a check that passed its pair arrives here reporting every touch of `paths`
+// as a doc left behind, on every commit, with no edit that clears it.
+test("a pair no file matches reports the class skipped rather than every touch of paths", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.DOC_LEFT_BEHIND]);
+  stage(root, { "src/engine/solver.ts": "export const solve = () => 1;\n" });
+  const { status, out } = driverJson(root);
+  assert.deepEqual(out.findings, [],
+    "a pair that exists nowhere was read as a pair this change left behind, and the check became a firehose");
+  assert.equal(status, 0);
+  assert.equal(out.skipped[0].id, "doc-left-behind");
+  assert.match(out.skipped[0].why, /no file matching docs\/\*\*\/\*\.md exists here/);
+});
+
+// And the doc arriving in the same commit is the pair, not an absence: the union
+// is the index, so a file this commit adds is a file the project has.
+test("a doc added by the same commit satisfies the pair", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true }, [A.DOC_LEFT_BEHIND]);
+  stage(root, {
+    "src/engine/solver.ts": "export const solve = () => 1;\n",
+    "docs/engine.md": "# engine\n",
+  });
+  const { status, out } = driverJson(root);
+  assert.deepEqual(out.findings, []);
+  assert.deepEqual(out.skipped, []);
+  assert.equal(status, 0);
 });
 
 // And the reason that limit is affordable: the selftest needs no index at all,

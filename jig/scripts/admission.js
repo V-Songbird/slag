@@ -198,22 +198,27 @@ const PAIRED_FENCE = "paired";
 
 // The removal detector's whole rule, written once so admission and the shipped
 // driver cannot answer it differently: some pattern this detector names is in
-// the before text more times than it is in the after text.
-//
-// `.some()` because that is what the driver does at run time — any one spelling
-// dropping is a finding. Admission does NOT read it that way: it hands this one
-// pattern at a time, so a spelling the fixture never drops is discarded instead
-// of riding in on a sibling's count.
-function removedFires(units, halves, blank) {
-  return units.some((u) => {
-    const before = blank(halves.before, u.filename, u.opts);
-    const after = blank(halves.after, u.filename, u.opts);
-    return u.patterns.some((p) => countOf(before, p) > countOf(after, p));
-  });
+// the before text more times than in the after text, and by how much.
+function removedDrop(before, after, patterns) {
+  for (const p of patterns) {
+    const drop = countOf(before, p) - countOf(after, p);
+    if (drop > 0) return { pattern: p, drop };
+  }
+  return null;
 }
 
 function countOf(text, pattern) {
   return (text.match(new RegExp(pattern, "g")) || []).length;
+}
+
+// Admission's reading of it. `.some()` over the units because that is what the
+// driver does at run time — any one spelling dropping is a finding. Admission
+// does NOT read it that way pattern by pattern: it hands this one pattern at a
+// time, so a spelling the fixture never drops is discarded instead of riding in
+// on a sibling's count.
+function removedFires(units, halves, blank) {
+  return units.some((u) => removedDrop(blank(halves.before, u.filename, u.opts),
+    blank(halves.after, u.filename, u.opts), u.patterns) !== null);
 }
 
 // The extract detector's whole rule: some name this detector's regex takes out
