@@ -2314,3 +2314,28 @@ test("a --select id no edition carries under any namespace says so rather than g
   const page = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
   assert.match(page, /- `not-a-class-anywhere` — no loaded edition carries a class with this id under any namespace/);
 });
+
+// The half the unit test above could not see. `--verify-commit` computes the
+// lane correctly and always did; what took it away again was the NEXT plan.
+// Question seven-a's recommended answer is "only in CI", so a second interview
+// about a different class recomputed the same tool's entry as `["ci"]` and
+// proposed writing the commit lane back out of a file the owner had put it into
+// — silently, on a page that says a re-run only ever adds. Every driven install
+// in the 2.14.0 audit ended up ci-only for exactly this reason, which is why
+// `run.mjs --verify --lane commit` printed "No entry names the commit lane" on
+// every edition and every before/after commit-lane number in it reads 0.
+test("a re-plan that does not repeat --verify-commit keeps the commit lane it was given", () => {
+  const root = nodeProject();
+  const opts = { edition: "javascript-typescript", "package-manager": "npm", tools: "eslint" };
+  const first = install(root, { ...opts, select: "javascript-typescript/focused-test", "verify-commit": true });
+  assert.deepEqual(readJson(root, ".jig/verify.json").entries.find((e) => e.id === "eslint").lanes,
+    ["ci", "commit"], "the flag did not reach the installed file");
+  assert.ok(first.plan.planId);
+
+  // A second interview about a different class, with the flag not repeated.
+  const again = planOnly(root, { ...opts, select: "javascript-typescript/skipped-test" });
+  const payload = engine.planFiles(root).map(engine.readPlan).find((p) => p.planId === again.planId);
+  const proposed = JSON.parse(payload.changes.find((c) => c.path === ".jig/verify.json").content);
+  assert.deepEqual(proposed.entries.find((e) => e.id === "eslint").lanes, ["ci", "commit"],
+    "the second plan proposes taking the commit lane away from a tool the owner put it on");
+});

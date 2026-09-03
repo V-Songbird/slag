@@ -1754,10 +1754,27 @@ function verifyFace(root, entries) {
   const installed = (raw === null ? null : proposedVerifyEntries(raw.toString("utf8"))) || [];
   const now = new Map(entries.map((e) => [e.id, e]));
   const carried = installed.filter((e) => typeof e.id === "string" && !now.has(e.id));
+  // The rule above, applied to the LANES on an entry this run recomputes and not
+  // only to the entries it does not. `--verify-commit` is an opt-in the owner
+  // gives once, at question seven-a, whose recommended answer is "only in CI" —
+  // so every later plan that ticks the same tool and does not repeat the flag
+  // recomputed `lanes: ["ci"]` and proposed writing the commit lane back out of
+  // a file the owner had put it into. That is a lane quietly taken away, which
+  // is the one thing this function's contract says a re-run never does. Adding
+  // a lane is still this run's job; removing one needs its own asking.
+  const keptLanes = new Map(installed
+    .filter((e) => typeof e.id === "string" && Array.isArray(e.lanes))
+    .map((e) => [e.id, e.lanes]));
+  const merged = entries.map((e) => {
+    const kept = keptLanes.get(e.id);
+    if (!kept) return e;
+    const lanes = [...new Set([...(e.lanes || []), ...kept])];
+    return lanes.length === (e.lanes || []).length ? e : { ...e, lanes };
+  });
   return {
-    entries: [...carried, ...entries],
+    entries: [...carried, ...merged],
     carried: carried.map((e) => e.id),
-    added: entries.map((e) => e.id),
+    added: merged.map((e) => e.id),
   };
 }
 
