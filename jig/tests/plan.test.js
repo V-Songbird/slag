@@ -2274,3 +2274,43 @@ test("inventory reports a refused config as the problem it is, not as an empty l
   assert.ok(inv.artifacts.length, "an unreadable config took the artifact list with it");
   assert.ok(inv.checks.length, "an unreadable config took the check list with it");
 });
+
+// SCOPE, "What happens to a `--select` id that matches nothing": disclosed, not
+// refused. Observed live — thirty BARE ids drew a thirty-row all-GAP matrix and
+// an ENFORCEMENT GAP list calling all thirty "the classes no host-neutral
+// deterministic lever catches", on a repository whose eslint and vitest configs,
+// written by that same plan, caught the planted `test.only` twice over. Nothing
+// on the page said the ids had matched nothing.
+test("a --select id that matches no class is disclosed by name, not drawn as a phantom class", () => {
+  const root = nodeProject();
+  engine.cmdPlan(root, {
+    _: [], change: [], provenance: "elicited",
+    select: "focused-test,javascript-typescript/focused-test",
+  });
+  const review = readJson(root, ".jig/plan.json");
+  const phantom = review.rows.filter((r) => r.unmatched);
+  assert.deepEqual(phantom.map((r) => r.classId), ["focused-test"],
+    "the bare id is the only row that matched nothing");
+  assert.deepEqual(phantom[0].namespacedSuggestion, ["javascript-typescript/focused-test"],
+    "the namespaced id the owner meant is not offered");
+  // And the matched row is not marked, which is the distinction the page turns on.
+  assert.equal(review.rows.find((r) => r.classId === "javascript-typescript/focused-test").unmatched, false);
+
+  const page = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
+  assert.match(page, /## 1 of the ids you selected matched nothing/);
+  assert.match(page, /- `focused-test` — did you mean `javascript-typescript\/focused-test`\?/);
+  // Not absorbed into the gap list, where it would read as a class no lever
+  // catches — which is the sentence that made the live run unreadable.
+  const gapList = page.split("## ENFORCEMENT GAP")[1] || "";
+  assert.ok(!gapList.split(/\r?\n/).some((l) => l.startsWith("- `focused-test`")),
+    "a phantom id is listed as a class no host-neutral lever catches");
+});
+
+test("a --select id no edition carries under any namespace says so rather than guessing", () => {
+  const root = nodeProject();
+  engine.cmdPlan(root, { _: [], change: [], provenance: "elicited", select: "not-a-class-anywhere" });
+  const review = readJson(root, ".jig/plan.json");
+  assert.deepEqual(review.rows.find((r) => r.classId === "not-a-class-anywhere").namespacedSuggestion, []);
+  const page = fs.readFileSync(path.join(root, ".jig", "plan.md"), "utf-8");
+  assert.match(page, /- `not-a-class-anywhere` — no loaded edition carries a class with this id under any namespace/);
+});

@@ -2161,7 +2161,23 @@ function draftFromTemplates(root, opts, checks) {
       // An id no edition carries and no admitted check answers. Not a refusal
       // (the catalogue never gates), just a class with nothing behind it — the
       // matrix says GAP in every column and the owner sees why.
-      return { id, edition: null, title: id, severity: "safety", axes: [], detectors: [], authored: false };
+      //
+      // "The owner sees why" was the part that was not true. A row like this is
+      // indistinguishable in the matrix from a class that DID match and is
+      // uncovered, and a live `--select` of thirty bare ids produced thirty of
+      // them: a 30-row all-GAP matrix and an ENFORCEMENT GAP list calling them
+      // "the classes no host-neutral deterministic lever catches", on a
+      // repository the same plan's own eslint and vitest configs were catching
+      // the planted violation in twice over. So the row is marked, and the page
+      // discloses it by name — with the namespaced id, when one exists, since
+      // bare-versus-namespaced is what the live run got wrong.
+      return {
+        id, edition: null, title: id, severity: "safety", axes: [], detectors: [], authored: false,
+        unmatched: true,
+        namespacedSuggestion: loaded.flatMap((e) => (e.classes || [])
+          .filter((c) => c.id === id)
+          .map((c) => editionsLib.namespacedId(e.edition, c.id))),
+      };
     }
     const check = authored.check;
     return {
@@ -3117,6 +3133,11 @@ function matrixRow(cls, provenance, changes, guards, installed, lanes) {
     // skipped-test` was exactly that: GAP in all four columns, and absent from
     // the list an owner reads to find exactly that.
     allCellsGap: Object.values(cells).every((c) => c.grade === "GAP"),
+    // Whether this row is a class at all. An id matching nothing in any loaded
+    // edition and no admitted check is a phantom, and it grades GAP everywhere
+    // for a reason that has nothing to do with coverage.
+    unmatched: cls.unmatched === true,
+    namespacedSuggestion: cls.namespacedSuggestion || [],
     floorCleared,
     floorNote: floorNote(cls, (installed || NO_INSTALLED_TOOLS).commitLane),
     // The edition's own words about what this class cannot see. Carried through
@@ -3532,13 +3553,46 @@ function renderReviewMd(review, backlog) {
   }
   out.push("");
 
+  // Said before anything else the table implies. An id that matched no class in
+  // any loaded edition and no admitted check installs nothing and grades GAP in
+  // every column — which reads exactly like a class that matched and is
+  // uncovered, and did: a live run of thirty bare ids drew a thirty-row all-GAP
+  // matrix over a repository the same plan's configs were already catching the
+  // violation in. SCOPE's "never silently substitutes a default" is the clause
+  // this closes; the catalogue still never gates, so it is a disclosure and not
+  // a refusal.
+  const phantom = review.rows.filter((r) => r.unmatched);
+  if (phantom.length) {
+    out.push("## " + phantom.length + " of the ids you selected matched nothing");
+    out.push("");
+    out.push("These are not classes. No loaded edition carries them and no admitted check answers");
+    out.push("them, so this plan installs nothing for any of them and their row above is GAP in");
+    out.push("every column for that reason — not because the coverage is missing:");
+    out.push("");
+    for (const row of phantom) {
+      const hint = (row.namespacedSuggestion || []).length
+        ? " — did you mean " + row.namespacedSuggestion.map((n) => "`" + n + "`").join(" or ") + "?"
+        : " — no loaded edition carries a class with this id under any namespace";
+      out.push("- `" + row.classId + "`" + hint);
+    }
+    out.push("");
+    out.push("Edition class ids are namespaced: `python/swallowed-exception`, not `swallowed-exception`.");
+    out.push("Every other row in that table is a class that matched.");
+    out.push("");
+  }
+
   if (review.rows.length && !(review.sessionGuards || []).length) {
     // Which classes the committed lane actually catches is read off the cell,
     // not off the levers the class declares. This paragraph used to name every
     // row as caught by the check driver at commit time and in CI while the
     // matrix six lines above graded them GAP for writing no driver module at
     // all — the coverage claim SCOPE forbids, on the page the claim is made.
-    const driven = review.rows.filter((r) => Object.values(r.cells)
+    // Phantom rows are excluded from all three sets. "The check driver gets no
+    // module for `focused-test`" reads as a fact about a class, and there is no
+    // such class — the section above says so, by name, and saying it twice in
+    // two different vocabularies is how the live run stayed unreadable.
+    const real = review.rows.filter((r) => !r.unmatched);
+    const driven = real.filter((r) => Object.values(r.cells)
       .some((c) => c.lever === "check-driver" && c.grade !== "GAP"));
     // And a GAP cell is not the same fact as "no module". `detectorArtifact`
     // forces GAP for a removal-only detector until a commit lane is wired, on a
@@ -3546,8 +3600,8 @@ function renderReviewMd(review, backlog) {
     // same breath — so keying this paragraph on the cell alone told the owner
     // the driver gets no module while the change list two sections up named it.
     // Ask what is written; the cell's own GAP reason says what is missing.
-    const written = review.rows.filter((r) => !driven.includes(r) && r.checkModule);
-    const nowhere = review.rows.filter((r) => !driven.includes(r) && !r.checkModule);
+    const written = real.filter((r) => !driven.includes(r) && r.checkModule);
+    const nowhere = real.filter((r) => !driven.includes(r) && !r.checkModule);
     const names = (rs) => rs.map((r) => "`" + r.classId + "`").join(", ");
     out.push("## No session guard");
     out.push("");
@@ -3628,7 +3682,7 @@ function renderReviewMd(review, backlog) {
   // its own words, "so the matrix above is not read as more than it is" — and a
   // row graded GAP in every column is the plainest case of that, which is the
   // one it used to leave out.
-  const stamped = review.rows.filter((r) => r.enforcementGap || r.allCellsGap);
+  const stamped = review.rows.filter((r) => !r.unmatched && (r.enforcementGap || r.allCellsGap));
   if (stamped.length) {
     out.push("## ENFORCEMENT GAP");
     out.push("");
@@ -3639,7 +3693,7 @@ function renderReviewMd(review, backlog) {
     for (const row of stamped) {
       const reason = row.enforcementGap
         ? (row.gapNotes ? " " + row.gapNotes : "")
-        : " Every actor's cell above is GAP: this plan installs nothing that catches it." +
+        : ". Every actor's cell above is GAP: this plan installs nothing that catches it." +
           (row.gapNotes ? " " + row.gapNotes : "");
       out.push("- `" + row.classId + "` — " + row.title + reason);
     }
