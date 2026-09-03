@@ -1191,13 +1191,32 @@ function buildSystemsOf(edition) {
   return [...seen.values()];
 }
 
+// Why an edition gets no arm here. G10 and G12 both dropped one with a bare
+// `continue`, and a bare `continue` is invisible: go's six tools appeared in
+// neither gate's output, as an arm or as a skip, so a release read off this list
+// as having covered them. Every skip on this list is named.
+function noStarterReason(id, spec) {
+  return spec
+    ? "the " + id + " edition writes no manifest sample under " + spec.manager +
+      ", so there is no tree here for its tools to read"
+    : "the " + id + " edition writes no starter — G7 names the command an owner runs to make one" +
+      " (`go mod init <module path>`), and until then there is no tree here for its tools to read";
+}
+
 test("release gate G10: every tool an edition installs exits clean over the starter jig just wrote", async (t) => {
   for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
     const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
     const spec = STARTER_BUILDS[row.id] || null;
     // An edition with no starter has no tree for anything to read, and G7
-    // already names who writes one instead.
-    if (!spec || !editions.manifestFor(edition, spec.manager).sample) continue;
+    // already names who writes one instead — per tool, so every id on the shelf
+    // leaves this gate with an arm or a named skip against its name.
+    if (!spec || !editions.manifestFor(edition, spec.manager).sample) {
+      for (const tool of edition.toolchain) {
+        await t.test(row.id + ": " + tool.id + " over the starter",
+          { skip: noStarterReason(row.id, spec) }, () => {});
+      }
+      continue;
+    }
 
     // The spec's manager first, so the arm that runs the tools is the one G7
     // and G12 also build; the rest are checked for what they write.
@@ -1251,20 +1270,26 @@ test("release gate G10: every tool an edition installs exits clean over the star
       if (manager !== spec.manager) continue;
 
       const candidates = edition.toolchain.filter((tool) => STARTER_TOOL_ROLES.includes(tool.role));
-      const ran = new Set(spec.runs.map((argv) => argv.join(" ")));
+      // Who has already run each command, so a tool sharing one can SAY so.
+      const ran = new Map(spec.runs.map((argv) => [argv.join(" "), "this edition's own starter build"]));
       for (const tool of candidates) {
         const argv = toolArgv(tool);
+        const key = argv.join(" ");
         // Five dotnet tools and two rust ones share one command. Running it five
-        // times would say the same thing five times and cost five restores.
-        if (ran.has(argv.join(" "))) continue;
-        ran.add(argv.join(" "));
+        // times would say the same thing five times and cost five restores — but
+        // dropping the duplicate with a bare `continue` took the tool id off this
+        // gate's output altogether, neither run nor disclosed. It is a named skip
+        // now, and the reason names the arm that DID run the command.
+        const already = ran.get(key);
         await t.test(row.id + ": " + tool.id + " over the starter", {
           // Named, never silent: a release cut here has to say which tools nobody
           // ran. The reason is presence alone, so a runner carrying the toolchain
           // runs every one of these.
-          skip: toolPresent(tool)
-            ? false
-            : argv[0] + " is not on this machine, so " + tool.id + " read nothing here",
+          skip: already
+            ? "`" + key + "` already ran here for " + already + ", and a second run says the same thing twice"
+            : toolPresent(tool)
+              ? false
+              : argv[0] + " is not on this machine, so " + tool.id + " read nothing here",
         }, () => {
           const run = spawnSync(argv[0], argv.slice(1), {
             cwd: root, shell: false, windowsHide: true, encoding: "utf8",
@@ -1274,8 +1299,181 @@ test("release gate G10: every tool an edition installs exits clean over the star
             " over a starter jig had just written, with the config jig wrote for " + tool.id + "\n" +
             String(run.stdout || "") + String(run.stderr || ""));
         });
+        if (!already) ran.set(key, tool.id);
       }
     }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// G15 — the bodies jig writes obey the formatter config jig writes, offline
+// ---------------------------------------------------------------------------
+//
+// G10 above is the only gate on "a config jig writes rejects a file jig
+// writes", and it can only ask that question where the tool is installed. On
+// the machine that CUTS the release the JavaScript arms are named skips —
+// eslint and prettier are not here — so the defect they exist to catch, a
+// starter written past its own `printWidth`, reintroduces with the whole suite
+// green. A gate that only bites where the toolchain happens to be does not
+// protect the machine doing the cutting.
+//
+// So this one runs everywhere, spawns nothing and installs nothing. It reads
+// the formatter config the edition ITSELF writes, takes the rules that are
+// machine-readable out of it, and holds every other body the edition can write
+// — every tool's config sample, every manifest sample, every starter file — to
+// them.
+//
+// WHAT IT REACHES. Only what the formatter's own config states, plus the one
+// documented default named below:
+//
+//   line width   `printWidth` / `max_width` / `line-length`
+//   indentation  a leading TAB where the config says spaces (`useTabs: false`,
+//                `hard_tabs = false`, `indent-style = "space"`,
+//                `indent_style = space`)
+//   quotes       a double-quoted string in a JS/TS body under `singleQuote`
+//   quoted keys  an object key quoted where it needs no quotes, under
+//                prettier's documented `quoteProps: "as-needed"` default — the
+//                ONE inference here, and a config that sets `quoteProps` itself
+//                turns the check off
+//
+// WHAT IT DOES NOT REACH, and G10 stays the deeper run for every line of it:
+//
+//   - every decision a formatter makes by PARSING: where it breaks a long line,
+//     trailing commas, semicolons, blank-line collapsing, import order, spacing
+//     inside braces. This gate can say a line is too long. It cannot say that a
+//     line short enough is the line prettier would have written.
+//   - python's `quote-style = "double"`. An apostrophe inside a docstring and a
+//     single-quoted literal are the same character to anything but a parser,
+//     and jig's python starters are full of the first.
+//   - the indent WIDTH (`tab_spaces`, `indent_size`). A formatter aligns a
+//     continuation off whatever column the line above ended at, so a modulo
+//     check reports the formatter's own output as a violation.
+//   - the .editorconfig past its first matching section: dotnet declares one
+//     indent for `[*.cs]` and another for `[*.{csproj,props,targets}]`, and
+//     glob resolution is the editorconfig library's job, not a gate's.
+//   - every LINTER rule. eslint, clippy, ruff's `select` and the type checkers
+//     are not formatters and state nothing here.
+//   - anything an OWNER writes. Only bodies jig ships are read.
+//
+// The extension list is declared HERE rather than read out of the edition. A
+// gate that reads its rule out of the thing it is gating asserts nothing, and
+// an edition that adds a formatter has to answer here — G13 carries its host
+// list for the same reason.
+const FORMATTER_SCOPE = {
+  rust: [".rs"],
+  python: [".py"],
+  // gofumpt has no config file of its own — the edition points its `configPath`
+  // at `go.mod`, which states no width, indent or quote — so go lands on the
+  // disclosed-gap list below rather than being checked against nothing.
+  go: [".go"],
+  "javascript-typescript": [".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx", ".json"],
+  dotnet: [".cs"],
+};
+
+// The subset prettier's quote rules speak for. A `.json` body carries quoted
+// keys and double-quoted strings by the format's own grammar, and prettier
+// leaves them exactly there.
+const JS_SOURCE = [".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx"];
+
+// `key = value` off a TOML or editorconfig body. The first spelling of a key
+// wins, which is the section order jig writes and the order those formats read.
+function declaredPairs(body) {
+  const out = new Map();
+  for (const line of body.split("\n")) {
+    const m = /^\s*([A-Za-z_][\w.-]*)\s*=\s*(.+?)\s*$/.exec(line);
+    if (m && !out.has(m[1])) out.set(m[1], m[2].replace(/^["']|["']$/g, ""));
+  }
+  return out;
+}
+
+// The rules, read out of the formatter config and nowhere else. A rule the
+// config does not state stays null and is not checked: this gate never invents
+// a house style the edition did not declare.
+function declaredFormat(edition) {
+  const tool = edition.toolchain.find((t) => t.role === "formatter" && typeof t.configSample === "string");
+  if (!tool) return null;
+  const rules = { tool: tool.id, source: tool.configPath, width: null, indent: null, quote: null, quoteProps: false };
+  if (tool.configPath.endsWith(".json")) {
+    const json = JSON.parse(tool.configSample);
+    if (Number.isInteger(json.printWidth)) rules.width = json.printWidth;
+    if (json.useTabs === false) rules.indent = "space";
+    if (json.singleQuote === true) rules.quote = "single";
+    rules.quoteProps = json.quoteProps === undefined;
+  } else {
+    const pairs = declaredPairs(tool.configSample);
+    for (const key of ["max_width", "line-length", "max_line_length"]) {
+      if (pairs.has(key)) rules.width = Number(pairs.get(key));
+    }
+    if (["hard_tabs", "indent-style", "indent_style"].some((k) => pairs.get(k) === "false" || pairs.get(k) === "space")) {
+      rules.indent = "space";
+    }
+  }
+  return rules;
+}
+
+// Every body this edition can write, by the path it writes it to: the config
+// each tool carries, each package manager's manifest, and each starter file.
+function shippedBodies(edition) {
+  const out = new Map();
+  for (const tool of edition.toolchain) {
+    if (typeof tool.configSample === "string") out.set(tool.configPath, tool.configSample);
+  }
+  for (const manager of edition.detect.packageManagers || []) {
+    const manifest = editions.manifestFor(edition, manager);
+    if (manifest.path && typeof manifest.sample === "string") out.set(manifest.path, manifest.sample);
+    for (const file of manifest.starter || []) {
+      if (typeof file.body === "string") out.set(file.path, file.body);
+    }
+  }
+  return out;
+}
+
+test("release gate G15: no body jig writes breaks the formatter config jig writes for it", () => {
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    const rules = declaredFormat(edition);
+    if (!rules) {
+      disclose("G15/" + row.id, "this edition installs no formatter, so it declares no rule to check against");
+      continue;
+    }
+    const scope = FORMATTER_SCOPE[row.id];
+    assert.ok(scope, row.id + " declares a formatter (" + rules.tool + ") and this gate has no extension" +
+      " list for it, so every body it writes went unchecked");
+    if (rules.width === null && rules.indent === null && rules.quote === null) {
+      disclose("G15/" + row.id, rules.source + " states no width, indent or quote rule this gate can read");
+      continue;
+    }
+    let checked = 0;
+    for (const [file, body] of shippedBodies(edition)) {
+      if (!scope.includes(path.extname(file))) continue;
+      checked += 1;
+      const says = row.id + " — " + file + " against " + rules.source + " (" + rules.tool + "), which ";
+      body.split("\n").forEach((line, i) => {
+        const at = ":" + (i + 1) + ": ";
+        if (rules.width !== null) {
+          assert.ok(line.length <= rules.width, says + "sets a width of " + rules.width + at +
+            "this line is " + line.length + " characters\n  " + line);
+        }
+        if (rules.indent === "space") {
+          assert.ok(!/^ *\t/.test(line), says + "indents with spaces" + at + "this line starts with a tab");
+        }
+        if (rules.quote === "single" && JS_SOURCE.includes(path.extname(file))) {
+          const code = line.replace(/\/\/.*$/, "");
+          assert.ok(!code.includes("\""), says + "sets singleQuote" + at +
+            "this line carries a double-quoted string\n  " + line);
+        }
+        if (rules.quoteProps && JS_SOURCE.includes(path.extname(file))) {
+          // prettier's default `quoteProps: "as-needed"` takes the quotes off a
+          // key that is already a valid identifier — `'eqeqeq':` becomes
+          // `eqeqeq:` — and leaves `'no-console':` alone.
+          const key = /^\s*(['"])([A-Za-z_$][\w$]*)\1\s*:/.exec(line);
+          assert.equal(key, null, key && says + "leaves quoteProps at as-needed" + at + "the key `" +
+            key[2] + "` is quoted and needs no quotes");
+        }
+      });
+    }
+    assert.ok(checked > 0, row.id + " declares a formatter and this gate read none of its bodies — the" +
+      " extension list here matches nothing the edition writes");
   }
 });
 
@@ -1349,8 +1547,13 @@ test("release gate G12: every step of the workflow jig writes exits 0 on the tre
     const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
     const spec = STARTER_BUILDS[row.id] || null;
     // An edition with no starter has no tree to write the workflow over, and
-    // G7 already names who writes one instead.
-    if (!spec || !editions.manifestFor(edition, spec.manager).sample) continue;
+    // G7 already names who writes one instead. Named, never a bare `continue`:
+    // an edition dropped in silence reads off this list as one the gate covered,
+    // which is how go's whole toolchain went unaccounted for.
+    if (!spec || !editions.manifestFor(edition, spec.manager).sample) {
+      await t.test(row.id + " workflow over the starter", { skip: noStarterReason(row.id, spec) }, () => {});
+      continue;
+    }
 
     const shapes = [
       ["with the checks it admitted", {}],

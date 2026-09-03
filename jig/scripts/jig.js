@@ -4337,10 +4337,30 @@ function execToolchainProbe(root, tool, base) {
   // outside every shipped config's reach — eslint's `globalIgnores` names
   // `.jig/**` and tsconfig's `include` names `src` and `tests` — so the tool
   // exited 0 over a violation it never read and every JavaScript install
-  // ledgered `unverified`. `execVerify` refuses rather than writes over a path
-  // the project already owns, so a seed named after a manifest is a disclosed
-  // "cannot plant" instead of a clobbered `Cargo.toml`.
+  // ledgered `unverified`.
   const seeded = toPosix((tool.seed && tool.seed.path) || "");
+  // Several seeds are named after a manifest — rust's cargo-deny seeds
+  // `Cargo.toml`, javascript's audit `package-lock.json`, python's pip-audit
+  // `requirements.txt` — so on a real install the seed path is routinely a file
+  // the project already owns. `execVerify` refuses to write over it, and the
+  // removal below used to run anyway: nothing was planted and the OWNER's file
+  // was deleted, with no pre-image for `revert` to restore. So the collision is
+  // decided HERE, before a seed row is journaled and before anything is
+  // planted, and it is a disclosed "cannot plant" rather than a destroyed
+  // manifest. SCOPE: jig never edits — or removes — a file it did not write.
+  if (seeded && fs.existsSync(path.join(root, seeded))) {
+    return { ...base, ran: false, cannotRun: true,
+      why: seeded + " is a file this project already owns, and " + tool.id + "'s seed is named after it." +
+        " jig will not write over it and will not remove it, so nothing was planted and nothing was" +
+        " proven — run `" + (base.command || tool.verify.argv.join(" ")) + "` yourself against a violation" +
+        " you plant by hand" };
+  }
+  // The deepest directory that is already there. The removal walks empty
+  // parents off, and without this it walked past the ones the planting made
+  // into one the project owned — an empty `tests/` goes with python's seed the
+  // same way the file does. Same rule as the file: only what this run created.
+  let owned = path.dirname(path.join(root, seeded));
+  while (owned !== root && owned.startsWith(root) && !fs.existsSync(owned)) owned = path.dirname(owned);
   const tx = hashBytes(Buffer.from(seeded + "|" + new Date().toISOString(), "utf8")).slice(0, 12);
   appendJournal(root, { event: "seed", tx, tool: tool.id, path: seeded });
   try {
@@ -4364,18 +4384,27 @@ function execToolchainProbe(root, tool, base) {
     if (!err.expected) throw err;
     return { ...base, ran: false, why: err.message, baseline: baseline.baseline, baselineExit: baseline.code };
   } finally {
-    removeSeed(root, seeded);
-    appendJournal(root, { event: "seed-removed", tx, tool: tool.id, path: seeded });
+    // Only what this run planted. The path was checked clear above, so a file
+    // there now is jig's own seed; a refusal that threw BEFORE writing one
+    // leaves nothing to remove, and removing nothing is not journaled as a
+    // removal.
+    if (seeded && fs.existsSync(path.join(root, seeded))) {
+      removeSeed(root, seeded, owned);
+      appendJournal(root, { event: "seed-removed", tx, tool: tool.id, path: seeded });
+    }
   }
 }
 
 // The seed file and every directory the planting created for it, and nothing
 // else: `rmdirSync` refuses a directory with anything left in it, so a `src`
 // the project already had survives and a `tests` jig made goes with the seed.
-function removeSeed(root, rel) {
+// `owned` is the deepest directory that was there BEFORE the planting, and the
+// walk stops at it — an EMPTY directory the project owns passes the `rmdirSync`
+// test and is not jig's to take.
+function removeSeed(root, rel, owned) {
   fs.rmSync(path.join(root, rel), { force: true });
   let dir = path.dirname(path.join(root, rel));
-  while (dir !== root && dir.startsWith(root)) {
+  while (dir !== root && dir !== owned && dir.startsWith(root)) {
     try {
       fs.rmdirSync(dir);
     } catch {

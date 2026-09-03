@@ -646,7 +646,10 @@ function withPath(dir, fn) {
   try { return fn(); } finally { process.env.PATH = had; }
 }
 
-test("a manager behind a batch shim is run through its own JS entry, never through a shell", { skip: process.platform !== "win32" }, () => {
+test("a manager behind a batch shim is run through its own JS entry, never through a shell",
+  // Named, never bare: a `# SKIP` with no reason beside it reads as a pass
+  // nobody has to account for. Batch shims exist only on Windows.
+  { skip: process.platform === "win32" ? false : "batch shims are a Windows shape and this is " + process.platform }, () => {
   for (const [name, rel] of Object.entries({
     npm: "node_modules/npm/bin/npm-cli.js",
     npx: "node_modules/npm/bin/npx-cli.js",
@@ -660,7 +663,8 @@ test("a manager behind a batch shim is run through its own JS entry, never throu
   }
 });
 
-test("only the managers with a JS entry are rewritten — nothing else gets a route", { skip: process.platform !== "win32" }, () => {
+test("only the managers with a JS entry are rewritten — nothing else gets a route",
+  { skip: process.platform === "win32" ? false : "batch shims are a Windows shape and this is " + process.platform }, () => {
   // A shim with no JS beside it is still a shim, and the refusal stands.
   const bare = tmpProject({});
   fs.writeFileSync(path.join(bare, "npm.cmd"), "@echo off\r\n");
@@ -670,11 +674,13 @@ test("only the managers with a JS entry are rewritten — nothing else gets a ro
   assert.equal(withPath(dir, () => toolchain.shellFreeArgv(["gradle", "wrapper"])), null);
 });
 
-test("nothing is rewritten off Windows: npm there is a script node already runs", { skip: process.platform === "win32" }, () => {
+test("nothing is rewritten off Windows: npm there is a script node already runs",
+  { skip: process.platform === "win32" ? "this is win32, where npm IS a batch shim and the rewrite is the point" : false }, () => {
   assert.equal(toolchain.shellFreeArgv(["npm", "install", "x"]), null);
 });
 
-test("the Gradle wrapper on win32 is refused with the batch line to run by hand", { skip: process.platform !== "win32" }, () => {
+test("the Gradle wrapper on win32 is refused with the batch line to run by hand",
+  { skip: process.platform === "win32" ? false : "`gradlew.bat` is a Windows shape and this is " + process.platform }, () => {
   const root = tmpProject(SCRIPTS);
   const item = runnableItem({ command: "./gradlew --no-daemon check", argv: ["./gradlew", "--no-daemon", "check"] });
   assert.throws(
@@ -908,6 +914,52 @@ test("a tool jig cannot start is `cannot run`, and no seed is left behind for it
   assert.equal(probe.caught, undefined, "a tool that never ran was reported as having caught something");
   assert.match(probe.why, /could not run/);
   assert.equal(fs.existsSync(path.join(root, ".jig", "selftest")), false);
+});
+
+// The worst defect of the 2.14.0 audit: `selftest --live --toolchain <tool>`
+// DELETED a project file. `execVerify` refuses to plant over a path the project
+// already owns, and the probe's `finally` removed the path anyway — so the
+// refusal destroyed the file it had just refused to touch, with no pre-image
+// for `revert` to restore. Five shipped seeds are named after a manifest
+// (`Cargo.toml` for rust's cargo-deny and cargo, `package-lock.json` for the
+// npm audit, `requirements.txt` for pip-audit, `pyproject.toml` for build), so
+// on a real install the collision is the ordinary case, not the exotic one.
+test("a seed path the project already owns is disclosed, and the owner's file is not removed", () => {
+  const owned = "[package]\nname = \"written-by-the-owner\"\n";
+  const root = tmpProject({ "verify.js": PROBE_SCRIPT, "pkg/seed.txt": owned });
+  const probe = engine.execToolchainProbe(root, seededTool(),
+    { probe: "toolchain-seeded", kind: "toolchain", command: "node verify.js" });
+
+  assert.equal(fs.existsSync(path.join(root, "pkg", "seed.txt")), true,
+    "jig deleted a file it did not write and left no pre-image to revert it with");
+  assert.equal(fs.readFileSync(path.join(root, "pkg", "seed.txt"), "utf8"), owned);
+
+  assert.equal(probe.ran, false);
+  assert.equal(probe.cannotRun, true);
+  assert.equal(probe.caught, undefined, "a tool that never ran was reported as having caught something");
+  assert.match(probe.why, /pkg\/seed\.txt is a file this project already owns/);
+  assert.match(probe.why, /node verify\.js/, "the owner was not told what to run by hand instead");
+
+  // Nothing was planted, so the journal carries neither half of a seed's life.
+  // The shipped defect journaled `seed` and `seed-removed` over a file jig had
+  // never written, which reads as a completed proof of a destroyed manifest.
+  const journal = path.join(root, ".jig", "journal.jsonl");
+  const rows = fs.existsSync(journal)
+    ? fs.readFileSync(journal, "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l))
+    : [];
+  assert.deepEqual(rows.filter((r) => r.event === "seed" || r.event === "seed-removed"), []);
+});
+
+// The same rule one level up. `rmdirSync` refuses a directory with anything
+// left in it, which is not the same question as who made it: an EMPTY `tests/`
+// the project owns passes that test and was walked off with the seed.
+test("a directory the project already had survives its seed, even when it is empty", () => {
+  const root = tmpProject({ "verify.js": PROBE_SCRIPT });
+  fs.mkdirSync(path.join(root, "pkg"));
+  const probe = engine.execToolchainProbe(root, seededTool(), { probe: "toolchain-seeded", kind: "toolchain" });
+  assert.equal(probe.verdict, "verified");
+  assert.equal(fs.existsSync(path.join(root, "pkg", "seed.txt")), false, "the seed jig planted was left behind");
+  assert.equal(fs.existsSync(path.join(root, "pkg")), true, "jig removed a directory it did not create");
 });
 
 // `execVerify` decides a catch on the exit code alone: `caught` is true when the
