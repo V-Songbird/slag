@@ -2979,6 +2979,29 @@ function planLanes(root, changes) {
 
 const NO_LANES = { commit: false, ci: false };
 
+function isCheckModule(rel) {
+  const p = toPosix(rel || "");
+  return p.startsWith(STATE_DIR + "/checks/") && p.endsWith(".check.mjs");
+}
+
+// Whether the workflow this plan writes could ever exit non-zero. Its steps are
+// the check driver plus one per CI-lane verify entry, and since an empty checks
+// directory stopped being a failure a run with no check module and no entry
+// reports over nothing and exits 0 at every step. So the consent line calling
+// it "the build" asks this rather than assuming it.
+function ciCanFail(root, changes) {
+  if ((changes || []).some((c) => isCheckModule(c.path))) return true;
+  const planned = (changes || []).find((c) => toPosix(c.path) === STATE_DIR + "/" + VERIFY_FILE);
+  const raw = planned ? planned.content : readIfExists(path.join(root, STATE_DIR, VERIFY_FILE));
+  const entries = raw === null || raw === undefined ? null : proposedVerifyEntries(raw.toString("utf8"));
+  if ((entries || []).some((e) => Array.isArray(e.lanes) && e.lanes.includes("ci"))) return true;
+  let installed = [];
+  try {
+    installed = fs.readdirSync(path.join(root, STATE_DIR, "checks"));
+  } catch { return false; }
+  return installed.some((name) => name.endsWith(".check.mjs"));
+}
+
 // What this cell can refuse, and where. Only the hook runners raise the arming
 // question; every other lever's answer is a LANE, and a lane nothing here runs
 // refuses nothing whatever module the plan writes. Answered per cell because the
@@ -3137,7 +3160,26 @@ function guardsWeakened(installed, content) {
 // item-approve anything that can refuse a tool call or fail somebody's build.
 // Both tests are mechanical — the change's kind and its target — so no artifact
 // lands in the cheap tier because somebody classified it there by hand.
-function consentFor(change, guards, installed) {
+// What this repository actually runs, so every line in the consent block is a
+// claim about THIS repository rather than about jig in general. The matrix one
+// section down was taught to read these in 2.14.0 and gate G14 holds it to
+// them; the consent block sat on the same page reading neither, and five of its
+// lines were verified wrong on generated plans. The default is the honest
+// floor — no lane live, and a CI workflow that cannot fail — so a caller that
+// checked nothing claims nothing.
+const NO_CONSENT_CONTEXT = Object.freeze({ lanes: NO_LANES, ciCanFail: false });
+
+// Where a lever's answer is a lane, the line names the lanes this plan leaves
+// live. "no lane here runs it yet" is the honest reading of none, and it is not
+// the same sentence as "the commit hook and CI both run it".
+function laneWords(lanes) {
+  const live = [(lanes || NO_LANES).commit ? "at commit time" : null, (lanes || NO_LANES).ci ? "in CI" : null].filter(Boolean);
+  return live.length ? live.join(" and ") : null;
+}
+
+function consentFor(change, guards, installed, context) {
+  const ctx = isObject(context) ? { ...NO_CONSENT_CONTEXT, ...context } : NO_CONSENT_CONTEXT;
+  const lanes = laneWords(ctx.lanes);
   if (change.kind === "write-config") {
     // Taking enforcement AWAY is the approval nobody should be able to give in
     // a batch. Named one by one, because "3 guards change mode" is not a thing
@@ -3155,10 +3197,20 @@ function consentFor(change, guards, installed) {
     // re-run adding nothing still hands over every guard already refusing here.
     const wiring = proposedGuards(change.content) || guards;
     if (wiring.length) {
+      // The mode is read off the rows about to land, the way the runner reads
+      // them — `mode` absent IS observe. An `--observe` plan said this config
+      // "wires 1 guard into a hook that can refuse a tool call" four lines under
+      // its own mode line saying it refuses nothing, and beside a cell saying
+      // the same: the owner approved believing they had a blocking guard.
+      const refusing = wiring.filter((g) => g.mode === "armed").length;
       return {
         tier: "item",
-        why: "wires " + wiring.length + " guard" + (wiring.length === 1 ? "" : "s") +
-          " into a hook that can refuse a tool call",
+        why: "wires " + wiring.length + " guard" + (wiring.length === 1 ? "" : "s") + " into a hook — " +
+          (refusing === 0
+            ? "every one of them observing, so it records the call and refuses nothing"
+            : refusing === wiring.length
+              ? "armed, so it can refuse a tool call"
+              : refusing + " of them armed, so it can refuse a tool call"),
       };
     }
   }
@@ -3184,7 +3236,16 @@ function consentFor(change, guards, installed) {
     };
   }
   if (toPosix(change.path).startsWith(".github/workflows/")) {
-    return { tier: "item", why: "fails the build for everyone who pushes" };
+    // A workflow with no check module and no lane entry behind it runs the
+    // driver over nothing and exits 0 — every step of it, by construction since
+    // an empty checks directory stopped being a failure. Saying it "fails the
+    // build for everyone who pushes" is a claim about a job that cannot.
+    return {
+      tier: "item",
+      why: ctx.ciCanFail
+        ? "fails the build for everyone who pushes"
+        : "runs on every push — and this plan gives it no check module and no lane entry, so every step of it exits 0",
+    };
   }
   // The build verdict itself, and the thing that asks for it. `run.mjs`'s exit
   // code is what the commit hook and the CI job report, and the shim is what
@@ -3192,18 +3253,26 @@ function consentFor(change, guards, installed) {
   // otherwise fall through to "reports only", which is the one thing they are
   // not.
   if (toPosix(change.path) === STATE_DIR + "/checks/run.mjs") {
-    return { tier: "item", why: "is the check driver every lane runs — its exit code is the commit and CI verdict" };
+    return {
+      tier: "item",
+      why: lanes
+        ? "is the check driver every lane runs — its exit code is the verdict " + lanes
+        : "is the check driver every lane runs — and no lane here runs it yet, so nothing reads its exit code",
+    };
   }
   if (toPosix(change.path) === STATE_DIR + "/hooks/pre-commit") {
     // "is the hook git runs" was a claim about this repository's git config, made
-    // by a function that never reads it — on a repository whose `core.hooksPath`
+    // by a function that never read it — on a repository whose `core.hooksPath`
     // is unset, and which scan had already reported as `no-hook`, the file jig
-    // writes here is run by nothing. What is true either way is what it becomes,
-    // and gate G14 is why it is worded without naming a lane: a consent line
-    // reads as a claim about this repository, so it says what the file IS and
-    // leaves what runs where to the cells, which know the lanes.
-    return { tier: "item", why: "is the hook git reaches for once `" + GIT_SETTING + "` points at " +
-      STATE_DIR + "/hooks — until it does, jig has written it and nothing runs it" };
+    // writes here is run by nothing. The correction that named no lane at all
+    // satisfied G14 and overshot the other way: where `core.hooksPath` already
+    // IS `.jig/hooks`, "until it does, nothing runs it" claims LESS than the
+    // repository is, beside a matrix saying the row fails the commit. So the
+    // line reads the lanes, as every other claim on this page does.
+    return { tier: "item", why: (ctx.lanes || NO_LANES).commit
+      ? "is the hook git runs here — `" + GIT_SETTING + "` already points at " + STATE_DIR + "/hooks"
+      : "is the hook git reaches for once `" + GIT_SETTING + "` points at " +
+        STATE_DIR + "/hooks — until it does, jig has written it and nothing runs it" };
   }
   // The lane list. Every command in it runs on somebody's machine or in
   // somebody's CI job, and a non-zero exit from any of them fails their build —
@@ -3220,7 +3289,12 @@ function consentFor(change, guards, installed) {
   // and CI both run it, so it can fail somebody's build — and it is the thing
   // the owner is really approving when they approve coverage.
   if (toPosix(change.path).startsWith(STATE_DIR + "/checks/") && toPosix(change.path).endsWith(".check.mjs")) {
-    return { tier: "item", why: "installs a check the driver and CI both run, so it can fail a build" };
+    return {
+      tier: "item",
+      why: lanes
+        ? "installs a check the driver runs " + lanes + ", so it can fail a build"
+        : "installs a check the driver runs — and no lane here runs the driver yet, so nothing evaluates it",
+    };
   }
   // The widened boundary's own tier (SCOPE: jig writes anywhere the owner
   // approves BY NAME). Inside `.jig/` a side-file is jig's own reporting;
@@ -3309,17 +3383,20 @@ function buildReview(payload, generated, root) {
   const mode = generated.mode || DEFAULT_INSTALL_MODE;
 
   const guards = configFromSelection(classes, provenance, mode).guards;
+  // Read BEFORE the consent block rather than after it: the two are one page and
+  // one repository, and the block used to describe a different one.
+  const lanes = planLanes(root, payload.changes);
+  const consentContext = { lanes, ciCanFail: ciCanFail(root, payload.changes) };
   const artifacts = payload.changes.map((c) => ({
     id: c.id,
     path: c.path,
     kind: c.kind,
     classIds: c.classIds,
     enforcementGap: c.enforcementGap,
-    ...consentFor(c, guards, generated.installedGuards || []),
+    ...consentFor(c, guards, generated.installedGuards || [], consentContext),
   }));
   const installedTools = installedToolFace(root);
   const backlog = backlogFor(generated.loaded || [], selection, installedTools.commitLane);
-  const lanes = planLanes(root, payload.changes);
   const rows = classes.map((cls) => matrixRow(cls, provenance, payload.changes, guards, installedTools, lanes));
   // The exact sentence each armable guard hands back, composed by the hook
   // library itself so the plan cannot describe words other than the ones that

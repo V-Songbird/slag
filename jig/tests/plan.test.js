@@ -1091,7 +1091,11 @@ test("everything that can refuse something is approved one at a time", () => {
   assert.match(item.find((a) => a.path === ".jig/config.json").why, /refuse a tool call/);
   assert.match(item.find((a) => a.path.startsWith(".github/")).why, /fails the build/);
   assert.match(item.find((a) => a.path.endsWith(".check.mjs")).why, /can fail a build/);
-  assert.match(item.find((a) => a.path === ".jig/checks/run.mjs").why, /commit and CI verdict/);
+  // Which lanes, not "the commit and CI verdict": `core.hooksPath` is unset in
+  // this project, so the commit lane is not live and only CI reads this exit
+  // code. The consent block reads `review.lanes` now, exactly as the matrix does.
+  assert.match(item.find((a) => a.path === ".jig/checks/run.mjs").why, /its exit code is the verdict in CI$/);
+  assert.match(item.find((a) => a.path.endsWith(".check.mjs")).why, /the driver runs in CI, so it can fail a build/);
   // And the shim's line does not say git runs it HERE. `core.hooksPath` is unset
   // in this project — scan reports the lane `no-hook` — so "is the hook git runs
   // at commit time" described a repository other than the one being planned.

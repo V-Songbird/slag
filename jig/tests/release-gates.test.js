@@ -1799,6 +1799,37 @@ test("release gate G14: no armed plan page claims a lane this repository does no
         }
       }
     }
+    // The consent block, held to the same two facts the matrix is. It sits on
+    // this page, it is the thing the owner actually approves, and until 2.14.0
+    // it read neither `review.lanes` nor the mode: an `--observe` plan called
+    // its own config "a hook that can refuse a tool call" four lines under a
+    // mode line saying it refuses nothing. The prose loop above catches a
+    // consent line that NAMES a dead lane — these are the claims that name none.
+    const armedRows = installed.guards.filter((g) => g.mode === "armed").length;
+    const someLane = review.lanes.commit || review.lanes.ci;
+    const modules = review.artifacts.filter((a) => /^\.jig\/checks\/.+\.check\.mjs$/.test(a.path));
+    for (const a of review.artifacts) {
+      const where = shape + " — " + a.path;
+      if (/refuse a tool call/.test(a.why)) {
+        assert.ok(armedRows > 0, where + ": `" + a.why + "` — every guard this plan writes is observing");
+      }
+      if (/no lane here runs/.test(a.why)) {
+        assert.equal(someLane, false, where + ": `" + a.why + "` — a lane IS live here");
+      }
+      if (a.path === ".jig/hooks/pre-commit") {
+        assert.equal(/nothing runs it/.test(a.why), !review.lanes.commit,
+          where + ": `" + a.why + "` — the commit lane here is " +
+          (review.lanes.commit ? "live" : "not live"));
+      }
+      // "fails the build" is a claim about a job that can exit non-zero, and a
+      // workflow with no check module and no CI-lane verify entry behind it
+      // runs the driver over nothing and exits 0 at every step.
+      if (/fails the build for everyone who pushes/.test(a.why)) {
+        assert.equal(review.lanes.ci, true, where + ": `" + a.why + "` — this plan wires no CI lane");
+        assert.ok(modules.length > 0,
+          where + ": `" + a.why + "` — the workflow this plan writes has no check module to fail on");
+      }
+    }
   }
 });
 
