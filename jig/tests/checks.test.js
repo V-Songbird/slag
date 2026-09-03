@@ -361,6 +361,34 @@ test("only a skipped directory blinds a driver detector, never a file that share
   assert.equal(engine.driverBlindDir({ lever: "bash-guard", params: { patterns: ["x"] } }), null);
 });
 
+// The union side blinds an extract detector on its own. A doc the walk never
+// reaches is simply never read; a union the walk never reaches holds none of the
+// names, so the class reports skipped on every run — coverage the plan claimed
+// and the lane never delivers.
+test("an extract detector whose union the walk never reaches is a gap, not a DET cell", () => {
+  const extract = (paths, pairedWith) =>
+    ({ lever: "check-driver", params: { paths, extract: ["`(--[a-z-]+)`"], pairedWith } });
+  assert.equal(engine.driverBlindDir(extract(["docs/**/*.md"], ["vendor/**/*.js"])), "vendor");
+  // The doc side still blinds it by itself, and a reachable pair is reachable.
+  assert.equal(engine.driverBlindDir(extract([".jig/**/*.md"], ["src/**/*.js"])), ".jig");
+  assert.equal(engine.driverBlindDir(extract(["docs/**/*.md"], ["src/**/*.js"])), null);
+  // `pairedWith` on a paired-change detector is a different relation and is not
+  // read here: it names what had to change alongside, not where names live.
+  assert.equal(engine.driverBlindDir(
+    { lever: "check-driver", params: { paths: ["src/**/*.js"], pairedWith: ["vendor/**/*.js"] } }), null);
+
+  const root = nodeProject({ "docs/cli.md": "The builder.\n" });
+  const { plan } = install(root, { "no-ci": true }, [A.DOC_NAME_DRIFT_BLIND_UNION]);
+  const row = JSON.parse(fs.readFileSync(path.join(root, ".jig", "plan.json"), "utf-8"))
+    .rows.find((r) => r.classId === "doc-names-what-vendor-has");
+  assert.equal(row.cells["human-editor"].grade, "GAP");
+  assert.equal(row.cells["human-editor"].artifact, null);
+  assert.match(row.cells["human-editor"].why, /never walks vendor\//);
+  // Installed all the same: a blind detector is a disclosed gap, never a hidden
+  // discard.
+  assert.ok(plan.changes.some((c) => c.path === ".jig/checks/doc-names-what-vendor-has.check.mjs"));
+});
+
 test("a removal on the check driver names the module only where the commit lane runs it", () => {
   // Until the count floor shipped, a removal detector was reported skipped on
   // every run and the cell was graded GAP because nothing anywhere counted it.
@@ -458,6 +486,40 @@ test("a detector authored to teach installs a guard that does, and one that was 
   assert.equal("teach" in row("empty-catch"), false,
     "a guard nobody asked to teach was given the key anyway");
   assert.deepEqual(lib.validateConfig({ schemaVersion: 1, guards }).problems, []);
+});
+
+// The path the widening was FOR, driven end to end rather than from a
+// hand-written config row: `edit-guard` is the only edit lever a fresh install
+// gets, so until 2.13.0 a detector authored to teach installed a guard whose
+// `teach` was stripped and the feature was unreachable on a new repository.
+test("an edit-guard authored to teach says its piece on a real Edit, and refuses nothing", () => {
+  const teaching = A.authored({
+    id: "teaching-edit-guard",
+    title: "A swallowed error, said out loud one event earlier",
+    detectors: [
+      { lever: "edit-guard", actor: "claude-session", confidence: "deterministic",
+        teach: true, params: { patterns: [A.CATCH_PATTERN] } },
+    ],
+    fixtures: A.EMPTY_CATCH.fixtures,
+    deny: A.DENY_CATCH,
+  });
+  const root = nodeProject();
+  install(root, { "no-ci": true, observe: true }, [teaching]);
+  const guard = JSON.parse(fs.readFileSync(path.join(root, ".jig", "config.json"), "utf-8"))
+    .guards.find((g) => g.id.startsWith("teaching-edit-guard"));
+  assert.equal(guard.runner, "PreToolUse");
+  assert.equal(guard.mode, "observe");
+  assert.equal(guard.teach, true);
+
+  const out = lib.runEvent(root, "PreToolUse", {
+    session_id: "s", tool_name: "Write",
+    tool_input: { file_path: path.join(root, "src", "bad.js"), content: A.EMPTY_CATCH.fixtures.violation },
+  }, () => {});
+  assert.equal(out.jig.decision, "would-deny", "an observing guard reported something other than a watch");
+  assert.equal(out.decision, undefined, "an observing guard refused the edit it only watches");
+  assert.equal(out.hookSpecificOutput.hookEventName, "PreToolUse");
+  assert.equal(out.hookSpecificOutput.permissionDecision, undefined);
+  assert.match(out.hookSpecificOutput.additionalContext, /swallows the error/);
 });
 
 test("the generated config carries no key that could become a matcher", () => {
@@ -1111,6 +1173,154 @@ test("a run with no index still reports the removal class skipped, and names the
 });
 
 // ---------------------------------------------------------------------------
+// The content relation: a doc that names what the code no longer has
+// ---------------------------------------------------------------------------
+//
+// The mistake co-change cannot reach, reproduced against the shipped driver
+// before this was written: a commit renamed a flag in the source AND edited the
+// README, so the paired-change rule was satisfied — and the README named the old
+// flag. `--staged`, exit 0, "No findings."
+
+const DOC_WITH_OLD_FLAG = "Pass `--outdir` to choose where the build lands.\n";
+const DOC_WITH_THE_FLAG = "Pass `--out-dir` to choose where the build lands.\n";
+const CLI_WITH_THE_FLAG = "const flags = ['--out-dir'];\nmodule.exports = { flags };\n";
+
+function drift(root) {
+  install(root, { "no-ci": true }, [A.DOC_NAME_DRIFT]);
+}
+
+test("a doc that names a flag no source file has is a finding at the name's own line", () => {
+  const root = nodeProject({
+    "docs/cli.md": "The builder.\n\n" + DOC_WITH_OLD_FLAG,
+    "src/cli.js": CLI_WITH_THE_FLAG,
+  });
+  drift(root);
+  const { status, out } = driverJson(root);
+  assert.equal(status, 1, "the doc named a flag the code renamed away and the run came back clean");
+  assert.deepEqual(out.findings.map((f) => [f.classId, f.path, f.line]),
+    [["doc-names-what-the-code-lost", "docs/cli.md", 3]]);
+  assert.equal(out.findings[0].note, "names something no file matching src/**/*.js has");
+  // The name itself is never carried out of the driver, for the reason every
+  // other finding's matched text is not: a report says which check spoke and
+  // where, not what somebody's text said.
+  assert.equal(JSON.stringify(out.findings[0]).includes("--outdir"), false);
+});
+
+test("a doc whose names the code still carries is silent", () => {
+  const root = nodeProject({ "docs/cli.md": DOC_WITH_THE_FLAG, "src/cli.js": CLI_WITH_THE_FLAG });
+  drift(root);
+  const { status, out } = driverJson(root);
+  assert.deepEqual(out.findings, []);
+  assert.equal(status, 0);
+});
+
+// A name the code carries only in a comment is still a name the code carries.
+// Nothing is blanked on either side of this rule, which is the direction that
+// adds no finding.
+test("a name the union carries in a comment counts as carried", () => {
+  const root = nodeProject({
+    "docs/cli.md": DOC_WITH_OLD_FLAG,
+    "src/cli.js": "// `--outdir` is the old spelling, still accepted\nconst flags = ['--out-dir'];\n",
+  });
+  drift(root);
+  assert.deepEqual(driverJson(root).out.findings, []);
+});
+
+// The mistake as it actually arrives: both files in one commit, the doc naming
+// the flag the rename took away.
+//
+// One side at a time, each edited back out of the working tree so a driver
+// reading disk finds a project with nothing wrong with it: the mistake exists
+// only in the index. Staging the same bytes to both places would pass whichever
+// side the driver read.
+test("the commit lane reads the doc and the union out of the staged bytes", () => {
+  for (const [side, rel, onDisk] of [
+    ["doc", "docs/cli.md", DOC_WITH_THE_FLAG],
+    ["union", "src/cli.js", "const flags = ['--outdir'];\n"],
+  ]) {
+    const root = nodeProject();
+    drift(root);
+    stage(root, { "docs/cli.md": DOC_WITH_OLD_FLAG, "src/cli.js": CLI_WITH_THE_FLAG });
+    fs.writeFileSync(path.join(root, rel), onDisk);
+    // The control: on disk the doc names exactly what the code beside it has.
+    assert.deepEqual(driverJson(root).out.findings, [],
+      "the " + side + " arm left the working tree red, so the staged run below proves nothing");
+    const { status, out } = driverJson(root, ["--staged"]);
+    assert.equal(status, 1, "the commit lane read the working tree's " + side + ", not the bytes the commit carries");
+    assert.deepEqual(out.findings.map((f) => [f.classId, f.path]),
+      [["doc-names-what-the-code-lost", "docs/cli.md"]]);
+  }
+});
+
+// The union nothing matches. Admission cannot see this — the fixture's union
+// half is inline text, so a `pairedWith` glob is never compiled against a tree —
+// so a check that passed its pair on a doc whose names ARE in its union arrives
+// here reporting every name in every doc as drift.
+test("a union no file matches reports the class skipped rather than every name missing", () => {
+  const root = nodeProject({
+    "docs/cli.md": DOC_WITH_OLD_FLAG,
+    "src/cli.js": CLI_WITH_THE_FLAG,
+  });
+  install(root, { "no-ci": true }, [A.DOC_NAME_DRIFT_NO_UNION]);
+  const { status, out } = driverJson(root);
+  assert.deepEqual(out.findings, [],
+    "an empty union was read as a union missing every name, and the check became a firehose");
+  assert.equal(status, 0);
+  assert.equal(out.skipped[0].id, "doc-names-nothing-reachable");
+  assert.match(out.skipped[0].why, /nothing to look this doc's names up in/);
+});
+
+// The union is not the run's scope. `files()` at commit time is the staged set,
+// and a union narrowed to it reports every name missing the moment the doc moved
+// without the code beside it — which is the ordinary case, since the code was
+// committed weeks ago.
+test("the union is every file the index holds, not the files this commit touches", () => {
+  const root = nodeProject();
+  drift(root);
+  committed(root, { "src/cli.js": CLI_WITH_THE_FLAG });
+  stage(root, { "docs/cli.md": DOC_WITH_THE_FLAG });
+  const { status, out } = driverJson(root, ["--staged"]);
+  assert.deepEqual(out.findings, [],
+    "the union was narrowed to the staged set, so a doc naming a flag the code has read as drift");
+  assert.equal(status, 0);
+});
+
+// And the same on a path-scoped run: `run.mjs docs/cli.md` reads that one doc,
+// and still looks its names up in the whole tree.
+test("a path-scoped run still looks the names up in the whole tree", () => {
+  const root = nodeProject({ "docs/cli.md": DOC_WITH_THE_FLAG, "src/cli.js": CLI_WITH_THE_FLAG });
+  drift(root);
+  const { status, out } = driverJson(root, ["docs/cli.md"]);
+  assert.deepEqual(out.findings, [], "the union was narrowed to the one path the run named");
+  assert.equal(status, 0);
+});
+
+// `pairedWith` on this kind says where the names have to appear, not what had to
+// change alongside. Read as a paired-change rule the same detector would report
+// the doc for moving without the source as well.
+test("an extract detector is not also reported as a doc that moved alone", () => {
+  const root = nodeProject();
+  drift(root);
+  committed(root, { "src/cli.js": CLI_WITH_THE_FLAG });
+  stage(root, { "docs/cli.md": DOC_WITH_THE_FLAG });
+  const { out } = driverJson(root, ["--staged"]);
+  assert.deepEqual(out.findings, []);
+  assert.deepEqual(out.skipped, []);
+});
+
+test("the selftest proves an extract check from the two halves of its own fixture", () => {
+  const root = nodeProject();
+  drift(root);
+  const run = driver(root, ["--selftest", "--json"]);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  const result = JSON.parse(run.stdout).selftest.find((r) => r.id === "doc-names-what-the-code-lost");
+  assert.equal(result.caught, true, result && result.why);
+  assert.equal(result.hits, 1);
+  assert.equal(result.nearMissHits, 0);
+  assert.equal(result.seeded, "docs/fixture.md");
+});
+
+// ---------------------------------------------------------------------------
 // `--staged`: the lane that gates the repository reads what enters it
 // ---------------------------------------------------------------------------
 //
@@ -1416,6 +1626,36 @@ test("a lane command that exits on anything else fails the lane and shows its ou
   assert.match(run.stdout, /3 problems/);
 });
 
+// Roadmap 232. The ledger claimed to cover all three lanes and covered one:
+// only the session hook's witness left a verification row, so a repository
+// whose CI ran the suite green on every push still reported `lastGreen: null`.
+test("a verification run in a non-session lane leaves the witness row lastGreen reads", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  writeVerify(root, [
+    { id: "clean", argv: [process.execPath, "--version"], expectedExit: 0, paths: [], lanes: ["ci"] },
+  ]);
+  assert.equal(engine.cmdInventory(root).verify.find((e) => e.id === "clean").lastGreen, null);
+  assert.equal(driver(root, ["--verify", "--lane", "ci"]).status, 0);
+  const row = lib.verifyRows(root).at(-1);
+  assert.equal(row.verify, "clean");
+  assert.equal(row.decision, "verified");
+  assert.equal(row.lane, "ci");
+  assert.equal(row.guardId, null);
+  assert.match(engine.cmdInventory(root).verify.find((e) => e.id === "clean").lastGreen, /^\d{4}-/);
+});
+
+test("a red lane run is recorded as verify-failed, so it never becomes a green baseline", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  writeVerify(root, [
+    { id: "linter", argv: [process.execPath, "-e", "process.exit(3)"], expectedExit: 0, paths: [], lanes: ["ci"] },
+  ]);
+  assert.equal(driver(root, ["--verify", "--lane", "ci"]).status, 1);
+  assert.equal(lib.verifyRows(root).at(-1).decision, "verify-failed");
+  assert.equal(engine.cmdInventory(root).verify.find((e) => e.id === "linter").lastGreen, null);
+});
+
 test("a tool the lane cannot start is a gap, never a pass", () => {
   const root = nodeProject();
   install(root, { "no-ci": true });
@@ -1481,6 +1721,28 @@ test("only the entries naming this lane run in it", () => {
   assert.equal(commit.status, 0);
   const ci = driverJson(root, ["--verify", "--lane", "ci"]);
   assert.deepEqual(ci.out.verify.results.map((r) => r.id), ["ci-only", "both"]);
+});
+
+// The same promise `--ledger` keeps for findings, kept for the verification
+// row: a hand run "writes no files and changes nothing". Before the gate,
+// `--verify` with no `--lane` wrote a row reading `lane: "ci"` — off the default
+// the REPORT uses — and `lastGreen` read it back as a CI run that never
+// happened.
+test("a verification run that names no lane writes nothing", () => {
+  const root = nodeProject();
+  install(root, { "no-ci": true });
+  writeVerify(root, [
+    { id: "clean", argv: [process.execPath, "--version"], expectedExit: 0, paths: [], lanes: ["ci", "commit"] },
+  ]);
+  // The positive control first: a ledger nothing can write to would pass the
+  // silence below for the wrong reason.
+  assert.equal(driver(root, ["--verify", "--lane", "commit"]).status, 0);
+  const rows = ledgerRows(root);
+  assert.deepEqual(rows.map((r) => [r.lane, r.decision, r.verify]), [["commit", "verified", "clean"]]);
+
+  assert.equal(driver(root, ["--verify"]).status, 0);
+  assert.equal(ledgerRows(root).length, 1,
+    "a hand-typed --verify minted a row for a lane nobody ran");
 });
 
 test("a lane nobody put an entry in runs nothing and fails nothing", () => {

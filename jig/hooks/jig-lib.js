@@ -258,13 +258,13 @@ function validateConfig(raw) {
       problems.push(label + ": `teach` must be true or false, and got " + JSON.stringify(g.teach));
       return;
     }
-    // The channel is PostToolUse `additionalContext` and nothing else — a
-    // non-blocking PreToolUse channel is unverified against a live host and is
-    // not assumed. A guard asking to teach from the wrong event is told so, out
-    // loud, rather than left believing the transcript will carry its line.
-    if (g.teach === true && g.runner !== "PostToolUse") {
-      warnings.push(label + ": `teach` speaks on PostToolUse only, and " + id + " runs on " + g.runner);
-    }
+    // The channel is `additionalContext`, and 2.13.0 measured it on both
+    // runners rather than assuming either: roadmap 233 drove a live host where a
+    // PreToolUse reply carrying `additionalContext` and no `permissionDecision`
+    // reached the model and refused nothing. So teaching is a property of the
+    // guard the owner opted in, not of the event it happens to run on — which is
+    // what makes it reachable on `edit-guard`, the edit lever a fresh install
+    // actually gets.
     // An unrecognized provenance degrades to `assumed`: the weakest claim, and
     // the one the coverage matrix discloses.
     const provenance = PROVENANCES.includes(g.provenance) ? g.provenance : "assumed";
@@ -272,7 +272,7 @@ function validateConfig(raw) {
       id, check, classId: typeof g.classId === "string" && g.classId ? g.classId : check,
       runner: g.runner, mode: g.mode || DEFAULT_MODE, provenance,
       proof: typeof g.proof === "string" ? g.proof : null,
-      teach: g.teach === true && g.runner === "PostToolUse",
+      teach: g.teach === true,
     });
   });
 
@@ -1025,17 +1025,25 @@ function verifyEntryFor(entries, command) {
     e.argv.every((word, i) => word === argv[i])) || null;
 }
 
-// Recorded only where the payload carries one. The hooks doc documents the
-// pass/fail split as which event fired and states no exit-code field, so an
-// absent code is the normal case — and a code jig guessed at would be a number
-// nobody measured in a file the review surface reads back as fact.
+// Recorded only where the payload carries one, and now from the place a live
+// host was measured putting it. Roadmap 230's probe (Claude Code 2.1.257,
+// `docs/research/jig/HOST-PROBE-2026-09-02.md`) found `PostToolUseFailure`
+// carries no `tool_response` at all — the code arrives as the `error` string
+// "Exit code 3" — so without this read the entry's own `expectedExit` could
+// never be honoured on the one event that carries a failure. The structured
+// fields stay first for a host that reports one. Anything else the host phrases
+// as an error is left null rather than guessed at: a number nobody measured is
+// the last thing a file the review surface reads back as fact should hold.
 function exitCodeOf(payload) {
   const res = payload && payload.tool_response;
-  if (!isObject(res)) return null;
-  for (const key of ["exit_code", "exitCode"]) {
-    if (Number.isInteger(res[key])) return res[key];
+  if (isObject(res)) {
+    for (const key of ["exit_code", "exitCode"]) {
+      if (Number.isInteger(res[key])) return res[key];
+    }
   }
-  return null;
+  const err = payload && payload.error;
+  const said = typeof err === "string" ? /^exit code (\d+)$/i.exec(err.trim()) : null;
+  return said ? Number(said[1]) : null;
 }
 
 // The verification rows, in the order they were written. Its own reader rather
@@ -1137,8 +1145,10 @@ function witness(root, event, base, payload, warn) {
   const entry = verifyEntryFor(verifyEntries(root), (payload.tool_input || {}).command);
   if (!entry) return { jig: { event, decision: "pass", verify: null } };
   const exitCode = exitCodeOf(payload);
-  // Which event fired is the documented signal and stays the answer wherever
-  // the payload carries no code. A code it DID carry outranks it: a row reading
+  // Which event fired is the documented signal — and the measured one: roadmap
+  // 230 watched a failing command fire `PostToolUseFailure` and no `PostToolUse`
+  // at all. It stays the answer wherever the payload carries no code. A code it
+  // DID carry outranks it: a row reading
   // `verified` beside `exitCode: 1` is a coverage claim contradicted by its own
   // evidence, and a host that routes a failing command to PostToolUse would
   // otherwise make every red run green on jig's headline surface. The entry's
@@ -1352,9 +1362,12 @@ function runEvent(root, event, payload, warn) {
     }
   }
   // The observe-mode channel, and the only one jig has to the model that does
-  // not refuse anything. `teach` is only ever set on PostToolUse, so it cannot
-  // collide with the PreToolUse deny reply above.
-  if (teach) out.hookSpecificOutput = { hookEventName: event, additionalContext: teach };
+  // not refuse anything. Both runners carry it since 2.13.0, so on PreToolUse a
+  // teaching guard can share this reply with an armed one's deny — one guard
+  // refusing while another only watches. It merges into that reply and never
+  // replaces it: dropping the `permissionDecision` would turn a refusal the
+  // owner armed into a pass.
+  if (teach) out.hookSpecificOutput = { ...out.hookSpecificOutput, hookEventName: event, additionalContext: teach };
   return out;
 }
 

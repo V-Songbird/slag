@@ -549,12 +549,12 @@ test("two moving guards share one config change, and the note says so instead of
     "the module still declares PostToolUse, so the moved row names an event it cannot run");
 });
 
-// Teaching speaks on PostToolUse and nowhere else, so a guard that moves cannot
-// keep it. Carrying it across would leave a row `validateConfig` warns about on
-// every call and then ignores — the owner's answer silently discarded, with
-// noise where the answer used to be.
-test("a guard opted into teaching loses it when it moves, and the plan says so", () => {
-  const { root, check } = currentInstall();
+// Teaching used to be the one answer this migration could not carry, because
+// the channel was verified on PostToolUse alone. 2.13.0 measured it on
+// PreToolUse (roadmap 233), so the move preserves the owner's answer — and an
+// answer silently discarded on an upgrade is what SCOPE forbids.
+test("a guard opted into teaching keeps it when it moves", () => {
+  const { root } = currentInstall();
   const before = readJson(root, ".jig/config.json");
   before.guards[0].teach = true;
   fs.writeFileSync(path.join(root, ".jig/config.json"), JSON.stringify(before, null, 2) + "\n");
@@ -563,13 +563,14 @@ test("a guard opted into teaching loses it when it moves, and the plan says so",
   const config = plan.changes.find((c) => c.path === ".jig/config.json");
   jig.cmdApply(root, { _: [], change: [config.id], path: [config.path] });
 
-  const guard = readJson(root, ".jig/config.json").guards[0];
-  assert.equal(guard.runner, "PreToolUse");
-  assert.equal(guard.teach, undefined, "the key is dropped, not carried onto an event that ignores it");
-  assert.deepEqual(lib.validateConfig(readJson(root, ".jig/config.json")).warnings, [],
-    "and the moved row warns about nothing");
-  assert.ok(plan.notes.some((n) => n.includes("g-" + check.id) && /teaching/.test(n)),
-    "the note names the guard whose teaching the move costs");
+  const after = readJson(root, ".jig/config.json");
+  assert.equal(after.guards[0].runner, "PreToolUse");
+  assert.equal(after.guards[0].teach, true, "the owner's answer was dropped on the way to the new lever");
+  const read = lib.validateConfig(after);
+  assert.deepEqual(read.warnings, [], "and the moved row warns about nothing");
+  assert.equal(read.guards[0].teach, true, "the runner reads it back on the lever it moved to");
+  assert.equal(plan.notes.some((n) => /teaching/.test(n)), false,
+    "nothing is lost, so nothing is announced as lost");
 });
 
 test("a guard whose check the install no longer carries is named, and the rest still move", () => {

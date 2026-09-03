@@ -108,12 +108,15 @@ Wiring the commit lane is an approved, reversible change like any other — send
 the user to `/jig:jig` to apply it rather than applying it here.
 
 `verify` is one row per lane entry, and `lastGreen` is the last time jig
-WITNESSED that command run green inside a Claude session — a timestamp, or
-`null` for one no session here has ever been seen to pass. Report it beside the
-lanes. It is the one fact in this report that contradicts a claim rather than
-recording a catch, and `null` does not mean the tests fail: it means no session
-here has been seen to run them. A repository whose CI runs the suite on every
-push reads `null` too, so say which claim it answers.
+WITNESSED that command run green — in a Claude session, or in this machine's own
+commit lane — a timestamp, or `null` for one nothing here has ever been seen to
+pass. Report it beside the lanes. It is the one fact in this report that
+contradicts a claim rather than recording a catch, and `null` does not mean the
+tests fail: it means nothing here has been seen to run them. Hosted CI is the
+case to say out loud, because it looks like the opposite: the CI lane writes its
+row into the runner's own checkout, the ledger is git-ignored and the checkout is
+thrown away, so a repository whose CI runs the suite green on every push still
+reads `null`. Say which claim the number answers.
 
 `ledger.lines` is how far the ledger has grown. It is never compacted — deleting
 rows deletes the evidence a wave-off is undone from — so this number only goes

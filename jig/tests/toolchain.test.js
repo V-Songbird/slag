@@ -594,7 +594,8 @@ function seededTool(over) {
 test("execVerify plants the seed under the caller's directory and matches on the exit code", () => {
   const root = tmpProject({ "verify.js": VERIFY_SCRIPT });
   const result = toolchain.execVerify(root, seededTool(), "proof");
-  assert.deepEqual(result, { ran: true, code: 1, caught: true, expectedExit: 1 });
+  assert.deepEqual(result, { ran: true, code: 1, caught: true, expectedExit: 1,
+    output: "Found 1 error. caught the seeded violation" });
   assert.equal(fs.readFileSync(path.join(root, "proof", "pkg", "seed.txt"), "utf8"), "boom\n");
 });
 
@@ -609,7 +610,8 @@ test("a matching stdout is not a proof — only the exit code is", () => {
 test("expectedExit may name several codes", () => {
   const root = tmpProject({ "verify.js": VERIFY_SCRIPT });
   const result = toolchain.execVerify(root, seededTool({ verify: { argv: [process.execPath, "verify.js"], expectedExit: [1, 5] } }), "proof");
-  assert.deepEqual(result, { ran: true, code: 1, caught: true, expectedExit: [1, 5] });
+  assert.deepEqual(result, { ran: true, code: 1, caught: true, expectedExit: [1, 5],
+    output: "Found 1 error. caught the seeded violation" });
 });
 
 test("execVerify never writes over a file that is already there", () => {
@@ -742,6 +744,30 @@ test("a tool that misses its own seed comes back unverified, never silently pass
   assert.equal(probe.caught, false);
   assert.equal(probe.verdict, "unverified");
   assert.equal(fs.existsSync(path.join(root, ".jig", "selftest")), false);
+});
+
+// Roadmap 228: an `unverified` verdict told the owner their config failed its
+// demonstration and handed them nothing to read. The guard probes print their
+// runner's stdout verbatim; a toolchain probe owes the same transcript.
+test("a probe carries the tool's own output, on both streams", () => {
+  const root = tmpProject({
+    "verify.js": "process.stderr.write('seed.txt:1 no-boom\\n');\nprocess.stdout.write('1 problem\\n');\nprocess.exit(0);\n",
+  });
+  const probe = engine.execToolchainProbe(root, seededTool(), { probe: "toolchain-seeded", kind: "toolchain" });
+  assert.equal(probe.verdict, "unverified");
+  assert.match(probe.output, /seed\.txt:1 no-boom/, "the owner was told the config failed with nothing to read");
+  assert.match(probe.output, /1 problem/);
+});
+
+// The close report reads this out loud, so a tool that spilled a whole tree's
+// diagnostics into it would bury the rest of the close.
+test("a probe's output is capped, and says that it was", () => {
+  const root = tmpProject({
+    "verify.js": "process.stdout.write('x'.repeat(9000));\nprocess.exit(1);\n",
+  });
+  const probe = engine.execToolchainProbe(root, seededTool(), { probe: "toolchain-seeded", kind: "toolchain" });
+  assert.equal(probe.output.length < 9000, true, "a linter's whole transcript went into the close report uncapped");
+  assert.match(probe.output, /truncated at 4000 characters$/);
 });
 
 // DERAIL-PASS defect 13, the Windows half: `npx` is a batch shim there and jig

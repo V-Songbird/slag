@@ -76,8 +76,8 @@ reason this skill exists:
 - `provable: false` — a fixture is missing, so this check can never be
   re-proven and no row naming it can arm.
 - `teach` — whether an observing match also says so in the transcript: one line
-  of PostToolUse context carrying this guard's id and its deny triple, and no
-  source. Off unless the guard's own row set it, on PostToolUse guards only.
+  of context carrying this guard's id and its deny triple, and no source. Off
+  unless the guard's own row set it, and available on either runner.
   Report it where it is on; a guard that teaches is one the owner will hear from
   and should be able to find here.
 - `provenance: "assumed"` — a default the owner never saw. Label it as one every
@@ -92,12 +92,19 @@ hook and CI run. A report built from the guards alone would show a fraction of
 the coverage as the whole of it.
 
 Each row carries `title`, `severity`, `provable`, and its `detectors[]` in the
-same `watches` shape as above. A detector with a non-empty `pairedWith` is the
-second kind: it does not match text at all — it reports a file in `paths` that
-changed with nothing in `pairedWith` changing beside it. A non-zero `removed` is
-the third: it counts what stopped being there rather than what is there, so the
-driver reports that class **skipped** on a normal run — say so, because a class
-this lane cannot evaluate is not a class that came back clean.
+same `watches` shape as above. A detector with a non-empty `pairedWith` and no
+`extract` is the second kind: it does not match text at all — it reports a file
+in `paths` that changed with nothing in `pairedWith` changing beside it. A
+non-zero `removed` is the third: it counts what stopped being there rather than
+what is there, so the driver reports that class **skipped** on a normal run —
+say so, because a class this lane cannot evaluate is not a class that came back
+clean. A non-zero `extract` is the fourth: it takes names out of the files in
+`paths` and reports the ones no file matching `pairedWith` carries, which is the
+doc that names a flag the code renamed away. Every RUN of the driver evaluates
+that one — unlike `removed`, which only the commit lane can count — so it is
+watched wherever the driver runs and nowhere else: there is no session lever for
+it, and a class whose only detector is this kind is watched by two of the three
+lanes.
 
 ## 3. Files — what jig wrote, and why
 
@@ -148,9 +155,11 @@ approved, reversible change like any other, which means `/jig:jig`.
 
 `verify` is one row per lane entry — the commands the lanes run besides the
 check driver — and `lastGreen` is the last time jig WITNESSED that command run
-green inside a Claude session, or `null` for one no session here has been seen
-to pass. A repository whose CI runs it on every push reads `null`. Report it with
-the lanes: a lane that is live and an entry that has never run green are two
+green — in a Claude session, or in this machine's own commit lane — or `null`
+for one nothing here has been seen to pass. A repository whose CI runs the suite
+green on every push reads `null` too: the CI lane's row is written into the
+runner's own checkout, which is thrown away with the job. Report it with the
+lanes: a lane that is live and an entry that has never run green are two
 different facts, and only the second one answers "do the tests pass".
 
 ## Closing

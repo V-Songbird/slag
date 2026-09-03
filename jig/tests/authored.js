@@ -186,6 +186,61 @@ const TESTS_DELETED = authored({
   },
 });
 
+// The extract kind, and the doc-sync mistake co-change cannot reach: the README
+// and the code moved in the SAME commit, and the README names the flag the
+// rename took away. Its patterns live under `extract` and each takes one name
+// out of the doc; `pairedWith` is where that name has to appear. Its fixtures
+// carry two texts — the doc, then the union — fenced by `--- paired`.
+const FLAG_PATTERN = "`(--[a-z][a-z0-9-]*)`";
+
+const DOC_NAME_DRIFT = authored({
+  id: "doc-names-what-the-code-lost",
+  title: "A doc that names a flag the code no longer has",
+  detectors: [
+    { lever: "check-driver", actor: "human-editor", confidence: "deterministic",
+      params: { paths: ["docs/**/*.md"], extract: [FLAG_PATTERN], pairedWith: ["src/**/*.js"] } },
+  ],
+  fixtures: {
+    violation: "Pass `--outdir` to choose where the build lands.\n" +
+      "--- paired\nconst flags = ['--out-dir'];\n",
+    nearMiss: "Pass `--out-dir` to choose where the build lands.\n" +
+      "--- paired\nconst flags = ['--out-dir'];\n",
+  },
+  deny: {
+    reason: "This doc names a flag no source file has.",
+    alternative: "use the name the code carries, or add the flag the doc promises",
+    override: "say where the name the doc uses lives, if it is not in the source",
+  },
+});
+
+// The same check with a union that exists in no project: `lib/` is nothing the
+// walk skips, so nothing rejects this at install time either — the pair passes
+// because the pair's union half is inline text and never a glob against a tree.
+const DOC_NAME_DRIFT_NO_UNION = authored({
+  id: "doc-names-nothing-reachable",
+  title: "A doc checked against a union that is not there",
+  detectors: [
+    { lever: "check-driver", actor: "human-editor", confidence: "deterministic",
+      params: { paths: ["docs/**/*.md"], extract: [FLAG_PATTERN], pairedWith: ["lib/**/*.js"] } },
+  ],
+  fixtures: DOC_NAME_DRIFT.fixtures,
+  deny: DOC_NAME_DRIFT.deny,
+});
+
+// And the union confined to a directory the driver's walk removes before any
+// glob is asked. The coverage matrix has to see this one at install time: the
+// class is watched by nothing, whatever the plan writes.
+const DOC_NAME_DRIFT_BLIND_UNION = authored({
+  id: "doc-names-what-vendor-has",
+  title: "A doc checked against a union the walk never reaches",
+  detectors: [
+    { lever: "check-driver", actor: "human-editor", confidence: "deterministic",
+      params: { paths: ["docs/**/*.md"], extract: [FLAG_PATTERN], pairedWith: ["vendor/**/*.js"] } },
+  ],
+  fixtures: DOC_NAME_DRIFT.fixtures,
+  deny: DOC_NAME_DRIFT.deny,
+});
+
 // The checks the model wrote, handed to the engine the way the skill hands them
 // over: one file, read by `plan --authored`.
 function writeChecks(root, checks) {
@@ -221,9 +276,13 @@ module.exports = {
   HEURISTIC_ONLY,
   DOC_LEFT_BEHIND,
   TESTS_DELETED,
+  DOC_NAME_DRIFT,
+  DOC_NAME_DRIFT_NO_UNION,
+  DOC_NAME_DRIFT_BLIND_UNION,
   PIPE_PATTERN,
   CATCH_PATTERN,
   TEST_COUNT_PATTERN,
+  FLAG_PATTERN,
   DENY_PIPE,
   DENY_CATCH,
 };

@@ -42,7 +42,7 @@
 // commit that does not contain it. Both were reproduced. CI and a manual run
 // have nothing staged and keep the walk.
 //
-// A check declares one of three detector kinds. A pattern detector is a regular
+// A check declares one of four detector kinds. A pattern detector is a regular
 // expression over the files a glob names. A paired-change detector names two
 // path sets and reports a staged change that touched the first and nothing in
 // the second — the doc left behind by the module, the migration left behind by
@@ -53,7 +53,13 @@
 // the file after, HEAD is the file before — so the commit lane counts the drop,
 // a deleted file included. Every other run reads the tree as it is and reports
 // that class skipped; the selftest proves it from the fixture carrying both
-// halves, so the check is proven where the lane cannot run it.
+// halves, so the check is proven where the lane cannot run it. An extract
+// detector asks whether a doc still describes the thing it names: every name its
+// regex takes out of `paths` has to appear literally somewhere in `pairedWith`.
+// That is the doc-sync mistake co-change cannot reach, because both files moved
+// and the doc names what the code no longer has. It reads the union whole —
+// the index in the commit lane, the tree everywhere else — never the handful of
+// files the run itself is scoped to.
 
 import fs from "node:fs";
 import os from "node:os";
@@ -351,6 +357,23 @@ function stagedFiles(root, filter) {
     .filter((rel) => !rel.split("/").some((seg) => SKIP_DIRS.has(seg)));
 }
 
+// Every path the index holds, which is the whole project as this commit will
+// leave it rather than the handful of paths it touches. `ls-files` and not
+// `diff --cached` for exactly that difference — an extract detector looks a
+// doc's names up in every file that could carry them, not only the ones that
+// happened to move.
+//
+// No `--relative`: `ls-files` has no such flag and already names paths from the
+// directory it is run in, which is the namespace `--relative` buys everywhere
+// else here. Below the repository root the two would otherwise differ and every
+// glob would match nothing.
+function indexFiles(root) {
+  const out = gitOut(root, ["ls-files", "--cached"]);
+  if (out === null) return null;
+  return out.split("\n").map((s) => s.trim()).filter(Boolean)
+    .filter((rel) => !rel.split("/").some((seg) => SKIP_DIRS.has(seg)));
+}
+
 function makeContext(root, only, staged) {
   const list = staged ? stagedFiles(root, "ACMR") : null;
   // A git that will not answer is a partial scan exactly like a walk that hit
@@ -362,12 +385,42 @@ function makeContext(root, only, staged) {
     : { ...walk(root, only), why: `the walk stopped at ${MAX_FILES} files — everything past that was never read` };
   const all = walked.files;
   const cache = new Map();
+  // The whole project, read once and only where something asks for it.
+  let whole;
   return {
     root,
     truncated: walked.truncated,
     partial: walked.truncated ? walked.why : null,
     files(globs) {
       return all.filter((rel) => matchesAny(rel, globs));
+    },
+    // The union a doc's names have to be found in, and deliberately not
+    // `files()`. `files()` is what this run READS — the staged set at commit
+    // time, the named paths on a path-scoped run — and a union narrowed to that
+    // reports every name missing the moment the doc moved without the code
+    // beside it. So the commit lane reads the index whole and every other run
+    // reads the tree whole, whatever the run itself was scoped to.
+    //
+    // Null when git will not answer, like `changed()`: a union nobody could read
+    // is not a union that came back missing the names.
+    union(globs) {
+      if (whole === undefined) {
+        if (staged) whole = indexFiles(root);
+        else if (!only || !only.length) whole = all;
+        else {
+          // The one run that has to walk twice: it was scoped to a few paths and
+          // the union is still the whole project. A ceiling hit here would let a
+          // name sitting in a file nobody read be reported missing, so it is
+          // disclosed exactly as a partial scan is.
+          const scan = walk(root, null);
+          whole = scan.files;
+          if (scan.truncated) {
+            this.truncated = true;
+            this.partial = `the union walk stopped at ${MAX_FILES} files — everything past that was never read`;
+          }
+        }
+      }
+      return whole === null ? null : whole.filter((rel) => matchesAny(rel, globs));
     },
     read(rel) {
       if (!cache.has(rel)) {
@@ -509,8 +562,13 @@ function scanWith(ctx, mod, det) {
 // the doc that has to follow the module, the migration that has to follow the
 // schema, the fixture that has to follow the format. `paths` names the files
 // whose change obliges something matching `pairedWith` to change with them.
+// An extract detector names `pairedWith` too and means something else by it —
+// not "this had to change alongside" but "this is where the names have to
+// appear" — so it is excluded here rather than reported as a doc that never
+// moved.
 function pairedDetectors(mod) {
   return mod.detectors.filter((det) => det && det.runner === "checks" && det.params &&
+    !(Array.isArray(det.params.extract) && det.params.extract.length) &&
     Array.isArray(det.params.pairedWith) && det.params.pairedWith.length &&
     Array.isArray(det.params.paths) && det.params.paths.length);
 }
@@ -538,12 +596,21 @@ function removedDetectors(mod) {
 
 // Its fixture is one file before an edit and the same file after it, in one
 // string with `--- after` on a line of its own between them.
-function fencedHalves(text) {
-  const at = text.search(/^--- after$/m);
+//
+// The extract kind needs two texts for its own reason — the doc, then the union
+// its names have to appear in — and says so with `--- paired`. The label is the
+// only difference; it is never anything but one of those two literals, so
+// nothing here escapes it.
+function fencedHalves(text, label) {
+  const at = text.search(new RegExp("^--- " + (label || "after") + "$", "m"));
   if (at === -1) return null;
   const nl = text.indexOf("\n", at);
   return { before: text.slice(0, at), after: nl === -1 ? "" : text.slice(nl + 1) };
 }
+
+// The extract fence, named once so admission, the driver and the skill cannot
+// spell it differently.
+const PAIRED_FENCE = "paired";
 
 // The rule: some pattern the detector names is in the before text more times
 // than in the after text, and by how much. Both halves are blanked the way the
@@ -583,6 +650,67 @@ function countFloorFindings(ctx, mod, det, changed) {
     if (found) {
       out.push(ctx.finding(mod.id, rel, 1, "removed:" + found.pattern,
         found.drop + " fewer than the version this commit replaces"));
+    }
+  }
+  return out;
+}
+
+// The fourth detector kind. A pattern detector asks what is inside one file, a
+// paired-change detector asks what moved together, a removal detector asks what
+// stopped being there. This one asks whether a doc still describes the thing it
+// names: every name its regex takes out of `paths` has to appear literally
+// somewhere in `pairedWith`. It is the doc-sync mistake co-change cannot reach —
+// the README and the flag were renamed in the same commit and the README named
+// the wrong one.
+function extractDetectors(mod) {
+  return mod.detectors.filter((det) => det && det.runner === "checks" && det.params &&
+    Array.isArray(det.params.extract) && det.params.extract.length &&
+    Array.isArray(det.params.paths) && det.params.paths.length &&
+    Array.isArray(det.params.pairedWith) && det.params.pairedWith.length);
+}
+
+// The rule, written once so the lane and the selftest cannot answer it
+// differently: every name the regex takes out of the doc has to appear literally
+// in one of the union's texts. Raw bytes on both sides, and nothing blanked — a
+// doc has no comments to strip, and a name the code carries only in a comment is
+// still a name the code carries, which is the direction that adds no finding.
+//
+// A pattern with no capture group takes nothing out of the doc, so it says
+// nothing here. It never fires on its own violation either, which is what keeps
+// it out rather than a rule about how a pattern must be written.
+function extractMisses(det, doc, union) {
+  const out = [];
+  for (const pattern of det.params.extract) {
+    for (const m of doc.matchAll(new RegExp(pattern, "g"))) {
+      if (typeof m[1] !== "string" || !m[1]) continue;
+      if (union.some((body) => body.includes(m[1]))) continue;
+      out.push({ pattern, at: m.index + m[0].indexOf(m[1]) });
+    }
+  }
+  return out;
+}
+
+// The finding is at the name's own line, which is the one place in the doc a
+// reader can act on: the line that says the thing the code no longer has. The
+// name itself is never carried out, for the reason `finding` gives — a report
+// says which check spoke and where, not what somebody's text said.
+//
+// Null when the union read back with no text at all, which is the caller's cue
+// to report the class skipped: a union nothing matches is not a union that came
+// back missing every name. The fixture pair cannot catch that — its union half
+// is inline text, so a `pairedWith` glob is never compiled against a real tree —
+// so without this a check the pair certified reports every name in every doc as
+// drift and blocks the commit that installed it.
+function extractFindings(ctx, mod, det, union) {
+  const bodies = union.map((rel) => ctx.read(rel)).filter((text) => text !== null);
+  if (!bodies.length) return null;
+  const note = "names something no file matching " + det.params.pairedWith.join(" or ") + " has";
+  const out = [];
+  for (const rel of ctx.files(det.params.paths)) {
+    const text = ctx.read(rel);
+    if (text === null) continue;
+    for (const miss of extractMisses(det, text, bodies)) {
+      out.push(ctx.finding(mod.id, rel, lineOf(text, miss.at), "extract:" + miss.pattern, note));
     }
   }
   return out;
@@ -651,7 +779,8 @@ async function runChecks(root, only, staged) {
     const mine = driverDetectors(mod);
     const paired = pairedDetectors(mod);
     const removed = removedDetectors(mod);
-    if (!mine.length && !paired.length && !removed.length) {
+    const extract = extractDetectors(mod);
+    if (!mine.length && !paired.length && !removed.length && !extract.length) {
       skipped.push({ id: mod.id, why: "no detector this driver runs — it is watched elsewhere", command: null });
       continue;
     }
@@ -661,7 +790,7 @@ async function runChecks(root, only, staged) {
     // Only when the module carries nothing else this run reads. A module with a
     // pattern detector beside its removal one IS evaluated, and reporting it
     // skipped as well would make the word mean two things in one run.
-    if (removed.length && !staged && !mine.length && !paired.length) {
+    if (removed.length && !staged && !mine.length && !paired.length && !extract.length) {
       // Where it IS watched, said only when the module carries the lever that
       // does it. A removal reaches a lane through an edit guard reading one
       // call's two halves; a module with none is watched nowhere at all, and
@@ -694,6 +823,32 @@ async function runChecks(root, only, staged) {
         } else {
           for (const det of paired) findings.push(...pairedFindings(ctx, mod, det, changed));
         }
+      }
+      // The content relation. Every lane reads it — the doc and the union both
+      // exist in the tree as readily as in the index — and the commit lane reads
+      // both from the staged bytes, which is the only reading that describes the
+      // commit being made.
+      for (const det of extract) {
+        const union = ctx.union(det.params.pairedWith);
+        if (union === null) {
+          skipped.push({
+            id: mod.id,
+            why: "git could not list what the index holds, so there was nothing to look this doc's names up in",
+            command: null,
+          });
+          break;
+        }
+        const found = extractFindings(ctx, mod, det, union);
+        if (found === null) {
+          skipped.push({
+            id: mod.id,
+            why: "no file matching " + det.params.pairedWith.join(" or ") +
+              " could be read here, so there is nothing to look this doc's names up in",
+            command: null,
+          });
+          continue;
+        }
+        findings.push(...found);
       }
       // The count floor, and the commit lane's alone. It is the one run holding
       // the file before the change as well as the file after it, so it is the
@@ -732,6 +887,7 @@ async function runSelftest() {
       const mine = driverDetectors(mod);
       const paired = pairedDetectors(mod);
       const removed = removedDetectors(mod);
+      const extract = extractDetectors(mod);
       const pair = mod.fixtures;
       // A check whose every detector belongs to another lane is not this
       // driver's to prove. The session guards carry their own witnessed close,
@@ -746,7 +902,7 @@ async function runSelftest() {
       // is unproven coverage sitting in the checks directory. Every check jig
       // admits carries its pair inline, so this one was never admitted, and
       // skipping it quietly is the coverage claim the driver must not make.
-      if ((!mine.length && !paired.length && !removed.length) || !pair ||
+      if ((!mine.length && !paired.length && !removed.length && !extract.length) || !pair ||
           typeof pair.violation !== "string" || typeof pair.nearMiss !== "string") {
         results.push({ id: mod.id, caught: false, why: "claims a `checks` detector but carries no fixture pair this driver can run" });
         continue;
@@ -796,6 +952,22 @@ async function runSelftest() {
             if (!seeded) seeded = fixturePath(det);
             hits += removedHits(det, halves.v);
             nearMissHits += removedHits(det, halves.n);
+          }
+        }
+      }
+      // An extract fixture is a doc and the union its names have to appear in,
+      // fenced by `--- paired` in one string. Nothing is written to disk for it
+      // either: the thing under test is whether one text's names are in the
+      // other, and both texts are here.
+      if (!failed && extract.length) {
+        const halves = { v: fencedHalves(pair.violation, PAIRED_FENCE), n: fencedHalves(pair.nearMiss, PAIRED_FENCE) };
+        if (!halves.v || !halves.n) {
+          failed = "an extract detector's fixture carries no `--- paired` fence, so there is nothing to look its names up in";
+        } else {
+          for (const det of extract) {
+            if (!seeded) seeded = fixturePath(det);
+            hits += extractMisses(det, halves.v.before, [halves.v.after]).length;
+            nearMissHits += extractMisses(det, halves.n.before, [halves.n.after]).length;
           }
         }
       }
@@ -994,7 +1166,13 @@ async function main(argv) {
   // which exists nowhere — a lane that checked nothing and said so cleanly.
   const paths = argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ledger");
   if (argv.includes("--verify")) {
-    const out = runVerify(flagValue(argv, "--lane") || "ci", flagValue(argv, "--entry"));
+    const lane = flagValue(argv, "--lane");
+    const out = runVerify(lane || "ci", flagValue(argv, "--entry"));
+    // Only a lane that names itself writes, exactly as `--ledger` gates the
+    // findings writer. Without the gate a hand-typed `--verify` minted a row
+    // reading `lane: "ci"` — evidence for a lane that did not run, off the
+    // default the report happens to use — and `lastGreen` read it back as fact.
+    if (lane) ledgerVerify(lane, out.results);
     process.stdout.write((json ? JSON.stringify({ verify: out }, null, 2) : verifyReport(out)) + "\n");
     // A step that named one entry and found none is a lane that lost the tool it
     // claims to run — exit 1. A lane nobody put an entry in ran nothing and says
@@ -1040,6 +1218,39 @@ function ledgerFindings(lane, findings) {
     }) + "\n").join("");
     if (rows) fs.appendFileSync(path.join(HERE, "..", "ledger.jsonl"), rows);
   } catch { /* evidence that cannot be written is not a reason to block */ }
+}
+
+// One row per lane entry a verification run touched, in the shape the session
+// hook's witness writes: a `verify` id and a `verified`/`verify-failed`
+// decision, with no guardId, is what the ledger's verification reader keeps.
+// Without it a repository whose pre-commit hook ran the suite green on every
+// commit still reported `lastGreen: null`, because only the session lane had
+// ever left evidence.
+//
+// Only a lane that names itself with `--lane`, for the reason `ledgerFindings`
+// says: a manual run stays the read-only thing the activation doc promises, and
+// a row carrying the default lane name would be evidence for a lane nobody ran.
+// A hosted CI lane writes here too and the row still dies with the job — the
+// ledger is git-ignored and the checkout is thrown away — which is why the
+// skills say `lastGreen` answers for the session and commit lanes and not for
+// somebody else's runner.
+//
+// An entry that could not start is `verify-failed` like any other red run: it
+// did not verify, and a lane that recorded nothing there would be the coverage
+// gap going quiet again.
+//
+// Wrapped whole and silent, for the reason `ledgerFindings` is: evidence that
+// cannot be written is never a reason to fail somebody's commit or CI step.
+function ledgerVerify(lane, results) {
+  try {
+    const ts = new Date().toISOString();
+    const rows = results.map((r) => JSON.stringify({
+      ts, lane, session: null, actor: null, guardId: null, classId: null,
+      mode: "armed", decision: r.passed ? "verified" : "verify-failed", tool: null,
+      matched: null, path: null, verify: r.id, exitCode: r.ran ? r.code : null,
+    }) + "\n").join("");
+    if (rows) fs.appendFileSync(path.join(HERE, "..", "ledger.jsonl"), rows);
+  } catch { /* evidence that cannot be written is not a reason to fail a lane */ }
 }
 
 // The same row the commit shim writes, in the same file: a lane that goes quiet

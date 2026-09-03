@@ -328,7 +328,9 @@ Each authored check carries, in one module:
     string and **nothing is blanked**: a shell command is not source, so a
     pattern that fires inside a quoted argument is a false positive here.
     `onlyBranches` narrows a `git push` to the branches named, `<default>`
-    meaning the repository's own.
+    meaning the repository's own. It may set `teach: true` like the edit levers:
+    since 2.13.0 teaching is a property of the guard, not of the event it runs
+    on, so every PreToolUse and PostToolUse guard can carry it.
   - `edit-guard` — a PreToolUse guard over an Edit or a Write, which denies
     before the host writes the bytes. Its `params.patterns` are matched against
     the text going in, blanked by the same two switches the driver uses; `paths`
@@ -336,15 +338,16 @@ Each authored check carries, in one module:
     only when the edit adds a match it did not replace. `params.removed` is the
     other kind it reads — see "When the mistake is something being deleted". A
     detector naming both is proven for both, one at a time. This is the edit
-    lever to author.
+    lever to author. A detector here may set `teach: true`, which is how the
+    owner opts one observing guard into saying its piece in the transcript
+    instead of only in the ledger — off unless asked for, and it refuses
+    nothing.
   - `edit-observe-guard` — the same guard one event later, at PostToolUse, so
     the file is already on disk by the time it fires. Never author a new one. It
     is still run for the installs that carry it: their recorded proof binds this
     lever, and `jig.js migrate` is what moves such a guard to `edit-guard` and
-    re-records the proof. Only a detector on this lever may set `teach: true`,
-    which is how the owner opts one observing guard into saying its piece in the
-    transcript; the channel exists on PostToolUse alone and is off unless asked
-    for.
+    re-records the proof. It can teach exactly as `edit-guard` can, and `migrate`
+    carries that answer across.
   - `ci-workflow` and `tool-rule` — the class is named in the workflow jig
     writes and in the tool rule it proposes. Neither carries patterns of its
     own, so `params` is empty. A `tool-rule` cell reads DET only where the plan
@@ -501,6 +504,55 @@ decide what it is worth:
 - Author it to **observe**. A per-call view cannot see the case being added back
   two calls later, and a deletion is sometimes right — behaviour that genuinely
   went away takes its tests with it.
+
+### When the mistake is a doc that names what the code no longer has
+
+Co-change catches the doc that never moved. It cannot catch the one that did: the
+flag was renamed, the README was edited in the same commit, and the README named
+the old spelling anyway. Nothing is missing from that commit — what is wrong is
+that a name in one file appears in no other.
+
+For those, the same `check-driver` detector takes `extract` beside `pairedWith`.
+Each `extract` pattern is a regex with **one capture group**, and every name it
+captures out of a file in `paths` has to appear literally somewhere in the files
+matching `pairedWith`. A name that appears nowhere is a finding **at its own
+line**. Write it when the user describes a mistake as a doc going out of step
+with the thing it names — a flag, a setting, an env var, an exported symbol.
+
+Its fixtures carry two texts, with `--- paired` on a line of its own between
+them: the doc, then the union its names are looked up in. The violation names
+something the union does not have; the near miss names only what it has:
+
+```json
+{
+  "detectors": [{ "lever": "check-driver",
+    "params": { "paths": ["docs/**/*.md"], "extract": ["`(--[a-z][a-z0-9-]*)`"],
+      "pairedWith": ["src/**/*.js"] } }],
+  "fixtures": {
+    "violation": "Pass `--outdir` to choose where the build lands.\n--- paired\nconst flags = ['--out-dir'];\n",
+    "nearMiss": "Pass `--out-dir` to choose where the build lands.\n--- paired\nconst flags = ['--out-dir'];\n"
+  }
+}
+```
+
+Four things to tell the user before they approve it:
+
+- Every RUN of the driver evaluates it, unlike `removed` — but it has no session
+  lever, so a class whose only detector is this kind is watched at commit time
+  and in CI and not while the model is editing. The commit lane reads the
+  **staged** bytes on both sides — the doc as it will be committed against the
+  code as it will be committed. The union is always the whole project, never the
+  files this run happens to touch.
+- `pairedWith` has to name files that are actually there. The fixture pair cannot
+  check that — its union half is inline text, so the globs are never compiled
+  against a tree — and a union nothing matches makes the driver report the class
+  **skipped** on every run, which is coverage the plan claimed and the lane never
+  delivers.
+- The comparison is **literal and unblanked**. A name the code carries only in a
+  comment counts as carried, which is the direction that adds no finding.
+- The capture has to be the name and nothing else. A pattern that takes the
+  punctuation around it — backticks, quotes — captures something no source file
+  has, and the fixture pair discards it for firing on its own near miss.
 
 ### When the mistake is a route around the harness
 
@@ -800,6 +852,11 @@ A tool jig cannot start comes back `cannotRun: true` — `./gradlew` on Windows 
 a pass. Read the command out and say plainly that nothing was proven for it.
 `npm`, `npx`, `pnpm` and `yarn` are not that case: they are Node programs behind
 a `.cmd`, and jig runs their JS entry with `process.execPath` instead.
+
+An `unverified` verdict or a `red` baseline is a failed demonstration, so print
+that probe's `output` verbatim — the tool's own words about what it did and did
+not see, capped by jig. A `verified` probe over a clean baseline needs no
+transcript; do not print it.
 
 **Degrade, never stall.** A probe that reports `ran: false` says why, and
 carries `command` and `expected`. Print both and tell the user what to look for.

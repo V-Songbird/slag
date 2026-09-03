@@ -2707,12 +2707,23 @@ function denyCapable(det) {
 // Only literal, non-final segments count. A glob may legitimately end in a file
 // named `build` or `vendor`, and a wildcard segment never resolves to a skipped
 // name — the walk removed those directories before the glob was ever asked.
+//
+// An extract detector is blind on either side, and its union side is the worse
+// one: a doc the walk never reaches is simply never read, but a union the walk
+// never reaches holds none of the names, so the class reports skipped on every
+// run. Each side is judged on its own, because a detector with a reachable doc
+// and an unreachable union is as blind as one with neither.
 function driverBlindDir(det) {
   if (!det || det.lever !== "check-driver") return null;
-  const globs = ((det.params || {}).paths || []).filter((p) => typeof p === "string" && p);
-  if (!globs.length) return null;
-  const blind = globs.map((g) => g.split("/").slice(0, -1).find((seg) => DRIVER_SKIPS.includes(seg)) || null);
-  return blind.every(Boolean) ? blind[0] : null;
+  const params = det.params || {};
+  const sides = Array.isArray(params.extract) && params.extract.length ? ["paths", "pairedWith"] : ["paths"];
+  for (const side of sides) {
+    const globs = (params[side] || []).filter((p) => typeof p === "string" && p);
+    if (!globs.length) continue;
+    const blind = globs.map((g) => g.split("/").slice(0, -1).find((seg) => DRIVER_SKIPS.includes(seg)) || null);
+    if (blind.every(Boolean)) return blind[0];
+  }
+  return null;
 }
 
 // A driver detector whose only kind is a removal. Since 2.12.0 the driver does
@@ -3893,6 +3904,11 @@ function ledgerLines(root) {
   return buf === null ? 0 : buf.toString("utf8").split("\n").filter((l) => l.trim()).length;
 }
 
+// Enough of a linter's own words to read what it did — and no more. The close
+// report prints this verbatim, and a tool that spilled a whole tree's
+// diagnostics into it would bury the rest of the close.
+const PROBE_OUTPUT_MAX = 4000;
+
 // A probe never throws. It either ran and says what it saw, or it did not run
 // and says what to run instead.
 function runProbe(root, guardId, probe, live) {
@@ -3983,6 +3999,13 @@ function execToolchainProbe(root, tool, base) {
     const proof = toolchainLib.execVerify(root, tool, ".");
     return {
       ...base, ran: true, caught: proof.caught, code: proof.code,
+      // The guard probes print their runner's stdout verbatim, and that is what
+      // makes a catch legible. A toolchain probe owes the owner the same, but a
+      // linter over a whole tree is not one JSON object, so it is capped here
+      // rather than read out unbounded.
+      output: proof.output.length > PROBE_OUTPUT_MAX
+        ? proof.output.slice(0, PROBE_OUTPUT_MAX) + "\n… truncated at " + PROBE_OUTPUT_MAX + " characters"
+        : proof.output,
       // A repository whose baseline is already red fails the seeded run for the
       // reason it failed the baseline, and the seed proved nothing. SCOPE step
       // 8: that is disclosed as `baseline: red`, never counted as a catch.
@@ -4908,6 +4931,10 @@ function watchesOf(lib, det, mod, deny) {
     // Non-zero means this detector reads a count going down between the text an
     // edit replaced and the text it wrote, rather than what is in a file.
     removed: Array.isArray(params.removed) ? params.removed.length : 0,
+    // And the fourth: counted too. Non-zero means this detector takes names out
+    // of `paths` and reports the ones no file in `pairedWith` carries, rather
+    // than reporting a file that never moved.
+    extract: Array.isArray(params.extract) ? params.extract.length : 0,
     title: mod && typeof mod.title === "string" ? mod.title : null,
     severity: mod && typeof mod.severity === "string" ? mod.severity : null,
     // The three-part reply an armed match shows. Null means this detector

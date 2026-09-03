@@ -434,6 +434,126 @@ test("removal crosses only among removal kinds", () => {
   assert.deepEqual(admission.crossNearMiss([check(), removed(), paired()], blank, match), []);
 });
 
+// ---------------------------------------------------------------------------
+// The extract kind
+// ---------------------------------------------------------------------------
+//
+// The doc-sync mistake co-change cannot reach: both files moved, and the doc
+// names the thing the code no longer has. So each fixture carries two texts —
+// the doc, then the union its names have to appear in, fenced by `--- paired`.
+
+function extract(over) {
+  return {
+    id: "doc-names-what-the-code-lost",
+    deny: DENY,
+    detectors: [{
+      lever: "check-driver",
+      params: { paths: ["docs/**/*.md"], extract: ["`(--[a-z][a-z0-9-]*)`"], pairedWith: ["src/**/*.js"] },
+    }],
+    fixtures: {
+      violation: "Pass `--outdir` to choose where the build lands.\n--- paired\nconst flags = ['--out-dir'];\n",
+      nearMiss: "Pass `--out-dir` to choose where the build lands.\n--- paired\nconst flags = ['--out-dir'];\n",
+    },
+    ...over,
+  };
+}
+
+test("an extract check is admitted when the doc names what the union lacks and not when it does not", () => {
+  const result = admission.ownPair(extract(), blank);
+  assert.deepEqual(result, {
+    id: "doc-names-what-the-code-lost",
+    violationHits: 1,
+    nearMissHits: 0,
+    passes: true,
+    why: null,
+  });
+  assert.deepEqual(admission.admit([extract()], blank).discarded, []);
+});
+
+// The kind is `extract`, and `pairedWith` means something else here than it does
+// on a paired-change detector: not "this had to change alongside" but "this is
+// where the names have to appear". Read as the other kind it would be held to a
+// change-set fixture it is not, and discarded for wanting a glob matcher.
+test("an extract detector is never read as a paired-change rule", () => {
+  const result = admission.ownPair(extract(), blank);
+  assert.equal(result.violationHits, 1, "the paired half counted a second hit off the same detector");
+  assert.deepEqual(admission.admit([extract()], blank).admitted.map((a) => a.id),
+    ["doc-names-what-the-code-lost"]);
+});
+
+test("an extract rule its own violation does not trip is discarded", () => {
+  // The doc was corrected in the same edit, so nothing in it names anything the
+  // union lacks and the rule is silent on the very drift it was written for.
+  const wrong = extract({
+    fixtures: {
+      violation: "Pass `--out-dir` to choose where the build lands.\n--- paired\nconst flags = ['--out-dir'];\n",
+      nearMiss: "Pass `--out-dir` to choose where the build lands.\n--- paired\nconst flags = ['--out-dir'];\n",
+    },
+  });
+  const result = admission.ownPair(wrong, blank);
+  assert.equal(result.passes, false);
+  assert.equal(result.violationHits, 0);
+  assert.match(result.why, /never fired on the violation fixture: extract/);
+  assert.deepEqual(admission.admit([wrong], blank).admitted, []);
+});
+
+test("an extract rule that also fires on its own near miss is discarded", () => {
+  // Capturing the whole code span rather than the flag inside it takes the
+  // backticks with it, and no source file has those — so the corrected doc reads
+  // as drift too.
+  const loose = extract({
+    detectors: [{
+      lever: "check-driver",
+      params: { paths: ["docs/**/*.md"], extract: ["(`--[a-z][a-z0-9-]*`)"], pairedWith: ["src/**/*.js"] },
+    }],
+  });
+  const result = admission.ownPair(loose, blank);
+  assert.equal(result.passes, false);
+  assert.equal(result.nearMissHits, 1);
+  assert.match(result.why, /fired on the near miss: extract/);
+  assert.deepEqual(admission.admit([loose], blank).admitted, []);
+});
+
+test("an extract fixture with no `--- paired` fence is discarded, never admitted on half a pair", () => {
+  const halved = extract({
+    fixtures: {
+      violation: "Pass `--outdir` to choose where the build lands.\n",
+      nearMiss: "Pass `--out-dir` to choose where the build lands.\n",
+    },
+  });
+  assert.throws(() => admission.ownPair(halved, blank), /violation fixture has no `--- paired` fence/);
+  const { admitted, discarded } = admission.admit([halved], blank);
+  assert.deepEqual(admitted, []);
+  assert.match(discarded[0].why, /`--- paired` fence/);
+});
+
+test("an extract check that reads every doc as drifted is caught by another one's near miss", () => {
+  // `(\w+)` takes every word out of the doc, and no union has every word — so it
+  // reports drift on any pair of files. Its own violation cannot show that.
+  const greedy = extract({
+    id: "fires-on-everything",
+    detectors: [{
+      lever: "check-driver",
+      params: { paths: ["docs/**/*.md"], extract: ["(\\w+)"], pairedWith: ["src/**/*.js"] },
+    }],
+    fixtures: { violation: "alpha\n--- paired\nbeta\n", nearMiss: "beta\n--- paired\nbeta\n" },
+  });
+  const rows = admission.crossNearMiss([extract(), greedy], blank, match);
+  assert.deepEqual(rows,
+    [{ check: "fires-on-everything", foreignCheck: "doc-names-what-the-code-lost", pattern: "extract" }]);
+
+  const { admitted, discarded } = admission.admit([extract(), greedy], blank, { cross: true, match });
+  assert.deepEqual(admitted.map((a) => a.id), ["doc-names-what-the-code-lost"]);
+  assert.equal(discarded.length, 1);
+  assert.match(discarded[0].why, /fired on doc-names-what-the-code-lost's near miss/);
+});
+
+test("extract crosses only among extract kinds", () => {
+  // A capture regex over a list of paths, or a source pattern over a doc fenced
+  // against its union, compares two different kinds of thing.
+  assert.deepEqual(admission.crossNearMiss([check(), removed(), paired(), extract()], blank, match), []);
+});
+
 test("writeDiscarded puts the discards on disk, including when there are none", () => {
   const stateDir = path.join(tmpDir(), ".jig");
   const rows = admission.admit([check({ deny: undefined })], blank).discarded;

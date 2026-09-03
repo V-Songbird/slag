@@ -66,9 +66,33 @@ function pairedUnits(check) {
   const units = [];
   for (const det of (check.detectors || []).filter((d) => d && d.lever === "check-driver")) {
     const p = det.params || {};
+    // An extract detector names `pairedWith` too and means something else by it:
+    // not "this had to change alongside" but "this is where the names have to
+    // appear". Read as a paired-change rule it would be held to a change-set
+    // fixture it is not, and discarded for a reason that names the wrong kind.
+    if ((p.extract || []).length) continue;
     const paths = (p.paths || []).filter((s) => typeof s === "string" && s.length);
     const pairedWith = (p.pairedWith || []).filter((s) => typeof s === "string" && s.length);
     if (paths.length && pairedWith.length) units.push({ paths, pairedWith });
+  }
+  return units;
+}
+
+// The content-relation kind. Its patterns live under `extract` and each takes a
+// name out of the doc; `pairedWith` says where that name has to appear. So it
+// carries no filename and no blanker options either — the comparison is over raw
+// bytes, and the patterns are all there is to prove.
+function extractUnits(check) {
+  const units = [];
+  for (const det of (check.detectors || []).filter((d) => d && d.lever === "check-driver")) {
+    const p = det.params || {};
+    const patterns = (p.extract || []).filter((s) => typeof s === "string" && s.length);
+    const paths = (p.paths || []).filter((s) => typeof s === "string" && s.length);
+    const pairedWith = (p.pairedWith || []).filter((s) => typeof s === "string" && s.length);
+    // All three or nothing, exactly as the driver selects it: a rule with no doc
+    // to read or no union to look the names up in evaluates to nothing there, and
+    // admitting it here would be coverage nobody could run.
+    if (patterns.length && paths.length && pairedWith.length) units.push({ patterns });
   }
   return units;
 }
@@ -146,12 +170,21 @@ function matchesAny(rel, globs, match) {
 // fence, and a side without one is not a pair this rule can read: it is thrown
 // on rather than guessed at, because a check admitted over half a fixture would
 // claim coverage nobody demonstrated.
-function fencedHalves(text) {
-  const at = text.search(/^--- after$/m);
+//
+// The extract kind needs two texts for its own reason — the doc, then the union
+// its names have to appear in — and says so with `--- paired`. The label is the
+// only difference; it is never anything but one of those two literals, so
+// nothing here escapes it.
+function fencedHalves(text, label) {
+  const at = text.search(new RegExp("^--- " + (label || "after") + "$", "m"));
   if (at === -1) return null;
   const nl = text.indexOf("\n", at);
   return { before: text.slice(0, at), after: nl === -1 ? "" : text.slice(nl + 1) };
 }
+
+// The extract fence, named once so admission, the driver and the skill cannot
+// spell it differently.
+const PAIRED_FENCE = "paired";
 
 // The removal detector's whole rule, written once so admission and the shipped
 // driver cannot answer it differently: some pattern this detector names is in
@@ -174,13 +207,46 @@ function countOf(text, pattern) {
   return (text.match(new RegExp(pattern, "g")) || []).length;
 }
 
+// The extract detector's whole rule: some name this detector's regex takes out
+// of the doc appears nowhere in the union it is checked against. It is the
+// driver's own `extractMisses`, byte for byte, and `blanker-drift.test.js` pins
+// the two together — a hand-kept copy is what lets admission and the shipped
+// driver answer the same fixture differently, which is the failure the drift
+// test exists to make impossible.
+//
+// Raw bytes on both sides, and nothing blanked. A doc has no comments to strip,
+// and a name the code carries only in a comment is still a name the code
+// carries — counting it present is the direction that adds no finding.
+// A pattern with no capture group takes nothing out of the doc, so it finds
+// nothing and never fires on its own violation — which is what discards it,
+// rather than a rule here about how a pattern must be written.
+function extractMisses(det, doc, union) {
+  const out = [];
+  for (const pattern of det.params.extract) {
+    for (const m of doc.matchAll(new RegExp(pattern, "g"))) {
+      if (typeof m[1] !== "string" || !m[1]) continue;
+      if (union.some((body) => body.includes(m[1]))) continue;
+      out.push({ pattern, at: m.index + m[0].indexOf(m[1]) });
+    }
+  }
+  return out;
+}
+
+// A unit's patterns in the shape the shared rule reads, and the fenced halves as
+// the doc and a union of exactly one text. `before` is the doc, `after` is that
+// union.
+function extractFires(units, halves) {
+  return units.some((u) =>
+    extractMisses({ params: { extract: u.patterns } }, halves.before, [halves.after]).length > 0);
+}
+
 // What a passing check has to have fired. One per pattern, plus one for the
 // paired rule if the check carries one — the same total `ownPair` counts up to,
 // because a mismatch between the two would discard every check silently.
 function patternCount(check) {
   return driverUnits(check).reduce((n, u) => n + u.patterns.length, 0) +
     (pairedUnits(check).length ? 1 : 0) + (removedUnits(check).length ? 1 : 0) +
-    sessionUnits(check).length;
+    (extractUnits(check).length ? 1 : 0) + sessionUnits(check).length;
 }
 
 function checkId(check) {
@@ -220,8 +286,9 @@ function ownPair(check, blank, match, evaluate) {
   const units = driverUnits(check);
   const paired = pairedUnits(check);
   const removed = removedUnits(check);
+  const extract = extractUnits(check);
   const session = sessionUnits(check);
-  if (!units.length && !paired.length && !removed.length && !session.length) {
+  if (!units.length && !paired.length && !removed.length && !extract.length && !session.length) {
     throw new Error(
       `admission: check "${id}" declares no check-driver patterns, so there is nothing to prove against its fixtures`,
     );
@@ -246,6 +313,16 @@ function ownPair(check, blank, match, evaluate) {
       if (fencedHalves(text)) continue;
       throw new Error(`admission: check "${id}" carries a removal detector and its ${half} fixture has no ` +
         "`--- after` fence — a removal is only visible between the file before an edit and the file after it");
+    }
+  }
+  // And the extract kind needs its own two texts for its own reason: the doc,
+  // then the union its names have to appear in. Unfenced there is nothing to
+  // look them up in, and every capture would read as missing.
+  if (extract.length) {
+    for (const [half, text] of [["violation", violation], ["nearMiss", nearMiss]]) {
+      if (fencedHalves(text, PAIRED_FENCE)) continue;
+      throw new Error(`admission: check "${id}" carries an extract detector and its ${half} fixture has no ` +
+        "`--- paired` fence — a doc's names mean nothing without the files they have to appear in");
     }
   }
 
@@ -310,6 +387,27 @@ function ownPair(check, blank, match, evaluate) {
     }
   }
 
+  // The content half. Each side of the pair is a doc and the union its names
+  // have to appear in, and the rule is the one the driver runs: the violation
+  // names something the union does not have, the near miss names nothing it
+  // lacks. One unit, one hit, so the totals stay comparable with the other kinds.
+  if (extract.length) {
+    let onViolation;
+    let onNearMiss;
+    try {
+      onViolation = extractFires(extract, fencedHalves(violation, PAIRED_FENCE));
+      onNearMiss = extractFires(extract, fencedHalves(nearMiss, PAIRED_FENCE));
+    } catch (err) {
+      throw new Error(`admission: check "${id}" has an unusable extract pattern — ${err.message}`);
+    }
+    if (onViolation) violationHits++;
+    else missed.push("extract");
+    if (onNearMiss) {
+      nearMissHits++;
+      falsePositives.push("extract");
+    }
+  }
+
   // The session half. Each lever is run through the hook runner's own
   // evaluation over the same fixture pair, and counts one hit exactly as the
   // paired rule does. A lever that misses its violation or fires on its near
@@ -325,7 +423,7 @@ function ownPair(check, blank, match, evaluate) {
   }
 
   const total = units.reduce((n, u) => n + u.patterns.length, 0) + (paired.length ? 1 : 0) +
-    (removed.length ? 1 : 0) + session.length;
+    (removed.length ? 1 : 0) + (extract.length ? 1 : 0) + session.length;
   const passes = violationHits === total && nearMissHits === 0;
   const reasons = [];
   if (missed.length) {
@@ -351,7 +449,9 @@ function ownPair(check, blank, match, evaluate) {
 // not the event's — since 2.11.0 both kinds run at PreToolUse.
 // Removal is a fourth, and crosses only among removal kinds for the same reason
 // the paired kind does: its near miss is a fenced before/after pair, and no
-// other kind's fixture is one.
+// other kind's fixture is one. Extract is a fifth and crosses the same way: its
+// near miss is a doc fenced against the union its names appear in, which is a
+// third kind of fixture again.
 function crossNearMiss(checks, blank, match, evaluate) {
   if (!Array.isArray(checks)) throw new Error("admission: crossNearMiss expects an array of checks");
   if (typeof blank !== "function") throw new Error("admission: crossNearMiss needs the blanker function injected");
@@ -362,6 +462,7 @@ function crossNearMiss(checks, blank, match, evaluate) {
     const ownerUnits = driverUnits(owner);
     const ownerPaired = pairedUnits(owner);
     const ownerHalves = removedUnits(owner).length ? fencedHalves(nearMiss) : null;
+    const ownerDoc = extractUnits(owner).length ? fencedHalves(nearMiss, PAIRED_FENCE) : null;
     const ownerKinds = new Set(sessionUnits(owner).map((u) => u.kind));
     for (const runner of checks) {
       const runnerId = checkId(runner);
@@ -396,6 +497,15 @@ function crossNearMiss(checks, blank, match, evaluate) {
       const runnerRemoved = removedUnits(runner);
       if (ownerHalves && runnerRemoved.length && removedFires(runnerRemoved, ownerHalves, blank)) {
         rows.push({ check: runnerId, foreignCheck: ownerId, pattern: "removal" });
+      }
+      // And a capture regex that takes a name out of anything. `(\w+)` finds a
+      // word in every doc, and no union has every word — so it reports drift on
+      // any pair of files, and its own violation cannot show that. Another
+      // extract check's near miss, a doc whose every name IS in its union, is
+      // the sample it was not authored against.
+      const runnerExtract = extractUnits(runner);
+      if (ownerDoc && runnerExtract.length && extractFires(runnerExtract, ownerDoc)) {
+        rows.push({ check: runnerId, foreignCheck: ownerId, pattern: "extract" });
       }
       // And the session levers. A bash-guard whose pattern matches every command
       // still fires on its own violation and can still dodge its own near miss;

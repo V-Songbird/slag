@@ -593,16 +593,41 @@ test("teaching stays quiet on a pass, and speaks once however many guards matche
     /^\[jig guard g-empty-catch would have denied this\]/);
 });
 
-test("teaching is refused the unverified PreToolUse channel, out loud", () => {
-  // HARNESS-PASS C6: a non-blocking model-visible channel on PreToolUse is
-  // unverified against a live host, so a row asking for one is told so rather
-  // than left believing the transcript carries its line.
+// 2.13.0 / roadmap 233: the PreToolUse channel, measured
+//
+// HARNESS-PASS refused this channel as unverified. Roadmap 233 drove a live
+// host with a PreToolUse hook answering `additionalContext` and no
+// `permissionDecision`; the token reached the model and the call ran. So the
+// channel is the guard's, not the event's — and that is what makes teaching
+// reachable at all on a fresh install, whose only edit lever is `edit-guard`.
+test("teaching speaks on PreToolUse too, and refuses nothing doing it", () => {
   const root = guarded([A.PIPED_INSTALLER], { teach: true });
   const out = run(root, "PreToolUse", PIPE_CALL);
-  assert.match(out.stderr, /`teach` speaks on PostToolUse only, and g-piped-installer runs on PreToolUse/);
+  assert.equal(out.stderr, "", "a channel this host carries is not warned about");
   const emitted = JSON.parse(out.stdout);
   assert.equal(emitted.jig.decision, "would-deny");
-  assert.deepEqual(Object.keys(emitted), ["jig"]);
+  assert.equal(emitted.hookSpecificOutput.hookEventName, "PreToolUse");
+  assert.match(emitted.hookSpecificOutput.additionalContext,
+    /^\[jig guard g-piped-installer would have denied this\]/);
+  // Teaching is not deciding: the omitted permissionDecision is what lets the
+  // call through, and it is the half the probe measured.
+  assert.equal(emitted.hookSpecificOutput.permissionDecision, undefined);
+});
+
+test("an armed guard's PreToolUse deny survives a teaching guard on the same call", () => {
+  // One reply carries both, so the merge order decides whether the refusal the
+  // owner armed still refuses.
+  const root = guarded([A.PIPED_INSTALLER], { mode: "armed" });
+  const file = path.join(root, ".jig", "config.json");
+  const config = JSON.parse(fs.readFileSync(file, "utf-8"));
+  config.guards.push({ ...config.guards[0], id: "g-watcher", mode: "observe", teach: true });
+  fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
+
+  const out = JSON.parse(run(root, "PreToolUse", PIPE_CALL).stdout);
+  assert.equal(out.jig.decision, "deny");
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+  assert.ok(out.hookSpecificOutput.permissionDecisionReason);
+  assert.match(out.hookSpecificOutput.additionalContext, /^\[jig guard g-watcher would have denied this\]/);
 });
 
 test("a non-boolean teach is a config that cannot be read as an answer", () => {
@@ -1310,6 +1335,28 @@ test("an exit code is recorded only where the payload carries one", () => {
   const root = verified(guarded([]));
   run(root, "PostToolUseFailure", ranBash("npm test", { exit_code: 1 }));
   assert.equal(ledger(root)[0].exitCode, 1);
+});
+
+// The shape a live host actually sends. Roadmap 230's probe caught
+// `PostToolUseFailure` with no `tool_response` at all and the code in `error`
+// as "Exit code 3", so this string is the only carrier there is — and without
+// reading it, a linter whose green IS a non-zero exit is recorded red on the
+// one event that ever carries it.
+test("an exit code is read from the failure event's error string", () => {
+  const root = verified(guarded([]), [
+    { id: "linter", argv: ["npm", "test"], expectedExit: 3, paths: [], lanes: ["ci"] },
+  ]);
+  const out = run(root, "PostToolUseFailure", { ...ranBash("npm test"), error: "Exit code 3" });
+  assert.deepEqual(JSON.parse(out.stdout).jig.verify, { entry: "linter", passed: true, exitCode: 3 });
+  assert.equal(ledger(root)[0].decision, "verified");
+});
+
+test("an error the host did not phrase as an exit code records none", () => {
+  const root = verified(guarded([]));
+  run(root, "PostToolUseFailure", { ...ranBash("npm test"), error: "Command timed out after 2m" });
+  const row = ledger(root)[0];
+  assert.equal(row.exitCode, null, "a number was invented from prose");
+  assert.equal(row.decision, "verify-failed");
 });
 
 // The event is the documented signal, not the only one. A host that hands jig a

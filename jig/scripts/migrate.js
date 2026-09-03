@@ -458,18 +458,14 @@ function migrateEditGuards(root, modules, guards, states) {
   // rows keep their ids, their modes and their provenance: this migration moves
   // WHEN a guard runs and nothing about what the owner decided.
   //
-  // The one answer it cannot carry is `teach`. That channel is PostToolUse only
-  // — a non-blocking PreToolUse channel is unverified against a live host — so a
-  // guard that moves loses it. Carrying it would leave a row `validateConfig`
-  // warns about on every single call and then ignores, which is worse than
-  // dropping it and saying so; `teachingLost` below is what says so.
+  // `teach` moves with the rest of them. It used to be the one answer this
+  // migration could not carry, because the channel was verified on PostToolUse
+  // alone; 2.13.0 measured it on PreToolUse too, so carrying the key preserves
+  // the owner's answer instead of discarding it one event earlier.
   const record = JSON.parse(jig.stripBom(readText(root, CONFIG_PATH).toString("utf8")));
-  const teachingLost = [];
   const newGuards = (record.guards || []).map((g) => {
     if (!isObject(g) || !proofBySlug.has(g.check) || g.runner !== "PostToolUse") return g;
-    const moved = { ...g, runner: "PreToolUse", proof: proofBySlug.get(g.check) };
-    if (moved.teach === true) { teachingLost.push(g.id); delete moved.teach; }
-    return moved;
+    return { ...g, runner: "PreToolUse", proof: proofBySlug.get(g.check) };
   });
   const configContent = JSON.stringify({ ...record, guards: newGuards }, null, 2) + "\n";
   const movedIds = moving.flatMap((row) => row.rows.map((g) => g.id));
@@ -523,11 +519,6 @@ function migrateEditGuards(root, modules, guards, states) {
       "No mode changes here. A guard that observes keeps observing, one event earlier.",
     ].concat(refused.length
       ? ["Some guards cannot move and are named on `refused`. They stay on " + OLD_EDIT_LEVER + ", which still runs."]
-      : []).concat(teachingLost.length
-      ? [teachingLost.join(", ") + (teachingLost.length === 1 ? " was" : " were") + " opted into teaching," +
-          " and teaching speaks on PostToolUse only. Moving " + (teachingLost.length === 1 ? "it" : "them") +
-          " earlier means " + (teachingLost.length === 1 ? "it stops" : "they stop") + " teaching. The guard" +
-          " still runs, and now refuses the edit instead of describing it afterwards."]
       : []),
   };
 }

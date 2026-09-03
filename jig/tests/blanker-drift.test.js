@@ -54,13 +54,26 @@ const BLOCKS = [
   },
   {
     // A removal fixture is one file before an edit and the same file after it,
-    // and admission and the shipped driver have to read that fence the same way
-    // or a check admits on a pair the driver splits differently — the selftest
-    // then disagrees with the admission that let the check in.
-    what: "the removal fixture's fence",
+    // and an extract fixture is a doc and the union its names appear in. Both
+    // are two texts in one string, and admission and the shipped driver have to
+    // read the fence the same way or a check admits on a pair the driver splits
+    // differently — the selftest then disagrees with the admission that let the
+    // check in.
+    what: "the fenced fixture's split",
     files: [DRIVER, ADMISSION],
-    from: "function fencedHalves(text) {",
-    to: '  return { before: text.slice(0, at), after: nl === -1 ? "" : text.slice(nl + 1) };\n}',
+    from: "function fencedHalves(text, label) {",
+    // Down to the label itself: a fence read the same way on both sides but
+    // named differently on one is the same drift with an extra step.
+    to: 'const PAIRED_FENCE = "paired";',
+  },
+  {
+    // The extract rule. Admission decides a check is coverage by it and the
+    // shipped driver reports findings by it, and a hand-kept second copy is what
+    // lets a check admit on a pair the driver reads the other way.
+    what: "the doc-name lookup",
+    files: [DRIVER, ADMISSION],
+    from: "function extractMisses(det, doc, union) {",
+    to: "  return out;\n}",
   },
   {
     // The lanes run the same argv the installer runs, and on Windows `npx` is a

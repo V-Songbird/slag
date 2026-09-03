@@ -4,6 +4,23 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.13.0] — 2026-09-02
+
+### Added
+
+- A check can now catch the doc-sync mistake that actually happens. Until now jig could tell you a file's pair did not change alongside it — but the case that bites is the one where both files changed and the doc still names the flag you renamed. An `extract` check pulls names out of the files you point it at and requires each one to appear somewhere in the files you paired them with. A name that appears nowhere is reported at its own line. At commit time it reads what you staged, on both sides.
+- A verification run leaves its green row whichever lane ran it. Until now only a Bash call in a session counted, so a repository whose CI or commit hook ran the suite still reported that nothing had been seen to run it.
+- A toolchain demonstration that comes back unverified now hands you the tool's own output. It used to tell you your linter had failed to catch its own planted violation and give you nothing to look at.
+
+### Changed
+
+- An observing guard can teach from either hook event, not just the later one. 2.11.0 restricted it to the after-the-fact event because the earlier channel was unmeasured; it has now been measured on a live host and it works, which matters because a fresh install's only edit guard runs on the earlier one — so until now teaching could not be switched on at all on a new project. Where an armed guard refuses the same call, the teaching line rides along with the refusal and never replaces it.
+- jig reads a failed command's exit code from where the host actually puts it. The failure event carries no tool response at all; the code arrives in the error text. jig was looking in the wrong place, so a tool whose success is a non-zero exit was recorded as a failure. Measured, not assumed — the record is in the repository.
+
+### Known limits
+
+- Two host behaviours are now written down as measured rather than believed: the failure event does fire, it does carry the command, and it replaces the success event rather than accompanying it. One remains unmeasured and is labelled as such — whether a reply that both refuses a call and carries a teaching line has that line surfaced. jig sends both, because dropping the refusal is the unsafe direction whatever the answer turns out to be.
+
 ## [2.12.0] — 2026-09-02
 
 ### Added

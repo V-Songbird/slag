@@ -615,6 +615,10 @@ function execVerify(projectRoot, tool, seedDir) {
     code,
     caught: code !== null && expected.includes(code),
     expectedExit: tool.verify.expectedExit,
+    // What the tool actually said. An exit code alone tells an owner their
+    // config failed its demonstration and gives them nothing to read; both
+    // streams, because linters split their diagnostics between them.
+    output: ((run.stdout || "") + (run.stderr || "")).trim(),
   };
 }
 
