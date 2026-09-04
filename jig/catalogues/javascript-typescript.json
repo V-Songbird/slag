@@ -321,6 +321,11 @@
               "--severity",
               "high"
             ]
+          },
+          "refuseWhen": {
+            "file": "yarn.lock",
+            "contains": "# yarn lockfile v1",
+            "why": "`yarn npm audit` is Yarn Berry's command and this project's yarn.lock is a v1 lockfile. On yarn 1 the audit is `yarn audit --level high`, and its exit code is a bitmask of the severities it found rather than 1 — a different command under a different contract, and jig will not wire one as the other. Run `yarn audit --level high` yourself, or migrate the project to Yarn Berry."
           }
         },
         "bun": {

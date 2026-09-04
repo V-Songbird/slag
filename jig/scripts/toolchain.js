@@ -228,6 +228,29 @@ function toolFor(tool, manager) {
   return merged;
 }
 
+// When a `byManager` entry does not apply after all. One package manager can be
+// two programs: `yarn npm audit --severity high` is Yarn Berry's command, and on
+// yarn 1 it is `error Command "npm" not found.` — which exits 1, the very code
+// the audit row calls a catch. `pickPackageManager` cannot tell them apart,
+// because both write a file called `yarn.lock` and it reads the name and never
+// the header.
+//
+// So the entry states the marker that rules it out, and the tool is refused onto
+// the plan rather than wired. Not a second manager: adding `yarn-classic` to an
+// edition's `detect.packageManagers` would make `managerForTool` refuse every
+// OTHER tool on a yarn 1 project, which is worse than the defect. A refusal the
+// owner reads is the honest answer to "jig cannot run this here".
+function refuseWhen(root, tool, id, manager) {
+  const rule = tool.refuseWhen;
+  if (!isObject(rule)) return null;
+  if (!nonEmptyString(rule.file) || !nonEmptyString(rule.contains) || !nonEmptyString(rule.why)) {
+    throw refuse(id + " states a refuseWhen with no file, marker and reason, so jig cannot tell when it applies");
+  }
+  const text = readIfExists(path.join(root, rule.file));
+  if (text === null || !text.includes(rule.contains)) return null;
+  return id + " is not offered under " + manager + " in this project: " + rule.why;
+}
+
 function readIfExists(full) {
   try {
     return fs.readFileSync(full, "utf8");
@@ -541,7 +564,7 @@ function managerForTool(edition, tool, packageManager, allowed) {
 // three"). Nothing is spawned here — a proposal the owner has not read yet
 // must not have touched anything.
 function proposeInstalls(projectRoot, edition, toolIds, packageManager) {
-  requireRoot(projectRoot);
+  const root = requireRoot(projectRoot);
   const allowed = editionManagers(edition);
   if (!Array.isArray(toolIds) || !toolIds.length || !toolIds.every(nonEmptyString)) {
     throw refuse("proposeInstalls needs at least one tool id, and jig was given " + JSON.stringify(toolIds));
@@ -562,6 +585,8 @@ function proposeInstalls(projectRoot, edition, toolIds, packageManager) {
     // into the project's own manifest and `ciStep` into the workflow, and both
     // spelled npm on a pnpm project before roadmap 251.
     const tool = toolFor(row, manager);
+    const why = refuseWhen(root, tool, id, manager);
+    if (why) throw refuse(why);
     const command = tool.install[manager];
     const argv = parseCommand(command, id + "'s " + manager + " install command");
 
