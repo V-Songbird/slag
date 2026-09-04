@@ -4,6 +4,35 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.15.0] — 2026-09-04
+
+### Fixed
+
+- A project on pnpm, Yarn or Bun was wired lanes that ran npm. A tool's verify command, the line jig writes into your manifest and the step it writes into CI all spelled `npm` whatever manager the project uses — so the audit lane ran npm's auditor over a tree npm never resolved, and presence was probed on npm for tools this project reaches through another manager. All three now name the manager the tool was installed with.
+- A Yarn 1 project was wired an audit command that does not exist there. `yarn npm audit` is Yarn Berry's subcommand; under Yarn 1 it is `error Command "npm" not found` and exits 1 — the same code the row counts as a catch, so a command that audited nothing read as one. jig now recognises the two from the lockfile header and refuses the tool onto the plan instead of wiring it.
+- The audit probe planted npm's `package-lock.json` whatever the manager was, so a pnpm or Bun audit was seeded a file it does not read, came back clean, and jig reported the tool as catching nothing over a config that works. Each manager is seeded its own lockfile now, or told plainly that jig could not plant one.
+- The JVM install wrote no source at all. Its build script did not compile, and once it did, `check` reported compile, both linters and test every one NO-SOURCE and exited 0 — a green lane over an empty tree. The edition ships a starter class and a JUnit 5 smoke test, and all six tasks run over real files.
+- Go's forbidden-call rules collapsed into a single match-everything rule wearing the first entry's message. A two-file Go starter carrying no print statement at all came back with six issues, each blaming a debug print. The rules are read as written now, and the same tree is clean.
+- A .NET package install could not find a project to add to, and a rejected install still read as applied. All three package-kind analyzers exited 1, the plan replayed the failure as installed and skipped it, and `.jig/verify.json` then named three analyzers that were in no project while the build came back green over them. Installs name their project, and a rejection now finishes the change as refused.
+- `dotnet test` ignored the `.runsettings` jig wrote for it, because nothing handed it the file — every setting in it was inert, including the one that makes a zero-discovery run fail. The verify command and the CI step pass it now.
+- Rust's lint levels covered eight of the thirty-two lints jig's own detectors name; the rest are restriction-group lints that a blanket deny does not reach, so those cells claimed a level nothing set. All thirty-two are written, and a violation added to jig's own starter is denied.
+- In a repository with a pre-commit hook of its own, jig's woven line ran the check driver over the working tree instead of the staged one, and left no ledger row — so what the guard saw at commit time was not what was being committed.
+- A Python install could leave the lane it wrote failing on the first run. Installing `pytest` and `pytest-cov` was proven by asking `pytest` alone, so on a machine carrying one and not the other jig planned no install, offered none, and the coverage flags in the config it had just written were rejected. Every distribution an install names has to answer now. Two Python samples also composed HTTP and validation libraries into your `requirements.txt` and `pyproject.toml` — dependencies a new project does not have and the starter never imports. Both are gone.
+- A check module missing its `fixtures` export installed armed and was pulled back to observe on every call, leaving the owner a check that refused nothing and no line saying so. Such a module is now named and discarded at plan time.
+- A paired-document check whose companion glob matched no file in the project reported every touch of its watched paths as a document left behind, on every commit, with no edit that could clear it. The relation is read against the repository now, and the class is reported skipped instead.
+- A re-plan took back the commit lane the owner had opted into. A second interview about an unrelated class recomputed an existing tool's entry without that lane and proposed writing it out, with nothing on the page saying so. Adding a lane is still a run's job; removing one is not.
+- Five lines of the consent block described a repository other than yours — a guard called blocking on an observe-only plan, a hook called unrun where it is wired, a workflow said to fail the build on a plan whose workflow can only pass. Each line now says what is true of this repository, and what would make it so where a lane is not live.
+- Three more plan-page claims did not match what the plan installs: a class whose entire matrix row was a gap could be left off the list that exists to report exactly that; a fix hint printed a command that answers "command not found"; and the no-session-guard paragraph blamed a selection flag on plans that carried none.
+- A `--select` id that matched nothing was drawn as a real class. A run with bare ids where namespaced ones were needed produced a full matrix of gaps and an enforcement-gap section listing all of them, on a repository whose checks were catching violations. Unmatched ids are now counted and named above the matrix, with the id each one probably meant.
+- Three .NET analyzers sharing one build command spawned it three times and printed three passes for one run, and the toolchain probe's captured output could be truncated mid-escape and swallow whatever your terminal printed next.
+
+### Changed
+
+- A tool row may state `byManager` overrides. The verify command, the install seed, the manifest line and the CI step are each resolved for the package manager this project actually uses, at the three places that already know which one that is.
+- A row may name a marker that rules a tool out. Where one package manager's name covers two incompatible programs, the tool is refused onto the plan rather than wired to fail later.
+- A tool-rule detector may name the file its levels live in, held to the same rule as every other artifact: named only where this plan writes it.
+- The JVM and Go editions, and every ecosystem's greenfield tree, are driven end to end before release.
+
 ## [2.14.0] — 2026-09-03
 
 ### Fixed
