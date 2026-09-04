@@ -308,7 +308,8 @@
               "audit",
               "--audit-level=high"
             ]
-          }
+          },
+          "seed": null
         },
         "yarn": {
           "wiring": "\"audit\": \"yarn npm audit --severity high\"",
@@ -326,7 +327,8 @@
             "file": "yarn.lock",
             "contains": "# yarn lockfile v1",
             "why": "`yarn npm audit` is Yarn Berry's command and this project's yarn.lock is a v1 lockfile. On yarn 1 the audit is `yarn audit --level high`, and its exit code is a bitmask of the severities it found rather than 1 — a different command under a different contract, and jig will not wire one as the other. Run `yarn audit --level high` yourself, or migrate the project to Yarn Berry."
-          }
+          },
+          "seed": null
         },
         "bun": {
           "wiring": "\"audit\": \"bun audit --audit-level=high\"",
@@ -337,6 +339,10 @@
               "audit",
               "--audit-level=high"
             ]
+          },
+          "seed": {
+            "path": "bun.lock",
+            "sample": "{\n  \"lockfileVersion\": 2,\n  \"configVersion\": 1,\n  \"workspaces\": {\n    \"\": {\n      \"name\": \"jig-audit-seed\",\n      \"dependencies\": {\n        \"minimist\": \"1.2.5\",\n      },\n    },\n  },\n  \"packages\": {\n    \"minimist\": [\"minimist@1.2.5\", \"\", {}, \"sha512-FM9nNUYrRBAELZQT3xeZQ7fmMOBg6nWNmJKTcgsJeaLstP/UODVpGsr5OhXhhXg6f+qtJ8uiZ+PUxkDWcgIXLw==\"],\n  }\n}\n"
           }
         }
       }

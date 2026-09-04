@@ -1287,3 +1287,30 @@ test("a byManager entry that cannot run here is refused, never wired", () => {
     assert.equal(row.packageManager, manager);
   }
 });
+
+// Roadmap 254. The audit row carried one seed, npm's `package-lock.json`, and
+// `execToolchainProbe` planted it whatever the manager was. A pnpm audit reads
+// `pnpm-lock.yaml` and a bun audit reads `bun.lock`, so the planted file was
+// ignored, the seeded run came back clean, and the probe reported `caught:
+// false` for a config that works.
+//
+// bun's seed is the lockfile bun itself wrote, and `bun audit --audit-level=high`
+// was watched to exit 1 on it — "1 vulnerability (1 critical)". pnpm's and
+// yarn's audit endpoints could not be reached from the machine that closed this,
+// so neither ships a seed: a disclosed "jig could not plant one" is honest where
+// a lockfile the tool ignores is not.
+test("an audit seed is that manager's own lockfile, or no seed at all", () => {
+  const row = edition("javascript-typescript").toolchain.find((t) => t.id === "audit");
+  const LOCKFILE = { npm: "package-lock.json", pnpm: "pnpm-lock.yaml", yarn: "yarn.lock", bun: "bun.lock" };
+  for (const manager of Object.keys(row.install)) {
+    const seed = toolchain.toolFor(row, manager).seed;
+    if (!seed) continue;
+    assert.equal(seed.path, LOCKFILE[manager],
+      manager + " is planted `" + seed.path + "`, which is a lockfile " + manager + " does not read");
+    assert.match(seed.sample, /minimist/, manager + "'s seed carries no advisory to find");
+  }
+  // The two that ship one, and the shape each manager writes.
+  assert.match(toolchain.toolFor(row, "npm").seed.sample, /"lockfileVersion": 3/);
+  assert.match(toolchain.toolFor(row, "bun").seed.sample, /"lockfileVersion": 2/);
+  assert.equal(toolchain.toolFor(row, "pnpm").seed, null);
+});
