@@ -1179,13 +1179,31 @@ test("release gate G7: every edition's starter scaffolds into a tree its own bui
 // of asking; a scanner this machine does not carry is a named skip as always.
 const STARTER_TOOL_ROLES = ["formatter", "linter", "type-checker", "test-runner", "security-scanner"];
 
+// A launcher the starter does not carry, and what stands in for it. Roadmap
+// 258: every jvm verify begins `./gradlew`, and the wrapper is written by the
+// `gradle wrapper` scaffold — which this gate does not run, because it runs no
+// install. So `./gradlew` was never there, all six jvm arms left every release
+// as named skips, and checkstyle, pmd, errorprone, detekt, spotbugs and junit5
+// had never been run over the tree jig writes by any gate. That is the exact
+// hole G10 was widened in 2.14.0 to close, still open in one edition.
+//
+// The wrapper is a pinned launcher for the same program: `./gradlew
+// checkstyleMain` and `gradle checkstyleMain` run the same task against the same
+// config, and the version pinning — the one thing the wrapper adds — is what G7
+// already holds. So the launcher is substituted and the arm SAYS so, because a
+// gate that quietly runs a different command from the one on the row is a gate
+// nobody can read.
+const LAUNCHERS = { "./gradlew": "gradle" };
+
 // The argv jig runs, minus the package runner in front of it. `npx <tool>` would
 // FETCH `<tool>`, and this gate installs nothing — so the only tool that can run
 // over the starter is one already on the machine.
 const FETCHING_RUNNERS = ["npx", "pnpx", "bunx", "uvx"];
 function toolArgv(tool) {
   const argv = tool.verify.argv;
-  return FETCHING_RUNNERS.includes(argv[0]) ? argv.slice(1) : argv;
+  const bare = FETCHING_RUNNERS.includes(argv[0]) ? argv.slice(1) : argv;
+  const stands = LAUNCHERS[bare[0]];
+  return stands ? [stands, ...bare.slice(1)] : bare;
 }
 
 // jig's own reading of "is this tool here", not a second one. This gate had a
@@ -1211,9 +1229,18 @@ function toolPresent(tool) {
     // program in the command is here, which it can ask directly. Without this,
     // fixing the false `present` in 2.14.0 would have turned three dotnet arms
     // into skips and quietly cost the gate the config it exists to read.
+    // And where a launcher stood in, the engine's answer is about a DIFFERENT
+    // program: it was asked whether `./gradlew` is here, which it is not and
+    // never will be in a tree no install touched, while what this gate runs is
+    // `gradle`. So that one is asked directly, the way the `unprobeable` branch
+    // already asks. Confined to the substitution on purpose — widened past it,
+    // two javascript arms started running commands that need a `node_modules`
+    // this gate never creates, and failed on the missing install rather than on
+    // anything jig wrote.
+    const stood = LAUNCHERS[tool.verify.argv[0]] !== undefined;
     runnableCache.set(key, seen.how === "unprobeable"
       ? !FETCHING_RUNNERS.includes(argv[0]) && runnable(argv[0])
-      : seen.present && seen.how === "probe");
+      : stood ? runnable(argv[0]) : seen.present && seen.how === "probe");
   }
   return runnableCache.get(key);
 }
@@ -1348,7 +1375,15 @@ test("release gate G10: every tool an edition installs exits clean over the star
         // gate's output altogether, neither run nor disclosed. It is a named skip
         // now, and the reason names the arm that DID run the command.
         const already = ran.get(key);
-        await t.test(row.id + ": " + tool.id + " over the starter", {
+        // The row's own first word, where this gate ran something else for it.
+        // Named on the arm rather than left to the reader of this file: the
+        // whole point of the substitution is that the arm stops being a skip,
+        // and a run that quietly used a different launcher would be worth less
+        // than the skip it replaced.
+        const stood = LAUNCHERS[tool.verify.argv[0]]
+          ? " (`" + argv[0] + "` for `" + tool.verify.argv[0] + "`, the wrapper no install here writes)"
+          : "";
+        await t.test(row.id + ": " + tool.id + " over the starter" + stood, {
           // Named, never silent: a release cut here has to say which tools nobody
           // ran. The reason is presence alone, so a runner carrying the toolchain
           // runs every one of these.
@@ -1358,9 +1393,10 @@ test("release gate G10: every tool an edition installs exits clean over the star
               ? false
               : argv[0] + " is not on this machine, so " + tool.id + " read nothing here",
         }, () => {
-          const run = spawnSync(argv[0], argv.slice(1), {
+          const started = launch(argv);
+          const run = spawnSync(started[0], started.slice(1), {
             cwd: root, shell: false, windowsHide: true, encoding: "utf8",
-            timeout: 600000, maxBuffer: 8 * 1024 * 1024,
+            timeout: 900000, maxBuffer: 8 * 1024 * 1024,
           });
           assert.equal(run.status, 0, row.id + ": `" + argv.join(" ") + "` exited " + run.status +
             " over a starter jig had just written, with the config jig wrote for " + tool.id + "\n" +
