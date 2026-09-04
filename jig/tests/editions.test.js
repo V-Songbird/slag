@@ -619,3 +619,59 @@ test("manifestFor hands back the starter tree, and an empty one where the editio
   const go = editions.loadEdition(PLUGIN_ROOT, "go");
   assert.deepEqual(editions.manifestFor(go, "go").starter, []);
 });
+
+// ---------------------------------------------------------------------------
+// Roadmap 246 — what the first jvm and go drives found
+// ---------------------------------------------------------------------------
+
+// The jvm build script did not compile. `options.errorprone { }` is an extension
+// the `net.ltgt.errorprone` plugin adds, and Kotlin needs the import to see it:
+// without it `error(...)` resolved to Kotlin's own `error(message: Any)` and
+// gradle reported 17 errors before it could write a wrapper. Driven on gradle
+// 9.7.1: with the import the same composed file is BUILD SUCCESSFUL.
+test("the jvm build script imports the extension its own config block uses", () => {
+  const jvm = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, "catalogues", "jvm.json"), "utf-8"));
+  const errorprone = jvm.toolchain.find((t) => t.id === "errorprone");
+  assert.match(errorprone.configSample, /^import net\.ltgt\.gradle\.errorprone\.errorprone$/m,
+    "options.errorprone { } is used with no import, so the script will not compile");
+  // The import has to reach the top of the composed file: Gradle reads imports
+  // before `plugins { }` and rejects one after it.
+  const sections = require("../scripts/sections.js");
+  const parts = jvm.toolchain.filter((t) => t.configPath === "build.gradle.kts")
+    .map((t) => ({ source: t.id, body: t.configSample }));
+  const merged = sections.merge(parts, "build.gradle.kts");
+  const lines = merged.body.split("\n").filter((l) => l.trim());
+  assert.match(lines[0], /^import /, "the composed script opens with " + JSON.stringify(lines[0]));
+});
+
+// A jvm install wrote `settings.gradle.kts` and no source at all, so
+// `./gradlew check` reported compileJava, checkstyleMain, pmdMain and test all
+// NO-SOURCE and exited 0 — a green lane over nothing. With the starter the same
+// command runs six real tasks over real files and still exits 0.
+test("the jvm edition ships a starter its own build has something to check", () => {
+  const jvm = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, "catalogues", "jvm.json"), "utf-8"));
+  for (const manager of jvm.detect.packageManagers) {
+    const files = jvm.detect.manifest.starter.files[manager] || [];
+    const paths = files.map((f) => f.path);
+    assert.ok(paths.some((p) => p.startsWith("src/main/java/")), manager + " lays down no main source");
+    assert.ok(paths.some((p) => p.startsWith("src/test/java/")), manager + " lays down no test source");
+  }
+  const test = jvm.detect.manifest.starter.files.gradle.find((f) => f.path.startsWith("src/test/"));
+  assert.match(test.body, /@Test/, "the starter test carries no test annotation to discover");
+  assert.match(test.body, /assert/i, "the starter test asserts nothing, which pmd's own ruleset refuses");
+});
+
+// golangci-lint 2.x names a forbidigo entry's regex `pattern`. Under the v1
+// spelling `p` the whole list degraded to one match-everything rule wearing the
+// first entry's message: driven on 2.12.2, a two-file Go starter with no print
+// in it came back with six issues — "use of `testing.T` forbidden because
+// 'debug print left in committed code'". With `pattern` the same tree is clean.
+test("the go linter's forbidigo rules use the key its own version reads", () => {
+  const go = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, "catalogues", "go.json"), "utf-8"));
+  const lint = go.toolchain.find((t) => t.id === "golangci-lint");
+  assert.match(lint.configSample, /^version: "2"$/m, "this assertion is written for the v2 schema");
+  assert.equal(/^\s*- p:\s/m.test(lint.configSample), false,
+    "a forbidigo entry still uses the v1 `p:` key, which v2 reads as no pattern at all");
+  const patterns = lint.configSample.match(/^\s*- pattern: .+$/gm) || [];
+  assert.ok(patterns.length >= 4, "only " + patterns.length + " forbidigo patterns survived");
+});

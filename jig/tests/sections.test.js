@@ -432,7 +432,13 @@ test("two jvm tools sharing build.gradle.kts produce one script Gradle would acc
   // not a merge that lost something, it is a build script that cannot compile.
   const body = bodyOf(root, plan, "build.gradle.kts");
   assert.equal(body.match(/^plugins \{$/gm).length, 1, body);
-  assert.equal(body.indexOf("plugins {"), 0, "and Gradle wants it first");
+  // Gradle wants `plugins { }` before everything except an import, and
+  // errorprone needs one for the extension its own block uses (roadmap 246).
+  // So the only lines allowed above it are imports and blank lines.
+  const above = body.slice(0, body.indexOf("plugins {")).split("\n").filter((l) => l.trim());
+  assert.deepEqual(above.filter((l) => !l.startsWith("import ")), [],
+    "something other than an import sits above the plugins block: " + above.join(" | "));
+  assert.ok(above.includes("import net.ltgt.gradle.errorprone.errorprone"), body);
   assert.equal(body.match(/^ *java$/gm).length, 1, "the plugin both tools ask for is applied once");
   assert.ok(body.includes('errorprone("com.google.errorprone:error_prone_core:2.42.0")'), body);
   assert.ok(body.includes("options.errorprone {"), body);
