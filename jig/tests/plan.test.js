@@ -2389,7 +2389,7 @@ test("tools that verify with one argv ride one lane entry that names them all", 
   const items = edition.toolchain.map((t) => ({
     item: { id: t.id, role: t.role, edition: "dotnet", packageManager: "dotnet" },
   }));
-  const { entries } = engine.verifyEntriesFor([edition], items, ["ci"], null);
+  const { entries } = engine.verifyEntriesFor(root, [edition], items, ["ci"], null);
   const build = entries.filter((e) => e.argv.join(" ") === "dotnet build --configuration Release -warnaserror");
   assert.equal(build.length, 1, "one build is wired as " + build.length + " lane entries");
   assert.deepEqual(build[0].proves.sort(), ["csc", "dotnet-analyzers", "sonaranalyzer-csharp"]);

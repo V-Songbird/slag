@@ -43,6 +43,7 @@ const lib = require("../hooks/jig-lib.js");
 const admission = require("../scripts/admission.js");
 const editions = require("../scripts/editions.js");
 const toolchain = require("../scripts/toolchain.js");
+const sections = require("../scripts/sections.js");
 const authored = require("./authored.js");
 
 const PLUGIN_ROOT = path.join(__dirname, "..");
@@ -923,12 +924,50 @@ test("release gate G6: every lever the engine can author is named in SKILL.md se
 // named subtest carrying the reason. Skipped, never silent: a release cut on a
 // machine with no cargo has to say which starters nobody built.
 
-// No shell, ever (SCOPE, the derail pass), so a `.cmd` or `.bat` shim counts as
-// absent here — jig would not start one either.
+// Still no shell, ever (SCOPE, the derail pass): nothing here is handed to
+// `shell: true` and no argv is ever spliced into a command line. But a bare
+// `spawnSync("gradle")` reported gradle absent on a machine carrying gradle
+// 9.7.1, and skipped the whole jvm arm of this gate for it — Windows ships
+// gradle as `gradle.bat`, and since the CVE-2024-27980 fix Node refuses to
+// start a `.bat` by name (ENOENT) or by path (EINVAL) without an interpreter.
+//
+// So a shim is resolved to the file on the PATH and launched through
+// `cmd.exe /d /s /c`, named outright, with the arguments still an array. That
+// is one named interpreter, not a shell opened over a string, and it is what
+// makes the arm run rather than skip.
+function shim(exe) {
+  if (process.platform !== "win32") return null;
+  const exts = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+  for (const dir of (process.env.PATH || "").split(path.delimiter).filter(Boolean)) {
+    for (const ext of exts) {
+      if (!/^\.(bat|cmd)$/i.test(ext)) continue;
+      const full = path.join(dir, exe + ext);
+      try {
+        if (fs.statSync(full).isFile()) return full;
+      } catch { /* the next candidate */ }
+    }
+  }
+  return null;
+}
+
+// The argv this machine actually starts for `argv`, shim resolved. Every caller
+// runs what this returns, so the command a skip decision was made about and the
+// command that runs are one thing.
+const launchCache = new Map();
+function launch(argv) {
+  const exe = argv[0];
+  if (!launchCache.has(exe)) {
+    const found = shim(exe);
+    launchCache.set(exe, found ? [process.env.ComSpec || "cmd.exe", "/d", "/s", "/c", found] : [exe]);
+  }
+  return [...launchCache.get(exe), ...argv.slice(1)];
+}
+
 const runnableCache = new Map();
 function runnable(exe) {
   if (!runnableCache.has(exe)) {
-    const run = spawnSync(exe, ["--version"], { shell: false, windowsHide: true, encoding: "utf8", timeout: 60000 });
+    const argv = launch([exe, "--version"]);
+    const run = spawnSync(argv[0], argv.slice(1), { shell: false, windowsHide: true, encoding: "utf8", timeout: 60000 });
     runnableCache.set(exe, !run.error);
   }
   return runnableCache.get(exe);
@@ -968,6 +1007,12 @@ const STARTER_BUILDS = {
     // starter row would recognise.
     manager: "gradle",
     runs: [["gradle", "--no-daemon", "--offline", "check"]],
+    // `check` exits 0 and prints `BUILD SUCCESSFUL` over a tree with no test
+    // sources in it at all — the run that found nothing says
+    // `> Task :test NO-SOURCE` and the run that found the starter's own test
+    // says `> Task :test`. That one word is the whole difference, so it is what
+    // the arm asserts.
+    proves: /^> Task :test(?! *(NO-SOURCE|SKIPPED))/m,
   },
   dotnet: {
     // The one arm that reaches the network: the starter's test project restores
@@ -1058,9 +1103,10 @@ test("release gate G7: every edition's starter scaffolds into a tree its own bui
         // the starter's test.
         const env = { ...process.env };
         delete env.NODE_TEST_CONTEXT;
-        const run = spawnSync(argv[0], argv.slice(1), {
+        const started = launch(argv);
+        const run = spawnSync(started[0], started.slice(1), {
           cwd: root, shell: false, windowsHide: true, encoding: "utf8", env,
-          timeout: 300000, maxBuffer: 8 * 1024 * 1024,
+          timeout: 600000, maxBuffer: 8 * 1024 * 1024,
         });
         output = String(run.stdout || "") + String(run.stderr || "");
         assert.equal(run.status, 0, row.id + ": `" + argv.join(" ") + "` exited " + run.status +
@@ -2125,4 +2171,105 @@ test("release gate G20: the woven activation line runs what the shim runs", () =
         " different lane from every other install.");
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// G21 — a build-script section can actually land
+// ---------------------------------------------------------------------------
+//
+// Roadmap 256. `spotbugs` and `detekt` each write a config file under `config/`
+// and state the `plugins { }` block that makes gradle read it in `wiring` —
+// which is prose nothing composes. So jig wrote both configs, offered
+// `./gradlew spotbugsMain` and `./gradlew detekt`, and both came back BUILD
+// FAILED: the tasks do not exist, because the plugins were never applied.
+//
+// A row says that now with `scriptPath` and `scriptSample`, and the composer
+// merges it. Two things have to hold for such a section to reach disk, and
+// neither is visible from the row alone: the file has to be one
+// `sections.mergeable` can compose, and something else in the edition has to
+// write it — a section is a passenger, and on its own it is handed back as a
+// snippet rather than written as somebody's whole build file.
+test("release gate G21: every build-script section names a file this edition composes and writes", () => {
+  let checked = 0;
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    for (const tool of edition.toolchain) {
+      if (typeof tool.scriptPath !== "string" || tool.scriptPath === "") continue;
+      checked++;
+      const where = row.id + "/" + tool.id + " states its build-script section in " + tool.scriptPath;
+      assert.equal(typeof tool.scriptSample, "string", where + " with no body to put there");
+      assert.ok(tool.scriptSample.trim(), where + " with an empty body");
+      assert.ok(sections.mergeable(tool.scriptPath),
+        where + ", and jig cannot compose that file — the section would be handed back as a snippet on" +
+        " every install, so the tool's own config would never be read by anything.");
+      // Every manager, because a manager's starter is what writes the file when
+      // no other tool is ticked, and `starter.files` may be keyed by manager.
+      const writers = edition.toolchain.filter((t) => t.configPath === tool.scriptPath).map((t) => t.id);
+      const starters = (edition.detect.packageManagers || [null]).filter((manager) => {
+        const m = editions.manifestFor(edition, manager);
+        return m.path === tool.scriptPath || (m.starter || []).some((f) => f.path === tool.scriptPath);
+      });
+      assert.ok(writers.length || starters.length,
+        where + ", and nothing in this edition writes that file — no tool configures it and no starter" +
+        " carries it, so the section has nothing to compose into and could only ever be a snippet.");
+    }
+  }
+  if (!checked) disclose("G21/script-sections", "no shipped tool states a build-script section");
+});
+
+// ---------------------------------------------------------------------------
+// G22 — a flag the machine decides is dropped safely, and only that flag
+// ---------------------------------------------------------------------------
+//
+// Roadmap 257. `go-test` verified with `go test -race -shuffle=on -count=1
+// ./...`, and on a box with no C toolchain the lane jig had just written came
+// back `FAILED go-test — exited 2` with `go: -race requires cgo`. `go env
+// CGO_ENABLED` reads 0 wherever no compiler is installed, which is the default
+// state of a Windows machine, so a greenfield go install shipped a commit lane
+// that was red on its own tree.
+//
+// A row states such a flag as `verify.dropUnless`, and the lane composer asks
+// once and shortens the argv. Three things have to hold for that to be safe, and
+// none of them is checked at install time on a machine where the probe happens
+// to answer the keeping value.
+test("release gate G22: a verify flag dropped on a machine probe is stated so it can be dropped safely", () => {
+  let checked = 0;
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    for (const tool of edition.toolchain) {
+      const rules = tool.verify && tool.verify.dropUnless;
+      if (!Array.isArray(rules) || !rules.length) continue;
+      const argv = (tool.verify && tool.verify.argv) || [];
+      for (const rule of rules) {
+        checked++;
+        const where = row.id + "/" + tool.id + " drops `" + rule.flag + "` unless `" + rule.probe.join(" ") + "`";
+        const at = argv.indexOf(rule.flag);
+        assert.ok(at >= 0, where + ", and that flag is not in its own verify argv — jig would narrow a" +
+          " command that never carried it.");
+        // A flag whose value is a SEPARATE token cannot be dropped by removing
+        // the token: `-timeout 30s` would leave `30s` behind as an operand, and
+        // the lane would run a different command from the one anybody read. The
+        // fix is always available to the author — write it as `-timeout=30s`.
+        const next = argv[at + 1];
+        assert.ok(rule.flag.includes("=") || next === undefined || next.startsWith("-"),
+          where + ", and the token after it is " + JSON.stringify(next) + " — a value dropping the flag" +
+          " would strand. Write the flag with its value attached (`" + rule.flag + "=…`) so removing one" +
+          " token removes the whole option.");
+        // And the probe has to be answerable wherever the tool is. Asking a
+        // program the project may not carry turns "cannot tell" into "drop the
+        // flag", which is the softening this whole rule exists to avoid — so
+        // the probe runs the tool's own executable and nothing else.
+        assert.equal(rule.probe[0], argv[0],
+          where + ", and the probe runs `" + rule.probe[0] + "` while the lane runs `" + argv[0] +
+          "` — a probe needing a second program answers for a machine, not for this tool.");
+        // The narrowing is machine-local, and the plan says so out loud: "the CI
+        // line on the row still carries the flag". A row that dropped it from
+        // `ciStep` too would make that sentence false.
+        assert.ok(typeof tool.ciStep === "string" && tool.ciStep.includes(rule.flag),
+          where + ", and its `ciStep` no longer carries the flag: `" + tool.ciStep + "`. The plan tells the" +
+          " owner the CI line still has it, because a runner with the toolchain can run it.");
+      }
+    }
+  }
+  if (!checked) disclose("G22/dropUnless", "no shipped tool drops a verify flag on a machine probe");
 });

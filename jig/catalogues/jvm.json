@@ -18,6 +18,12 @@
         "files": {
           "gradle": [
             {
+              "path": "build.gradle.kts",
+              "version": "1.0.0",
+              "sha256": "19ec1e3d501074af956b98f019318c30d16d1dfc2356287077c24767c7c0505e",
+              "body": "// Starter build script. It carries the java plugin, the test dependencies and\n// the test task, so `gradle check` compiles and runs the starter's own test\n// before any tool is added. Each tool jig installs composes its blocks into\n// this same file.\nplugins {\n    java\n}\n\nrepositories { mavenCentral() }\n\ndependencies {\n    testImplementation(platform(\"org.junit:junit-bom:5.13.4\"))\n    testImplementation(\"org.junit.jupiter:junit-jupiter\")\n    testRuntimeOnly(\"org.junit.platform:junit-platform-launcher\")\n}\n\ntasks.withType<JavaCompile>().configureEach {\n    options.compilerArgs.addAll(listOf(\"-Xlint:all\", \"-Werror\"))\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform()\n    failOnNoDiscoveredTests = true\n    ignoreFailures = false\n    testLogging { events(\"failed\", \"skipped\") }\n}\n"
+            },
+            {
               "path": "src/main/java/com/example/app/App.java",
               "version": "1.0.0",
               "sha256": "a8ec34cdd985d797016a349f3a3a104d9ef26381e702df89285ec4ac2a75718e",
@@ -88,8 +94,8 @@
       },
       "installKind": "scaffold",
       "configPath": "build.gradle.kts",
-      "configSample": "plugins {\n    java\n    checkstyle\n    pmd\n}\n\nrepositories { mavenCentral() }\n\ndependencies {\n    testImplementation(platform(\"org.junit:junit-bom:5.13.4\"))\n    testImplementation(\"org.junit.jupiter:junit-jupiter\")\n    testRuntimeOnly(\"org.junit.platform:junit-platform-launcher\")\n}\n\ntasks.withType<JavaCompile>().configureEach {\n    options.compilerArgs.addAll(listOf(\"-Xlint:all\", \"-Werror\"))\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform()\n    failOnNoDiscoveredTests = true\n    ignoreFailures = false\n    testLogging { events(\"failed\", \"skipped\") }\n}\n",
-      "wiring": "tasks.named(\"check\") { dependsOn(\"test\", \"checkstyleMain\", \"checkstyleTest\", \"pmdMain\", \"pmdTest\") }",
+      "configSample": "plugins {\n    java\n}\n\nrepositories { mavenCentral() }\n\ndependencies {\n    testImplementation(platform(\"org.junit:junit-bom:5.13.4\"))\n    testImplementation(\"org.junit.jupiter:junit-jupiter\")\n    testRuntimeOnly(\"org.junit.platform:junit-platform-launcher\")\n}\n\ntasks.withType<JavaCompile>().configureEach {\n    options.compilerArgs.addAll(listOf(\"-Xlint:all\", \"-Werror\"))\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform()\n    failOnNoDiscoveredTests = true\n    ignoreFailures = false\n    testLogging { events(\"failed\", \"skipped\") }\n}\n",
+      "wiring": "tasks.named(\"check\") { dependsOn(\"test\") }, plus the task each tool jig installs adds",
       "ciStep": "./gradlew --no-daemon --stacktrace check",
       "verify": {
         "argv": [
@@ -115,7 +121,9 @@
       "installKind": "audit",
       "configPath": "config/checkstyle/checkstyle.xml",
       "configSample": "<?xml version=\"1.0\"?>\n<!DOCTYPE module PUBLIC\n    \"-//Checkstyle//DTD Checkstyle Configuration 1.3//EN\"\n    \"https://checkstyle.org/dtds/configuration_1_3.dtd\">\n<module name=\"Checker\">\n  <property name=\"severity\" value=\"error\"/>\n  <module name=\"TreeWalker\">\n    <module name=\"EmptyCatchBlock\"/>\n    <module name=\"IllegalCatch\"/>\n    <module name=\"IllegalThrows\"/>\n    <module name=\"EqualsHashCode\"/>\n    <module name=\"MissingSwitchDefault\"/>\n    <module name=\"UnusedLocalVariable\"/>\n    <module name=\"UnusedImports\"/>\n    <module name=\"AvoidStarImport\"/>\n    <module name=\"MissingOverride\"/>\n    <module name=\"SuppressWarnings\">\n      <property name=\"format\" value=\"^unchecked$|^rawtypes$|^all$\"/>\n    </module>\n    <module name=\"MagicNumber\">\n      <property name=\"ignoreAnnotation\" value=\"true\"/>\n    </module>\n    <module name=\"RegexpSinglelineJava\">\n      <property name=\"format\" value=\"System\\.(out|err)\\.print\"/>\n      <property name=\"message\" value=\"Use a logger, not System.out/System.err.\"/>\n      <property name=\"ignoreComments\" value=\"true\"/>\n    </module>\n    <module name=\"SuppressWarningsHolder\"/>\n  </module>\n  <module name=\"SuppressWarningsFilter\"/>\n</module>\n",
-      "wiring": "plugins { checkstyle }   // build.gradle.kts; Maven: <plugin><artifactId>maven-checkstyle-plugin</artifactId></plugin> bound to the `verify` phase",
+      "scriptPath": "build.gradle.kts",
+      "scriptSample": "plugins {\n    checkstyle\n}\n",
+      "wiring": "jig writes `plugins { checkstyle }` into `build.gradle.kts` itself, and the plugin reads `config/checkstyle/checkstyle.xml` from its own default location. Maven: <plugin><artifactId>maven-checkstyle-plugin</artifactId></plugin> bound to the `verify` phase",
       "ciStep": "./gradlew --no-daemon checkstyleMain checkstyleTest",
       "verify": {
         "argv": [
@@ -141,7 +149,9 @@
       "installKind": "audit",
       "configPath": "config/pmd/ruleset.xml",
       "configSample": "<?xml version=\"1.0\"?>\n<ruleset name=\"jig\"\n    xmlns=\"http://pmd.sourceforge.net/ruleset/2.0.0\"\n    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n    xsi:schemaLocation=\"http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd\">\n  <description>Guardrails jig refuses to trust until seen firing.</description>\n\n  <rule ref=\"category/java/bestpractices.xml/UnitTestShouldIncludeAssert\"/>\n  <rule ref=\"category/java/bestpractices.xml/UnitTestShouldUseTestAnnotation\"/>\n  <rule ref=\"category/java/bestpractices.xml/SystemPrintln\"/>\n  <rule ref=\"category/java/bestpractices.xml/AvoidPrintStackTrace\"/>\n  <rule ref=\"category/java/bestpractices.xml/UnusedAssignment\"/>\n\n  <rule ref=\"category/java/errorprone.xml/EmptyCatchBlock\"/>\n  <rule ref=\"category/java/errorprone.xml/AvoidCatchingThrowable\"/>\n  <rule ref=\"category/java/errorprone.xml/AvoidCatchingNPE\"/>\n  <rule ref=\"category/java/errorprone.xml/TestClassWithoutTestCases\"/>\n  <rule ref=\"category/java/errorprone.xml/DetachedTestCase\"/>\n  <rule ref=\"category/java/errorprone.xml/CloseResource\"/>\n  <rule ref=\"category/java/errorprone.xml/ReturnFromFinallyBlock\"/>\n  <rule ref=\"category/java/errorprone.xml/CompareObjectsWithEquals\"/>\n  <rule ref=\"category/java/errorprone.xml/DoNotTerminateVM\"/>\n  <rule ref=\"category/java/errorprone.xml/AvoidDuplicateLiterals\"/>\n\n  <rule ref=\"category/java/design.xml/AvoidCatchingGenericException\"/>\n  <rule ref=\"category/java/design.xml/AvoidThrowingRawExceptionTypes\"/>\n  <rule ref=\"category/java/design.xml/SignatureDeclareThrowsException\"/>\n  <rule ref=\"category/java/design.xml/ExceptionAsFlowControl\"/>\n</ruleset>\n",
-      "wiring": "plugins { pmd }\npmd { ruleSetFiles = files(\"config/pmd/ruleset.xml\"); ruleSets = emptyList(); isConsoleOutput = true }",
+      "scriptPath": "build.gradle.kts",
+      "scriptSample": "plugins {\n    pmd\n}\n\npmd {\n    ruleSetFiles = files(\"config/pmd/ruleset.xml\")\n    ruleSets = emptyList()\n    isConsoleOutput = true\n}\n",
+      "wiring": "jig writes the `plugins` and `pmd` blocks above into `build.gradle.kts` itself. Without them `config/pmd/ruleset.xml` is read by nothing and gradle has no `pmdMain` task.",
       "ciStep": "./gradlew --no-daemon pmdMain pmdTest",
       "verify": {
         "argv": [
@@ -193,7 +203,9 @@
       "installKind": "audit",
       "configPath": "config/detekt/detekt.yml",
       "configSample": "build:\n  maxIssues: 0\n\nconfig:\n  validation: true\n\nempty-blocks:\n  active: true\n  EmptyCatchBlock:\n    active: true\n    allowedExceptionNameRegex: '_|(ignore|expected).*'\n  EmptyFunctionBlock:\n    active: true\n  EmptyTryBlock:\n    active: true\n\nexceptions:\n  active: true\n  SwallowedException:\n    active: true\n  PrintStackTrace:\n    active: true\n  TooGenericExceptionCaught:\n    active: true\n  TooGenericExceptionThrown:\n    active: true\n  NotImplementedDeclaration:\n    active: true\n  ThrowingExceptionsWithoutMessageOrCause:\n    active: true\n\npotential-bugs:\n  active: true\n  UnsafeCallOnNullableType:\n    active: true\n  UnsafeCast:\n    active: true\n  IgnoredReturnValue:\n    active: true\n  ExitOutsideMain:\n    active: true\n  LateinitUsage:\n    active: true\n  MapGetWithNotNullAssertionOperator:\n    active: true\n  HasPlatformType:\n    active: true\n\nstyle:\n  active: true\n  ForbiddenComment:\n    active: true\n    comments:\n      - reason: 'Unfinished work must not reach main.'\n        value: 'TODO:'\n      - reason: 'Unfinished work must not reach main.'\n        value: 'FIXME:'\n  ForbiddenMethodCall:\n    active: true\n    methods:\n      - reason: 'Use a logger.'\n        value: 'kotlin.io.println'\n      - reason: 'Use a logger.'\n        value: 'kotlin.io.print'\n  MagicNumber:\n    active: true\n  WildcardImport:\n    active: true\n  UnusedImport:\n    active: true\n  UnusedPrivateFunction:\n    active: true\n  UnusedPrivateProperty:\n    active: true\n",
-      "wiring": "plugins { id(\"io.gitlab.arturbosch.detekt\") version \"1.23.8\" }\ndetekt { buildUponDefaultConfig = true; config.setFrom(\"config/detekt/detekt.yml\"); ignoreFailures = false }   // Gradle only. detekt ships no Maven plugin: detekt.dev documents Maven use as maven-antrun-plugin invoking the detekt-cli jar, so a Maven project must wire that ant task itself. `mvn dependency:get` is not an alternative: it downloads a jar into the local repository and installs nothing runnable.",
+      "scriptPath": "build.gradle.kts",
+      "scriptSample": "plugins {\n    id(\"io.gitlab.arturbosch.detekt\") version \"1.23.8\"\n}\n\ndetekt {\n    buildUponDefaultConfig = true\n    config.setFrom(\"config/detekt/detekt.yml\")\n    ignoreFailures = false\n}\n",
+      "wiring": "jig writes the `plugins` and `detekt` blocks above into `build.gradle.kts` itself. The `detekt` task does not exist until they land, and `config/detekt/detekt.yml` is read by nothing.",
       "ciStep": "./gradlew --no-daemon detekt",
       "verify": {
         "argv": [
@@ -219,7 +231,9 @@
       "installKind": "audit",
       "configPath": "config/spotbugs/exclude.xml",
       "configSample": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<FindBugsFilter\n    xmlns=\"https://github.com/spotbugs/filter/3.0.0\"\n    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n    xsi:schemaLocation=\"https://github.com/spotbugs/filter/3.0.0 https://raw.githubusercontent.com/spotbugs/spotbugs/master/spotbugs/etc/findbugsfilter.xsd\">\n  <!-- Generated stubs only; nothing hand-written is excluded. -->\n  <Match>\n    <Source name=\"~.*[\\\\/]generated[\\\\/].*\"/>\n  </Match>\n</FindBugsFilter>\n",
-      "wiring": "plugins { id(\"com.github.spotbugs\") version \"6.4.2\" }\nspotbugs { effort = com.github.spotbugs.snom.Effort.MAX; reportLevel = com.github.spotbugs.snom.Confidence.LOW; excludeFilter = file(\"config/spotbugs/exclude.xml\") }\ndependencies { spotbugsPlugins(\"com.h3xstream.findsecbugs:findsecbugs-plugin:1.14.0\") }",
+      "scriptPath": "build.gradle.kts",
+      "scriptSample": "plugins {\n    id(\"com.github.spotbugs\") version \"6.4.2\"\n}\n\nspotbugs {\n    effort = com.github.spotbugs.snom.Effort.MAX\n    reportLevel = com.github.spotbugs.snom.Confidence.LOW\n    excludeFilter = file(\"config/spotbugs/exclude.xml\")\n}\n\ndependencies {\n    spotbugsPlugins(\"com.h3xstream.findsecbugs:findsecbugs-plugin:1.14.0\")\n}\n",
+      "wiring": "jig writes the `plugins`, `spotbugs` and `dependencies` blocks above into `build.gradle.kts` itself. `spotbugsMain` and `spotbugsTest` do not exist until they land.",
       "ciStep": "./gradlew --no-daemon spotbugsMain spotbugsTest",
       "verify": {
         "argv": [
@@ -1636,7 +1650,7 @@
       ],
       "fixtures": {
         "violation": "plugins {\n    java\n    checkstyle\n    pmd\n}\n\nrepositories { mavenCentral() }\n\ntasks.withType<JavaCompile>().configureEach {\n    options.compilerArgs.addAll(listOf(\"-Xlint:all\"))\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform {\n        excludeTags(\"slow\", \"integration\")\n    }\n    failOnNoDiscoveredTests = false\n    ignoreFailures = true\n    testLogging { events(\"failed\", \"skipped\") }\n}\n",
-        "nearMiss": "plugins {\n    java\n    checkstyle\n    pmd\n}\n\nrepositories { mavenCentral() }\n\ndependencies {\n    testImplementation(platform(\"org.junit:junit-bom:5.13.4\"))\n    testImplementation(\"org.junit.jupiter:junit-jupiter\")\n    testRuntimeOnly(\"org.junit.platform:junit-platform-launcher\")\n}\n\ntasks.withType<JavaCompile>().configureEach {\n    options.compilerArgs.addAll(listOf(\"-Xlint:all\", \"-Werror\"))\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform()\n    failOnNoDiscoveredTests = true\n    ignoreFailures = false\n    testLogging { events(\"failed\", \"skipped\") }\n}\n"
+        "nearMiss": "plugins {\n    java\n}\n\nrepositories { mavenCentral() }\n\ndependencies {\n    testImplementation(platform(\"org.junit:junit-bom:5.13.4\"))\n    testImplementation(\"org.junit.jupiter:junit-jupiter\")\n    testRuntimeOnly(\"org.junit.platform:junit-platform-launcher\")\n}\n\ntasks.withType<JavaCompile>().configureEach {\n    options.compilerArgs.addAll(listOf(\"-Xlint:all\", \"-Werror\"))\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform()\n    failOnNoDiscoveredTests = true\n    ignoreFailures = false\n    testLogging { events(\"failed\", \"skipped\") }\n}\n"
       },
       "gapNotes": "The near miss is the build.gradle.kts jig writes, character for character, so this class fails the moment it would fire on jig's own install. A regex over a Kotlin DSL, not an evaluated build: a value read from a gradle.properties entry or a project extra, an `ignoreFailures = shouldSoften` bound to a variable, and the same settings applied in an init script or a convention plugin all evaluate to the same thing at build time and match nothing. excludeTags has honest uses — a nightly-only tag is a legitimate split — so that pattern is a review prompt rather than a verdict. The loudest loosening of all leaves no token: deleting the `check` task's dependsOn wiring, or running the build with -x test, which the `build-check-disabled` class and the CI lane cover instead. Maven's pom.xml equivalents (testFailureIgnore, skipTests) are not read here.",
       "evidence": {

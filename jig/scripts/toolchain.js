@@ -397,6 +397,54 @@ function alsoAnswered(root, tool) {
   return true;
 }
 
+// A flag whose availability is a fact about the MACHINE rather than about the
+// project or the tool. `go test -race` needs cgo and a C compiler: `go env
+// CGO_ENABLED` reads 0 wherever none is installed, which is the default state of
+// a Windows box, and the lane jig had just written came back `FAILED go-test —
+// exited 2` with `go: -race requires cgo`. A lane jig writes must never be red
+// on the tree jig wrote, and dropping the flag everywhere is not the answer
+// either — the go edition's own `toothless-test-command` class lists "drops
+// -race" as an agent mode it exists to catch, so jig would be shipping the
+// softening it teaches owners to look for.
+//
+// So the row states the flag, the query that settles it and the answer that
+// keeps it, and this asks once. The probe is a fixed argv from the edition,
+// spawned with no shell and the same leash as every other probe here. A flag is
+// KEPT unless the machine says otherwise: a probe that cannot run is not proof
+// the flag would fail.
+//
+// Returns the argv the lane should run and every flag taken out of it, because
+// a narrowed command the owner is not told about is a different command from the
+// one they approved.
+function narrowedVerify(projectRoot, tool) {
+  const root = requireRoot(projectRoot);
+  requireTool(tool);
+  const argv = tool.verify && Array.isArray(tool.verify.argv) ? tool.verify.argv : [];
+  const rules = tool.verify && tool.verify.dropUnless;
+  if (!Array.isArray(rules) || !rules.length) return { argv, dropped: [] };
+
+  const dropped = [];
+  for (const rule of rules) {
+    if (!isObject(rule) || !nonEmptyString(rule.flag) || !nonEmptyString(rule.stdout) || !nonEmptyString(rule.why)
+      || !Array.isArray(rule.probe) || !rule.probe.length || !rule.probe.every(nonEmptyString)) {
+      throw refuse(tool.id + " states a verify.dropUnless entry without a flag, a probe argv, the stdout that" +
+        " keeps the flag and a reason, so jig cannot tell when it applies");
+    }
+    if (!argv.includes(rule.flag)) {
+      throw refuse(tool.id + " states a verify.dropUnless for `" + rule.flag + "`, which is not in its own" +
+        " verify argv — jig would be narrowing a command that never carried the flag");
+    }
+    const run = spawnSync(rule.probe[0], rule.probe.slice(1), {
+      cwd: root, shell: false, windowsHide: true, encoding: "utf8", timeout: PROBE_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES,
+    });
+    if (run.error || run.status !== 0) continue;
+    if (String(run.stdout || "").trim() === rule.stdout) continue;
+    dropped.push({ flag: rule.flag, why: rule.why, probe: rule.probe.join(" "), answered: String(run.stdout || "").trim() });
+  }
+  const out = dropped.length ? argv.filter((word) => !dropped.some((d) => d.flag === word)) : argv;
+  return { argv: out, dropped };
+}
+
 // Absence is an answer, never an exception: the whole point of asking is that
 // the tool is probably missing. A malformed edition entry still throws, because
 // that is a bug in data jig shipped and silence would hide it.
@@ -649,6 +697,18 @@ function proposeInstalls(projectRoot, edition, toolIds, packageManager) {
       throw refuse(id + " states one half of an ignore file: ignorePath and ignoreSample are written together or not at all");
     }
 
+    // Some tools are not read from their own config file at all until the build
+    // script names them. spotbugs and detekt each write a config under
+    // `config/`, and until the `plugins { }` block that loads them reaches
+    // `build.gradle.kts` gradle has no such task — jig wrote both files and the
+    // installs it offered came back `BUILD FAILED`. So a row states that second
+    // file the way it states the first, a path and a body, and the composer
+    // merges it into whatever else writes that path. Half of one is refused for
+    // the same reason half an ignore file is.
+    if (nonEmptyString(tool.scriptPath) !== (typeof tool.scriptSample === "string")) {
+      throw refuse(id + " states one half of a build-script section: scriptPath and scriptSample are written together or not at all");
+    }
+
     // Frozen because an item is shown, approved, and only then run. Anything
     // that could edit `command` between those steps would make the approval
     // describe a command that is no longer the one about to execute.
@@ -671,6 +731,10 @@ function proposeInstalls(projectRoot, edition, toolIds, packageManager) {
       // reports every file under `.jig/`, ruff and gofumpt never see them.
       ignorePath: nonEmptyString(tool.ignorePath) ? tool.ignorePath : null,
       ignoreBody: typeof tool.ignoreSample === "string" ? tool.ignoreSample : null,
+      // The section this tool needs in the ecosystem's build script, for a tool
+      // whose config file nothing reads until the build names it.
+      scriptPath: nonEmptyString(tool.scriptPath) ? tool.scriptPath : null,
+      scriptBody: typeof tool.scriptSample === "string" ? tool.scriptSample : null,
       wiring: nonEmptyString(tool.wiring) ? tool.wiring : null,
       // The item is the whole tool, and CI is part of it. Carried here so the
       // route that installs a tool and the route that only configures one hand
@@ -921,6 +985,10 @@ module.exports = {
   // is one parser and one refusal for both.
   parseCommand,
   presence,
+  // Exported for the lane composer, which is the only caller that needs it: a
+  // flag the machine cannot run is taken out of the argv the lane writes, and
+  // the plan says which and why.
+  narrowedVerify,
   // Exported so the caller that already knows which manager this project is —
   // the install proposal, the lane composer, the toolchain probe — reads the
   // verify that manager runs rather than the row's default.

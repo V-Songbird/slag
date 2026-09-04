@@ -29,7 +29,7 @@ starters build with no source files in them at all — the .NET one is a library
 executable for exactly that reason — because the first thing jig does after writing one is run the
 checks against it, and a starter that fails its own first check would be a harness that cries wolf.
 
-Four ecosystems need more than the project file to get there, and they say so in
+Five ecosystems need more than the project file to get there, and they say so in
 `detect.manifest.starter.files`: a list of entries jig writes beside the manifest, each as its own
 approved change. An entry carries a `path`, a `body`, and the `version` and `sha256` that put the
 body under the same discipline every other file jig writes is under — the loader hashes the body and
@@ -43,7 +43,9 @@ needs the package directory hatchling builds from; JavaScript needs a module and
 solution file, because `dotnet test` beside a lone `App.csproj` resolves that one project and exits
 0 having run nothing — and the library goes under `src/`, because a root holding both `App.sln` and
 `App.csproj` is two MSBuild workspaces and `dotnet format`, the formatter this edition installs,
-refuses to choose between them. A file may name the `tool` it belongs to and is then written only where that
+refuses to choose between them. The jvm list carries a `build.gradle.kts` as well as the source and
+the smoke test, because a Gradle root with no build script has no `java` plugin and so no `check`
+task at all — `gradle check` over one answers `Task 'check' not found`. A file may name the `tool` it belongs to and is then written only where that
 tool is in the plan — JavaScript's two smoke tests are why, since `node --test` and vitest read
 different files and neither can read the other's. Each list is the smallest tree
 that makes that ecosystem's own build and test commands exit 0, and
@@ -81,8 +83,8 @@ driver and the runner. Nothing in an edition gates an install — catalogues inf
 { schemaVersion: 4, edition, displayName, researchedOn,
   detect:    { manifest: { path, sample, hint }, ignore, files, extensions, commentSyntax, packageManagers },
   toolchain: [{ id, role, why, installKind, install, uninstall, configPath, configSample,
-                ignorePath?, ignoreSample?, wiring, ciStep, seed: { path, sample },
-                verify: { argv, expected, expectedExit } }],
+                scriptPath?, scriptSample?, ignorePath?, ignoreSample?, wiring, ciStep, seed: { path, sample },
+                verify: { argv, expected, expectedExit, alsoProbe?, dropUnless? } }],
   classes:   [ … ] }
 ```
 
@@ -122,6 +124,18 @@ for a file the project already owns, so every body merged is one this catalogue 
 gate G5 composes every shared path in every edition and fails if a single line of any sample is
 lost or if two tools dispute one key.
 
+`scriptPath` and `scriptSample` are a second file the same composer merges, for a tool whose own
+config is read by nothing until the ecosystem's build script names it. Four jvm tools need one:
+checkstyle, pmd, spotbugs and detekt each write a config under `config/`, and until the
+`plugins { }` block that applies them reaches `build.gradle.kts` gradle has no `checkstyleMain`,
+`pmdMain`, `spotbugsMain` or `detekt` task at all — jig wrote the config files and every install it
+offered came back `BUILD FAILED`. The pair is stated together or not at all, like the ignore pair,
+and it is a SECOND contribution rather than a replacement: the tool's own config still lands under
+its own name. A section is a passenger and never the driver — with nothing else in the plan writing
+that path it is handed back as a snippet, because a `plugins { }` block on its own is not a build
+file. Release gate G21 holds every shipped section to both halves of that: the path has to be one
+the composer can merge, and something in the edition has to write it.
+
 `ignorePath` and `ignoreSample` are the tool's own ignore file, written beside its config as one
 more approved change. They are optional and stated together or not at all: only a tool that walks
 by path rather than by extension needs one. Prettier is the single entry that does — `prettier
@@ -141,6 +155,19 @@ would otherwise land on a project's own manifest.
 `verify.expectedExit` is the exit code that means the tool caught the seeded violation. Every entry
 states a single integer, and it is not always 1: `101` wherever the Rust compiler refuses the
 crate, `100` for the Rust test runner, `2` for the TypeScript compiler.
+
+`verify.dropUnless` is for a flag whose availability is a fact about the MACHINE rather than about
+the project or the tool. One entry exists: `go test -race` is built on cgo, so it needs a C
+compiler, and `go env CGO_ENABLED` reads 0 wherever none is installed — the default state of a
+Windows box. The lane jig wrote came back `exited 2` with `go: -race requires cgo`, on the tree jig
+had just written. Each rule states the `flag`, the `probe` argv that settles it, the `stdout` that
+keeps it and the `why` the owner reads; the lane composer asks once and the plan names every flag it
+took out. The flag is KEPT when the probe cannot answer — a probe that failed is not proof the flag
+would — because dropping `-race` is itself an agent mode the go edition's `toothless-test-command`
+class exists to catch, and jig must not ship the softening it teaches owners to look for. `ciStep`
+keeps the flag either way: a CI runner has the toolchain. Release gate G22 holds every rule to four
+things — the flag is in the row's own argv, its value is attached rather than a separate token that
+would strand, the probe runs the tool's own executable, and `ciStep` still carries it.
 
 A class row:
 

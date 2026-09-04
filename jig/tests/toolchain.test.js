@@ -1067,7 +1067,7 @@ test("parseCommand is exported, so an install and a lane entry meet one parser",
 
 test("a lane entry carries the tool's own argv and the exit code a clean run has", () => {
   const js = edition("javascript-typescript");
-  const { entries } = engine.verifyEntriesFor([js], [tickedRow("eslint", "linter")], ["ci"], null);
+  const { entries } = engine.verifyEntriesFor(tmpProject(), [js], [tickedRow("eslint", "linter")], ["ci"], null);
   assert.deepEqual(entries.length, 1);
   const row = entries[0];
   assert.equal(row.id, "eslint");
@@ -1087,7 +1087,7 @@ test("every shipped tool's verify argv survives the no-shell parser", () => {
   // command needs a shell would be a tool the matrix must never call covered.
   for (const row of shippedEditions()) {
     const items = row.edition.toolchain.map((t) => tickedRow(t.id, t.role, row.edition.edition));
-    const { entries, refused } = engine.verifyEntriesFor([row.edition], items, ["ci"], null);
+    const { entries, refused } = engine.verifyEntriesFor(tmpProject(), [row.edition], items, ["ci"], null);
     assert.deepEqual(refused, [], row.id + " carries a verify command no lane can run");
     // Every tool reaches a lane, and one argv is one entry. Three dotnet rows
     // verify with the same `dotnet build`, so counting entries against tools
@@ -1103,7 +1103,7 @@ test("every shipped tool's verify argv survives the no-shell parser", () => {
 test("a verify command that needs a shell is refused onto the page, never run", () => {
   const ed = { edition: "made-up", detect: { extensions: [".x"] },
     toolchain: [{ id: "shelly", role: "linter", verify: { argv: ["lint", "&&", "test"], expectedExit: 1 } }] };
-  const { entries, refused } = engine.verifyEntriesFor([ed], [tickedRow("shelly", "linter", "made-up")], ["ci"], null);
+  const { entries, refused } = engine.verifyEntriesFor(tmpProject(), [ed], [tickedRow("shelly", "linter", "made-up")], ["ci"], null);
   assert.deepEqual(entries, []);
   assert.equal(refused.length, 1);
   assert.match(refused[0], /shelly's verify command contains the shell character/);
@@ -1111,7 +1111,7 @@ test("a verify command that needs a shell is refused onto the page, never run", 
 
 test("the project's own test script is the test-runner entry when no test runner was ticked", () => {
   const js = edition("javascript-typescript");
-  const { entries } = engine.verifyEntriesFor([js], [tickedRow("eslint", "linter")], ["ci", "commit"], "node --test");
+  const { entries } = engine.verifyEntriesFor(tmpProject(), [js], [tickedRow("eslint", "linter")], ["ci", "commit"], "node --test");
   const mine = entries.find((e) => e.id === "test-script");
   assert.deepEqual(mine.argv, ["node", "--test"]);
   assert.equal(mine.expectedExit, 0);
@@ -1120,15 +1120,110 @@ test("the project's own test script is the test-runner entry when no test runner
 
 test("a ticked test runner is the test-runner entry, and the script does not double it", () => {
   const js = edition("javascript-typescript");
-  const { entries } = engine.verifyEntriesFor([js], [tickedRow("vitest", "test-runner")], ["ci"], "npm test");
+  const { entries } = engine.verifyEntriesFor(tmpProject(), [js], [tickedRow("vitest", "test-runner")], ["ci"], "npm test");
   assert.deepEqual(entries.map((e) => e.id), ["vitest"]);
 });
 
 test("a test script that needs a shell is refused rather than half-run", () => {
   const js = edition("javascript-typescript");
-  const { entries, refused } = engine.verifyEntriesFor([js], [], ["ci"], "jest && eslint .");
+  const { entries, refused } = engine.verifyEntriesFor(tmpProject(), [js], [], ["ci"], "jest && eslint .");
   assert.deepEqual(entries, []);
   assert.match(refused[0], /the project's own test script contains the shell character/);
+});
+
+// ---------------------------------------------------------------------------
+// Roadmap 257 — a flag whose availability is a fact about the machine
+// ---------------------------------------------------------------------------
+//
+// `go test -race` needs cgo and a C compiler. `go env CGO_ENABLED` reads 0
+// wherever none is installed, and the lane jig had just written came back
+// `FAILED go-test — exited 2` with `go: -race requires cgo`. Dropping the flag
+// everywhere is not the answer either: the go edition's own
+// `toothless-test-command` class lists "drops -race" as an agent mode it exists
+// to catch. So the row states the query, and jig asks.
+
+// The probe is spawned, so the answers are staged with a node script standing in
+// for the tool: `node say.js 1` is a program that prints 1 and exits 0.
+const SAYS = {
+  "say.js": "process.stdout.write(process.argv[2] + '\\n');\n",
+  "die.js": "process.exit(3);\n",
+};
+
+function racyTool(probeArgs) {
+  return {
+    id: "faketest",
+    installKind: "builtin",
+    install: { go: "node --version" },
+    configPath: "go.mod",
+    configSample: "",
+    verify: {
+      argv: [process.execPath, "test", "-race", "-shuffle=on", "./..."],
+      dropUnless: [{ flag: "-race", probe: [process.execPath, ...probeArgs], stdout: "1", why: "it needs cgo." }],
+      expectedExit: 1,
+    },
+  };
+}
+
+test("a flag the machine can carry stays in the verify argv", () => {
+  const root = tmpProject(SAYS);
+  const out = toolchain.narrowedVerify(root, racyTool(["say.js", "1"]));
+  assert.deepEqual(out.dropped, []);
+  assert.ok(out.argv.includes("-race"));
+});
+
+test("a flag the machine cannot carry comes out, and says which and why", () => {
+  const root = tmpProject(SAYS);
+  const out = toolchain.narrowedVerify(root, racyTool(["say.js", "0"]));
+  assert.equal(out.argv.includes("-race"), false, out.argv.join(" "));
+  assert.deepEqual(out.argv.slice(1), ["test", "-shuffle=on", "./..."]);
+  assert.equal(out.dropped.length, 1);
+  assert.equal(out.dropped[0].flag, "-race");
+  assert.equal(out.dropped[0].answered, "0");
+  assert.match(out.dropped[0].why, /needs cgo/);
+});
+
+// The direction this has to fail in. A probe that could not run is not proof the
+// flag would fail, and guessing "drop it" there would ship the softening
+// `toothless-test-command` exists to catch, on every machine where a probe is
+// merely slow or missing.
+test("a probe that cannot answer keeps the flag rather than dropping it", () => {
+  const root = tmpProject(SAYS);
+  for (const probe of [["die.js"], ["no-such-file-anywhere.js"]]) {
+    const out = toolchain.narrowedVerify(root, racyTool(probe));
+    assert.deepEqual(out.dropped, [], probe.join(" ") + " was read as an answer");
+    assert.ok(out.argv.includes("-race"));
+  }
+});
+
+test("a dropUnless jig cannot read is refused by name, never applied half-way", () => {
+  const root = tmpProject(SAYS);
+  const half = racyTool(["say.js", "0"]);
+  half.verify.dropUnless = [{ flag: "-race", probe: [process.execPath, "say.js", "0"] }];
+  assert.throws(() => toolchain.narrowedVerify(root, half), /without a flag, a probe argv/);
+
+  const absent = racyTool(["say.js", "0"]);
+  absent.verify.dropUnless[0].flag = "-nosuchflag";
+  assert.throws(() => toolchain.narrowedVerify(root, absent), /not in its own\s+verify argv/);
+});
+
+test("the go lane drops -race exactly where this machine cannot run it", () => {
+  const root = tmpProject({ "go.mod": "module example.com/x\n\ngo 1.27\n" });
+  const go = edition("go");
+  const { entries, refused, narrowings } =
+    engine.verifyEntriesFor(root, [go], [{ item: { id: "go-test", role: "test-runner", edition: "go", packageManager: "go" } }], ["ci"], null);
+  const lane = entries.find((e) => e.id === "go-test");
+  assert.ok(lane, "no go-test lane entry");
+  // Whichever machine this runs on, the two halves agree: the flag is in the
+  // lane if and only if nothing was narrowed, and a narrowing is always stated.
+  assert.deepEqual(refused, [], refused.join("\n"));
+  if (lane.argv.includes("-race")) {
+    assert.deepEqual(narrowings, [], "the flag is in the lane and something claims it was dropped");
+  } else {
+    assert.equal(narrowings.length, 1, "the flag left the lane and nothing said so");
+    assert.match(narrowings[0], /go-test's lane runs without `-race` here/);
+    assert.match(narrowings[0], /go env CGO_ENABLED/);
+    assert.deepEqual(lane.argv, ["go", "test", "-shuffle=on", "-count=1", "./..."]);
+  }
 });
 
 // ---------------------------------------------------------------------------

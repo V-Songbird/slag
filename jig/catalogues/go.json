@@ -131,7 +131,7 @@
       "installKind": "builtin",
       "configPath": "go.mod",
       "configSample": "module example.com/project\n\ngo 1.25.0\n\nrequire (\n\tgithub.com/stretchr/testify v1.11.1\n)\n",
-      "wiring": "Makefile target: test: ; go test -race -shuffle=on -count=1 ./...",
+      "wiring": "Makefile target: test: ; go test -race -shuffle=on -count=1 ./...   // -race needs cgo and a C toolchain; drop it where `go env CGO_ENABLED` reads 0, which is what the lane jig writes does.",
       "ciStep": "go test -race -shuffle=on -count=1 -coverprofile=coverage.out ./...",
       "verify": {
         "argv": [
@@ -141,6 +141,18 @@
           "-shuffle=on",
           "-count=1",
           "./..."
+        ],
+        "dropUnless": [
+          {
+            "flag": "-race",
+            "probe": [
+              "go",
+              "env",
+              "CGO_ENABLED"
+            ],
+            "stdout": "1",
+            "why": "the race detector is built on cgo, so it needs a C toolchain; `go test -race` exits 2 with `go: -race requires cgo; enable cgo by setting CGO_ENABLED=1` where there is none, which is the default state of a machine with no compiler installed."
+          }
         ],
         "expected": "exit code 1 with FAIL lines; a seeded skip shows as --- SKIP with ok ... [no tests to run] rather than a pass",
         "expectedExit": 1

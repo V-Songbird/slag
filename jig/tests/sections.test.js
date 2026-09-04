@@ -58,6 +58,18 @@ function bodyOf(root, plan, rel) {
   return hit.content;
 }
 
+// The same bytes for a tool jig has to INSTALL. Its config rides inside the
+// install change rather than standing as its own write, so a claim about what a
+// tool's config file would say has to look in both places.
+function configBodyOf(root, plan, rel) {
+  const written = JSON.parse(fs.readFileSync(path.join(root, plan.plan), "utf8"));
+  const side = written.changes.find((c) => c.path === rel && c.kind === "write-side-file");
+  if (side) return side.content;
+  const install = written.changes.find((c) => c.kind === "run-install" && c.install && c.install.configPath === rel);
+  assert.ok(install, "no write and no install planned for " + rel);
+  return install.install.configBody;
+}
+
 // ---------------------------------------------------------------------------
 // mergeable
 
@@ -537,16 +549,67 @@ test("a greenfield Gradle project gets the settings file and the composed build 
   assert.ok(starter, "the settings file is what makes the directory a Gradle build root: " + pathsOf(plan).join(", "));
   assert.match(bodyOf(root, plan, "settings.gradle.kts"), /rootProject\.name = "app"/);
 
-  // The build script is not the starter — it is composed from the tools, and
-  // that is what 158 made possible.
+  // The build script here is composed from the tools, which is what 158 made
+  // possible. The starter carries one too — a Gradle root with no build script
+  // has no `java` plugin and so no `check` task at all — and a path a tool's
+  // config claims is left to the composition that owns it, so only one of the
+  // two is ever planned.
   const body = bodyOf(root, plan, "build.gradle.kts");
   assert.equal(body.match(/^plugins \{$/gm).length, 1, body);
   assert.ok(body.includes("options.errorprone {"), body);
+  assert.equal(pathsOf(plan, "write-side-file").filter((p) => p === "build.gradle.kts").length, 1,
+    pathsOf(plan, "write-side-file").join(", "));
 
   const at = plan.changes.indexOf(starter);
   for (const [i, change] of plan.changes.entries()) {
     if (change.kind === "run-install") assert.ok(at < i, "the project file is written before install " + i);
   }
+});
+
+test("a tool whose config nothing reads until the build names it gets its section in the build script", () => {
+  const root = project({});
+  const plan = planOf(root, {
+    edition: "jvm", "package-manager": "gradle",
+    tools: "gradle,spotbugs,detekt", select: "jvm/swallowed-exception",
+  });
+  // Both rows write a config under `config/`, and until 2.15.0 that was all
+  // they wrote: the `plugins { }` blocks that make gradle load them were prose
+  // in `wiring` that nothing composed, so `./gradlew spotbugsMain` and
+  // `./gradlew detekt` were BUILD FAILED — no such task — over two config files
+  // jig had just written and nothing ever read.
+  const body = bodyOf(root, plan, "build.gradle.kts");
+  assert.equal(body.match(/^plugins \{$/gm).length, 1, "one plugins block, composed:\n" + body);
+  assert.ok(body.includes('id("com.github.spotbugs") version "6.4.2"'), body);
+  assert.ok(body.includes('id("io.gitlab.arturbosch.detekt") version "1.23.8"'), body);
+  assert.ok(body.includes('excludeFilter = file("config/spotbugs/exclude.xml")'), body);
+  assert.ok(body.includes('config.setFrom("config/detekt/detekt.yml")'), body);
+  assert.deepEqual(plan.configConflicts, [], "the sections compose without disagreeing");
+
+  // And the section is a SECOND file, never a replacement: each tool's own
+  // config still lands, because that is what its block points at.
+  assert.match(configBodyOf(root, plan, "config/spotbugs/exclude.xml"), /<FindBugsFilter/);
+  assert.match(configBodyOf(root, plan, "config/detekt/detekt.yml"), /SwallowedException/);
+});
+
+test("a build-script section with nothing else writing that file is handed back, not written alone", () => {
+  const root = project({});
+  const plan = planOf(root, {
+    edition: "jvm", "package-manager": "gradle",
+    tools: "spotbugs", select: "jvm/swallowed-exception",
+  });
+  // A `plugins { }` block on its own is not a build file. Writing one would
+  // hand somebody a `build.gradle.kts` with no `java` plugin in it out of a
+  // tool that only ever asked for a section — so what lands here is the
+  // starter's own build script, with nothing of spotbugs in it.
+  const body = bodyOf(root, plan, "build.gradle.kts");
+  assert.equal(body.includes("spotbugs"), false, "no bare section was written:\n" + body);
+  const note = plan.configNotes.find((n) => n.path === "build.gradle.kts" && n.tool === "spotbugs");
+  assert.ok(note, "the section is a snippet the owner can paste: " + JSON.stringify(plan.configNotes));
+  assert.ok(note.snippet.includes("com.github.spotbugs"), note.snippet);
+  // Its own config file is untouched by that: the note is about the build
+  // script, and suppressing the write it CAN make would take away the only
+  // artifact jig could still land.
+  assert.match(configBodyOf(root, plan, "config/spotbugs/exclude.xml"), /<FindBugsFilter/);
 });
 
 test("the same edition under Maven gets a pom, not a Gradle settings file", () => {

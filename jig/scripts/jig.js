@@ -1701,9 +1701,14 @@ function permissionsProposal(classes) {
 // own `verify.expectedExit` is the code that means CAUGHT over a planted
 // violation, so it is not the code a lane wants — a lane wants the tool clean,
 // which is 0.
-function verifyEntriesFor(loaded, items, lanes, testScript) {
+function verifyEntriesFor(root, loaded, items, lanes, testScript) {
   const entries = [];
   const refused = [];
+  // Kept apart from `refused`, because they are different facts: a refusal is a
+  // lane entry that could not be written at all, and a narrowing is one that WAS
+  // written, shorter, for a reason the owner has to read. Both land on the
+  // plan's own list; only the first means a tool went unwired.
+  const narrowings = [];
   const roles = new Set();
   const extensionsOf = (editionId) => {
     const edition = loaded.find((e) => e.edition === editionId);
@@ -1717,9 +1722,29 @@ function verifyEntriesFor(loaded, items, lanes, testScript) {
     const tool = toolchainLib.toolFor(toolchainToolFor(loaded, row.item.id), row.item.packageManager);
     const argv = tool && tool.verify && Array.isArray(tool.verify.argv) ? tool.verify.argv : null;
     if (!argv) continue;
+    // A flag the machine cannot run comes out here, before the argv becomes a
+    // lane. `go test -race` needs cgo and a C compiler, and on a box with
+    // neither the lane jig had just written exited 2 on its first run — the one
+    // thing the contract forbids. The narrowing is stated, never silent: the
+    // owner approves the command that will run, so a shortened one has to be
+    // named on the same page.
+    let narrowed;
+    try {
+      narrowed = toolchainLib.narrowedVerify(root, tool);
+    } catch (err) {
+      if (!err.expected) throw err;
+      refused.push(err.message);
+      continue;
+    }
+    for (const gone of narrowed.dropped) {
+      narrowings.push(row.item.id + "'s lane runs without `" + gone.flag + "` here: " + gone.why +
+        " `" + gone.probe + "` answered " + JSON.stringify(gone.answered) + " on this machine." +
+        " The lane is `" + narrowed.argv.join(" ") + "`; the CI line on the row still carries the flag," +
+        " because a runner with a C toolchain can run it.");
+    }
     let parsed;
     try {
-      parsed = toolchainLib.parseCommand(argv.join(" "), row.item.id + "'s verify command");
+      parsed = toolchainLib.parseCommand(narrowed.argv.join(" "), row.item.id + "'s verify command");
     } catch (err) {
       if (!err.expected) throw err;
       refused.push(err.message);
@@ -1755,7 +1780,7 @@ function verifyEntriesFor(loaded, items, lanes, testScript) {
       refused.push(err.message);
     }
   }
-  return { entries, refused };
+  return { entries, refused, narrowings };
 }
 
 // The lane face of any plan, on the same rule `configFace` follows and for the
@@ -1961,10 +1986,16 @@ function toolchainProposal(root, loaded, opts, states) {
       // tool. jig still writes nothing it does not own; the config becomes a
       // note the owner can act on, and the install goes ahead.
       const occupied = occupancyProblem(root, toPosix(proposed.configPath), states);
+      // The build script a row asks for a section in is a second file, so it
+      // gets its own occupancy answer. Reading the config file's would let a
+      // `plugins { }` block land in a `build.gradle.kts` jig does not own.
+      const scriptOccupied = proposed.scriptPath
+        ? occupancyProblem(root, toPosix(proposed.scriptPath), states)
+        : null;
       // `toolFor`, because presence is derived from the verify argv and a row
       // may key that by manager: probing `npm` for a tool this project installs
       // through pnpm answers for a program the lane will never run.
-      items.push({ item: proposed, occupied: occupied || null,
+      items.push({ item: proposed, occupied: occupied || null, scriptOccupied: scriptOccupied || null,
         ...toolchainLib.presence(root, toolchainLib.toolFor(tool, manager)) });
     }
   }
@@ -2002,7 +2033,7 @@ function greenfieldEditions(root, loaded, manager) {
 // rather than assumed: a starter with no `scripts` is a project whose own CI
 // step has nothing to call, and prose grafted into a manifest is a half-parser
 // writing somebody's build file.
-function scriptBody(wiring) {
+function manifestScripts(wiring) {
   if (typeof wiring !== "string" || !wiring.trimStart().startsWith("\"")) return null;
   let scripts;
   try {
@@ -2020,14 +2051,30 @@ function composeConfigs(items, manifests) {
   // owner read.
   const scriptParts = (manifest) => items
     .filter((row) => row.item.edition === manifest.edition)
-    .map((row) => ({ source: row.item.id, body: scriptBody(row.item.wiring) }))
+    .map((row) => ({ source: row.item.id, body: manifestScripts(row.item.wiring) }))
     .filter((part) => part.body !== null);
 
   const byPath = new Map();
-  for (const row of items) {
-    const rel = toPosix(row.item.configPath);
+  const contribute = (rel, row) => {
     if (!byPath.has(rel)) byPath.set(rel, []);
     byPath.get(rel).push(row);
+  };
+  for (const row of items) {
+    contribute(toPosix(row.item.configPath), row);
+    // A tool whose config file nothing reads until the build script names it
+    // states that section too, and it composes into that file exactly the way a
+    // config does — `sections.merge` already reads `build.gradle.kts`. It is a
+    // SECOND contribution rather than a replacement: spotbugs still writes
+    // `config/spotbugs/exclude.xml`, and the `plugins { }` block that makes
+    // gradle read it lands in the build script beside every other tool's.
+    if (row.item.scriptPath && row.item.scriptBody !== null) {
+      contribute(toPosix(row.item.scriptPath), {
+        ...row,
+        occupied: row.scriptOccupied || null,
+        script: true,
+        item: { ...row.item, configPath: row.item.scriptPath, configBody: row.item.scriptBody },
+      });
+    }
   }
 
   const writes = [];
@@ -2042,7 +2089,11 @@ function composeConfigs(items, manifests) {
     const held = rows.find((r) => r.occupied);
     if (held) {
       for (const row of rows) {
-        composed.add(row.item.id);
+        // A build-script section never marks its tool composed: the tool's own
+        // config file is a different path, and suppressing its write because
+        // the build script was somebody else's would take away the one artifact
+        // jig could still land.
+        if (!row.script) composed.add(row.item.id);
         notes.push({
           path: rel,
           tool: row.item.id,
@@ -2057,6 +2108,24 @@ function composeConfigs(items, manifests) {
     // A manifest jig may write is the first part of its own file, so the
     // starter and the tool sections land composed rather than fighting.
     const starter = manifests.find((m) => m.path && toPosix(m.path) === rel && m.sample);
+    // A build-script section is a passenger, never the driver. On its own it
+    // would be a `plugins { }` block in a build file with no build in it — jig
+    // would have written somebody a broken `build.gradle.kts` out of a tool
+    // that only ever asked for a section — so with nothing else writing this
+    // path it is handed back as a snippet, the way an occupied file is.
+    if (!starter && rows.every((r) => r.script)) {
+      for (const row of rows) {
+        notes.push({
+          path: rel,
+          tool: row.item.id,
+          why: "nothing else in this plan writes " + rel + ", and a section on its own is not a build file." +
+            " Here is what " + row.item.id + " needs in it:",
+          snippet: row.item.configBody,
+          wiring: row.item.wiring || null,
+        });
+      }
+      continue;
+    }
     const shared = rows.length > 1 || Boolean(starter);
     // A project file jig cannot compose is a project file jig does not touch,
     // even for one tool. The `go.mod` samples in the go edition are pictures of
@@ -2071,7 +2140,7 @@ function composeConfigs(items, manifests) {
         ? names[0] + "'s"
         : names.slice(0, -1).join(", ") + " and " + names[names.length - 1] + "'s";
       for (const row of rows) {
-        composed.add(row.item.id);
+        if (!row.script) composed.add(row.item.id);
         notes.push({
           path: rel,
           tool: row.item.id,
@@ -2091,7 +2160,7 @@ function composeConfigs(items, manifests) {
       parts.push(...scriptParts(starter));
     }
     for (const row of rows) {
-      composed.add(row.item.id);
+      if (!row.script) composed.add(row.item.id);
       parts.push({ source: row.item.id, body: row.item.configBody });
     }
     const merged = sectionsLib.merge(parts, rel);
@@ -2284,8 +2353,8 @@ function draftFromTemplates(root, opts, checks) {
     // project's own test script is the half only the scan can see.
   }
   const verify = verifyLanes.length
-    ? verifyEntriesFor(loaded, usable, verifyLanes, stack && stack.testScript)
-    : { entries: [], refused: [] };
+    ? verifyEntriesFor(root, loaded, usable, verifyLanes, stack && stack.testScript)
+    : { entries: [], refused: [], narrowings: [] };
   // What the file will hold: what this plan computed, over what is already
   // installed. A re-run adds a lane entry; it never quietly takes one away.
   // Always over the installed list, even when this run ticked nothing: the
@@ -2389,6 +2458,10 @@ function draftFromTemplates(root, opts, checks) {
   // write. Said out loud rather than dropped: the tool still installs, and the
   // matrix reports the cell it can no longer claim.
   refused.push(...verify.refused);
+  // And a lane entry jig wrote SHORTER than the row states it. The owner
+  // approves the command that will run, so a flag this machine cannot carry is
+  // named on the same page rather than quietly absent from `.jig/verify.json`.
+  refused.push(...(verify.narrowings || []));
 
   // A project that does not exist yet cannot be installed into. Where the
   // edition can hand over a starter project file, jig writes it and the run
@@ -3467,6 +3540,12 @@ function toolchainRow(row) {
     // to say so rather than print it like every other command here.
     uninstallManual: !!item.uninstallManual,
     configPath: item.configPath,
+    // The second file, for a tool whose config nothing reads until the build
+    // script names it. Named here for the same reason `configSample` is: the
+    // owner ticks the tool off this row, and a section that reached
+    // `build.gradle.kts` without appearing on it would be a write nobody named.
+    scriptPath: item.scriptPath || null,
+    scriptSample: typeof item.scriptBody === "string" ? item.scriptBody : null,
     wiring: item.wiring,
     ciStep: item.ciStep,
     // Set when this project already carries the tool's config file and jig did
@@ -3798,6 +3877,8 @@ function renderReviewMd(review, backlog) {
       out.push("- **" + t.id + "** (" + (t.role || "tool") + ", " + (t.installKind || "install") + ") — " +
         (t.present ? "already here (" + t.how + (t.version ? " " + t.version : "") + "), config only" : "`" + t.command + "`"));
       out.push("  - config: `" + t.configPath + "`");
+      if (t.scriptPath) out.push("  - build script section: `" + t.scriptPath +
+        "` — the tool's config above is not read until this lands");
       if (t.wiring) out.push("  - wiring: " + t.wiring);
       // `ciStep` is the edition's hand-written line for an owner wiring their own
       // workflow, and jig runs it nowhere — the workflow jig writes runs the check
