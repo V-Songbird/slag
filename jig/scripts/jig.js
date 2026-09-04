@@ -1704,10 +1704,9 @@ function permissionsProposal(classes) {
 function verifyEntriesFor(root, loaded, items, lanes, testScript) {
   const entries = [];
   const refused = [];
-  // Kept apart from `refused`, because they are different facts: a refusal is a
-  // lane entry that could not be written at all, and a narrowing is one that WAS
-  // written, shorter, for a reason the owner has to read. Both land on the
-  // plan's own list; only the first means a tool went unwired.
+  // Kept apart from `refused` because a release gate reads that one: every
+  // shipped verify command must parse, and a lane written SHORTER is not a lane
+  // that could not be written at all. Both land on the plan's own list below.
   const narrowings = [];
   const roles = new Set();
   const extensionsOf = (editionId) => {
@@ -2461,7 +2460,7 @@ function draftFromTemplates(root, opts, checks) {
   // And a lane entry jig wrote SHORTER than the row states it. The owner
   // approves the command that will run, so a flag this machine cannot carry is
   // named on the same page rather than quietly absent from `.jig/verify.json`.
-  refused.push(...(verify.narrowings || []));
+  refused.push(...verify.narrowings);
 
   // A project that does not exist yet cannot be installed into. Where the
   // edition can hand over a starter project file, jig writes it and the run
