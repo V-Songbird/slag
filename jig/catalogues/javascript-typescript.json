@@ -112,6 +112,17 @@
       "seed": {
         "path": "tests/jig-seed-lint.test.ts",
         "sample": "import { describe, it, expect } from 'vitest';\n\ndescribe('jig lint seed', () => {\n  it.only('is focused, which the linter must refuse', () => {\n    expect(1 + 1).toBe(2);\n  });\n});\n"
+      },
+      "byManager": {
+        "pnpm": {
+          "ciStep": "pnpm run lint"
+        },
+        "yarn": {
+          "ciStep": "yarn run lint"
+        },
+        "bun": {
+          "ciStep": "bun run lint"
+        }
       }
     },
     {
@@ -149,6 +160,17 @@
       "seed": {
         "path": "src/jig-seed-type.ts",
         "sample": "export function firstWord(line: string): string {\n  const words = line.split(' ');\n  const head = words[0];\n  return head.toUpperCase();\n}\n"
+      },
+      "byManager": {
+        "pnpm": {
+          "ciStep": "pnpm run typecheck"
+        },
+        "yarn": {
+          "ciStep": "yarn run typecheck"
+        },
+        "bun": {
+          "ciStep": "bun run typecheck"
+        }
       }
     },
     {
@@ -186,6 +208,17 @@
       "seed": {
         "path": "tests/jig-seed-only.test.ts",
         "sample": "import { describe, it, expect } from 'vitest';\n\ndescribe('jig runner seed', () => {\n  it.only('is focused, so the runner must refuse the run', () => {\n    expect(1 + 1).toBe(2);\n  });\n\n  it('is the case the focus would silently skip', () => {\n    expect(2 + 2).toBe(4);\n  });\n});\n"
+      },
+      "byManager": {
+        "pnpm": {
+          "ciStep": "pnpm test -- --reporter=github-actions"
+        },
+        "yarn": {
+          "ciStep": "yarn test -- --reporter=github-actions"
+        },
+        "bun": {
+          "ciStep": "bun test -- --reporter=github-actions"
+        }
       }
     },
     {
@@ -224,6 +257,17 @@
       "seed": {
         "path": "src/jig-seed-format.ts",
         "sample": "export const seedRoute = {\"method\":\"GET\",   \"path\":\"/orders\",\n      \"labels\":[ \"alpha\",\"beta\" ]\n   }\n"
+      },
+      "byManager": {
+        "pnpm": {
+          "ciStep": "pnpm run format:check"
+        },
+        "yarn": {
+          "ciStep": "yarn run format:check"
+        },
+        "bun": {
+          "ciStep": "bun run format:check"
+        }
       }
     },
     {
@@ -248,16 +292,28 @@
           "--audit-level=high"
         ],
         "expected": "exit code 1 with 'found N vulnerabilities (… high, … critical)' after a package with a known advisory is added to the lockfile",
-        "expectedExit": 1,
-        "byManager": {
-          "pnpm": {
+        "expectedExit": 1
+      },
+      "seed": {
+        "path": "package-lock.json",
+        "sample": "{\n  \"name\": \"jig-audit-seed\",\n  \"version\": \"0.0.0\",\n  \"lockfileVersion\": 3,\n  \"requires\": true,\n  \"packages\": {\n    \"\": {\n      \"name\": \"jig-audit-seed\",\n      \"version\": \"0.0.0\",\n      \"dependencies\": {\n        \"minimist\": \"1.2.5\"\n      }\n    },\n    \"node_modules/minimist\": {\n      \"version\": \"1.2.5\",\n      \"resolved\": \"https://registry.npmjs.org/minimist/-/minimist-1.2.5.tgz\"\n    }\n  }\n}\n"
+      },
+      "byManager": {
+        "pnpm": {
+          "wiring": "\"audit\": \"pnpm audit --audit-level=high\"",
+          "ciStep": "pnpm run audit",
+          "verify": {
             "argv": [
               "pnpm",
               "audit",
               "--audit-level=high"
             ]
-          },
-          "yarn": {
+          }
+        },
+        "yarn": {
+          "wiring": "\"audit\": \"yarn npm audit --severity high\"",
+          "ciStep": "yarn run audit",
+          "verify": {
             "argv": [
               "yarn",
               "npm",
@@ -265,8 +321,12 @@
               "--severity",
               "high"
             ]
-          },
-          "bun": {
+          }
+        },
+        "bun": {
+          "wiring": "\"audit\": \"bun audit --audit-level=high\"",
+          "ciStep": "bun run audit",
+          "verify": {
             "argv": [
               "bun",
               "audit",
@@ -274,10 +334,6 @@
             ]
           }
         }
-      },
-      "seed": {
-        "path": "package-lock.json",
-        "sample": "{\n  \"name\": \"jig-audit-seed\",\n  \"version\": \"0.0.0\",\n  \"lockfileVersion\": 3,\n  \"requires\": true,\n  \"packages\": {\n    \"\": {\n      \"name\": \"jig-audit-seed\",\n      \"version\": \"0.0.0\",\n      \"dependencies\": {\n        \"minimist\": \"1.2.5\"\n      }\n    },\n    \"node_modules/minimist\": {\n      \"version\": \"1.2.5\",\n      \"resolved\": \"https://registry.npmjs.org/minimist/-/minimist-1.2.5.tgz\"\n    }\n  }\n}\n"
       }
     }
   ],
@@ -306,7 +362,7 @@
               "\\.toBeFalsy\\s*\\(\\s*\\)",
               "\\.toBeDefined\\s*\\(\\s*\\)",
               "expect\\.(?:any|anything)\\s*\\(",
-          "expect\\s*\\(\\s*(true|false|\\d+)\\s*\\)\\s*\\.\\s*(?:toBe|toEqual|toStrictEqual)\\s*\\(\\s*\\1\\s*\\)"
+              "expect\\s*\\(\\s*(true|false|\\d+)\\s*\\)\\s*\\.\\s*(?:toBe|toEqual|toStrictEqual)\\s*\\(\\s*\\1\\s*\\)"
             ],
             "paths": [
               "**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"

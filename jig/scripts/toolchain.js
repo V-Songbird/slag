@@ -208,15 +208,24 @@ function verifyExecutable(tool) {
 // resolved — the same shape as the jvm defect 2.14.0 closed, the lane and the
 // install disagreeing about which manager this project is.
 //
-// Where an edition keys `verify.byManager`, the manager picks; where it does
-// not, the tool is itself, which is every row that runs the same program under
-// every manager.
+// `verify` was not the only one. `wiring` is the line jig writes into the
+// project's own manifest and `ciStep` is the command it writes into the
+// workflow, and both spelled npm on a pnpm, yarn or bun project — a script block
+// and a CI step naming a manager this project does not use.
+//
+// So the override is one place and covers the whole row: `byManager.<name>` is a
+// patch over the tool, shallow except for `verify`, which merges a level deeper
+// so a per-manager `argv` keeps the row's own `expected`, `expectedExit` and
+// `alsoProbe`. A row with no `byManager` is itself, which is every tool that
+// runs the same program under every manager.
 function toolFor(tool, manager) {
-  const byManager = tool && tool.verify && tool.verify.byManager;
+  const byManager = tool && tool.byManager;
   if (!isObject(byManager) || !nonEmptyString(manager) || !isObject(byManager[manager])) return tool;
-  const verify = { ...tool.verify, ...byManager[manager] };
-  delete verify.byManager;
-  return { ...tool, verify };
+  const patch = byManager[manager];
+  const merged = { ...tool, ...patch };
+  delete merged.byManager;
+  if (isObject(patch.verify)) merged.verify = { ...tool.verify, ...patch.verify };
+  return merged;
 }
 
 function readIfExists(full) {
@@ -547,8 +556,12 @@ function proposeInstalls(projectRoot, edition, toolIds, packageManager) {
 
   const items = [];
   for (const id of toolIds) {
-    const tool = findTool(edition, id);
-    const manager = managerForTool(edition, tool, packageManager, allowed);
+    const row = findTool(edition, id);
+    const manager = managerForTool(edition, row, packageManager, allowed);
+    // Everything below reads the row as THIS manager runs it — `wiring` goes
+    // into the project's own manifest and `ciStep` into the workflow, and both
+    // spelled npm on a pnpm project before roadmap 251.
+    const tool = toolFor(row, manager);
     const command = tool.install[manager];
     const argv = parseCommand(command, id + "'s " + manager + " install command");
 

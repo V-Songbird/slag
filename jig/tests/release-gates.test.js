@@ -1933,13 +1933,26 @@ test("release gate G16: no tool's verify runs a package manager other than the o
       if (keyed.length < 2) continue;
       for (const manager of keyed) {
         const resolved = toolchain.toolFor(tool, manager);
-        const program = resolved.verify.argv[0];
-        checked++;
-        if (program === manager || !keyed.includes(program)) continue;
-        assert.fail(row.id + "/" + tool.id + " installs under `" + manager + "` (" + tool.install[manager] +
-          ") and its verify runs `" + resolved.verify.argv.join(" ") + "` — that is " + program +
-          "'s program over a tree " + program + " never resolved. Key the row's `verify.byManager." +
-          manager + "`.");
+        // `ciStep` as well as `verify.argv` (roadmap 251): it is a command jig
+        // writes verbatim into the workflow, and every javascript row spelled it
+        // `npm run …` on a pnpm, yarn or bun project. `wiring` is deliberately
+        // NOT held to this — it is prose, and python's rows legitimately name
+        // several managers in one line ("Poetry/pip projects: a Makefile
+        // target…"). A gate over prose would fail on advice that is correct.
+        // The PROGRAM each one runs, which is the first word and never a later
+        // one: `yarn npm audit` is yarn berry's own subcommand, and npm there is
+        // yarn's namespace rather than the npm binary.
+        const written = [
+          ["verify.argv", resolved.verify.argv.join(" "), resolved.verify.argv[0]],
+          ["ciStep", resolved.ciStep, String(resolved.ciStep || "").trim().split(/\s+/)[0]],
+        ].filter(([, text]) => typeof text === "string" && text);
+        for (const [field, text, program] of written) {
+          checked++;
+          if (program === manager || !keyed.includes(program)) continue;
+          assert.fail(row.id + "/" + tool.id + " installs under `" + manager + "` (" + tool.install[manager] +
+            ") and its " + field + " runs `" + text + "` — that is " + program + "'s program over a tree " +
+            program + " never resolved. Key the row's `byManager." + manager + "." + field.split(".")[0] + "`.");
+        }
       }
     }
   }

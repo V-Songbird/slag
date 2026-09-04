@@ -1210,3 +1210,33 @@ test("an install refused at apply time is finished, not `interrupted` for ever",
   assert.deepEqual(engine.cmdRevert(root, { _: [], change: [], all: true }).reverted, []);
   assert.equal(engine.cmdStatus(root).changes.find((c) => c.id === plan.changes[0].id).state, "refused");
 });
+
+// Roadmap 251. `verify.argv` was keyed by manager and its three siblings on the
+// same row were not: `wiring` is the line jig writes into the project's own
+// manifest and `ciStep` is the command it writes into the workflow, and both
+// spelled npm on a pnpm, yarn or bun project.
+test("an install proposal reads the wiring and the CI step of the manager it resolved", () => {
+  const js = edition("javascript-typescript");
+  for (const [manager, wiring, step] of [
+    ["npm", "npm audit --audit-level=high", "npm run audit"],
+    ["pnpm", "pnpm audit --audit-level=high", "pnpm run audit"],
+    ["yarn", "yarn npm audit --severity high", "yarn run audit"],
+    ["bun", "bun audit --audit-level=high", "bun run audit"],
+  ]) {
+    const [item] = toolchain.proposeInstalls(tmpProject({}), js, ["audit"], manager);
+    assert.equal(item.packageManager, manager);
+    assert.ok(item.wiring.includes(wiring), manager + " wires `" + item.wiring + "`");
+    assert.equal(item.ciStep, step);
+  }
+});
+
+test("a row with no byManager is itself under every manager it installs under", () => {
+  const ruff = edition("python").toolchain.find((t) => t.id === "ruff");
+  assert.equal(ruff.byManager, undefined, "pick a row that states no per-manager patch");
+  for (const manager of Object.keys(ruff.install)) {
+    assert.equal(toolchain.toolFor(ruff, manager), ruff, "an unpatched row was copied for no reason");
+  }
+  // And the patch table never rides into a row that HAS one.
+  const audit = edition("javascript-typescript").toolchain.find((t) => t.id === "audit");
+  assert.equal(toolchain.toolFor(audit, "pnpm").byManager, undefined);
+});
