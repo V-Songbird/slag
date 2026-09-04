@@ -1240,3 +1240,18 @@ test("a row with no byManager is itself under every manager it installs under", 
   const audit = edition("javascript-typescript").toolchain.find((t) => t.id === "audit");
   assert.equal(toolchain.toolFor(audit, "pnpm").byManager, undefined);
 });
+
+// Roadmap 252. `dotnet test` reads a `.runsettings` only when it is handed one:
+// jig wrote the file, passed no `--settings`, and set no `RunSettingsFilePath`,
+// so every setting in it was inert. Driven on this machine's SDK before the fix
+// and after: with the flag a zero-discovery run exits 1 and writes
+// `TestResults/results.trx`, without it the same run exits 0 and writes nothing
+// — which is exactly what the row's own `expected` claims and never had.
+test("every command jig wires for dotnet-test hands it the runsettings jig wrote", () => {
+  const dotnet = edition("dotnet");
+  const test = dotnet.toolchain.find((t) => t.id === "dotnet-test");
+  assert.equal(test.configPath, ".runsettings");
+  const argv = test.verify.argv.join(" ");
+  assert.match(argv, /--settings \.runsettings/, "the verify runs `" + argv + "`");
+  assert.match(test.ciStep, /--settings \.runsettings/, "the CI step runs `" + test.ciStep + "`");
+});

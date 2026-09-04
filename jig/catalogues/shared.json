@@ -3,14 +3,14 @@
   "writtenOn": "2026-08-18",
   "activation": {
     "sh": {
-      "line": "command -v node >/dev/null 2>&1 && { node .jig/checks/run.mjs || exit 1; } # jig:checks",
+      "line": "command -v node >/dev/null 2>&1 && { node .jig/checks/run.mjs --staged --ledger commit || exit 1; } # jig:checks",
       "marker": "jig:checks",
-      "note": "One line for an existing sh pre-commit. Skips silently when node is off PATH; the CI workflow is the floor."
+      "note": "One line for an existing sh pre-commit. Reads the index like the shim jig writes, because a commit carries the index and not the working tree. Skips silently when node is off PATH; the CI workflow is the floor."
     },
     "node": {
-      "line": "require(\"child_process\").spawnSync(process.execPath, [\".jig/checks/run.mjs\"], { stdio: \"inherit\" }).status && process.exit(1); // jig:checks",
+      "line": "require(\"child_process\").spawnSync(process.execPath, [\".jig/checks/run.mjs\", \"--staged\", \"--ledger\", \"commit\"], { stdio: \"inherit\" }).status && process.exit(1); // jig:checks",
       "marker": "jig:checks",
-      "note": "One line for an existing node-shebang pre-commit (CommonJS). Uses the running node, so no PATH hazard."
+      "note": "One line for an existing node-shebang pre-commit (CommonJS). Reads the index like the shim jig writes. Uses the running node, so no PATH hazard."
     }
   }
 }

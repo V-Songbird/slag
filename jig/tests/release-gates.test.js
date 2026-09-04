@@ -2050,3 +2050,79 @@ test("release gate G18: a wiring line names no XML element the shipped configs d
   }
   if (!checked) disclose("G18/xml-wiring", "no shipped wiring line names an XML element");
 });
+
+// ---------------------------------------------------------------------------
+// G19 — a cell that names the file carrying its rule is held to it
+// ---------------------------------------------------------------------------
+//
+// Roadmap 252. A `tool-rule` detector may say `rulesIn`: the file that carries
+// its LEVEL, when that is not the tool's own config. Only clippy says it, and it
+// says it because `[lints.clippy]` is where a lint is set to deny — the
+// eighteen cells that named `clippy.toml` named a file that levels nothing.
+//
+// The claim is only as good as the file behind it, and the rust sample listed
+// eight of the thirty-two lints its own detectors name. `all = { level =
+// "deny" }` does not cover the rest: `arithmetic_side_effects`,
+// `as_conversions`, `indexing_slicing`, `string_slice` and
+// `undocumented_unsafe_blocks` are restriction-group lints and are not in
+// `clippy::all`, so five cells graded DET over a level nothing set.
+//
+// Deliberately scoped to `rulesIn` and nothing else. A tool that enables rule
+// FAMILIES — ruff's `select = ["B", "PT"]`, eslint's plugin presets, spotbugs
+// excluding rather than including — carries no literal rule id in its config and
+// is correct that way. `rulesIn` is the one claim that is literal by
+// construction.
+test("release gate G19: a rule whose level lives in another file is written in that file", () => {
+  let checked = 0;
+  for (const row of editions.loadIndex(PLUGIN_ROOT).editions) {
+    const edition = editions.loadEdition(PLUGIN_ROOT, row.id);
+    for (const cls of edition.classes) {
+      for (const det of cls.detectors || []) {
+        const p = (det && det.params) || {};
+        if (det.lever !== "tool-rule" || !p.rulesIn || !p.rule) continue;
+        checked++;
+        const writers = edition.toolchain.filter((t) => t.configPath === p.rulesIn);
+        assert.ok(writers.length, row.id + "/" + cls.id + " says its `" + p.rule + "` level lives in " +
+          p.rulesIn + ", and no tool in this edition writes that file");
+        const body = writers.map((t) => String(t.configSample || "")).join("\n");
+        assert.ok(body.includes(p.rule), row.id + "/" + cls.id + " grades on `" + p.tool + "`'s `" +
+          p.rule + "` and says its level lives in " + p.rulesIn + ", where no line names it — the cell" +
+          " claims a level nothing in this plan sets.");
+      }
+    }
+  }
+  if (!checked) disclose("G19/rulesIn", "no shipped detector names a rulesIn file");
+});
+
+// ---------------------------------------------------------------------------
+// G20 — the woven line and the shim jig writes read the same lane
+// ---------------------------------------------------------------------------
+//
+// Roadmap 253. A repository with a pre-commit hook of its own does not get
+// jig's shim: jig weaves one line into the hook they already have, because
+// repointing `core.hooksPath` would switch their own hook off. That line ran
+// `node .jig/checks/run.mjs` pathless, while the shim jig writes for everybody
+// else runs `--staged --ledger commit`. So the woven half read the working tree
+// at commit time — a violation staged and then edited back out of the file lands
+// in HEAD unchecked, which is the defect `--staged` was added to close in 2.9.0
+// — and its catches left no ledger row, so `review` reported a class that had
+// only ever fired at commit time as one that had never fired.
+//
+// slag itself was on the woven route, so this was jig's own commit lane too.
+test("release gate G20: the woven activation line runs what the shim runs", () => {
+  const shim = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "templates", "hook-pre-commit.sh"), "utf-8");
+  const shimCall = /node \.jig\/checks\/run\.mjs((?: --[a-z]+)*)/.exec(shim);
+  assert.ok(shimCall, "the shim no longer invokes the driver in a shape this gate can read");
+  const flags = shimCall[1].trim();
+  assert.ok(flags.includes("--staged"), "the shim itself stopped reading the index: `" + shimCall[0] + "`");
+  const activation = JSON.parse(
+    fs.readFileSync(path.join(PLUGIN_ROOT, "catalogues", "shared.json"), "utf-8")).activation;
+  for (const [host, entry] of Object.entries(activation)) {
+    for (const flag of flags.split(/\s+/)) {
+      assert.ok(entry.line.includes(flag.replace(/^--/, "")),
+        "the " + host + " activation line is `" + entry.line + "` and the shim runs `" + shimCall[0] +
+        "` — a repository with its own hook gets the woven line and never the shim, so it would read a" +
+        " different lane from every other install.");
+    }
+  }
+});

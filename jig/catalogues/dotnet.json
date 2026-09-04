@@ -195,15 +195,17 @@
       },
       "configPath": ".runsettings",
       "configSample": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TestSessionTimeout>600000</TestSessionTimeout>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\">\n        <Configuration>\n          <LogFileName>results.trx</LogFileName>\n        </Configuration>\n      </Logger>\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n",
-      "wiring": ".runsettings at the repository root, which jig writes. Nothing reads it by itself: dotnet test needs either --settings .runsettings on the command line, which the lane entry does not pass, or a RunSettingsFilePath property in Directory.Build.props, which jig does not write. Add one of the two, or these settings are inert.",
-      "ciStep": "dotnet test --configuration Release --no-build --logger \"trx;LogFileName=results.trx\" --collect:\"XPlat Code Coverage\"",
+      "wiring": ".runsettings at the repository root, which jig writes and every command jig wires reads with --settings .runsettings. Nothing picks it up on its own: dotnet test needs either that flag or a RunSettingsFilePath property in Directory.Build.props, and jig writes no such property.",
+      "ciStep": "dotnet test --configuration Release --no-build --settings .runsettings --logger \"trx;LogFileName=results.trx\" --collect:\"XPlat Code Coverage\"",
       "verify": {
         "argv": [
           "dotnet",
           "test",
           "--configuration",
           "Release",
-          "--no-build"
+          "--no-build",
+          "--settings",
+          ".runsettings"
         ],
         "expected": "exit code 1 with 'Failed!  - Failed:     1'; with TreatNoTestsAsError set to true a run that discovers zero tests also exits 1 instead of 0",
         "expectedExit": 1

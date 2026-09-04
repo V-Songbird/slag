@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 "use strict";
-require("child_process").spawnSync(process.execPath, [".jig/checks/run.mjs"], { stdio: "inherit" }).status && process.exit(1); // jig:checks
+require("child_process").spawnSync(process.execPath, [".jig/checks/run.mjs", "--staged", "--ledger", "commit"], { stdio: "inherit" }).status && process.exit(1); // jig:checks
 
 // Installed via: git config core.hooksPath scripts/git-hooks
 // Reference-name scan: private blocklist (gitignored), fail-open when absent.
