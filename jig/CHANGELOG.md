@@ -4,6 +4,14 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.15.1] — 2026-09-04
+
+### Fixed
+
+- A JVM install wrote SpotBugs' and detekt's configuration and nothing ever read it — the plugin blocks that make Gradle load them never reached your build script, so `./gradlew spotbugsMain` and `./gradlew detekt` came back BUILD FAILED. Checkstyle and PMD had the mirror problem: both were applied whether or not you ticked them, so a project that installed only the build tool got a script turning them on with no configuration for either, and `gradle check` failed. Each tool brings its own block now, and PMD's ruleset is read.
+- A new JVM project got no build script, so it had no `check` task at all and `gradle check` answered `Task 'check' not found`. The starter carries one.
+- The Go test lane ran `go test -race`, which needs a C toolchain. On a machine without one the commit lane jig had just written failed on its first run. jig now asks whether this machine can run the flag, drops it where it cannot and says so on the plan, and leaves it in the CI line.
+
 ## [2.15.0] — 2026-09-04
 
 ### Fixed
