@@ -72,6 +72,8 @@ Takes effect next session. Nothing to configure — the interview is the configu
 | You want to… | Command |
 | --- | --- |
 | Set up guardrails, interview included | `/jig:jig` |
+| Adopt an existing Jig project in Codex | `/jig:jig migrate --host codex` |
+| Adopt an existing Jig project in Claude Code | `/jig:jig migrate --host claude` |
 | Set them up with one review and no questions — the engine picks the classes from your own history, records the choice and its basis, and labels every value assumed | `/jig:jig --quick` |
 | Scaffold a new project and guard it from line one | `/jig:jig` in the empty folder |
 | Know what jig checks here, and what needs attention | `/jig:jig what are you checking, and what needs attention?` |
@@ -84,6 +86,33 @@ Takes effect next session. Nothing to configure — the interview is the configu
 | Go straight to the guards' record, or quiet a guard | `/jig:review` |
 
 A question reads and answers; it never installs, repairs or migrates on the way. When what you asked could mean two things, jig asks which before it changes anything.
+
+## Move an existing Jig project between hosts
+
+Run `/jig:jig migrate --host codex` or `/jig:jig migrate --host claude`
+in the intended project checkout. Either plugin build can prepare either
+destination. This is a separate, plan-only workflow: it inventories the existing
+installation and writes a review plan, then waits for approval of the exact
+instruction change and path before applying it. Plain `migrate` keeps its legacy
+format-upgrade behavior.
+
+The approved change adds scoped pointers to the source instructions in a
+separate owned region of the destination's root instruction file. Codex uses a
+nonempty `AGENTS.override.md` when present, otherwise `AGENTS.md`; Claude uses
+`CLAUDE.md`. Source instruction files remain required. Existing checks, guard
+IDs, modes, proofs, driver and historical records are retained, including any
+reported drift. The new transaction has its own undo record.
+
+The report names missing local history and instruction-discovery limits.
+Referenced governance documents, external or user instructions, host settings
+and policy conflicts still need review. Applying a bridge does not register
+hooks or prove that session, commit or CI checks run. Verify the destination
+plugin and lanes in the actual checkout and host; desktop, CLI and operating
+systems require their own evidence.
+
+See the [host migration workflow](skills/jig/references/host-migration.md) for
+the engine commands, named approval, stale-plan refusal, verification and exact
+transaction reversal. No existing project is migrated merely by updating Jig.
 
 ## Benchmarks
 

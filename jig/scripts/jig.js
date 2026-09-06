@@ -42,6 +42,8 @@
 //                                            the catch; --live actually runs
 //                                            them, and --toolchain names the
 //                                            installed tools it may spawn
+//   node jig.js migrate --host codex|claude review a host instruction bridge;
+//                                            named apply is a separate approval
 //   node jig.js migrate [--accept-drops]     rewrite a 1.0.1 install into the
 //                                            shape this engine reads, as one
 //                                            journalled transaction. It refuses
@@ -624,6 +626,37 @@ function emptiesConfig(root, rel, content) {
     " jig does not propose that — use `revert` to take the install back out.";
 }
 
+// Version 2 is reserved for one reviewed host bridge. Older engines must
+// refuse it rather than treating its safety metadata as an ignorable field.
+const HOST_MIGRATION_PLAN_VERSION = 2;
+function hostMigrationPlanProblem(record) {
+  if (record.changes.length !== 1) return "host migration plans must contain exactly one reviewed bridge";
+  const change = record.changes[0];
+  if (!isObject(change) || change.kind !== "write-side-file" || typeof change.content !== "string") {
+    return "host migration plans require an instruction-file change";
+  }
+  const review = change.migrationReview;
+  const keys = ["version", "host", "targetHash", "snapshot", "bridgeHash"];
+  const digest = (value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+  if (!isObject(review) || Object.keys(review).length !== keys.length ||
+      keys.some((key) => !Object.prototype.hasOwnProperty.call(review, key)) || review.version !== 1 ||
+      !["codex", "claude"].includes(review.host) || !(review.targetHash === null || digest(review.targetHash)) ||
+      !digest(review.snapshot) || !digest(review.bridgeHash)) return "host migration review metadata is missing or unsupported";
+  const targets = review.host === "codex" ? ["AGENTS.md", "AGENTS.override.md"] : ["CLAUDE.md"];
+  if (!targets.includes(change.path) || change.sourceHash !== review.targetHash ||
+      !["lf", "crlf"].includes(change.eol) || typeof change.bom !== "boolean") {
+    return "host migration target or reviewed file identity is not canonical";
+  }
+  const canonical = { version: 1, host: review.host, targetHash: review.targetHash,
+    snapshot: review.snapshot, bridgeHash: review.bridgeHash };
+  const id = "migrate-host-" + review.host + "-" +
+    hashBytes(Buffer.from(JSON.stringify({ content: change.content, migrationReview: canonical }), "utf8")).slice(0, 16);
+  if (change.id !== id) return "host migration change id does not bind its reviewed content and sources";
+  const planId = hashBytes(Buffer.from(JSON.stringify(record.changes), "utf8")).slice(0, 12);
+  if (record.planId !== planId) return "host migration plan id does not match its canonical changes";
+  return null;
+}
+
 // Draft → canonical plan. Everything mechanical is computed here rather than
 // trusted from the draft: the fingerprint, the file's EOL/BOM style, the
 // format, and how that format gets verified. A draft that states any of them is
@@ -664,6 +697,12 @@ function planFromDraft(draft, root) {
     const rel = toPosix(typeof raw.path === "string" ? raw.path.trim() : "");
     const badTarget = targetProblem(root, raw.kind, rel);
     if (badTarget) { problems.push(label + ": " + badTarget); continue; }
+    let migrationReview;
+    if (raw.migrationReview !== undefined) {
+      try {
+        migrationReview = require("./migrate-host.js").validateReview(root, raw.migrationReview, rel);
+      } catch (err) { problems.push(label + ": " + err.message); continue; }
+    }
     // An include-line change carries the line and its marker instead of whole
     // file content — the final bytes are woven from the host file at apply
     // time, because the host may legitimately change between plan and apply.
@@ -729,6 +768,7 @@ function planFromDraft(draft, root) {
       // The staleness basis. `null` means "this change creates the file", and
       // the file existing at apply time is then itself the staleness.
       sourceHash: current === null ? null : hashBytes(current),
+      ...(migrationReview === undefined ? {} : { migrationReview }),
       eol: style.eol,
       bom: style.bom,
       format,
@@ -817,7 +857,14 @@ function planFromDraft(draft, root) {
   // A content hash, not a clock: the same draft over the same tree plans to the
   // same id, so a re-run is recognisable as the same plan.
   const planId = hashBytes(Buffer.from(JSON.stringify(changes), "utf8")).slice(0, 12);
-  return { problems: [], payload: { schemaVersion: SCHEMA_VERSION, planId, changes } };
+  const schemaVersion = changes.some((change) => change.migrationReview !== undefined)
+    ? HOST_MIGRATION_PLAN_VERSION : SCHEMA_VERSION;
+  const payload = { schemaVersion, planId, changes };
+  if (schemaVersion === HOST_MIGRATION_PLAN_VERSION) {
+    const problem = hostMigrationPlanProblem(payload);
+    if (problem) return { problems: [problem] };
+  }
+  return { problems: [], payload };
 }
 
 function planFiles(root) {
@@ -834,9 +881,19 @@ function readPlan(file) {
     throw expected(path.basename(file) + " is not readable JSON (" + err.message + ")");
   }
   if (!isObject(record) || !Array.isArray(record.changes)) throw expected(path.basename(file) + " is not a plan");
-  if (record.schemaVersion > SCHEMA_VERSION) {
-    throw expected(path.basename(file) + " is schemaVersion " + record.schemaVersion + " and this engine reads " +
-      SCHEMA_VERSION + ". Upgrade jig rather than applying a plan it cannot fully read.");
+  if (record.schemaVersion === HOST_MIGRATION_PLAN_VERSION) {
+    // Shape only: historical plans may now be stale. Live source and target
+    // checks belong to the selected apply, not every plan findChange reads.
+    const problem = hostMigrationPlanProblem(record);
+    if (problem) throw expected(path.basename(file) + " is schemaVersion 2 and this engine reads 1 for ordinary plans. " + problem);
+  } else {
+    if (record.schemaVersion > SCHEMA_VERSION) {
+      throw expected(path.basename(file) + " is schemaVersion " + record.schemaVersion + " and this engine reads " +
+        SCHEMA_VERSION + ". Upgrade jig rather than applying a plan it cannot fully read.");
+    }
+    if (record.changes.some((change) => isObject(change) && change.migrationReview !== undefined)) {
+      throw expected(path.basename(file) + " carries host migration review metadata, which requires schemaVersion 2");
+    }
   }
   return record;
 }
@@ -1200,6 +1257,7 @@ function applyGitConfig(root, ctx, change) {
 }
 
 function applyChange(root, ctx, change) {
+  if (change.migrationReview !== undefined) require("./migrate-host.js").assertReview(root, change);
   if (change.kind === "run-install") return applyInstall(root, ctx, change);
   if (change.kind === "set-git-config") return applyGitConfig(root, ctx, change);
 
@@ -3348,6 +3406,9 @@ function laneWords(lanes) {
 }
 
 function consentFor(change, guards, installed, context) {
+  if (change.migrationReview !== undefined) {
+    return { tier: "item", why: "adds a reviewed host instruction bridge in " + change.path + "; approve its exact change and path" };
+  }
   const ctx = isObject(context) ? { ...NO_CONSENT_CONTEXT, ...context } : NO_CONSENT_CONTEXT;
   const lanes = laneWords(ctx.lanes);
   if (change.kind === "write-config") {
@@ -4225,6 +4286,12 @@ function cmdApply(root, opts, internal) {
     if (change.kind !== "write-config") continue;
     const dropped = emptiesConfig(root, change.path, change.content);
     if (dropped) throw expected("Refusing to apply " + change.id + ": " + dropped + " Nothing was written.");
+  }
+
+  // A stale host bridge must refuse before any selected change writes. Repeat
+  // at applyChange so each write also checks the bytes it is about to replace.
+  for (const change of selected) {
+    if (change.migrationReview !== undefined) require("./migrate-host.js").assertReview(root, change);
   }
 
   const tx = hashBytes(Buffer.from(String(planId) + "|" + selected.map((c) => c.id).join(",") + "|" + new Date().toISOString()))
@@ -5580,6 +5647,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === "--change") { opts.change.push(argv[++i]); continue; }
     if (a === "--path") { opts.path.push(argv[++i]); continue; }
+    if (a.startsWith("--host=")) { opts.host = a.slice("--host=".length); continue; }
     if (a.startsWith("--")) {
       const key = a.slice(2);
       const next = argv[i + 1];
@@ -6255,7 +6323,8 @@ function main(argv) {
   const opts = parseArgs(argv);
   const command = opts._[0];
   if (!command || !COMMANDS[command]) {
-    process.stderr.write("usage: jig.js <" + Object.keys(COMMANDS).join("|") + "> [options]\n");
+    process.stderr.write("usage: jig.js <" + Object.keys(COMMANDS).join("|") + "> [options]\n" +
+      "       jig.js migrate --host <codex|claude> [--root <path>]\n");
     process.exit(1);
   }
   const root = typeof opts.root === "string" ? path.resolve(opts.root) : process.cwd();

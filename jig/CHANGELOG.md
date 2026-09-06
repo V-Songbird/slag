@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [2.16.0] — 2026-09-08
 
+### Added
+
+- `migrate --host codex|claude` moves an existing jig install between Codex and Claude Code. It inventories what is installed and proposes one named, reversible instruction bridge; plain `migrate` keeps its format-upgrade behavior.
+- The bridge keeps nested and rule-path scopes, writes into the destination's active root instruction file without touching your own text, and leaves the source files, checks, guard ids, modes, proofs and history in place.
+- The migration review reports drift, missing history, discovery limits and unverified session, commit and CI lanes. A change to the source, the target or the install makes a stale plan refuse, and an imported governance file needs your review.
+
 ### Changed
 
 - `/jig:jig` takes a request in plain words and does the right job with it: "what are you checking?", "why is this file here?" and "is anything running?" read the inventory; "what did you catch?", "that alert was wrong" and "quiet that guard" go to the guards' record; "undo it" goes straight to the revert. A question only reads — it never installs, repairs or migrates on the way. `/jig:inventory` and `/jig:review` still work as direct entries.

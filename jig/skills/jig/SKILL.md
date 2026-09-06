@@ -15,11 +15,20 @@ description: >-
   /jig:jig. Do NOT use to grade, audit or author prompt text — rules, skill
   descriptions or agent instructions: this installs checks that run against a
   codebase.
-argument-hint: "[what you want, in your own words] [--quick] [--edition <id>] [--select <classId,…>] [--no-ci] [--observe]"
+argument-hint: "[what you want, in your own words] [migrate --host codex|claude] [--quick] [--edition <id>] [--select <classId,…>] [--no-ci] [--observe]"
 allowed-tools: Bash, PowerShell, Read, Write, AskUserQuestion
 ---
 
 # jig:jig
+
+For an explicit request to move an existing Jig project between Codex and Claude
+Code, including `migrate --host codex` or `migrate --host claude`, read
+[host migration](references/host-migration.md) and follow only that workflow.
+Route this request before the re-run upgrade or review handoff below. If the
+destination is missing, ask for it; do not infer an ordinary setup request.
+Host migration is plan-only until the exact instruction change and path are
+approved, even in quick mode. Do not run the legacy no-flag migration
+automatically for a host-only request.
 
 The engine does everything mechanical. You run it, read its result, and ask the
 questions it cannot answer. Never re-derive by hand what a command already
@@ -54,6 +63,7 @@ invoke another skill or to say the same thing again.
 | checks set up, or one more mistake caught | The setup below, from step 1. On an existing install this is the fresh pass over new material, not the routine review handoff. |
 | a named installation change repaired | Read inventory to name the issue, then the plan/apply repair route in step 7. Named approval and the drift refusal hold; do not widen a repair into a new setup. |
 | an installation change undone | Step 9 directly: `status`, resolve the change or transaction they named, then `revert`. No setup and no migration first. |
+| an existing install moved between Codex and Claude Code | The host migration route at the top of this file. No setup and no re-run upgrade first. |
 
 Bare `/jig:jig` is the setup and re-run flow below. `--quick` is asked for by
 flag, never chosen because the owner wanted a short answer, and a read-only
@@ -78,10 +88,10 @@ a,b`, never `--select=a,b`, which the parser reads as a flag named
 `select=a,b`. Every command accepts `--root <path>`; without it the working
 directory is the project.
 
-When `.jig/manifest.json` already exists, this is a re-run, and there is one
-thing to do before anything else. An install made before the rework carries
-checks in the old single-function shape, which this engine does not read, so
-upgrade it in place first:
+For ordinary setup, after ruling out a host migration request above, an
+existing `.jig/manifest.json` means this is a re-run. An install made before
+the rework carries checks in the old single-function shape, which this engine
+does not read, so upgrade it in place first:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" migrate
