@@ -1,6 +1,6 @@
 {
   "name": "jig",
-  "version": "2.15.1-codex.1",
+  "version": "2.16.0-codex.1",
   "private": true,
   "description": "Jig repository guardrails for Codex",
   "license": "MIT",

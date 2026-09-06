@@ -24,6 +24,7 @@
 //      in the same transaction.
 //
 //   node jig.js migrate [--root <path>]
+//   node jig.js migrate --host codex|claude [--root <path>]
 //
 // Nothing is armed by this command. A guard keeps whatever mode its own row
 // recorded (SCOPE, "What mode does a migrated 1.0.1 guard take"), and a row
@@ -542,6 +543,12 @@ function asWritten(root, rel, content) {
 }
 
 function cmdMigrate(root, opts) {
+  if (Object.prototype.hasOwnProperty.call(opts || {}, "host")) {
+    if (opts.host !== "codex" && opts.host !== "claude") {
+      throw expected("migrate --host needs codex or claude; no host was selected. Nothing was written.");
+    }
+    return require("./migrate-host.js").cmdMigrateHost(root, opts);
+  }
   if (!fs.existsSync(statePath(root))) {
     throw expected("there is no " + jig.STATE_DIR + "/ here — `migrate` upgrades an install jig already made," +
       " and there is nothing here to upgrade. Nothing was written.");

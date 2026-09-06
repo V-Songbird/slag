@@ -4,6 +4,20 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.16.0-codex.1] — 2026-09-06
+
+### Added
+
+- Explicit `migrate --host codex|claude` in either plugin build. It inventories an
+  existing Jig installation and proposes one named, reversible instruction
+  bridge; ordinary `migrate` keeps its legacy format-upgrade behavior.
+- Conditional source pointers preserve nested and supported rule-path scopes.
+  The destination uses its active root instruction file, retains owner text and
+  keeps the source files, installed checks, guard IDs, modes, proofs and history.
+- Migration review reports drift, missing history, discovery limits and
+  unverified host/commit/CI lanes. Source, target or installed-state changes
+  invalidate a stale plan; imported governance target bytes require manual review.
+
 ## [2.15.1-codex.1] — 2026-09-06
 
 ### Changed

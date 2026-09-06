@@ -1,6 +1,6 @@
 {
   "name": "jig",
-  "version": "2.15.1-codex.1",
+  "version": "2.16.0-codex.1",
   "description": "Interviews you about recurring mistakes, installs the checks you approve, and proves each check against a planted violation. Journals every change for reversal and guards supported Codex shell and patch calls.",
   "license": "MIT",
   "author": {

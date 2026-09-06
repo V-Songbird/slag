@@ -10,15 +10,24 @@ description: >-
   checked from the first edit, or a repeat mistake caught before it lands — e.g.
   "set up guardrails", "scaffold this project", "stop the AI deleting my tests",
   "add checks to this repo", "what keeps breaking here", "catch skipped tests
-  before they merge" — or invokes $jig. Do NOT use to grade, audit or author
-  prompt text — rules, skill descriptions or agent instructions: this installs
-  checks that run against a codebase.
+  before they merge" — or invokes $jig. Also handles explicit migration of
+  an existing Jig project between Codex and Claude Code. Do NOT use for general
+  grading, auditing or authoring of prompt text, rules or skill descriptions.
 ---
 
 # Jig setup
 
 Read [Codex runtime and consent](references/codex-runtime.md) first. It defines
 plugin-path resolution, supported interview inputs, consent and host-proof limits.
+
+For an explicit request to move an existing Jig project between Codex and Claude
+Code, including `migrate --host codex` or `migrate --host claude`, read
+[host migration](references/host-migration.md) and follow only that workflow.
+Route this request before the re-run upgrade or review handoff below. If the
+destination is missing, ask for it; do not infer an ordinary setup request.
+Host migration is plan-only until the exact instruction change and path are
+approved, even in quick mode. Do not run the legacy no-flag migration
+automatically for a host-only request.
 
 The engine does everything mechanical. You run it, read its result, and ask the
 questions it cannot answer. Never re-derive by hand what a command already
@@ -55,10 +64,10 @@ a,b`, never `--select=a,b`, which the parser reads as a flag named
 `select=a,b`. Every command accepts `--root <path>`; without it the working
 directory is the project.
 
-When `.jig/manifest.json` already exists, this is a re-run, and there is one
-thing to do before anything else. An install made before the rework carries
-checks in the old single-function shape, which this engine does not read, so
-upgrade it in place first:
+For ordinary setup, after ruling out a host migration request above, an
+existing `.jig/manifest.json` means this is a re-run. An install made before
+the rework carries checks in the old single-function shape, which this engine
+does not read, so upgrade it in place first:
 
 ```
 node "<JIG_ROOT>/scripts/jig.js" migrate

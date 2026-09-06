@@ -86,6 +86,8 @@ alone does not establish that.
 | You want to… | Skill invocation |
 | --- | --- |
 | Set up guardrails, interview included | `$jig` |
+| Adopt an existing Jig project in Codex | `$jig migrate --host codex` |
+| Adopt an existing Jig project in Claude Code | `$jig migrate --host claude` |
 | Use the engine's history-based or catalogue selection, with every value labelled assumed, then approve the concrete plan | `$jig --quick` |
 | Prepare a new project's toolchain and checks | `$jig` in the empty folder |
 | Review catches, record a false alarm or change a named guard's mode | `$review` |
@@ -111,6 +113,33 @@ It can write approved starter project files for supported editions. If a
 project needs an owner-selected identity, such as a Go module path, the scan
 returns the exact prerequisite. A starter is a project file, not an application
 template. Tool installs show their exact commands, config bytes and undo steps.
+
+## Move an existing Jig project between hosts
+
+Run `$jig migrate --host codex` or `$jig migrate --host claude`
+in the intended project checkout. Either plugin build can prepare either
+destination. This is a separate, plan-only workflow: it inventories the existing
+installation and writes a review plan, then waits for approval of the exact
+instruction change and path before applying it. Plain `migrate` keeps its legacy
+format-upgrade behavior.
+
+The approved change adds scoped pointers to the source instructions in a
+separate owned region of the destination's root instruction file. Codex uses a
+nonempty `AGENTS.override.md` when present, otherwise `AGENTS.md`; Claude uses
+`CLAUDE.md`. Source instruction files remain required. Existing checks, guard
+IDs, modes, proofs, driver and historical records are retained, including any
+reported drift. The new transaction has its own undo record.
+
+The report names missing local history and instruction-discovery limits.
+Referenced governance documents, external or user instructions, host settings
+and policy conflicts still need review. Applying a bridge does not register
+hooks or prove that session, commit or CI checks run. Verify the destination
+plugin and lanes in the actual checkout and host; desktop, CLI and operating
+systems require their own evidence.
+
+See the [host migration workflow](skills/jig/references/host-migration.md) for
+the engine commands, named approval, stale-plan refusal, verification and exact
+transaction reversal. No existing project is migrated merely by updating Jig.
 
 ## What “proven” means
 
