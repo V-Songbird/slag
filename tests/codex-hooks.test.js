@@ -242,3 +242,27 @@ test("native shell stdout cannot spoof a green verification result", () => {
 test("native default CRLF matching preserves untouched lines and rewrites matched context", () => {
   assert.equal(adapter.applyHunks("untouched();\r\nsafe();\r\n", [{ before: ["safe();"], after: ["safer();"] }]), "untouched();\r\nsafer();\n");
 });
+
+test("review reports native patch evaluations without inventing activity from non-evaluation rows", () => {
+  const root = fixture({ observe: true });
+  const lib = require("../hooks/jig-lib");
+  const engine = require("../scripts/jig");
+  for (const row of [
+    { guardId: "g-codex", tool: "apply_patch", decision: "pass", check: "unusable" },
+    { guardId: "g-codex", tool: "apply_patch", decision: "false-positive-cleared" },
+    { guardId: null, tool: "apply_patch", decision: "verified", verify: "test" },
+  ]) lib.appendLedger(root, row);
+  const before = engine.cmdReview(root).guards.find((guard) => guard.guardId === "g-codex");
+  assert.equal(before.evaluated, 0);
+  assert.deepEqual(before.evaluatedOn, []);
+
+  const caught = run(root, patch("*** Add File: observed.js", "+try { risky(); } catch {}"));
+  assert.equal(caught.out.jig.decision, "would-deny");
+  run(root, patch("*** Add File: allowed.js", "+safe();"));
+  lib.appendLedger(root, { guardId: "different-shell-guard", tool: "Bash", decision: "pass" });
+  const reported = engine.cmdReview(root).guards.find((guard) => guard.guardId === "g-codex");
+  assert.equal(reported.evaluated, 2);
+  assert.equal(reported.wouldDeny, 1);
+  assert.deepEqual(reported.evaluatedOn, ["apply_patch"]);
+  assert.deepEqual(lib.shellToolsSeen(root), ["Bash"], "patch evaluations must not contaminate the shell-only surface");
+});

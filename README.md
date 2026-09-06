@@ -34,7 +34,7 @@ agent from bypassing every possible route. Its original behavior is preserved:
 named consent, deterministic checks, recorded evidence, and reversible changes.
 [The behavior analysis](docs/BEHAVIOR.md) explains the boundaries.
 
-Three lanes carry the checks:
+Checks run in the lanes their detectors support:
 
 - **Session:** trusted Codex hooks inspect supported shell commands and patch
   operations. An armed PreToolUse match can deny the call with a reason, an
@@ -48,8 +48,10 @@ Three lanes carry the checks:
   verification commands. Index-dependent co-change and removal checks are
   disclosed as skipped when no changes are staged.
 
-The committed checks run without Jig or Codex. Session hooks are an additional
-lane, whose registration and trust must be verified in the active Codex host.
+Driver-capable detectors and registered verification commands can run without
+Jig or Codex once their files are installed. Session-only detectors gain no
+commit or CI coverage from those files. Session hooks require registration and
+trust to be verified in the active Codex host.
 
 ## Install
 
@@ -155,7 +157,7 @@ They are recalculated by the test suite on every change.
 
 | What | Score |
 | --- | --- |
-| Checks jig runs, each passing its own pair | **147 of 147** |
+| Catalogue detector fixtures, each passing their own pair | **147 of 147** |
 | Patterns those checks name, each proved on its own | **256 of 256** |
 | Mistake classes across the six editions | 165 |
 | Cross-sample hits, disclosed | 8 |
@@ -206,3 +208,12 @@ machine to enable the optional real ecosystem starter builds, tool executions
 and version probes. Each unexecuted external smoke check is explicitly reported
 as skipped; it is not counted as verified tool coverage. The CI matrix runs the
 portable suite on Node 20, 22 and 24 across Windows, macOS and Linux.
+
+Run `npm run probe:workflow` to replay the owner-control workflow in a disposable
+repository, including named approvals, arming, false-positive review and exact
+restoration of original project and Git bytes, retaining Jig audit records.
+Decisions are predeclared fixtures; this does not simulate a human
+interview or prove host delivery. Use the separate
+[host probe](docs/CODEX-COMPATIBILITY.md#validation-evidence) for native tool
+blocking. [Desktop acceptance](docs/DESKTOP-ACCEPTANCE.md) records the installed
+plugin checks and their remaining limits.

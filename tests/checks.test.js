@@ -2132,11 +2132,12 @@ test("apply says out loud that commit-time checks and the permissions are still 
   assert.equal(applied.proposals.length, 2);
   const lane = applied.proposals.find((n) => /activation\.md/.test(n));
   assert.ok(lane, "the commit-lane note is missing");
-  // The note leads with what it buys, names the one command, and says plainly
-  // that skipping it does not leave the project uncovered.
+  // The note names the command and separates optional wiring from actual
+  // check coverage; it cannot establish that CI ran or blocked a merge.
   assert.match(lane, /at the moment you commit/);
   assert.match(lane, /git config core\.hooksPath \.jig\/hooks/);
-  assert.match(lane, /CI still stops the merge/);
+  assert.match(lane, /CI coverage requires a configured workflow/);
+  assert.doesNotMatch(lane, /CI still stops the merge|catches everything/);
   assert.ok(applied.proposals.some((n) => /proposed-permissions\.json/.test(n) && /never edits your settings/.test(n)));
 });
 
@@ -2306,8 +2307,8 @@ test("the wiring plan rewrites the activation doc in the same plan that makes it
   assert.equal(engine.commitLane(root).state, "live");
 
   const after = fs.readFileSync(path.join(root, ".jig", "activation.md"), "utf-8");
-  assert.match(after, /Commit-time checks are running/);
-  assert.match(after, /Nothing here is a task/);
+  assert.match(after, /Commit hook wiring is configured/);
+  assert.match(after, /does not establish that a check has run/);
   assert.match(after, /git config --unset core\.hooksPath/);
   // The sentence that sent the owner to ask a session whether they had to act.
   assert.equal(/one step jig leaves to you/.test(after), false);
@@ -2353,7 +2354,7 @@ test("a second interview on a wired repository is never offered the unwired text
   const act = record.changes.find((c) => c.path === ".jig/activation.md");
   assert.ok(act, "the re-run planned no activation doc at all");
   assert.equal(act.template.name, "activation-wired");
-  assert.match(act.content, /Commit-time checks are running/);
+  assert.match(act.content, /Commit hook wiring is configured/);
 });
 
 test("a repository wired under an older jig can be put back in step without being rewired", () => {
@@ -2372,7 +2373,7 @@ test("a repository wired under an older jig can be put back in step without bein
   engine.cmdApply(root, { _: [], change: [row.id], path: [row.path] });
 
   const after = fs.readFileSync(path.join(root, ".jig", "activation.md"), "utf-8");
-  assert.match(after, /Commit-time checks are running/);
+  assert.match(after, /Commit hook wiring is configured/);
   // Nothing was rewired. The setting is whatever it already was.
   assert.equal(engine.commitLane(root).state, "live");
 });
@@ -2387,7 +2388,7 @@ test("refresh refuses rather than proposing nothing, and says which case it is",
 
   wireCommit(root);
   assert.throws(() => engine.cmdPlan(root, { _: [], change: [], "refresh-activation": true }),
-    /already says the checks are running/);
+    /already describes the current hook wiring/);
 });
 
 test("a file the owner edited is refused rather than rewritten out from under them", () => {

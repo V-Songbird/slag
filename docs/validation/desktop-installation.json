@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-09-06T10:35:35.267Z",
+  "plugin": "jig@personal",
+  "version": "2.15.1-codex.1",
+  "method": "Desktop-bundled Codex app-server with actual user configuration; initial untrusted metadata reviewed and exact hashes persisted through version-checked config/batchWrite, then hooks/list re-read.",
+  "userSettingsOutsideJigPreserved": true,
+  "skills": [
+    {
+      "name": "jig:inventory",
+      "enabled": true,
+      "pluginId": "jig@personal"
+    },
+    {
+      "name": "jig:jig",
+      "enabled": true,
+      "pluginId": "jig@personal"
+    },
+    {
+      "name": "jig:review",
+      "enabled": true,
+      "pluginId": "jig@personal"
+    }
+  ],
+  "hooks": [
+    {
+      "key": "jig@personal:hooks/hooks.json:pre_tool_use:0:0",
+      "eventName": "preToolUse",
+      "command": "node -e \"require(process.env.PLUGIN_ROOT + '/hooks/runner.js').cli(process.argv.slice(1))\" PreToolUse",
+      "matcher": "^(Bash|apply_patch)$",
+      "currentHash": "sha256:3edb8bb2c8be8efb3df41c7a7771c22fd0826165af76c226fed6b7d4185809bb",
+      "enabled": true,
+      "trustStatus": "trusted"
+    },
+    {
+      "key": "jig@personal:hooks/hooks.json:post_tool_use:0:0",
+      "eventName": "postToolUse",
+      "command": "node -e \"require(process.env.PLUGIN_ROOT + '/hooks/runner.js').cli(process.argv.slice(1))\" PostToolUse",
+      "matcher": "^(Bash|apply_patch)$",
+      "currentHash": "sha256:6728caf60c23192b5e6c4f2b1f657af5dcb1491e6ac248b0f7b4f58cdbb553db",
+      "enabled": true,
+      "trustStatus": "trusted"
+    },
+    {
+      "key": "jig@personal:hooks/hooks.json:subagent_stop:0:0",
+      "eventName": "subagentStop",
+      "command": "node -e \"require(process.env.PLUGIN_ROOT + '/hooks/runner.js').cli(process.argv.slice(1))\" SubagentStop",
+      "matcher": null,
+      "currentHash": "sha256:f61793e294b4c2e04523dc09341f67883af60f7b9431aaec5255ca6a93b00e0b",
+      "enabled": true,
+      "trustStatus": "trusted"
+    },
+    {
+      "key": "jig@personal:hooks/hooks.json:stop:0:0",
+      "eventName": "stop",
+      "command": "node -e \"require(process.env.PLUGIN_ROOT + '/hooks/runner.js').cli(process.argv.slice(1))\" Stop",
+      "matcher": null,
+      "currentHash": "sha256:6f2bb038e0d6038b0fccb784548732e192f26fe712e4f54f6127f33c4da1fb86",
+      "enabled": true,
+      "trustStatus": "trusted"
+    }
+  ],
+  "desktopWindowOperated": false,
+  "installedSourceSha256": {
+    ".codex-plugin/plugin.json": "f65b36b27f347deab2504ecf1c208fd983ddc851d68ba27044d68e0dd2734340",
+    "hooks/hooks.json": "cb0df7c543f04fe6e725f32c830d511bde95b26263d22e56e5003c091e0f48b4",
+    "hooks/runner.js": "22e2be87881a4d3cf815da7e49aa6992dc06c5e5508648299a35d80d2b75cee6",
+    "hooks/jig-lib.js": "64acf4b141f4979caf20d9617ab30052de7b850ae703380b22fca19cc8a50e02",
+    "hooks/codex.js": "0c079b5f58b232ed260826d05a0c507bb852470479e948ac27a3ceec790a0ac7",
+    "scripts/jig.js": "c514fd8fb4ff203b849f5e2b50dccd0b90173dc64700da88852266c5e456e3fc",
+    "scripts/vocab.js": "fe2297fdf00ffb32783cd3576fb6de7125d84191959f9bf58c6a62c6d5a75ad9",
+    "scripts/templates/templates.json": "cae61569ada344e57031d146d01b64fb2738291960796554ad2393ee6d0bff51",
+    "skills/jig/SKILL.md": "aca0a7b5452d65a3431567c67e999dbf2cb0b97bbfb51ee3274b6039daaaff0a",
+    "skills/review/SKILL.md": "5542e5f5a61848137c0f5e312a5aa111702350f9da09fa92a664911185a94a5e",
+    "skills/inventory/SKILL.md": "8ea29dc9fdec541e1ed0735c14fa2ebc96daf309bb3b9fbc7843f68630555315"
+  }
+}

@@ -176,7 +176,7 @@ test("the README benchmark table publishes the figures this suite measures", () 
   const readme = fs.readFileSync(path.join(PLUGIN_ROOT, "README.md"), "utf8");
   const driven = rows.reduce((n, r) => n + r.driven, 0);
 
-  assert.equal(cell(readme, "Checks jig runs, each passing its own pair"), driven + " of " + driven);
+  assert.equal(cell(readme, "Catalogue detector fixtures, each passing their own pair"), driven + " of " + driven);
   assert.equal(cell(readme, "Patterns those checks name, each proved on its own"),
     patterns.proved + " of " + patterns.owed);
   assert.equal(cell(readme, "Mistake classes across the six editions"), String(pairs));

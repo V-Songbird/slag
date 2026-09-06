@@ -29,7 +29,7 @@ const path = require("path");
 // thousand lines it never called into (`tests/runner.test.js` holds this
 // boundary open).
 const {
-  SCHEMA_VERSION, STATE_DIR, VERIFY_FILE, SHELL_TOOLS,
+  SCHEMA_VERSION, STATE_DIR, VERIFY_FILE, SHELL_TOOLS, NATIVE_EDIT_TOOLS,
   stripBom, fixturePath, proposedVerifyEntries,
 } = require("../scripts/vocab.js");
 // The one function that says what binds a proof to the check it proves. A
@@ -41,6 +41,7 @@ const CONFIG_FILE = "config.json";
 const LEDGER_FILE = "ledger.jsonl";
 const OFF_FILE = "off";
 const CHECKS_DIR = "checks";
+const EVALUATED_TOOLS = [...SHELL_TOOLS, ...NATIVE_EDIT_TOOLS];
 
 // The closed runner set. A config naming anything else is invalid — the whole
 // point of a closed set is that a teammate cannot introduce a new execution
@@ -745,12 +746,10 @@ function ledgerStats(root) {
       standingFalsePositive: false, pendingFalsePositive: false, falsePositives: 0, fired: 0,
       denied: 0, wouldDeny: 0, evaluated: 0, evaluatedOn: [], lastFired: null,
     });
-    // Which shell tools THIS guard's evaluated calls arrived on. The tool name
-    // rides on every row that feeds `evaluated`, so the per-guard half of the
-    // shell question costs a set rather than a second pass — and it is the half
-    // that matters: `shellToolsSeen` is repository-wide, so a `PowerShell` row
-    // written by some other guard would otherwise be read as this guard's
-    // syntax, and a `Bash` row from a guard retired months ago as a live one.
+    // Which native tools THIS guard actually evaluated. Shells and patches
+    // share this report; limiting it to shells hid observed Codex patch calls.
+    // Only rows counted as evaluations can add a tool, so judgments, witnesses,
+    // and unusable checks never imply execution coverage.
     const counted = s.evaluated;
     if (row.decision === "false-positive") {
       s.falsePositives++;
@@ -773,13 +772,13 @@ function ledgerStats(root) {
       // coverage nobody had, on the row `problem` separately calls broken.
       s.evaluated++;
     }
-    if (s.evaluated > counted && SHELL_TOOLS.includes(row.tool) && !s.evaluatedOn.includes(row.tool)) {
+    if (s.evaluated > counted && EVALUATED_TOOLS.includes(row.tool) && !s.evaluatedOn.includes(row.tool)) {
       s.evaluatedOn.push(row.tool);
     }
   }
-  // Reported in the shared list's own order, the way `shellToolsSeen` reports
-  // its set, so two surfaces never name the same pair in two orders.
-  for (const s of Object.values(stats)) s.evaluatedOn = SHELL_TOOLS.filter((t) => s.evaluatedOn.includes(t));
+  // Stable native tool order, independent of ledger append order. The separate
+  // shellToolsSeen surface remains shell-only.
+  for (const s of Object.values(stats)) s.evaluatedOn = EVALUATED_TOOLS.filter((t) => s.evaluatedOn.includes(t));
   return stats;
 }
 

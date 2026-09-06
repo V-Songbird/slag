@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "evidence": "automated-owner-workflow-fixture",
+  "ok": true,
+  "humanInterview": false,
+  "nativeHostVerified": false,
+  "networkUsed": false,
+  "packagesInstalled": false,
+  "ownerDecisions": [
+    "Configure the supplied fixture check in observe mode; do not install tools or CI.",
+    "Approve only the reviewed change-id/path pairs, including the fenced AGENTS brief and SCOPE pointer.",
+    "Arm both admitted guards, then verify fixture denials and allowed near misses.",
+    "Request a shell-guard disarm, inspect its pending token, and explicitly approve that token.",
+    "Re-arm; record a fixture false-positive judgment, explicitly approve its pending token, clear it, and re-arm.",
+    "Revert all journaled changes and compare the original project files byte for byte."
+  ],
+  "platform": "linux",
+  "node": "v22.23.2",
+  "steps": [
+    {
+      "step": "disposable-project",
+      "passed": true,
+      "originalFiles": 6,
+      "originalSha256": "7292de2e5a16cc7abcdbaa4ca0af9b27b562804a090ddef210d1b49db8981f1d"
+    },
+    {
+      "step": "reviewed-plan-and-consent-refusals",
+      "passed": true,
+      "planId": "b6a9a666ebd0",
+      "approvals": [
+        {
+          "id": "activation-257f192c",
+          "path": ".jig/activation.md",
+          "kind": "write-side-file"
+        },
+        {
+          "id": "agents-region-d709490a",
+          "path": "AGENTS.md",
+          "kind": "write-agents-region"
+        },
+        {
+          "id": "check-driver-fa3f9f13",
+          "path": ".jig/checks/run.mjs",
+          "kind": "write-side-file"
+        },
+        {
+          "id": "check-owner-command-fixture-fbc2c276",
+          "path": ".jig/checks/owner-command-fixture.check.mjs",
+          "kind": "write-side-file"
+        },
+        {
+          "id": "check-owner-edit-fixture-d0a2210e",
+          "path": ".jig/checks/owner-edit-fixture.check.mjs",
+          "kind": "write-side-file"
+        },
+        {
+          "id": "config-81cca2aa",
+          "path": ".jig/config.json",
+          "kind": "write-config"
+        },
+        {
+          "id": "hook-shim-d17d5340",
+          "path": ".jig/hooks/pre-commit",
+          "kind": "write-side-file"
+        },
+        {
+          "id": "permissions-104f0ceb",
+          "path": ".jig/proposed-permissions.json",
+          "kind": "write-side-file"
+        }
+      ]
+    },
+    {
+      "step": "named-apply-and-review",
+      "passed": true,
+      "guards": [
+        {
+          "guardId": "owner-command-fixture-bash-guard-0",
+          "mode": "observe"
+        },
+        {
+          "guardId": "owner-edit-fixture-edit-guard-0",
+          "mode": "observe"
+        }
+      ],
+      "sessionHostState": "unverified-host"
+    },
+    {
+      "step": "armed-runtime-fixtures",
+      "passed": true,
+      "evidence": "local-runtime-replay",
+      "nativeHostVerified": false,
+      "denied": [
+        "Bash",
+        "apply_patch"
+      ],
+      "nearMissPassed": [
+        "Bash",
+        "apply_patch"
+      ],
+      "selftestWitnessed": true
+    },
+    {
+      "step": "disarm-requires-approved-token",
+      "passed": true,
+      "guard": "owner-command-fixture-bash-guard-0",
+      "approval": {
+        "change": "disarm-owner-command-fixture-bash-guard-0-75dcf07c",
+        "path": ".jig/config.json"
+      },
+      "rearmed": true
+    },
+    {
+      "step": "false-positive-requires-approved-token",
+      "passed": true,
+      "judgment": "predeclared fixture decision, not a measured false positive",
+      "guard": "owner-command-fixture-bash-guard-0",
+      "approval": {
+        "change": "fp-owner-command-fixture-bash-guard-0-c6a1d030",
+        "path": ".jig/config.json"
+      },
+      "cleared": true,
+      "rearmed": true,
+      "evaluated": 9,
+      "sessionHostState": "unverified-host"
+    },
+    {
+      "step": "full-journal-revert",
+      "passed": true,
+      "exactOriginalProjectBytes": true,
+      "comparedFiles": 6,
+      "originalSha256": "7292de2e5a16cc7abcdbaa4ca0af9b27b562804a090ddef210d1b49db8981f1d",
+      "restoredSha256": "7292de2e5a16cc7abcdbaa4ca0af9b27b562804a090ddef210d1b49db8981f1d",
+      "idempotent": true,
+      "restoredInstallPaths": [
+        ".jig/activation.md",
+        ".jig/checks/run.mjs",
+        ".jig/checks/owner-command-fixture.check.mjs",
+        ".jig/checks/owner-edit-fixture.check.mjs",
+        ".jig/config.json",
+        ".jig/hooks/pre-commit",
+        ".jig/proposed-permissions.json"
+      ],
+      "retainedAudit": {
+        "directory": ".jig",
+        "files": [
+          ".gitignore",
+          "discarded.json",
+          "journal.jsonl",
+          "ledger.jsonl",
+          "owner-fixture.json",
+          "plan-4b71d309b3f9.json",
+          "plan-56ab4c207cbf.json",
+          "plan-6c69b1fc8510.json",
+          "plan-a39a4bdf8e63.json",
+          "plan-b45188c99bd2.json",
+          "plan-b6a9a666ebd0.json",
+          "plan-b6a9a666ebd0.md",
+          "plan-ec810ee6eba8.json",
+          "preimages/12e2919a97695295e16db55986496b57597bb070799c62f97dba73377b27e347",
+          "preimages/36c38d2edf4b64001224b1d92b6b217060eb45b0879ee86fba5c8ca38b178021",
+          "preimages/41c66d2dc5a0206a9e0c0cb23c5c7f3dd6728ad2b25c9ad09315823fcc22b2c3",
+          "preimages/540d577df6265ca4e90c997989acf5c5aa26ae6a4f101f8888a0960a87e45fce",
+          "preimages/6dcc1cacb8c9e9d069b40170dfbc1914ad69e6a3d806317670f52b122732f68d",
+          "preimages/813f79648ef329ad41f572a6cc472dd9f7a7247f3f3033610ef2abab4b2c6c9c",
+          "preimages/81cca2aa4f1d168d1cad1134ef29db9beafb43133a1318bbd2992cb643b79cd8",
+          "preimages/87c9d21c988bf67a0be701f504e96e85b41c4901da72866353ddc7e2e3822283",
+          "preimages/8886d429ecdfd3910b3986e34ad95514663e3a46520e69a288030a30bc1c055e",
+          "preimages/9d2284d466d8e9e8fab26988dfbaf3c752f3caa293d14aba7ea42d028cbf74d6",
+          "preimages/b0a8a6c972b4ff604f1e424000d54246d80f79b5805116003b125435fe83a31a",
+          "preimages/b5df769393a5c498d32c9c638e35572d7851c4653ab25d19e180d9424cf3fb8c",
+          "preimages/bb191b6ed67c46c8bfd6bea2be1a8cab86255b8f10a78f11d2c3292fb5a4b35a",
+          "preimages/c418d052801ef9f137b3e4bf861f025e70af5df057a0cd081b6f56b5caac8ce4",
+          "preimages/c4f11ea150214027b2a99e73041143a9ced94a4d1f748a04b6c8527dfb2a184a",
+          "preimages/cb20b851fb1ff120275665a71a4954aff64b3964c25daf3525184cdee4c05259",
+          "preimages/dee4dc4340762960be95e6a2966b77270c436a80f10bddfdf0b92e412583a506",
+          "preimages/e8e025e7ddccaaeeae0d0b593041131b1027cb840d7319ca067052c93a4f4c8a",
+          "preimages/f368a417e1f4dfd0c470aa60c2d40299bcca9d18b72670eb5c9cd69e5344e407",
+          "profile.json"
+        ],
+        "explanation": "Only named audit/plan/preimage records, the fixture input, and audit ignore/profile metadata remain; each approved install path was checked separately."
+      }
+    }
+  ],
+  "kept": false
+}

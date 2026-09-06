@@ -2275,8 +2275,8 @@ function composeConfigs(items, manifests) {
 }
 
 // Which face of the activation doc a plan writes. The unwired one tells the
-// owner how to turn commit-time checks on. The wired ones say the checks are
-// already running and how to turn them off, and there are two because undoing
+// owner how to configure commit-time invocation. The wired ones describe that
+// configuration and how to undo it, and there are two because undoing
 // the two routes is two different things: unsetting `core.hooksPath` for the
 // hook jig wrote, taking one line back out of a hook the owner already had.
 //
@@ -2455,7 +2455,7 @@ function draftFromTemplates(root, opts, checks) {
     const entry = byName.get(face);
     const current = readIfExists(path.join(root, STATE_DIR, ACTIVATION_FILE));
     if (entry && current !== null && templateText(current) === templateBody(entry)) {
-      throw expected(STATE_DIR + "/" + ACTIVATION_FILE + " already says the checks are running — nothing to refresh.");
+      throw expected(STATE_DIR + "/" + ACTIVATION_FILE + " already describes the current hook wiring — nothing to refresh.");
     }
   }
   // A plan with no coverage behind it is a wiring plan — `--wire-commit`,
@@ -4408,9 +4408,9 @@ function proposalNotes(root, results) {
   const wrote = new Set(results.map((r) => r.path));
   const lane = commitLane(root);
   if (wrote.has(STATE_DIR + "/" + ACTIVATION_FILE) && lane.state !== "live") {
-    notes.push("Your checks run in CI, and CI catches everything before it merges. What is missing is the" +
-      " earlier catch, on your own machine, at the moment you commit — so a mistake never reaches a" +
-      " pull request at all." +
+    notes.push("Git does not invoke Jig's driver here yet. Wiring it can run check-driver detectors and" +
+      " opted-in verification entries at the moment you commit. Session-only detectors do not gain" +
+      " commit or CI coverage from this wiring." +
       (lane.state === "hook-without-jig"
         ? "\n  You already have a commit hook at " + lane.path + ". Add jig's one line to it:" +
           "\n    " + ACTIVATION.sh.line +
@@ -4419,7 +4419,8 @@ function proposalNotes(root, results) {
           "\n    git config " + GIT_SETTING + " " + STATE_DIR + "/hooks" +
           "\n  Or have jig propose that as an approved, reversible change instead: " + WIRE_COMMIT_FIX +
           "\n  " + STATE_DIR + "/" + ACTIVATION_FILE + " explains both routes and what each costs.") +
-      "\n  Skipping this costs you nothing except finding out later. CI still stops the merge.");
+      "\n  CI coverage requires a configured workflow and checks or verification entries that it runs." +
+      " This note does not establish that CI ran or that a merge is blocked.");
   }
   if (wrote.has(STATE_DIR + "/" + PERMISSIONS_FILE)) {
     notes.push("Permission rules are proposed, not applied. " + STATE_DIR + "/" + PERMISSIONS_FILE + " says what" +

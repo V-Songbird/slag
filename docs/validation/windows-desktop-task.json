@@ -1,0 +1,408 @@
+{
+  "phase": 2,
+  "installedVersion": "2.15.1-codex.1",
+  "branch": "jig-desktop-acceptance",
+  "skillUsed": "jig:review",
+  "inputProvenance": "Predeclared test-controller decisions; not a fresh human interview.",
+  "authorizedInstallationPlan": "343174ec1a46",
+  "approved": [
+    {
+      "id": "check-desktop-forbidden-command-918d6517",
+      "path": ".jig/checks/desktop-forbidden-command.check.mjs"
+    },
+    {
+      "id": "check-desktop-forbidden-edit-d2f97f8d",
+      "path": ".jig/checks/desktop-forbidden-edit.check.mjs"
+    },
+    {
+      "id": "check-driver-fa3f9f13",
+      "path": ".jig/checks/run.mjs"
+    },
+    {
+      "id": "config-f3c64f3f",
+      "path": ".jig/config.json"
+    },
+    {
+      "id": "permissions-30c97293",
+      "path": ".jig/proposed-permissions.json"
+    }
+  ],
+  "declined": [
+    "activation-274c9193",
+    "hook-shim-028c4946"
+  ],
+  "armActions": [
+    {
+      "guardId": "desktop-forbidden-command-bash-guard-0",
+      "response": {
+        "ok": true,
+        "armed": "desktop-forbidden-command-bash-guard-0",
+        "plan": "71c5510d437a",
+        "change": "arm-desktop-forbidden-command-bash-guard-0-92a9c4d0",
+        "evidence": "the recorded proof matches the check on disk and no false positive stands"
+      }
+    },
+    {
+      "guardId": "desktop-forbidden-edit-edit-guard-0",
+      "response": {
+        "ok": true,
+        "armed": "desktop-forbidden-edit-edit-guard-0",
+        "plan": "f96fc8844b98",
+        "change": "arm-desktop-forbidden-edit-edit-guard-0-82f284e0",
+        "evidence": "the recorded proof matches the check on disk and no false positive stands"
+      }
+    }
+  ],
+  "nativeProbeResults": {
+    "toolSource": "Actual tools.exec_command and tools.apply_patch calls in this desktop task.",
+    "manualHookRunnerUsed": false,
+    "syntheticSelftestUsed": false,
+    "observe": [
+      {
+        "path": "work/observe-shell-forbidden.txt",
+        "exists": true,
+        "content": "JIG_DESKTOP_FORBIDDEN_COMMAND\r\n",
+        "sha256": "3E4993CE2CEB781F696A3C89D62F1AE11BED0CA43FB8D24B6A35603E850308B7"
+      },
+      {
+        "path": "work/observe-shell-allowed.txt",
+        "exists": true,
+        "content": "JIG_DESKTOP_ALLOWED_COMMAND\r\n",
+        "sha256": "6AF32E5ACAEDC2DDC7F6E3C0E01DA9229E95ABCFEFAB54E0061772FFE47D2650"
+      },
+      {
+        "path": "src/observe-forbidden.js",
+        "exists": true,
+        "content": "export const safe = true;\nJIG_DESKTOP_FORBIDDEN_EDIT();\n",
+        "sha256": "05BF94BB8DBE8245CE556C59AA2D6B038AE06B501B8EF0280AA9089F770A0DFB"
+      },
+      {
+        "path": "src/observe-allowed.js",
+        "exists": true,
+        "content": "export const safe = true;\nJIG_DESKTOP_ALLOWED_EDIT();\n",
+        "sha256": "26923C763AA3F3B2FC1246CF359227FBC87F00DB11D5F6850B6510EAD1CF2DA6"
+      }
+    ],
+    "armed": [
+      {
+        "path": "work/armed-shell-forbidden.txt",
+        "exists": false,
+        "content": null,
+        "sha256": null
+      },
+      {
+        "path": "work/armed-shell-allowed.txt",
+        "exists": true,
+        "content": "JIG_DESKTOP_ALLOWED_COMMAND\r\n",
+        "sha256": "6AF32E5ACAEDC2DDC7F6E3C0E01DA9229E95ABCFEFAB54E0061772FFE47D2650"
+      },
+      {
+        "path": "src/armed-forbidden.js",
+        "exists": false,
+        "content": null,
+        "sha256": null
+      },
+      {
+        "path": "src/armed-allowed.js",
+        "exists": true,
+        "content": "export const safe = true;\nJIG_DESKTOP_ALLOWED_EDIT();\n",
+        "sha256": "26923C763AA3F3B2FC1246CF359227FBC87F00DB11D5F6850B6510EAD1CF2DA6"
+      }
+    ],
+    "shellPreToolDenial": true,
+    "patchPreToolDenial": true,
+    "forbiddenShellOutputAbsent": true,
+    "forbiddenPatchFileAbsent": true,
+    "bothNearMissesAllowedInBothModes": true
+  },
+  "controllerHookTrustEvidence": "Parent reports all four installed hooks enabled and trusted through supported hooks/list and config/batchWrite APIs. This child did not inspect a hooks UI or modify host settings.",
+  "hostDeliveryObservedHere": {
+    "host": [
+      "codex"
+    ],
+    "session": [
+      "01a0764e-1605-7a61-834a-d58efec0e190"
+    ],
+    "supportedTools": [
+      "Bash",
+      "apply_patch"
+    ]
+  },
+  "reviewSnapshot": {
+    "guards": [
+      {
+        "guardId": "desktop-forbidden-command-bash-guard-0",
+        "fired": 2,
+        "evaluated": 11,
+        "denied": 1,
+        "wouldDeny": 1,
+        "evaluatedOn": [
+          "Bash"
+        ],
+        "lastFired": "2026-09-06T10:56:01.002Z",
+        "mode": "armed",
+        "why": "the recorded proof matches the check on disk and no false positive stands",
+        "problem": null,
+        "demoted": null,
+        "wavedOff": 0,
+        "rawLedgerTools": [
+          "Bash"
+        ]
+      },
+      {
+        "guardId": "desktop-forbidden-edit-edit-guard-0",
+        "fired": 2,
+        "evaluated": 4,
+        "denied": 1,
+        "wouldDeny": 1,
+        "evaluatedOn": [],
+        "lastFired": "2026-09-06T10:56:16.455Z",
+        "mode": "armed",
+        "why": "the recorded proof matches the check on disk and no false positive stands",
+        "problem": null,
+        "demoted": null,
+        "wavedOff": 0,
+        "rawLedgerTools": [
+          "apply_patch"
+        ]
+      }
+    ],
+    "ledgerLines": 15,
+    "neverFired": [],
+    "drifted": [],
+    "verify": [],
+    "lanes": {
+      "session": {
+        "runs": null,
+        "observing": false,
+        "configured": true,
+        "off": false,
+        "offSince": null,
+        "shell": {
+          "seen": [
+            "Bash"
+          ],
+          "watched": [
+            "Bash"
+          ]
+        },
+        "state": "unverified-host",
+        "host": "codex",
+        "evidence": "Guard configuration is readable; active Codex hook delivery and blocking have not been verified by this report."
+      },
+      "commit": {
+        "runs": false,
+        "state": "no-hook",
+        "path": ".git/hooks/pre-commit",
+        "executable": null,
+        "fix": "ask the jig skill to wire the commit lane, or run: node <INSTALLED_JIG_ROOT>/scripts/jig.js plan --wire-commit"
+      },
+      "ci": {
+        "runs": false,
+        "state": "absent",
+        "path": null
+      }
+    }
+  },
+  "retainedLedgerLines": 17,
+  "noteOnReviewFields": "Review evaluatedOn lists shell tool names. It is [Bash] for the command guard and [] for the edit guard; raw edit ledger rows name apply_patch. The CLI still labels session state unverified-host because it cannot inspect host trust, while the separately captured real tool denials prove these two deliveries.",
+  "reversal": {
+    "ok": true,
+    "journalEntriesReverted": 14,
+    "allStatesReverted": true,
+    "openTransactions": [],
+    "installedAfterRevert": false,
+    "reason": "there is no .jig/config.json here, so no guards are installed",
+    "reconcile": [],
+    "destinations": [
+      {
+        "id": "activation-274c9193",
+        "path": ".jig/activation.md",
+        "absent": true
+      },
+      {
+        "id": "check-desktop-forbidden-command-918d6517",
+        "path": ".jig/checks/desktop-forbidden-command.check.mjs",
+        "absent": true
+      },
+      {
+        "id": "check-desktop-forbidden-edit-d2f97f8d",
+        "path": ".jig/checks/desktop-forbidden-edit.check.mjs",
+        "absent": true
+      },
+      {
+        "id": "check-driver-fa3f9f13",
+        "path": ".jig/checks/run.mjs",
+        "absent": true
+      },
+      {
+        "id": "config-f3c64f3f",
+        "path": ".jig/config.json",
+        "absent": true
+      },
+      {
+        "id": "hook-shim-028c4946",
+        "path": ".jig/hooks/pre-commit",
+        "absent": true
+      },
+      {
+        "id": "permissions-30c97293",
+        "path": ".jig/proposed-permissions.json",
+        "absent": true
+      }
+    ],
+    "baselineResults": [
+      {
+        "path": "package.json",
+        "expectedSha256": "4CFB506FA79888DF4E65DAC2F732D4C953F0032465DB7FE7A304F010DEF35C8C",
+        "actualSha256": "4CFB506FA79888DF4E65DAC2F732D4C953F0032465DB7FE7A304F010DEF35C8C",
+        "byteIdentical": true
+      },
+      {
+        "path": "AGENTS.md",
+        "expectedSha256": "A0C6F4AD930F36112606C0BF9020B3CF6F19C404A0A7D68FA112F97F04305CBC",
+        "actualSha256": "A0C6F4AD930F36112606C0BF9020B3CF6F19C404A0A7D68FA112F97F04305CBC",
+        "byteIdentical": true
+      },
+      {
+        "path": "src/example.js",
+        "expectedSha256": "2670F1D6A7560277A2F6054C93516482D2742B41221739923EE6AC89A4A66C04",
+        "actualSha256": "2670F1D6A7560277A2F6054C93516482D2742B41221739923EE6AC89A4A66C04",
+        "byteIdentical": true
+      },
+      {
+        "path": ".git/config",
+        "expectedSha256": "05BECDB83BB897F6103C8D91439E2E9092144EDF5B3955A746FCE4975C12BFDC",
+        "actualSha256": "05BECDB83BB897F6103C8D91439E2E9092144EDF5B3955A746FCE4975C12BFDC",
+        "byteIdentical": true
+      }
+    ],
+    "git": {
+      "comparedFiles": 18,
+      "added": [],
+      "removed": [],
+      "changed": [],
+      "allBytesUnchanged": true
+    },
+    "cleanup": [
+      {
+        "path": "work/observe-shell-forbidden.txt",
+        "removed": true
+      },
+      {
+        "path": "work/observe-shell-allowed.txt",
+        "removed": true
+      },
+      {
+        "path": "work/armed-shell-allowed.txt",
+        "removed": true
+      },
+      {
+        "path": "src/observe-forbidden.js",
+        "removed": true
+      },
+      {
+        "path": "src/observe-allowed.js",
+        "removed": true
+      },
+      {
+        "path": "src/armed-allowed.js",
+        "removed": true
+      }
+    ],
+    "sourceFiles": [
+      "src/example.js"
+    ]
+  },
+  "retainedAuditPaths": [
+    ".jig/journal.jsonl",
+    ".jig/ledger.jsonl",
+    ".jig/preimages",
+    ".jig/plan-343174ec1a46.json",
+    ".jig/plan-343174ec1a46.md",
+    ".jig/plan-71c5510d437a.json",
+    ".jig/plan-f96fc8844b98.json"
+  ],
+  "limits": [
+    "Observed only this task, these exact marker fixtures, shell command text, and apply_patch Add File operations. No other patch operations, tools, host surfaces, future versions, or semantic variants are claimed tested.",
+    "Commit and CI lanes stayed inactive; no packages, user settings, plugin files, protected source repositories, commits, pushes or PRs were changed.",
+    "No disarm or false-positive mutation was needed. The authorized revert reversed the two arm actions and removed all five installed artifacts.",
+    "The declined activation guidance and shim remained unapplied. Phase-1 template/reporting findings are preserved; no source fix was evaluated in this installed version."
+  ],
+  "schemaVersion": 1,
+  "evidence": "fresh-windows-desktop-task",
+  "desktopTaskTitle": "Jig desktop acceptance",
+  "nativeToolResults": [
+    {
+      "operation": "observe-shell-forbidden",
+      "result": {
+        "chunk_id": "5e6de6",
+        "wall_time_seconds": 0.2279881,
+        "exit_code": 0,
+        "original_token_count": 8,
+        "output": "JIG_DESKTOP_FORBIDDEN_COMMAND\r\n"
+      }
+    },
+    {
+      "operation": "observe-shell-allowed",
+      "result": {
+        "chunk_id": "46897c",
+        "wall_time_seconds": 0.2451105,
+        "exit_code": 0,
+        "original_token_count": 8,
+        "output": "JIG_DESKTOP_ALLOWED_COMMAND\r\n"
+      }
+    },
+    {
+      "operation": "observe-patch-forbidden",
+      "patch": "*** Begin Patch\n*** Add File: <FIXTURE_ROOT>\\src\\observe-forbidden.js\n+export const safe = true;\n+JIG_DESKTOP_FORBIDDEN_EDIT();\n*** End Patch",
+      "result": {}
+    },
+    {
+      "operation": "observe-patch-allowed",
+      "patch": "*** Begin Patch\n*** Add File: <FIXTURE_ROOT>\\src\\observe-allowed.js\n+export const safe = true;\n+JIG_DESKTOP_ALLOWED_EDIT();\n*** End Patch",
+      "result": {}
+    },
+    {
+      "operation": "armed-shell-forbidden",
+      "result": {
+        "error": "Command blocked by PreToolUse hook: [jig guard desktop-forbidden-command-bash-guard-0] This command contains the exact forbidden marker from the desktop acceptance fixture. Instead: Use JIG_DESKTOP_ALLOWED_COMMAND for the harmless positive control. To override: Ask the parent task to approve observing this named guard before repeating a deliberate violation. Before calling this work done, run: node .jig/checks/run.mjs. (false alarm? $review fp desktop-forbidden-command-bash-guard-0). Command: Write-Output 'JIG_DESKTOP_FORBIDDEN_COMMAND' | Tee-Object -FilePath work/armed-shell-forbidden.txt"
+      }
+    },
+    {
+      "operation": "armed-shell-allowed",
+      "result": {
+        "chunk_id": "269eee",
+        "wall_time_seconds": 0.3107034,
+        "exit_code": 0,
+        "original_token_count": 8,
+        "output": "JIG_DESKTOP_ALLOWED_COMMAND\r\n"
+      }
+    },
+    {
+      "operation": "armed-patch-forbidden",
+      "patch": "*** Begin Patch\n*** Add File: <FIXTURE_ROOT>\\src\\armed-forbidden.js\n+export const safe = true;\n+JIG_DESKTOP_FORBIDDEN_EDIT();\n*** End Patch",
+      "result": {
+        "error": "Command blocked by PreToolUse hook: [jig guard desktop-forbidden-edit-edit-guard-0] This patch introduces the exact forbidden JavaScript call from the desktop acceptance fixture. Instead: Use JIG_DESKTOP_ALLOWED_EDIT(); for the harmless positive control. To override: Ask the parent task to approve observing this named guard before repeating a deliberate violation. Before calling this work done, run: node .jig/checks/run.mjs. (false alarm? $review fp desktop-forbidden-edit-edit-guard-0). Command: *** Begin Patch\n*** Add File: <FIXTURE_ROOT>\\src\\armed-forbidden.js\n+export const safe = true;\n+JIG_DESKTOP_FORBIDDEN_EDIT();\n*** End Patch"
+      }
+    },
+    {
+      "operation": "armed-patch-allowed",
+      "patch": "*** Begin Patch\n*** Add File: <FIXTURE_ROOT>\\src\\armed-allowed.js\n+export const safe = true;\n+JIG_DESKTOP_ALLOWED_EDIT();\n*** End Patch",
+      "result": {}
+    }
+  ],
+  "installedSourceSha256": {
+    ".codex-plugin/plugin.json": "f65b36b27f347deab2504ecf1c208fd983ddc851d68ba27044d68e0dd2734340",
+    "hooks/hooks.json": "cb0df7c543f04fe6e725f32c830d511bde95b26263d22e56e5003c091e0f48b4",
+    "hooks/runner.js": "22e2be87881a4d3cf815da7e49aa6992dc06c5e5508648299a35d80d2b75cee6",
+    "hooks/jig-lib.js": "64acf4b141f4979caf20d9617ab30052de7b850ae703380b22fca19cc8a50e02",
+    "hooks/codex.js": "0c079b5f58b232ed260826d05a0c507bb852470479e948ac27a3ceec790a0ac7",
+    "scripts/jig.js": "c514fd8fb4ff203b849f5e2b50dccd0b90173dc64700da88852266c5e456e3fc",
+    "scripts/vocab.js": "fe2297fdf00ffb32783cd3576fb6de7125d84191959f9bf58c6a62c6d5a75ad9",
+    "scripts/templates/templates.json": "cae61569ada344e57031d146d01b64fb2738291960796554ad2393ee6d0bff51",
+    "skills/jig/SKILL.md": "aca0a7b5452d65a3431567c67e999dbf2cb0b97bbfb51ee3274b6039daaaff0a",
+    "skills/review/SKILL.md": "5542e5f5a61848137c0f5e312a5aa111702350f9da09fa92a664911185a94a5e",
+    "skills/inventory/SKILL.md": "8ea29dc9fdec541e1ed0735c14fa2ebc96daf309bb3b9fbc7843f68630555315"
+  }
+}

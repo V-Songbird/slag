@@ -3,7 +3,9 @@
 
 // A deterministic host integration probe, not a model benchmark. An in-process
 // Responses server supplies harmless, fixed tool calls to the real Codex CLI.
-// Plugin installation and all writes stay in a fresh temporary directory.
+// Fixture project writes stay in a fresh temporary directory. By default the
+// plugin and CLI home are isolated too; --installed uses the owner's existing
+// plugin and persisted hook trust without installing or changing any settings.
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -11,6 +13,7 @@ const http = require("node:http");
 const { spawn, spawnSync } = require("node:child_process");
 const engine = require("../jig.js");
 const { packageCodex } = require("../package-codex.js");
+const { fixtureGitEnvironment, withFixtureGitEnvironment } = require("./fixture-isolation.js");
 
 function cliCommand(explicit) {
   if (explicit) return { command: explicit, prefix: [] };
@@ -24,21 +27,42 @@ function cliCommand(explicit) {
   throw new Error("Codex was not found; pass --codex <path-to-codex-executable>");
 }
 
-function run(cli, args, options) {
+function run(cli, args, options, timeoutMs = 60000) {
   return new Promise((resolve, reject) => {
-    const child = spawn(cli.command, [...cli.prefix, ...args], { ...options, windowsHide: true });
-    let stdout = "", stderr = "";
+    // A new POSIX process group lets the timeout stop Codex and its tools.
+    const child = spawn(cli.command, [...cli.prefix, ...args], { ...options, windowsHide: true, detached: process.platform !== "win32" });
+    let stdout = "", stderr = "", timedOut = false, finished = false, fallback;
+    const finish = (error, code) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      clearTimeout(fallback);
+      if (error) reject(error);
+      else resolve({ code, stdout, stderr, timedOut });
+    };
     child.stdin.end();
     child.stdout.on("data", (data) => { stdout += data; });
     child.stderr.on("data", (data) => { stderr += data; });
     const timeout = setTimeout(() => {
+      timedOut = true;
       if (process.platform === "win32") {
         // Only the process tree this probe started; no user Codex sessions.
-        spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
-      } else child.kill();
-    }, 60000);
-    child.on("error", (error) => { clearTimeout(timeout); reject(error); });
-    child.on("close", (code) => { clearTimeout(timeout); resolve({ code, stdout, stderr }); });
+        const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+        killer.on("error", () => { child.kill("SIGKILL"); });
+      } else {
+        try { process.kill(-child.pid, "SIGKILL"); }
+        catch (error) { if (error.code !== "ESRCH") child.kill("SIGKILL"); }
+      }
+      // A descendant with inherited pipes must not make the advertised timeout
+      // unbounded, even if the OS fails to finish closing its handles.
+      fallback = setTimeout(() => {
+        child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy();
+        child.unref();
+        finish(null, null);
+      }, 1000);
+    }, timeoutMs);
+    child.on("error", (error) => { finish(error); });
+    child.on("close", (code) => { finish(null, code); });
   });
 }
 
@@ -54,26 +78,50 @@ function probeCheck(id, lever, pattern) {
     module: Object.entries(values).map(([key, value]) => "export const " + key + " = " + JSON.stringify(value) + ";").join("\n") + "\n" };
 }
 
-function prepareProject(project) {
-  fs.mkdirSync(project, { recursive: true });
-  const git = spawnSync("git", ["init", "-q", "-b", "jig-probe"], { cwd: project, encoding: "utf8", windowsHide: true });
-  if (git.status !== 0) throw new Error("could not initialize temporary probe repository: " + git.stderr);
-  fs.writeFileSync(path.join(project, "verify-pass.js"), "process.exit(0);\n");
-  fs.writeFileSync(path.join(project, "verify-fail.js"), "process.exit(3);\n");
-  engine.cmdScan(project, { _: [], change: [] });
-  const authored = path.join(project, ".jig", "authored.json");
-  fs.writeFileSync(authored, JSON.stringify({ schemaVersion: 1, checks: [
-    probeCheck("probe-command", "bash-guard", "JIG_PROBE_DENY_COMMAND"),
-    probeCheck("probe-edit", "edit-guard", "JIG_PROBE_DENY_EDIT"),
-  ] }));
-  const plan = engine.cmdPlan(project, { _: [], change: [], authored, provenance: "elicited", "no-ci": true });
-  // These are precisely the two fixture guards above, in a disposable repo.
-  // Apply still exercises the engine's normal named change/path boundary.
-  for (const change of plan.changes) engine.cmdApply(project, { _: [], change: [change.id], path: [change.path] });
-  fs.writeFileSync(path.join(project, ".jig", "verify.json"), JSON.stringify({ schemaVersion: 1, entries: [
-    { id: "probe-pass", argv: ["node", "verify-pass.js"], lanes: ["commit"], paths: ["**/*.js"], expectedExit: 0 },
-    { id: "probe-fail", argv: ["node", "verify-fail.js"], lanes: ["commit"], paths: ["**/*.js"], expectedExit: 0 },
-  ] }));
+function prepareProject(project, gitEnvironment) {
+  return withFixtureGitEnvironment(gitEnvironment, () => {
+    fs.mkdirSync(project, { recursive: true });
+    const git = spawnSync("git", ["init", "-q", "-b", "jig-probe"], { cwd: project, encoding: "utf8", windowsHide: true, timeout: 20000 });
+    if (git.status !== 0) throw new Error("could not initialize temporary probe repository: " + git.stderr);
+    fs.writeFileSync(path.join(project, "verify-pass.js"), "process.exit(0);\n");
+    fs.writeFileSync(path.join(project, "verify-fail.js"), "process.exit(3);\n");
+    engine.cmdScan(project, { _: [], change: [] });
+    const authored = path.join(project, ".jig", "authored.json");
+    fs.writeFileSync(authored, JSON.stringify({ schemaVersion: 1, checks: [
+      probeCheck("probe-command", "bash-guard", "JIG_PROBE_DENY_COMMAND"),
+      probeCheck("probe-edit", "edit-guard", "JIG_PROBE_DENY_EDIT"),
+    ] }));
+    const plan = engine.cmdPlan(project, { _: [], change: [], authored, provenance: "elicited", "no-ci": true });
+    // These are precisely the two fixture guards above, in a disposable repo.
+    // Apply still exercises the engine's normal named change/path boundary.
+    for (const change of plan.changes) engine.cmdApply(project, { _: [], change: [change.id], path: [change.path] });
+    fs.writeFileSync(path.join(project, ".jig", "verify.json"), JSON.stringify({ schemaVersion: 1, entries: [
+      { id: "probe-pass", argv: ["node", "verify-pass.js"], lanes: ["commit"], paths: ["**/*.js"], expectedExit: 0 },
+      { id: "probe-fail", argv: ["node", "verify-fail.js"], lanes: ["commit"], paths: ["**/*.js"], expectedExit: 0 },
+    ] }));
+  });
+}
+
+function evaluateHostChecks({ execution, requestCount, expectedRequests, serverError, project, rows }) {
+  const nativeDenial = (id) => rows.some((row) => row.classId === id && row.decision === "deny" && row.host === "codex" && row.actor === "codex-session");
+  const rawUnknown = (id) => {
+    const raw = rows.filter((row) => row.verify === id && (row.host === "codex" || row.tool === "Bash" || row.lane == null));
+    return raw.length > 0 && raw.every((row) => row.host === "codex" && row.actor === "codex-session" && row.event === "PostToolUse"
+      && row.tool === "Bash" && row.decision === "verify-unknown" && row.exitCode === null);
+  };
+  const driverWitness = (id, decision, exitCode) => rows.some((row) => row.verify === id && row.decision === decision
+    && row.exitCode === exitCode && row.lane === "commit" && row.tool == null && row.session == null && row.host == null);
+  const nearMiss = path.join(project, "safe-edit.js");
+  return {
+    hostExited: execution.code === 0 && !execution.timedOut,
+    requestsCompleted: requestCount === expectedRequests && !serverError,
+    commandPrevented: !fs.existsSync(path.join(project, "blocked-command.txt")) && nativeDenial("probe-command"),
+    editPrevented: !fs.existsSync(path.join(project, "blocked-edit.js")) && nativeDenial("probe-edit"),
+    nearMissAllowed: fs.existsSync(nearMiss) && fs.readFileSync(nearMiss, "utf8") === "JIG_PROBE_SAFE();\n",
+    rawShellOutcomesNotInvented: ["probe-pass", "probe-fail"].every(rawUnknown),
+    driverPassingVerificationRecorded: driverWitness("probe-pass", "verified", 0),
+    driverFailingVerificationRecorded: driverWitness("probe-fail", "verify-failed", 3),
+  };
 }
 
 async function hostProbe(options = {}) {
@@ -82,19 +130,24 @@ async function hostProbe(options = {}) {
   fs.mkdirSync(probeParent, { recursive: true });
   const root = fs.mkdtempSync(path.join(probeParent, "host-"));
   const project = path.join(root, "project");
-  const home = path.join(root, "codex-home");
-  fs.mkdirSync(home);
-  prepareProject(project);
-  const packaged = packageCodex(path.join(root, "marketplace"));
-  // CODEX_HOME has its normal meaning here: a separate CLI configuration root.
-  // Do not copy authentication or configuration from the owner's Codex home.
-  const env = { ...process.env, CODEX_HOME: home };
+  const installed = options.installed === true;
+  const modelOverride = options.model || (installed ? null : "gpt-5.4");
+  const home = installed ? path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), ".codex")) : path.join(root, "codex-home");
+  if (!installed) fs.mkdirSync(home);
+  const gitEnvironment = fixtureGitEnvironment(path.join(root, "git-isolation"));
+  prepareProject(project, gitEnvironment);
+  // Keep CODEX_HOME's ordinary meaning. Installed mode inherits the actual
+  // current home; isolated mode creates a new one. Neither copies credentials.
+  const env = { ...gitEnvironment, ...(installed ? {} : { CODEX_HOME: home }) };
   delete env.OPENAI_API_KEY;
   const launch = { env, cwd: project };
   const version = await run(cli, ["--version"], launch);
-  for (const args of [["plugin", "marketplace", "add", packaged.root], ["plugin", "add", "jig@jig-local", "--json"]]) {
-    const result = await run(cli, args, launch);
-    if (result.code !== 0) throw new Error("temporary plugin install failed: " + result.stderr + result.stdout + "\nEvidence: " + root);
+  if (!installed) {
+    const packaged = packageCodex(path.join(root, "marketplace"));
+    for (const args of [["plugin", "marketplace", "add", packaged.root], ["plugin", "add", "jig@jig-local", "--json"]]) {
+      const result = await run(cli, args, launch);
+      if (result.code !== 0) throw new Error("temporary plugin install failed: " + result.stderr + result.stdout + "\nEvidence: " + root);
+    }
   }
 
   const calls = [
@@ -108,8 +161,16 @@ async function hostProbe(options = {}) {
   ];
   let requestCount = 0;
   const captured = [];
+  const httpRequests = [];
   let serverError = null;
   const server = http.createServer((req, res) => {
+    const requestPath = new URL(req.url, "http://127.0.0.1").pathname;
+    httpRequests.push({ method: req.method, path: requestPath });
+    // Installed clients can make ancillary GETs (for example provider health
+    // or model discovery). They are not Responses turns and carry no JSON.
+    if (req.method !== "POST" || !requestPath.endsWith("/responses")) {
+      res.writeHead(404); res.end("Only fixed Responses fixture calls are supported."); return;
+    }
     let body = "";
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", () => {
@@ -122,7 +183,7 @@ async function hostProbe(options = {}) {
         if (next && next.shell) {
           const name = ["exec_command", "shell_command", "shell"].find((candidate) => tools.some((tool) => tool.name === candidate));
           if (!name) throw new Error("host advertised no supported shell tool");
-          const args = name === "exec_command" ? { cmd: next.shell } : name === "shell" ? { command: ["sh", "-c", next.shell] } : { command: next.shell };
+          const args = name === "exec_command" ? { cmd: next.shell } : name === "shell" ? { command: process.platform === "win32" ? ["powershell.exe", "-NoProfile", "-Command", next.shell] : ["sh", "-c", next.shell] } : { command: next.shell };
           item = { type: "function_call", id: "fc_" + requestCount, call_id: "call_" + requestCount, name, arguments: JSON.stringify(args) };
         } else if (next) {
           const tool = tools.find((entry) => entry.name === "apply_patch");
@@ -148,10 +209,13 @@ async function hostProbe(options = {}) {
   let execution;
   try {
     execution = await run(cli, ["exec", "--skip-git-repo-check", "--json", "-C", project, "-s", options.hostOnly === true ? "danger-full-access" : "workspace-write",
-      // Only this freshly copied and reviewed Jig package is installed. This
-      // flag vets the probe source, not the owner's normal hook trust settings.
-      "--dangerously-bypass-hook-trust", "-c", "approval_policy=\"never\"",
-      "-c", "model_provider=\"jig-probe\"", "-c", "model=\"gpt-5.4\"",
+      // Installed mode must exercise the owner's persisted review decision.
+      // Bypass is only for the freshly copied isolated fixture package.
+      ...(installed ? [] : ["--dangerously-bypass-hook-trust"]), "-c", "approval_policy=\"never\"",
+      "-c", "model_provider=\"jig-probe\"",
+      // Installed mode needs the owner's current model metadata/tool set. The
+      // local provider supplies fixed responses regardless of the model slug.
+      ...(modelOverride ? ["-c", "model=" + JSON.stringify(modelOverride)] : []),
       "-c", "model_providers.jig-probe.name=\"Jig deterministic probe\"",
       "-c", "model_providers.jig-probe.base_url=\"http://127.0.0.1:" + port + "/v1\"",
       "-c", "model_providers.jig-probe.wire_api=\"responses\"",
@@ -163,20 +227,15 @@ async function hostProbe(options = {}) {
   } finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
   const ledgerPath = path.join(project, ".jig", "ledger.jsonl");
   const rows = fs.existsSync(ledgerPath) ? fs.readFileSync(ledgerPath, "utf8").split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line)) : [];
-  const checks = {
-    hostExited: execution.code === 0,
-    requestsCompleted: requestCount === calls.length + 1 && !serverError,
-    commandPrevented: !fs.existsSync(path.join(project, "blocked-command.txt")) && rows.some((row) => row.classId === "probe-command" && row.decision === "deny"),
-    editPrevented: !fs.existsSync(path.join(project, "blocked-edit.js")) && rows.some((row) => row.classId === "probe-edit" && row.decision === "deny"),
-    nearMissAllowed: fs.existsSync(path.join(project, "safe-edit.js")),
-    rawShellOutcomesNotInvented: ["probe-pass", "probe-fail"].every((id) => rows.some((row) => row.verify === id && row.decision === "verify-unknown")),
-    driverPassingVerificationRecorded: rows.some((row) => row.verify === "probe-pass" && row.decision === "verified" && row.exitCode === 0 && row.lane === "commit"),
-    driverFailingVerificationRecorded: rows.some((row) => row.verify === "probe-fail" && row.decision === "verify-failed" && row.exitCode === 3 && row.lane === "commit"),
-  };
-  fs.writeFileSync(path.join(root, "host-output.json"), JSON.stringify({ execution, captured }, null, 2));
+  const checks = evaluateHostChecks({ execution, requestCount, expectedRequests: calls.length + 1, serverError, project, rows });
+  fs.writeFileSync(path.join(root, "host-output.json"), JSON.stringify({ execution, captured, httpRequests }, null, 2));
   const result = { schemaVersion: 1, checkedAt: new Date().toISOString(), cliVersion: version.stdout.trim(), platform: process.platform, arch: process.arch,
     green: Object.values(checks).every(Boolean), checks, serverError, evidence: root, sandbox: options.hostOnly === true ? "none (fixed local tool fixtures only)" : "workspace-write",
-    method: "Real installed Codex CLI with a local deterministic Responses server and vetted temporary plugin hooks; no model inference. Desktop UI and other OSes are not measured by this run." };
+    pluginMode: installed ? "installed" : "isolated", codexHome: home, hookTrustBypassed: !installed, modelOverride,
+    configurationOverrides: ["local deterministic Responses provider", "fixed-fixture sandbox mode", "approval_policy=never", "request compression disabled", "unified exec enabled", "apps disabled", "remote plugin catalog disabled", "temporary project trusted for this invocation", ...(modelOverride ? ["model=" + modelOverride + " (standard Responses fixture transport)"] : [])],
+    method: installed
+      ? "Real Codex CLI using the current Codex home, installed plugins, and persisted hook trust without trust bypass or plugin installation; local deterministic Responses server and disposable fixture project, no model inference. Desktop UI delivery is not measured."
+      : "Real Codex CLI with an isolated home, vetted temporary plugin hooks, and a local deterministic Responses server; no model inference. Desktop UI and other OSes are not measured by this run." };
   fs.writeFileSync(path.join(root, "results.json"), JSON.stringify(result, null, 2) + "\n");
   return result;
 }
@@ -187,13 +246,15 @@ if (require.main === module) {
   let invalid = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--host-only") options.hostOnly = true;
+    else if (args[i] === "--installed") options.installed = true;
+    else if (args[i] === "--model" && args[i + 1]) options.model = args[++i];
     else if (args[i] === "--codex" && args[i + 1]) options.codex = args[++i];
     else invalid = true;
   }
   if (invalid) {
-    process.stderr.write("usage: node scripts/probes/codex-host.js [--codex <executable>] [--host-only]\n"); process.exitCode = 1;
+    process.stderr.write("usage: node scripts/probes/codex-host.js [--codex <executable>] [--host-only] [--installed] [--model <slug>]\n"); process.exitCode = 1;
   } else hostProbe(options).then((result) => {
     process.stdout.write(JSON.stringify(result, null, 2) + "\n"); process.exitCode = result.green ? 0 : 1;
   }).catch((error) => { process.stderr.write("jig: " + error.message + "\n"); process.exitCode = 1; });
 }
-module.exports = { hostProbe };
+module.exports = { hostProbe, prepareProject, evaluateHostChecks, runCli: run };

@@ -24,8 +24,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   to Codex settings. Historical check identities, proofs and revert records
   remain readable.
 
+### Fixed
+
+- Guard review now includes native apply_patch evaluations in evaluatedOn,
+  matching the existing ledger evidence while keeping shell-only reports separate.
+- Generated activation guidance and missing-Node hook messages no longer claim
+  CI is running when it was not configured, or imply that session-only detectors
+  gain commit coverage. Hook wiring is distinguished from observed execution.
+
 ### Validation
 
+- Added an offline owner-control workflow probe covering named approvals, modes,
+  false-positive decisions and exact reversal, plus installed-plugin probing
+  that uses persisted hook trust without a bypass.
 - Added native transport and engine regressions, a deterministic real-Codex
   host probe, and a Windows/macOS/Linux Node test matrix. See
   [compatibility evidence](docs/CODEX-COMPATIBILITY.md) for measured results.

@@ -77,11 +77,13 @@ hosted CI run. Do not change lane registration just to obtain a green record.
 
 ## Validation evidence
 
-The host probe installs an unmodified generated marketplace package into an
-isolated Codex home. A local deterministic Responses server supplies fixed tool
-calls to the real runtime; it uses no model inference and copies no account
-credentials. It checks command denial, edit denial, an allowed edit, unknown raw
-shell outcomes, and actual passing/failing driver ledger records.
+The host probe defaults to installing an unmodified generated marketplace package
+into an isolated Codex home. Its `--installed` mode instead uses the current
+Codex home, installed plugins and persisted hook trust, without installing a
+package or bypassing trust. A local deterministic Responses server supplies
+fixed tool calls to the real runtime; it uses no model inference and copies no
+account credentials. It checks command denial, edit denial, an allowed edit,
+unknown raw shell outcomes, and actual passing/failing driver ledger records.
 
 The Windows and Linux runtimes passed all eight assertions:
 
@@ -90,6 +92,7 @@ The Windows and Linux runtimes passed all eight assertions:
 | Installed Codex CLI | 0.145.0 | 8/8 host assertions |
 | Desktop-bundled Codex runtime on Windows, invoked as CLI | 0.153.4 | 8/8 host assertions |
 | Official Linux Codex runtime under Ubuntu WSL | 0.153.4 | 8/8 host assertions |
+| Windows runtime with installed Jig and persisted owner trust | 0.153.4 | 8/8 host assertions; no trust bypass |
 
 Sanitized result records are in [validation](validation/). These runs used the
 explicit `--host-only` option: this machine's Windows sandbox setup failed or
@@ -106,18 +109,33 @@ npm run test:toolchains
 node scripts/probes/codex-host.js --codex <native-codex-executable>
 # Only for isolating hook behavior from a broken OS sandbox:
 node scripts/probes/codex-host.js --codex <native-codex-executable> --host-only
+# Current installation and persisted trust; fixed standard Responses fixtures:
+node scripts/probes/codex-host.js --codex <native-codex-executable> --installed --model gpt-5.5
+# Offline owner-control workflow, using predeclared fixture decisions:
+node scripts/probes/owner-workflow.js
 ```
 
-The probe bypasses hook trust only for its freshly copied, vetted temporary
-package. It does not change the owner's normal plugin configuration or trust.
-Do not use that bypass as normal installation guidance.
+Only the isolated probe mode bypasses hook trust, for its freshly copied, vetted
+temporary package. Neither mode changes the owner's plugin configuration or
+trust. Do not use the isolated bypass as normal installation guidance. Installed
+mode inherits the configured model unless `--model` is supplied; the measured
+run selected GPT-5.5's standard Responses tool protocol. This fixed server does
+not implement GPT-6 ResponsesLite/code-mode transport, so that run does not
+certify the configured default model. A separate fresh desktop task tests the
+actual desktop tool path; see [desktop acceptance](DESKTOP-ACCEPTANCE.md).
+
+The offline owner-workflow probe passed on Windows and Linux. It exercises
+violation/near-miss admission, refusal of unnamed or mismatched approvals, named
+installation, observe and arm modes, pending disarm and false-positive decisions,
+and exact reversal of project and Git bytes. Its runner calls are synthetic.
+It is neither a human interview nor evidence of native hook delivery.
 
 Final regression runs on 2026-09-06 had zero failures:
 
 | Environment | Node | Passed | Skipped | Mode |
 | --- | --- | ---: | ---: | --- |
-| Windows | 22.22.2 | 963 | 20 | Full suite including available ecosystem smoke checks |
-| Ubuntu Linux under WSL | 22.23.2 | 926 | 61 | Portable suite with a native Linux PATH |
+| Windows | 22.22.2 | 974 | 20 | Full suite including available ecosystem smoke checks |
+| Ubuntu Linux under WSL | 22.23.2 | 937 | 61 | Portable suite with a native Linux PATH |
 
 Skips are named in test output and do not establish coverage. The optional
 external smoke checks, absent tools, OS-specific cases, editions without a
@@ -134,9 +152,10 @@ claimed as measured results.
 ## Remaining platform limits
 
 The implementation targets desktop and CLI on Windows, macOS and Linux, but
-this Windows workspace cannot prove every host combination. Native macOS
-execution and desktop UI installation/trust have not been exercised. Invoking
-the desktop-bundled binary validates its runtime hooks, not the UI. Linux host
-behavior was also measured directly under Ubuntu WSL with the official Codex
-runtime; native Linux desktop UI behavior remains unmeasured. These checks
-remain release validation work; full end-to-end platform parity is not claimed.
+this Windows workspace cannot prove every host combination. Installation and
+trust were verified through supported runtime APIs, and a fresh Windows desktop
+task exercised native command/patch guards and reversal. See the
+[desktop acceptance record](DESKTOP-ACCEPTANCE.md). No plugin-management UI was
+operated. Native macOS execution and native Linux desktop acceptance remain
+unmeasured. Linux CLI hooks were measured under Ubuntu WSL with the official
+Codex runtime. Full end-to-end platform parity is not claimed.

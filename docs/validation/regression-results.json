@@ -1,35 +1,36 @@
 {
   "schemaVersion": 1,
-  "checkedAt": "2026-09-06T10:16:01.481Z",
+  "checkedAt": "2026-09-06T11:14:42.676Z",
   "runs": [
     {
       "platform": "Windows",
       "node": "22.22.2",
       "command": "node scripts/test.js --toolchains --test-reporter=spec",
-      "tests": 983,
-      "pass": 963,
+      "tests": 994,
+      "pass": 974,
       "fail": 0,
       "cancelled": 0,
       "skipped": 20,
       "todo": 0,
-      "duration_ms": 153080.4888
+      "duration_ms": 133903.4095
     },
     {
       "platform": "Ubuntu Linux under WSL",
       "node": "22.23.2",
       "command": "node scripts/test.js --test-reporter=spec (native Linux PATH)",
-      "tests": 987,
-      "pass": 926,
+      "tests": 998,
+      "pass": 937,
       "fail": 0,
       "cancelled": 0,
       "skipped": 61,
       "todo": 0,
-      "duration_ms": 34303.152983
+      "duration_ms": 27984.140169
     }
   ],
   "notes": [
     "Skipped tests are explicitly unverified; they include unavailable tools, optional external smoke checks, editions without starter scaffolds, duplicate commands, and OS-specific cases.",
-    "Plugin manifest and all three Codex skill validators passed.",
-    "The committed CI matrix has not run remotely. macOS execution and desktop UI trust/installation remain unverified."
+    "Plugin manifest and all three Codex skill validators passed; skills were unchanged during desktop acceptance.",
+    "A fresh Windows desktop task measured trusted native command/Add File patch guards and reversal; see windows-desktop-task.json. Plugin UI was not operated.",
+    "The committed CI matrix has not run remotely. macOS execution and native Linux desktop acceptance remain unverified."
   ]
 }
