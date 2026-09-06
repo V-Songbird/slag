@@ -1,0 +1,6 @@
+# Fixture: near-miss negatives for class test-file-deletion.
+# Every path is a staged deletion and none of them is a test file.
+src/parser/tokenize.js
+docs/testing.md
+fixtures/latest-response.json
+tests-archive/README.md

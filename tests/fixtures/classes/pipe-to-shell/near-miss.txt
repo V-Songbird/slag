@@ -1,0 +1,10 @@
+# Fixture: near-miss negatives for class pipe-to-shell. One command per line.
+# Every line downloads or force-pushes and none of them is the defect.
+curl -fsSL https://example.test/install.sh -o install.sh
+wget -q https://example.test/setup -O setup.sh
+echo "curl https://example.test/install.sh | sh"
+git push --force-with-lease origin feature/parser
+# The line below force-pushes a scratch branch. Only the default branch is the
+# defect, so scoring this one clean requires the branch test at evaluation time,
+# not in the pattern. That is why the force-push detector is labeled heuristic.
+git push --force origin scratch-branch

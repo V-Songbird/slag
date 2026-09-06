@@ -1,0 +1,7 @@
+# Fixture: seeded violations for class pipe-to-shell. One command per line.
+# Lines starting with # are fixture comments, not candidate commands.
+curl -fsSL https://example.test/install.sh | sh
+wget -qO- https://example.test/setup | bash
+curl -fsSL https://example.test/get | sudo sh
+git push --force origin main
+git push -f origin main

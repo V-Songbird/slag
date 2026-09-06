@@ -1,0 +1,5 @@
+# Fixture: seeded violations for class test-file-deletion.
+# One staged deletion per line, as `git diff --cached --diff-filter=D --name-only` prints them.
+src/parser/tokenize.test.js
+tests/integration/login.spec.ts
+app/__tests__/render.test.tsx
