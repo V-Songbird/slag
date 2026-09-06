@@ -180,7 +180,7 @@ test("no surface reads shell.seen as per-guard or per-host, and none names an un
 
 test("the README describes the quick start and the kill switch as the engine has them", () => {
   const readme = read("README.md");
-  const quick = readme.split("\n").find((l) => l.includes("/jig:jig --quick`"));
+  const quick = readme.split("\n").find((l) => l.includes("$jig --quick`"));
   assert.ok(quick, "the --quick row is gone from the README");
   assert.match(quick, /assumed/,
     "the --quick row sells a selection without saying every value in it was assumed");
@@ -195,22 +195,43 @@ test("the README describes the quick start and the kill switch as the engine has
     "the commit shim now honours the kill switch, so the README line may say so");
 });
 
-test("the item tier is asked as an enumerated multi-select, and applied one pair at a time", () => {
-  // SCOPE's derail-pass row on N19 allows the multi-select on two conditions:
-  // nothing pre-ticked, and the token unchanged. Both are prose, so both are
-  // pinned here — the engine cannot refuse a skill that walks the tier as
-  // paragraphs or ticks an option nobody chose.
+test("the Codex item tier preserves explicit named consent without a multi-select dependency", () => {
   const skill = read("skills", "jig", "SKILL.md");
   const consent = skill.slice(skill.indexOf("Then take consent in two tiers"), skill.indexOf("## 7. Apply"));
-  assert.ok(consent.includes("consent.item"), "the consent section is gone from SKILL.md");
-  assert.match(consent, /multiSelect/, "the item tier is not asked as an AskUserQuestion multiSelect");
-  assert.match(consent, /at most four options per question and at\s+most four questions per call/,
-    "the item tier's page size is not stated");
-  assert.match(consent, /\*\*Nothing is pre-ticked\.\*\*/,
-    "the item tier does not say that nothing is pre-ticked");
-  assert.match(consent, /label is the change id/, "the option label is not the change id");
-  assert.match(consent, /--change <id> --path <rel>/,
-    "the multi-select no longer says the token stays one pair per ticked id");
+  const runtime = read("skills", "jig", "references", "codex-runtime.md");
+  assert.ok(consent.includes("consent.item"), "the item consent tier is missing");
+  assert.match(consent, /enumerated table/, "consequential changes are not individually enumerated");
+  assert.match(consent, /label is the change id/, "a row is not bound to a stable change id");
+  assert.match(consent, /exact path, kind and/, "the approval surface omits the path or consequence");
+  assert.match(consent, /\*\*Nothing is pre-ticked\.\*\*/, "item consent permits preselection");
+  assert.match(consent, /--change <id> --path <rel>/, "approval no longer preserves each exact token pair");
+  assert.match(consent, /existing explicit\s+approval only for the same named id, path and consequence/,
+    "the workflow does not preserve unchanged prior authorization");
+  assert.match(runtime, /conversational approval question/, "mandatory consent has no native fallback");
+  assert.match(runtime, /Do not apply\s+unanswered, declined, or implicitly selected rows/,
+    "an unanswered or inferred item can silently become consent");
+  assert.doesNotMatch(consent + runtime, /AskUserQuestion|multiSelect:/,
+    "the Codex workflow requires an unavailable Claude input tool");
+});
+
+test("every Codex skill resolves its runner from the loaded skill and separates host proof", () => {
+  const runtime = read("skills", "jig", "references", "codex-runtime.md");
+  assert.match(runtime, /absolute path of the SKILL\.md that Codex loaded/);
+  assert.match(runtime, /two parent directories/);
+  assert.match(runtime, /placeholder, not an environment variable/);
+  assert.match(runtime, /\/hooks/);
+  assert.match(runtime, /trusted and enabled/);
+  assert.match(runtime, /does not prove Codex dispatched or enforced a\s+real hook/);
+  assert.match(runtime, /Codex supports blocking and continuation at Stop/);
+  assert.match(runtime, /Jig requests neither/);
+  assert.match(runtime, /Node\.js 20 or later/);
+  for (const name of ["jig", "review", "inventory"]) {
+    const skill = read("skills", name, "SKILL.md");
+    assert.match(skill, /codex-runtime\.md/, name + " has no native runtime or consent reference");
+    assert.doesNotMatch(skill, /CLAUDE_PLUGIN_ROOT|AskUserQuestion|multiSelect:|\/jig:/,
+      name + " still requires a Claude surface");
+    assert.match(skill, /node "<JIG_ROOT>\/scripts\/jig\.js"/, name + " omits its resolved script invocation");
+  }
 });
 
 // Roadmap 234 made the batch half of a mixed plan reachable by `apply --plan`,
@@ -227,6 +248,8 @@ test("the apply section names the command that carries the batch tier, and relay
   // The order is the whole of it: `--plan` refuses while an item-tier change is
   // unapplied, so a skill told to run it first only ever reads the refusal.
   assert.match(apply, /The item tier first/, "section 7 does not apply the item tier first");
+  assert.match(apply, /declined\s+prerequisite makes an approved config inconsistent/,
+    "a declined prerequisite can leave silently broken wiring");
   assert.match(apply, /refuses while any item-tier change in the plan is still unapplied/,
     "section 7 does not say why `--plan` comes second");
   assert.match(apply, /\*\*names every one it\s+skipped\*\*/,
@@ -276,7 +299,7 @@ test("round one offers all four routes around the harness, leading on the agent 
   }
   assert.match(round, /`Me and my AI sessions` persona they lead the list/,
     "the standing offers do not lead the list on the persona whose sessions take these routes");
-  assert.match(round, /Ticking one of those installs nothing/,
+  assert.match(round, /Selecting one of those installs nothing/,
     "question three does not say that ticking a standing offer installs nothing");
 });
 
@@ -348,30 +371,39 @@ test("no jig source reads the measured session as a fact about the platform", ()
   }
 });
 
-// The other half of the same rule, on the surface an author reads. jig watches
-// two names; whether any host names its shell a third is recorded as NOT
-// probed, and plan.md discloses it. An authoring skill that says the guard runs
-// "either way" tells the author the set is exhaustive, which no run establishes.
-test("the authoring skill discloses the third name the probe never ruled out", () => {
+// A canonical tool name does not establish the host's actual shell dialect.
+test("the authoring skill distinguishes canonical tool names from shell semantics", () => {
   const authoring = read("skills", "jig", "SKILL.md");
-  assert.ok(!authoring.includes("so the guard runs either way"),
-    "the authoring skill calls two names exhaustive, which HOST-PROBE-2026-09-02 marks as not probed");
-  assert.match(authoring, /names its shell anything else\s+is a host where this guard does not evaluate/,
-    "the authoring skill never tells an author where a command guard does not run at all");
-  assert.match(authoring, /not probed and is not guessed/,
-    "the authoring skill states the gap as known rather than as unmeasured");
+  assert.match(authoring, /canonical hook name `Bash`/);
+  assert.match(authoring, /actual shell\s+can be PowerShell or a POSIX shell/);
+  assert.match(authoring, /tool outside that supported set is not evaluated/);
+  assert.match(authoring, /not its shell's semantics/);
+  assert.match(authoring, /PreToolUse guard over Codex `apply_patch`/);
+  assert.match(authoring, /exact, `trimEnd`, `trim` and\s+Unicode-normalized matching/);
+  assert.match(authoring, /known denial survives another file's gap/);
+  assert.match(authoring, /disclosed coverage gaps/);
 });
 
-// A citation is the only thing standing between a comment and folklore, so it
-// has to point at where the measurement is. The untrusted-workspace trap is in
-// the record's `## Method`; section 1 is `PostToolUseFailure`, and a reader who
-// followed the citation as written found a finding about something else. The
-// record itself is a local research file this suite cannot read, which is
-// exactly why the citation in the source has to be right.
-test("the permissions probe cites the section its trap was actually recorded in", () => {
+test("the Codex port retires the legacy permission probe without an authenticated host call", () => {
   const probe = read("scripts", "probes", "permissions.js");
-  const trap = probe.slice(probe.indexOf("A fresh mkdtemp root"), probe.indexOf("function tmpProject"));
-  assert.ok(trap.includes("permissions.allow"), "the untrusted-workspace note is gone from the probe");
-  assert.ok(!/section 1/.test(trap), "the note still cites section 1, which is `PostToolUseFailure`");
-  assert.match(trap, /`## Method`, the traps list/, "the note does not say where the trap is recorded");
+  assert.doesNotMatch(probe, /require\(["'](?:node:)?child_process["']\)|spawnSync\(|execSync\(/,
+    "the retired probe can still launch an external host");
+  assert.match(probe, /unsupported|not supported|disabled|refus/i,
+    "the retired probe does not explain why it cannot certify Codex");
+});
+
+
+test("verification guidance distinguishes raw stdout from witnessed command exits", () => {
+  const runtime = read("skills", "jig", "references", "codex-runtime.md");
+  assert.match(runtime, /0\.145\.0 and 0\.153\.4/);
+  assert.match(runtime, /stdout without exit status/);
+  assert.match(runtime, /`verify-unknown`/);
+  assert.match(runtime, /node \.jig\/checks\/run\.mjs --verify --lane commit --entry <id>/);
+  assert.match(runtime, /requires its `lanes` to include `commit`/);
+  assert.match(runtime, /actual zero and nonzero exits/);
+  assert.match(runtime, /not proof a Git commit occurred/);
+  for (const name of ["review", "inventory"]) {
+    assert.match(read("skills", name, "SKILL.md"), /reliable-verification-evidence/,
+      name + " does not expose the reliable verification route");
+  }
 });

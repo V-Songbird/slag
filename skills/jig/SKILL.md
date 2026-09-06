@@ -10,43 +10,44 @@ description: >-
   checked from the first edit, or a repeat mistake caught before it lands — e.g.
   "set up guardrails", "scaffold this project", "stop the AI deleting my tests",
   "add checks to this repo", "what keeps breaking here", "catch skipped tests
-  before they merge" — or invokes /jig:jig. Do NOT use to grade, audit or author
+  before they merge" — or invokes $jig. Do NOT use to grade, audit or author
   prompt text — rules, skill descriptions or agent instructions: this installs
   checks that run against a codebase.
-argument-hint: "[--quick] [--edition <id>] [--select <classId,…>] [--no-ci] [--observe]"
-allowed-tools: Bash, PowerShell, Read, Write, AskUserQuestion
 ---
 
-# jig:jig
+# Jig setup
+
+Read [Codex runtime and consent](references/codex-runtime.md) first. It defines
+plugin-path resolution, supported interview inputs, consent and host-proof limits.
 
 The engine does everything mechanical. You run it, read its result, and ask the
 questions it cannot answer. Never re-derive by hand what a command already
 computed, and never put to a human a fact the scan already read.
 
 One rule holds for the whole run, and it is the only promise you have to
-remember: **nothing unapproved**. Every path jig writes — a linter config, a
+remember: **nothing unapproved**. Every installation path jig writes — a linter config, a
 manifest entry, a CI file, a check module, a line in a committed hook — is named
 to the user and approved before a byte lands, and every write is journaled with
 its pre-image, so `revert` puts the original back exactly. Tool installs are the
-same shape: jig shows the exact command, and runs it only after the user ticks
+same shape: jig shows the exact command, and runs it only after the user selects
 that tool by name. Say that plainly when the user asks what they just installed.
 
 A check installs proven and blocking. Observe mode is a choice the owner can
 make per guard, not a probation every guard serves — never describe it as
 something a guard graduates from.
 
-Flags in `$ARGUMENTS`: `--quick` (skip the rounds, pass `--quick` to `scan` and
+Flags in the user's invocation text: `--quick` (skip the rounds, pass `--quick` to `scan` and
 take the selection it computes, plan as `assumed`), `--edition <id>` (the user named the language, so
 work against that edition rather than detection — the flag a project that does
 not exist yet runs on), `--select <classId,…>` (the user already named the
 classes, so skip that question and treat them as elicited), `--no-ci` (pass
 through to `plan`, which then generates no CI workflow), `--observe` (every
 guard watches rather than blocks). The interview's own answers reach `plan`
-through four more flags, listed at step 6.
+through the additional flags listed at step 6.
 
 Every command runs from the project root and every one of them is `node
-"${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" <scan|toolchain|plan|apply|status|revert|selftest|migrate>`
-or `node "${CLAUDE_PLUGIN_ROOT}/scripts/forensics.js"`. (`admit` runs the
+"<JIG_ROOT>/scripts/jig.js" <scan|toolchain|plan|apply|status|revert|selftest|migrate>`
+or `node "<JIG_ROOT>/scripts/forensics.js"`. (`admit` runs the
 fixture-pair test on its own; `plan` already does it, so this flow never needs
 the separate call.) There is no other entry
 point and nothing is on PATH. Flags take a space-separated value — `--select
@@ -60,7 +61,7 @@ checks in the old single-function shape, which this engine does not read, so
 upgrade it in place first:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" migrate
+node "<JIG_ROOT>/scripts/jig.js" migrate
 ```
 
 `already on the pair shape` with nothing else on it is the normal answer on a
@@ -79,13 +80,16 @@ quietly carried over. Say which guards were discarded and why.
 A check that cannot be proven takes its guards with it, and `migrate` will not
 remove a guard the owner has not seen. It refuses before it writes anything,
 naming every guard it would drop with its mode and the reason. Put that list to
-the owner as it is — an `[armed]` row is enforcement they are about to lose —
-and only then run `migrate --accept-drops`. There is nothing to repair first:
-the drop is what the pair test decided, and the flag says the list was read.
+the owner as it is — an `[armed]` row is enforcement they are about to lose.
+Run `migrate --accept-drops` only after explicit approval of that named drop
+list, reusing unchanged authorization already given. Merely displaying the list
+is not consent. The drop is what the pair test decided; do not silently replace
+the rejected check to avoid that decision.
 
 There is a second pass, and it hands back a plan instead of applying one. An
-install made before 2.11.0 watches edits with `edit-observe-guard`, which denies
-at PostToolUse — after the host has written the file. `migrate` answers such an
+install made before 2.11.0 watches edits with `edit-observe-guard` at PostToolUse,
+after the file has been written. In Codex this is advisory: it cannot prevent
+the completed edit. `migrate` answers such an
 install with `moving`: one change per check, moving each guard to the
 `edit-guard` lever at PreToolUse and re-recording the proof over the rewritten
 module, because the proof it carries binds the lever it would no longer run.
@@ -98,17 +102,17 @@ until that module lands too. A guard on `refused` cannot move and keeps running
 as it is — say which, and why.
 
 After that, the drift report, the retire offer and the one re-run question
-belong to `/jig:review`. Hand off there and stop, unless the user says they want
+belong to `$review`. Hand off there and stop, unless the user says they want
 a fresh pass over new material.
 
 ## 1. Scan
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" scan
+node "<JIG_ROOT>/scripts/jig.js" scan
 ```
 
 If `node` is not on PATH (fnm/nvm setups), register it the way the project's
-CLAUDE.md says to, then rerun.
+AGENTS.md says to, then rerun.
 
 Writes `.jig/profile.json` and returns its contents. These keys feed the
 column-one list you print at step 2:
@@ -133,15 +137,16 @@ column-one list you print at step 2:
 `disclosures` is prose the engine wrote for a human. Print those lines
 **verbatim**; paraphrasing them is how an honest limit turns into a vague one.
 
-**An occupied slot is missing coverage, not a detail.** Hooks registered for the
-same event do not chain reliably across plugins, so a guard jig cannot register
-is protection the user does not have. Say which slot, and say that the check
-driver and the CI workflow are the floor that does not depend on any of it.
+**An occupied slot is a coverage disclosure.** Jig conservatively avoids a
+slot the scan reports occupied. Name it without claiming every Codex host has
+the same hook-composition behavior. The scan cannot establish host trust or
+registration: verify `/hooks` separately. The check driver and CI workflow are
+the independent lanes to report alongside any session gap.
 
 Then mine the history:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/forensics.js"
+node "<JIG_ROOT>/scripts/forensics.js"
 ```
 
 Deterministic git mining, with no model in the loop. Read `ranking` — classes
@@ -186,7 +191,7 @@ not an application template and must never be described as one — say what it
 is, and leave choosing a template to the owner.
 
 A starter also brings the two files a project is red without: the script each
-ticked tool's CI step calls, composed into the manifest beside the starter's own
+selected tool's CI step calls, composed into the manifest beside the starter's own
 members, and a root `.gitignore` of what that ecosystem never commits. Both are
 changes on the plan approved by name, and a folder that already has a
 `.gitignore` keeps it.
@@ -221,12 +226,13 @@ question's wording and the disclosures are in
 The columns exist so the user can see the boundary. Anything in column one that
 you then put to them as a question is a defect in the run.
 
-The interview is a design tree worked in rounds, not a fixed script. Each round
-asks the whole **frontier** — every question whose prerequisites are already
-answered — as ONE `AskUserQuestion` call, numbered `Q1…`, each question's
-recommended answer listed first and marked `(Recommended)`. A question whose
-answer depends on another still open this round waits for the next round. The
-close is mechanical: the interview ends exactly when the frontier is empty.
+The interview is a design tree worked in rounds. Each round asks its **frontier**:
+questions whose prerequisites are already answered. Batch independent optional
+questions within the available Codex input tool's limits; otherwise ask them in
+conversation. Number them `Q1…`. Put a recommended preference first when useful,
+with `(Recommended)` in its label. A question whose answer depends on another
+open question waits for the next round. The interview ends when the frontier is
+empty. Reuse answers already in this conversation.
 
 Three rules bind every round:
 
@@ -258,7 +264,7 @@ runner, security scan, build — comes from the editions the scan matched. Ask f
 it rather than reading the catalogue files yourself:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" toolchain
+node "<JIG_ROOT>/scripts/jig.js" toolchain
 ```
 
 Add `--edition <id> --package-manager <name>` when the interview supplied them
@@ -269,7 +275,7 @@ nothing at all and there is no toolchain to put to anybody.
 package manager and its existing install. `refused` names any tool this project
 cannot be offered and why — read it out; a tool silently missing from a
 proposal is a tool the owner never got to decline. `greenfield` repeats the
-step-1a rows, because this is the command that runs *before* anybody ticks a
+step-1a rows, because this is the command that runs *before* anybody selects a
 tool, and half these installs have nowhere to record themselves until the
 project file exists.
 
@@ -290,14 +296,15 @@ show somebody who asks, and nothing jig ever runs. What the lanes run is not on
 this row: `plan` writes each tool's verify argv and its clean exit code into
 `.jig/verify.json`, and the CI workflow gains a step per entry.
 
-Put the proposal to the user as a multi-select, one line per tool: `why`, the
+Put the proposal to the user as an enumerated selection table, one row per tool: `why`, the
 `command` that would run, and the `configPath` it would write. Show
-`configSample` alongside for any tool the user asks about, or before they tick
+`configSample` alongside for any tool the user asks about, or before they select
 one that writes a config into a project that already has opinions — the bytes
 are on the row so nobody approves a file sight unseen. **Nothing is installed
-that the owner did not tick.**
+that the owner did not select.** Ask them to name tool ids or `none`; the later
+plan review still approves the concrete installation changes.
 
-Hold the ticked ids for `--tools` at step 6. The plan probes the thing that has
+Hold the selected ids for `--tools` at step 6. The plan probes the thing that has
 to exist — the tool's own `--version`, a module through its interpreter, a
 dispatched subcommand as itself — and then the manifest, so a tool the machine
 already carries comes back as present and is never installed again. Two shapes
@@ -349,31 +356,33 @@ Each authored check carries, in one module:
     meaning the repository's own. It may set `teach: true` like the edit levers:
     since 2.13.0 teaching is a property of the guard, not of the event it runs
     on, so every PreToolUse and PostToolUse guard can carry it.
-    **The command line is the sending tool's, not always bash's.** A host may
-    call its shell `Bash` or `PowerShell`, and may offer both at once; since
-    2.14.0 jig watches both names, and a host that names its shell anything else
-    is a host where this guard does not evaluate at all. Whether any host does
-    is not probed and is not guessed here. Where it does run it matches
-    the line as sent, as text and not as meaning. The same action spelled in
-    another shell's syntax is a different string, and a pattern that only spells
-    one of them evaluates on the other and passes, which is not coverage. Which
-    spellings differ is yours to answer for the patterns you write — jig has
-    measured none of them and names no examples. Write the patterns for every
-    shell an agent may reach for here, and say which syntaxes the check reads
-    when you offer it. Do not infer which shell that is from the operating
-    system — `/jig:review` reports the tools each guard was evaluated on
-    (`evaluatedOn` on the guard row), and nothing else knows.
-  - `edit-guard` — a PreToolUse guard over an Edit or a Write, which denies
-    before the host writes the bytes. Its `params.patterns` are matched against
-    the text going in, blanked by the same two switches the driver uses; `paths`
-    scopes it exactly as it scopes the driver, and `onlyWhenIntroduced` fires
-    only when the edit adds a match it did not replace. `params.removed` is the
-    other kind it reads — see "When the mistake is something being deleted". A
-    detector naming both is proven for both, one at a time. This is the edit
-    lever to author. A detector here may set `teach: true`, which is how the
-    owner opts one observing guard into saying its piece in the transcript
-    instead of only in the ledger — off unless asked for, and it refuses
-    nothing.
+    **The command line is the sending tool's, not always bash's.** Codex
+    presents shell calls under the canonical hook name `Bash`; the actual shell
+    can be PowerShell or a POSIX shell. The adapter also recognizes its declared
+    tool-name aliases; a tool outside that supported set is not evaluated.
+    A canonical name does not establish the shell dialect. Jig matches the
+    command as text, so a pattern that spells only one dialect can pass an
+    equivalent command in another. Write patterns and fixtures for the syntaxes
+    this project uses and disclose their limits. Do not infer them from the
+    operating system or a `Bash` label. `$review` reports `evaluatedOn` for each
+    guard; this proves the tool name observed, not its shell's semantics.
+  - `edit-guard` — a PreToolUse guard over Codex `apply_patch`. The adapter reads
+    the original file and reconstructs the proposed result for supported Add,
+    Update, Delete and Move operations, including every hunk. It evaluates each
+    path separately; a move checks removal at the source and the destination.
+    `params.patterns` reads the proposed text with the driver's blanker switches;
+    `paths` scopes it, and `onlyWhenIntroduced` fires only when the change adds a
+    match. `params.removed` compares before and after counts as described below.
+    A detector naming both is proven for both, separately. This is the edit
+    lever to author. `teach: true` lets an observing guard report its reason,
+    alternative and override in the transcript; it remains non-blocking.
+    Context reconstruction follows Codex's exact, `trimEnd`, `trim` and
+    Unicode-normalized matching, including ordered hunks and the first matching
+    duplicate context. Unreadable or malformed files and paths outside the
+    repository are disclosed coverage gaps. Other readable files in the same
+    patch still evaluate, and a known denial survives another file's gap.
+    Edits performed through shell commands or external tools are not patch
+    coverage.
   - `edit-observe-guard` — the same guard one event later, at PostToolUse, so
     the file is already on disk by the time it fires. Never author a new one. It
     is still run for the installs that carry it: their recorded proof binds this
@@ -458,8 +467,9 @@ Two limits to tell the user:
 - The two detectors are one module and one approval, and the proof hash binds
   both. Moving the patterns of one and not the other is a new check, not an
   edit — the guard would claim a proof for something it no longer runs.
-- The guard reads one Edit or Write payload. A match that arrives spread over
-  two calls is a disclosed miss; the driver is what catches that one, at commit.
+- The guard reconstructs each supported file change in one patch call. It
+  cannot reason about a multi-call intention or changes made outside the patch
+  adapter; the committed driver remains a separate check of the resulting code.
 
 ### When the mistake is two files drifting apart
 
@@ -531,17 +541,18 @@ that keeps them:
 Three limits to tell the user before they approve it, because together they
 decide what it is worth:
 
-- Two lanes see it, and neither is the walk. An `edit-guard` reads an Edit's
-  `old_string` against its `new_string` and sees the deletion as it is proposed;
+- Two lanes see it, and neither is the walk. An `edit-guard` compares the
+  actual pre-patch file with the supported patch result before it is written;
   the commit lane counts the index against HEAD, deletions included, so a suite
   that lost cases in the commit is a finding there. A pathless run reads the tree
   as it is, has no earlier version to count against, and reports a removal
   detector **skipped**. So a removal on `check-driver` alone is caught at commit
   time and nowhere else — put it on both levers if the mistake is worth stopping
-  before the bytes land.
-- A **Write** payload carries no prior text at all, so a whole-file rewrite that
-  drops half the suite never fires it. That is a disclosed miss, not something to
-  work around.
+  before supported patch bytes land.
+- A supported patch Delete has a pre-image at PreToolUse and can be checked.
+  A shell rewrite or another unrecognized mutation has no patch event for this
+  lever. Legacy PostToolUse observers cannot recover a deleted file's prior
+  bytes; that operation is a disclosed gap.
 - Author it to **observe**. A per-call view cannot see the case being added back
   two calls later, and a deletion is sometimes right — behaviour that genuinely
   went away takes its tests with it.
@@ -592,7 +603,7 @@ Four things to tell the user before they approve it:
 - The comparison is **literal and unblanked**. A name the code carries only in a
   comment counts as carried, which is the direction that adds no finding.
 - The capture has to be the name and nothing else. A pattern that takes the
-  punctuation around it — backticks, quotes — captures something no source file
+  punctuation around it — backselects, quotes — captures something no source file
   has, and the fixture pair discards it for firing on its own near miss.
 
 ### When the mistake is a route around the harness
@@ -608,7 +619,7 @@ So round one carries them as four standing offers — `hook-bypassed`,
 mistake list on the `Me and my AI sessions` persona
 (references/interview.md). They are offered on every project, because they are
 about the harness rather than about a language — and they are only ever
-**offered**: nothing here is authored unless the owner ticked it, each one is
+**offered**: nothing here is authored unless the owner selected it, each one is
 proved against its own pair at admission, and each is approved by name at step 6
 like every other write.
 
@@ -662,10 +673,11 @@ Five limits to tell the user, because they decide what this set is worth:
   real file past it. The plan grades such a cell `GAP`, "the check driver never
   walks `.jig/`", and stops counting it towards the host-neutral floor; a
   workflow check under `.github/` is not affected and may carry one.
-- `.jig/off` is reachable by `touch`, so the lever that catches it is the Bash
-  one. An `edit-guard` cannot: a `Write` that creates an empty file carries no
-  text for a pattern to read, and a rule that fired on the path alone could not
-  be admitted — its near miss lands at the same path and would fire too.
+- `.jig/off` can be created by a shell command, so its check uses the command
+  lever. The shown `touch` pair proves that spelling only; add separately
+  proven checks for other requested shell spellings. An empty patch addition
+  carries no text for an edit pattern to match. A path-only pattern cannot be
+  admitted when its near miss lands at the same path.
 - These guards deny at PreToolUse, so they refuse the call rather than report the
   file afterwards. Nothing catches a change made outside the session — the whole
   set is a guard on agents, not on people.
@@ -699,11 +711,11 @@ claim a proof it does not have.
 ## 6. Plan and consent
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" plan --authored .jig/authored.json --select <classId,…> --tools <toolId,…> --provenance <elicited|forensic|assumed>
+node "<JIG_ROOT>/scripts/jig.js" plan --authored .jig/authored.json --select <classId,…> --tools <toolId,…> --provenance <elicited|forensic|assumed>
 ```
 
 `--authored` carries the checks written at step 4, `--select` the edition class
-ids the user ticked, and `--tools` the tools they ticked at step 3. Drop a flag
+ids the user selected, and `--tools` the tools they selected at step 3. Drop a flag
 whose list is empty. Add `--package-manager <name>` when the plan asked for it,
 and `--no-ci` when the user declined the workflow.
 
@@ -712,20 +724,19 @@ yet.** It is the flag that names the language when nothing on disk can, and it
 is also the permission to write the starter project file — without it the plan
 scaffolds nothing and says so in `refused`.
 
-**Four more flags carry answers the interview already collected. A round that
+**Additional flags carry answers the interview already collected. A round that
 asked a question and then dropped the answer is worse than a round that never
 asked, so pass every one the user said yes to:**
 
 | Pass | When the user |
 | --- | --- |
-| `--observe` | asked for guards that watch rather than block. It applies to the whole install; a single guard is moved afterwards in `/jig:review` |
+| `--observe` | asked for guards that watch rather than block. It applies to the whole install; a single guard is moved afterwards in `$review` |
 | `--weave-precommit` | agreed to let jig put its one line into the pre-commit hook their repository already commits. The scan lists the hosts under `guardrails.precommit`, and a repo with none refuses rather than creating one |
 | `--wire-commit` | agreed to let jig point git at the hook it wrote, by setting `core.hooksPath` to `.jig/hooks`. Run it as its own `plan` AFTER the install, because the hook has to exist before git can be pointed at it. It refuses when the lane already runs, and refuses rather than hiding a pre-commit hook the owner wrote |
 | `--refresh-activation` | is in a repository whose commit lane already runs while `.jig/activation.md` still reads as though it does not. It proposes that one file and nothing else, and refuses when the lane is dead or the file is already right |
-| `--verify-commit` | asked at question seven-a for the tools they ticked to run at commit time as well as in CI. Every lane entry in `.jig/verify.json` then names the `commit` lane too, and the pre-commit shim runs them. Without it the shim asks for that lane on every commit and finds nothing in it, which is what makes this the owner's choice rather than a cost jig imposes |
-| `--wire-governance` | agreed to wire the orphaned governance documents the scan found. It writes one computed pointer rule, `.claude/rules/jig-governance.md` |
-| `--agents-region` | said another AI tool reads this repository, so `AGENTS.md` should carry a fenced block pointing at the same checks |
-| `--checks-rule` | wants the same standing brief in front of a Claude Code session, which never reads `AGENTS.md`. It writes one rule, `.claude/rules/jig-checks.md`, from the same selection as the region |
+| `--verify-commit` | asked at question seven-a for the tools they selected to run at commit time as well as in CI. Every lane entry in `.jig/verify.json` then names the `commit` lane too, and the pre-commit shim runs them. Without it the shim asks for that lane on every commit and finds nothing in it, which is what makes this the owner's choice rather than a cost jig imposes |
+| `--wire-governance` | agreed to point Codex at orphaned governance documents. It updates the governance portion of Jig's single fenced region in the active root `AGENTS.md` (or `AGENTS.override.md` when present), preserving the checks brief and owner text outside the fence |
+| `--checks-rule` or `--agents-region` | approved a standing brief pointing Codex at the checks. These are aliases for one checks portion of the same fenced region; they do not create separate rules or duplicate instructions |
 
 Provenance is the weakest thing that fed the selection, and it stays
 load-bearing: it is how the plan states which rows the owner actually chose.
@@ -741,11 +752,15 @@ under this plan's id at `reviewKept` — `.jig/plan-<planId>.md`. Quote that one
 back when somebody asks what they approved. Read the page and walk the user
 through it:
 
-- the **coverage matrix**: rows are the admitted checks, columns are the four
-  actors (`human-editor`, `human-ci`, `claude-session`, `codex-session`), each
+- `host` — the engine reports `projectTrust`, `hooksEnabled` and `pluginLoaded`
+  as `unknown` because its file scan cannot inspect the active Codex session.
+  Print that limitation and verify `/hooks` separately; do not turn a matrix
+  cell into a claim of actual interception.
+- the **coverage matrix**: rows are the admitted checks, columns are the three
+  actors (`human-editor`, `human-ci`, `codex-session`), each
   cell `DET`, `PROB` or `GAP`. A class nothing catches is a disclosed gap, not
   a refusal — report it and move on.
-- the **toolchain section**: every tool the user ticked at step 3, with its
+- the **toolchain section**: every tool the user selected at step 3, with its
   command and its config path. An install must be approved from a surface the
   owner actually read, which is why it appears here as well.
 
@@ -775,21 +790,23 @@ Then take consent in two tiers, read off `consent` on the result:
   writes outside `.jig/`, or fails somebody's build. Every authored check is
   item tier, because it can fail a build.
 
-The item tier is where every dangerous change lives, so it is never walked as
-prose — nine paragraphs is a plan approved by fatigue. Put it to the user as
-`AskUserQuestion` multiSelect pages: **at most four options per question and at
-most four questions per call**, paging until every item-tier change has been
-asked. Each option's label is the change id, and its description is the path,
-the kind, and the exact consequence of approving it — the hook it wires into,
-the tool it installs, the build it can fail.
+Show the item tier as an enumerated table, not a series of vague approval
+paragraphs. Each row's label is the change id, with the exact path, kind and
+consequence beside it: the hook it wires, the tool it installs, or the build it
+can fail. Include the exact command and config bytes before approval. Ask the
+owner to name the approved ids from that displayed id/path table, or write the
+approved id/path pairs explicitly; `none` declines all. Page a long table into
+manageable groups without inferring approval for later pages.
 
-**Nothing is pre-ticked.** An option the owner did not tick is an answer they
-did not give, and jig never substitutes a default for one of those: a change
-nobody ticked is not applied, and it is reported back as not applied.
+**Nothing is pre-ticked.** No default, unanswered question, recommended option,
+or approval of the batch tier selects an item. Reuse an existing explicit
+approval only for the same named id, path and consequence. A change the owner
+did not select is not applied, and is reported back as not applied. Follow the
+Codex runtime reference's conversational fallback for mandatory consent; do not
+invent a multi-select tool.
 
-A multi-select is how the question is *asked*; it does not widen what is
-*applied*. Step 7 still runs one `--change <id> --path <rel>` pair per ticked
-id.
+The selection method does not widen what is applied. Step 7 runs exactly one
+`--change <id> --path <rel>` pair per approved id.
 
 `refused` and `enforcementGaps` are reported, never swallowed. `refused` names
 each thing this plan wanted and could not have, and why; a plan that quietly
@@ -803,10 +820,17 @@ around it.
 
 ## 7. Apply
 
-The item tier first, one id at a time:
+The item tier first, one id at a time. Apply approved prerequisites, including
+check modules, before wiring the config that names them. If a declined
+prerequisite makes an approved config inconsistent, do not apply that wiring
+or silently include the declined item. Explain the dependency and revise the
+plan within the owner's selected scope. Show changed rows for explicit approval;
+reuse consent only where the id, path and consequence remain unchanged.
+
+For each approved item:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" apply --change <id> --path <rel>
+node "<JIG_ROOT>/scripts/jig.js" apply --change <id> --path <rel>
 ```
 
 The approval token is the pair. A change id alone does not name a path, so an
@@ -816,15 +840,17 @@ Never widen it to a form that applies everything by default.
 Then the batch tier, in the one command the user already approved it as:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" apply --plan <planId>
+node "<JIG_ROOT>/scripts/jig.js" apply --plan <planId>
 ```
 
 **In that order, and never the other way round.** `--plan` names no path, so it
 refuses while any item-tier change in the plan is still unapplied and prints the
 `--change`/`--path` pair for each one — including a change the user declined,
 which is why a declined item leaves the batch half to be applied by name like
-any other change. Run `--plan` only once every item id the user ticked has
-landed.
+any other change. Run `--plan` only when every item-tier change in that plan has landed. If any
+item was declined or remains unanswered, apply only the approved batch artifacts
+individually by their own id/path pairs; do not attempt a batch refusal as a
+way to prompt broader consent.
 
 `--plan` skips what the repository already carries and **names every one it
 skipped** on `skipped`. Read that list out — a batch approval that quietly
@@ -867,9 +893,9 @@ A file the owner edited is refused rather than rewritten, and the plan says so i
 A repository wired under an older jig has the stale file and no plan coming to
 fix it. When the scan says the commit lane is live and `.jig/activation.md` still
 reads unwired, offer `plan --refresh-activation` — one file, approved by name,
-nothing rewired. `/jig:inventory` is where that mismatch shows up between runs.
+nothing rewired. `$inventory` is where that mismatch shows up between runs.
 
-Every file under `.git/` stays unwritable, including `.git/hooks/pre-commit`.
+Every file under `.git/` stays unavailable for direct Jig file writes, including `.git/hooks/pre-commit`.
 What jig may change is one setting: `core.hooksPath`, through
 `plan --wire-commit`, which points git at the hook jig already wrote under
 `.jig/hooks/`. A setting has a pre-image the journal can hold, so it reverts;
@@ -884,18 +910,21 @@ result says. Do not do those on the user's behalf.
 
 ## 8. Witnessed close
 
-The install is not finished until a guard has been seen catching something and
-the ledger has grown a line proving it.
+Demonstrate the installed detector and its ledger before describing its
+coverage. Separately inspect the active host's `/hooks` trust and registration as
+described in the Codex runtime reference. The command below supplies synthetic
+events to Jig directly; its name does not mean it exercises Codex itself.
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" selftest --live
+node "<JIG_ROOT>/scripts/jig.js" selftest --live
 ```
 
 Read `witnessed`. It is `true` only when something caught its synthetic
 violation **and** `ledger.linesAfter` exceeds `ledger.linesBefore`. Where guards
 are installed, that something is a guard probe. Where none is — a checks-only
 install, which is a whole persona — the check driver's own catch is the witness,
-because it is that install's entire surface. Show the runner's own stdout for at
+because it is that install's entire surface. This establishes detector proof,
+not an actual host tool-call denial. Show the runner's own stdout for at
 least one probe, verbatim, from `probes[].output` — "it works" from the thing
 under test is not evidence.
 
@@ -912,7 +941,7 @@ its `verify.argv`: the tool caught the violation when the exit code equals
 name, because a type check or a test run costs a build — so name them:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" selftest --live --toolchain eslint,typescript
+node "<JIG_ROOT>/scripts/jig.js" selftest --live --toolchain eslint,typescript
 ```
 
 Each named tool reports `verdict: verified` or `unverified`, and `baseline:
@@ -944,25 +973,38 @@ Print `notes` too. The close never aborts because a tool could not run.
 caught its probe, or the ledger did not grow — name the probe, and call the
 install unwitnessed at step 9.
 
+For ongoing named verification after the fixture demonstration, follow
+[the runtime guide](references/codex-runtime.md#reliable-verification-evidence).
+Measured Codex CLI 0.145.0 and 0.153.4 shell PostToolUse gives stdout without exit
+status, so a matching raw shell run records `verify-unknown`. For an approved
+entry assigned to `commit`, `node .jig/checks/run.mjs --verify --lane commit
+--entry <id>` records the actual exit through the driver. Select an existing
+entry and lane from `.jig/verify.json`; the lane label does not prove a Git
+commit occurred. Do not substitute this command's normal verification for the
+fixture-seeding toolchain demonstration above.
+
 ## 9. Close, and how to undo any of it
 
 Say what is now installed, which actors it covers, what it cannot see, and which
-guards the owner put in observe rather than blocking. Describe coverage as
+guards the owner put in observe rather than blocking. Describe detector coverage as
 demonstrated only when step 8 returned `witnessed: true`; otherwise say plainly
-that nothing has been seen catching anything yet. Name the discarded checks
+that nothing has been seen catching anything yet. Report host hook trust and
+real tool-call evidence separately. If they were not verified, call session
+enforcement unverified. Jig deliberately keeps Stop advisory, although Codex
+supports blocking and continuation there. Name the discarded checks
 again, and anything still waiting on the user from `proposals`. Point at
-`/jig:review` as the place the guards' record accrues.
+`$review` as the place the guards' record accrues.
 
 What is installed, any time, reading the journal and writing nothing ever:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" status
+node "<JIG_ROOT>/scripts/jig.js" status
 ```
 
 The undo, only when the user asks for it:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" revert --all
+node "<JIG_ROOT>/scripts/jig.js" revert --all
 ```
 
 `revert` also takes `--change <id>` and `--tx <id>`, and it refuses when a file

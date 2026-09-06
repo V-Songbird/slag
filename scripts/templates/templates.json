@@ -23,43 +23,43 @@
     },
     {
       "name": "activation",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "file": "activation.md",
       "target": ".jig/activation.md",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "9f74301e740f1d753499147cc4a962c45638351601e2f2a54491d6b53edda9a5"
+      "sha256": "274c9193de20efdf5df2a383b29e64c903b030f7ffacfc3bebf415a00878f909"
     },
     {
       "name": "activation-woven",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "file": "activation-woven.md",
       "target": ".jig/activation.md",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "29cdea01fcde5865dc0e5244b3dc01a228abcc18569a145a8e49ede78b7bb237"
+      "sha256": "1538648cae8b10d5a2c148df7bf456d4d2e94e2419ad851df434d6c63056db46"
     },
     {
       "name": "activation-wired",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "file": "activation-wired.md",
       "target": ".jig/activation.md",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "7d53dc2ca7245d334025611045d2df0443941086ed471db0a92f4b34b3c63fc3"
+      "sha256": "033ee0b36b7dab4fc4177ca4ee11da284a7d426202cc065f28bab2840633a0d0"
     },
     {
       "name": "hook-shim",
-      "version": "1.4.0",
+      "version": "1.4.1",
       "file": "hook-pre-commit.sh",
       "target": ".jig/hooks/pre-commit",
       "kind": "write-side-file",
       "ownership": "file",
       "classId": null,
-      "sha256": "8f672c200b0eb00b80c4a2040fceb21ce30fe5407ba3bd70c3886ceeff9ce7d9"
+      "sha256": "028c4946ecec464f5419097cf6678935cd856792ff7eb8d487dea028a2966b2f"
     }
   ]
 }

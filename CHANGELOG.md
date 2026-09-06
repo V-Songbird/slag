@@ -4,6 +4,32 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.15.1-codex.1] — 2026-09-06
+
+### Changed
+
+- Ported the plugin and all three workflows to Codex desktop and CLI. Local
+  marketplace packaging is isolated and never installs itself into user settings.
+- Added native shell and `apply_patch` hook translation, including multi-file
+  edits, moves and removal checks. Verification requires explicit exit evidence.
+- Governance and check reminders share Jig's reversible fenced `AGENTS.md`
+  region. Discovery reads Codex instructions, skills and hook configuration.
+- Configured session guards no longer imply that the current host has loaded
+  or trusted their hooks. Reports disclose that limit and synthetic selftests
+  are distinguished from host delivery probes.
+- Canonicalized plan paths consistently across operating systems, including
+  protected metadata paths hidden by dot segments. Shared configuration retains
+  its recorded tool membership across successful package installs.
+- Retired the Claude permission-settings probe; its result cannot unlock writes
+  to Codex settings. Historical check identities, proofs and revert records
+  remain readable.
+
+### Validation
+
+- Added native transport and engine regressions, a deterministic real-Codex
+  host probe, and a Windows/macOS/Linux Node test matrix. See
+  [compatibility evidence](docs/CODEX-COMPATIBILITY.md) for measured results.
+
 ## [2.15.1] — 2026-09-04
 
 ### Fixed

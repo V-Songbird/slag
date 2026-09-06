@@ -39,7 +39,7 @@ function moduleSource(spec) {
     line("title", spec.title),
     line("severity", spec.severity || "safety"),
     line("confidence", spec.confidence || "deterministic"),
-    line("actor", spec.actor || "claude-session"),
+    line("actor", spec.actor || "codex-session"),
     line("deny", spec.deny),
     line("fixtures", spec.fixtures),
     line("detectors", withRunners(spec.detectors)),
@@ -84,7 +84,7 @@ const PIPED_INSTALLER = authored({
   id: "piped-installer",
   title: "A downloaded script piped straight into a shell",
   detectors: [
-    { lever: "bash-guard", actor: "claude-session", confidence: "deterministic",
+    { lever: "bash-guard", actor: "codex-session", confidence: "deterministic",
       params: { patterns: [PIPE_PATTERN] } },
     { lever: "check-driver", actor: "human-editor", confidence: "deterministic",
       params: { patterns: [PIPE_PATTERN], paths: ["**/*.sh"], perLine: true } },
@@ -101,7 +101,7 @@ const EMPTY_CATCH = authored({
   id: "empty-catch",
   title: "A catch block that swallows the error",
   detectors: [
-    { lever: "edit-observe-guard", actor: "claude-session", confidence: "deterministic",
+    { lever: "edit-observe-guard", actor: "codex-session", confidence: "deterministic",
       params: { patterns: [CATCH_PATTERN], onlyWhenIntroduced: true } },
     { lever: "check-driver", actor: "human-editor", confidence: "deterministic",
       params: { patterns: [CATCH_PATTERN], paths: ["**/*.js"] } },
@@ -121,7 +121,7 @@ const HEURISTIC_ONLY = authored({
   title: "A test file removed by shell",
   confidence: "heuristic",
   detectors: [
-    { lever: "bash-guard", actor: "claude-session", confidence: "heuristic",
+    { lever: "bash-guard", actor: "codex-session", confidence: "heuristic",
       params: { patterns: ["\\b(?:git\\s+)?rm\\b[^\\n]*\\btests?\\/"] } },
     { lever: "check-driver", actor: "human-editor", confidence: "heuristic",
       params: { patterns: ["\\b(?:git\\s+)?rm\\b[^\\n]*\\btests?\\/"], paths: ["**/*.sh"], perLine: true } },

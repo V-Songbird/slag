@@ -733,14 +733,15 @@ test("node-on-PATH is disclosed, and a version manager is disclosed with it", ()
 
 test("the rule corpus is measured, and its token count says it is an estimate", () => {
   const root = project({
-    "CLAUDE.md": "x".repeat(400),
-    ".claude/rules/a.md": "y".repeat(200),
+    "AGENTS.md": "x".repeat(400),
+    "AGENTS.override.md": "y".repeat(200),
     ".claude/rules/notes.txt": "ignored",
   });
   const rules = engine.ruleCorpus(root);
-  assert.deepEqual(rules.files.map((f) => f.path), ["CLAUDE.md", ".claude/rules/a.md"]);
-  assert.equal(rules.bytes, 600);
-  assert.equal(rules.approxTokens, 150);
+  assert.deepEqual(rules.files.map((f) => f.path), ["AGENTS.override.md", "AGENTS.md"]);
+  assert.equal(rules.bytes, 200);
+  assert.equal(rules.files.find((f) => f.path === "AGENTS.md").loaded, false);
+  assert.equal(rules.approxTokens, 50);
   assert.match(rules.estimate, /not a tokenizer/);
 });
 
@@ -766,7 +767,7 @@ test("a file already sitting in a slot is refused, not written over", () => {
 
 test("a hook already registered for the same tool occupies the slot, with the reason said out loud", () => {
   const root = project({
-    ".claude/settings.json": JSON.stringify({
+    ".codex/hooks.json": JSON.stringify({
       hooks: {
         PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "node", args: ["./guard.js"] }] }],
       },
@@ -775,12 +776,12 @@ test("a hook already registered for the same tool occupies the slot, with the re
   const out = engine.cmdScan(root);
   // The literal, not `SHELL_TOOLS` joined back against itself: the slot id is a
   // report string an owner reads, and 2.14.0 widened it off `Bash` alone.
-  assert.deepEqual(out.occupied, ["PreToolUse:Bash|PowerShell"]);
-  const slot = out.slots.find((s) => s.slot === "PreToolUse:Bash|PowerShell");
+  assert.deepEqual(out.occupied, ["PreToolUse:Bash"]);
+  const slot = out.slots.find((s) => s.slot === "PreToolUse:Bash");
   assert.equal(slot.free, false);
-  assert.ok(slot.occupiedBy[0].includes(".claude/settings.json"));
+  assert.ok(slot.occupiedBy[0].includes(".codex/hooks.json"));
   assert.ok(slot.occupiedBy[0].includes("node ./guard.js"));
-  assert.ok(out.disclosures.some((d) => d.includes("do not chain")));
+  assert.ok(out.disclosures.some((d) => d.includes("Composition with existing Codex hooks has not been verified")));
 });
 
 // 2.14.0 / roadmap 237. Widening `HOOK_SLOTS[0].tools` to every shell tool is a
@@ -788,61 +789,48 @@ test("a hook already registered for the same tool occupies the slot, with the re
 // hook registered for `PowerShell` alone used to leave the command-guard slot
 // free, and jig would have registered a second PreToolUse hook beside it.
 // Registrations do not chain, so one of the two would silently never fire.
-test("a foreign hook on the other shell tool takes the command-guard slot too", () => {
-  const root = project({
-    ".claude/settings.json": JSON.stringify({
-      hooks: {
-        PreToolUse: [{ matcher: "PowerShell", hooks: [{ type: "command", command: "node", args: ["./ps-guard.js"] }] }],
-      },
-    }),
-  });
+test("a legacy PowerShell matcher is not confused with Codex's canonical Bash event", () => {
+  const root = project({ ".codex/hooks.json": JSON.stringify({ hooks: {
+    PreToolUse: [{ matcher: "PowerShell", hooks: [{ type: "command", command: "node ./ps-guard.js" }] }],
+  } }) });
   const out = engine.cmdScan(root);
-  assert.deepEqual(out.occupied, ["PreToolUse:Bash|PowerShell"]);
-  const slot = out.slots.find((s) => s.slot === "PreToolUse:Bash|PowerShell");
-  assert.ok(slot.occupiedBy[0].includes("node ./ps-guard.js"));
-  assert.ok(out.disclosures.some((d) => d.includes("do not chain")));
-
-  // SCOPE, "Is a foreign hook on one shell tool a full occupancy": yes, whole,
-  // because the session's tool list is not knowable from here and jig's matcher
-  // is one static registration covering both names. What the owner is owed is
-  // WHICH name is contested — a flat "taken" over a slot named for two tools is
-  // the report claiming more than jig knows, and this hook holds only one.
-  assert.deepEqual(slot.overlap, ["PowerShell"]);
-  assert.ok(out.disclosures.some((d) => d.includes("held on PowerShell only, not on Bash")),
-    "the owner is refused a guard without being told which name the hook holds");
+  assert.deepEqual(out.occupied, []);
+  assert.equal(out.guardrails.hooks.length, 1, "the unmatched hook still belongs in the inventory");
+  assert.equal(out.guardrails.host.hooksEnabled, "unknown");
 });
 
 // The other direction: a foreign hook on the matcher jig's own slot covers whole
 // contends for both names, and there is no partial hold to disclose.
 test("a foreign hook covering every shell tool holds the whole slot with nothing to qualify", () => {
   const root = project({
-    ".claude/settings.json": JSON.stringify({
+    ".codex/hooks.json": JSON.stringify({
       hooks: {
-        PreToolUse: [{ matcher: "Bash|PowerShell", hooks: [{ type: "command", command: "node", args: ["./both.js"] }] }],
+        PreToolUse: [{ matcher: "Bash|apply_patch", hooks: [{ type: "command", command: "node", args: ["./both.js"] }] }],
       },
     }),
   });
   const out = engine.cmdScan(root);
-  const slot = out.slots.find((s) => s.slot === "PreToolUse:Bash|PowerShell");
+  const slot = out.slots.find((s) => s.slot === "PreToolUse:Bash");
   assert.equal(slot.free, false);
-  assert.deepEqual(slot.overlap, ["Bash", "PowerShell"]);
+  assert.deepEqual(slot.overlap, ["Bash"]);
+  assert.deepEqual(out.occupied, ["PreToolUse:Bash", "PreToolUse:apply_patch"]);
   assert.ok(!out.disclosures.some((d) => d.includes("only, not on")),
     "a hook holding both names is qualified as if it held one");
 });
 
 test("a wildcard matcher takes every slot for its event", () => {
   const root = project({
-    ".claude/settings.local.json": JSON.stringify({
+    ".codex/hooks.json": JSON.stringify({
       hooks: { PostToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "./wide.sh" }] }] },
     }),
   });
   const out = engine.cmdScan(root);
-  assert.deepEqual(out.occupied, ["PostToolUse:Edit|Write"]);
+  assert.deepEqual(out.occupied, ["PostToolUse:apply_patch"]);
 });
 
 test("a matcher that misses jig's tools leaves the slot free", () => {
   const root = project({
-    ".claude/settings.json": JSON.stringify({
+    ".codex/hooks.json": JSON.stringify({
       hooks: { PreToolUse: [{ matcher: "^WebFetch$", hooks: [{ type: "command", command: "./net.js" }] }] },
     }),
   });
@@ -858,24 +846,25 @@ test("a matcher that is not valid regex is compared as text instead of throwing"
 });
 
 test("jig does not report its own hooks as the thing occupying its own slots", () => {
-  const rows = engine.collectHooks(REPO_ROOT);
+  const rows = engine.collectHooks(PLUGIN_ROOT);
   assert.deepEqual(rows.filter((r) => r.source === "jig/hooks/hooks.json"), []);
-  assert.ok(rows.length > 0, "expected this repository's own hooks to be inventoried");
+  assert.equal(rows.some((r) => r.source === "hooks/hooks.json"), false);
 });
 
 test("an in-tree plugin's hooks are inventoried alongside settings", () => {
   const root = project({
+    "otherplugin/.codex-plugin/plugin.json": JSON.stringify({ name: "otherplugin", hooks: "./hooks/hooks.json" }),
     "otherplugin/hooks/hooks.json": JSON.stringify({
       hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "node", args: ["r.js"] }] }] },
     }),
   });
   const out = engine.cmdScan(root);
   assert.deepEqual(out.guardrails.hooks.map((h) => h.source), ["otherplugin/hooks/hooks.json"]);
-  assert.deepEqual(out.occupied, ["PreToolUse:Bash|PowerShell"]);
+  assert.deepEqual(out.occupied, ["PreToolUse:Bash"]);
 });
 
 test("unreadable settings are skipped rather than crashing the scan", () => {
-  const root = project({ ".claude/settings.json": "{ not json" });
+  const root = project({ ".codex/hooks.json": "{ not json" });
   const out = engine.cmdScan(root);
   assert.equal(out.ok, true);
   assert.deepEqual(out.guardrails.hooks, []);
@@ -886,7 +875,7 @@ test("unreadable settings are skipped rather than crashing the scan", () => {
 
 test("a governance doc no loaded surface references is an orphan, and the scan says so", () => {
   const root = project({
-    "CLAUDE.md": "# House rules\n\n- Keep functions small.\n",
+    "AGENTS.md": "# House rules\n\n- Keep functions small.\n",
     "docs/adr/0001-storage.md": "# ADR 0001 — storage\n\nDecided.\n",
     "SCOPE.md": "# Scope\n\nWhat this project is.\n",
   });
@@ -899,12 +888,12 @@ test("a governance doc no loaded surface references is an orphan, and the scan s
 
 test("a referenced governance doc is not an orphan, and names its referencing surface", () => {
   const root = project({
-    "CLAUDE.md": "# House rules\n\nRead docs/adr/0001-storage.md before touching storage.\n",
+    "AGENTS.md": "# House rules\n\nRead docs/adr/0001-storage.md before touching storage.\n",
     "docs/adr/0001-storage.md": "# ADR 0001 — storage\n",
   });
   const scan = engine.cmdScan(root, { _: [], change: [] });
   const doc = scan.governance.docs.find((d) => d.path === "docs/adr/0001-storage.md");
-  assert.deepEqual(doc.referencedBy, ["CLAUDE.md"]);
+  assert.deepEqual(doc.referencedBy, ["AGENTS.md"]);
   assert.deepEqual(scan.governance.orphans, []);
 });
 

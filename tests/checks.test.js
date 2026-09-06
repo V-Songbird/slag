@@ -330,7 +330,7 @@ test("a check-driver detector inside a directory the walk skips is a gap, not a 
   assert.equal(row.cells["human-editor"].why, "the check driver never walks .jig/");
   // The session lever over the same path is untouched — this is about the lane,
   // not about the check.
-  assert.equal(row.cells["claude-session"].grade, "DET");
+  assert.equal(row.cells["codex-session"].grade, "DET");
   // And the module is still installed: a blind detector is a disclosed gap, not
   // a discard, because the same check carries a lever that does work.
   assert.ok(plan.changes.some((c) => c.path === ".jig/checks/jig-config-disarmed.check.mjs"));
@@ -1911,7 +1911,8 @@ test("an edit guard that denies at PreToolUse is witnessed with the edit it refu
   const result = engine.cmdSelftest(root, { _: [], change: [], live: true });
   const probe = result.probes.find((p) => p.probe === "prevented-catch-edit-guard-0");
   assert.equal(probe.event, "PreToolUse");
-  assert.match(probe.command, /"tool_name":"Write"/);
+  assert.match(probe.command, /"tool_name":"apply_patch"/);
+  assert.match(probe.command, /--diagnostic/);
   assert.equal(probe.caught, true, probe && (probe.why || probe.output));
   assert.equal(result.witnessed, true);
 });
@@ -2000,13 +2001,13 @@ test("without --live nothing runs, and every probe prints the command to run by 
 // 3 measured as offering no `Bash` tool at all. The guard itself was never wrong
 // (`LEVER_TOOLS["bash-guard"]` is the whole list), so nothing failed; the
 // reproduction line named a tool the session could not send.
-test("a guard's reproduction line names a shell this repository has actually recorded", () => {
+test("a guard reproduction uses Codex canonical Bash even after legacy PowerShell observations", () => {
   const root = nodeProject();
   install(root, { "no-ci": true });
   // The shell half of the fixture pair — `EMPTY_CATCH` is an edit guard and its
   // payload names `Write`, which no host renames.
   const guardProbe = () => engine.cmdSelftest(root, { _: [], change: [] }).probes
-    .find((p) => p.kind === "guard" && p.command.includes('"tool_input":{"command"'));
+    .find((p) => p.probe === "piped-installer-bash-guard-0");
 
   // Nothing has run, so nothing is claimed beyond a name jig watches.
   assert.match(guardProbe().command, /"tool_name":"Bash"/);
@@ -2017,9 +2018,9 @@ test("a guard's reproduction line names a shell this repository has actually rec
     ts: "2026-09-01T00:00:00.000Z", guardId: "piped-installer-bash-guard-0", decision: "pass", tool: "PowerShell",
   }) + "\n");
   const after = guardProbe();
-  assert.match(after.command, /"tool_name":"PowerShell"/);
-  assert.ok(!after.command.includes('"tool_name":"Bash"'),
-    "the owner is handed a reproduction naming a tool this repository has never sent");
+  assert.match(after.command, /"tool_name":"Bash"/);
+  assert.ok(!after.command.includes('"tool_name":"PowerShell"'),
+    "a historical tool label must not replace Codex canonical Bash in a native reproduction");
 });
 
 test("selftest on a project with no guards says so and does not fail", () => {
@@ -2417,7 +2418,7 @@ test("the unwired doc no longer claims jig cannot do the wiring", () => {
   // The route it names has to be one the owner can actually take. Nothing puts
   // `jig` on a PATH, so a doc printing `jig plan --wire-commit` was printing a
   // command that answers "command not found".
-  assert.match(text, /\/jig:jig/);
+  assert.match(text, /\$jig/);
   assert.equal(/^\s*jig .*--wire-commit/m.test(text), false,
     "the activation doc hands out a `jig …` command nothing puts on a PATH");
 });
@@ -2450,7 +2451,8 @@ test("a wiring plan never proposes a guard config, because it would be an empty 
 test("the kill switch is the whole answer for the session lane", () => {
   const root = nodeProject();
   install(root, { "no-ci": true });
-  assert.equal(engine.cmdReview(root).lanes.session.runs, true);
+  assert.equal(engine.cmdReview(root).lanes.session.runs, null);
+  assert.equal(engine.cmdReview(root).lanes.session.state, "unverified-host");
 
   fs.writeFileSync(path.join(root, ".jig", "off"), "");
   const session = engine.cmdReview(root).lanes.session;

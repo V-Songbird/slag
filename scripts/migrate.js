@@ -253,7 +253,7 @@ function tombstoneSource(id, why) {
     "//   " + why,
     "//",
     "// It exports nothing, so nothing runs it. Its ledger history is untouched,",
-    "// `revert` puts the original file back, and /jig:jig can author a",
+    "// `revert` puts the original file back, and $jig can author a",
     "// replacement that earns its place on a pair of its own.",
     "",
   ].join("\n");
@@ -796,7 +796,7 @@ function cmdMigrate(root, opts) {
       "Undo the whole thing with `revert --tx " + applied.tx + "`.",
     ].concat(discarded.length
       ? ["The discarded checks stopped running and their files are now records of why." +
-        " Author replacements with /jig:jig if those mistakes still matter."]
+        " Author replacements with $jig if those mistakes still matter."]
       : []),
   };
 }

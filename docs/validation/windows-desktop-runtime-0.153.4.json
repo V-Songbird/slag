@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-09-06T10:00:58.491Z",
+  "cliVersion": "codex-cli 0.153.4",
+  "platform": "win32",
+  "arch": "x64",
+  "green": true,
+  "checks": {
+    "hostExited": true,
+    "requestsCompleted": true,
+    "commandPrevented": true,
+    "editPrevented": true,
+    "nearMissAllowed": true,
+    "rawShellOutcomesNotInvented": true,
+    "driverPassingVerificationRecorded": true,
+    "driverFailingVerificationRecorded": true
+  },
+  "serverError": null,
+  "sandbox": "none (fixed local tool fixtures only)",
+  "method": "Real installed Codex CLI with a local deterministic Responses server and vetted temporary plugin hooks; no model inference. Desktop UI and other OSes are not measured by this run.",
+  "pluginVersion": "2.15.1-codex.1",
+  "sourceHashes": {
+    ".codex-plugin/plugin.json": "f65b36b27f347deab2504ecf1c208fd983ddc851d68ba27044d68e0dd2734340",
+    "hooks/hooks.json": "cb0df7c543f04fe6e725f32c830d511bde95b26263d22e56e5003c091e0f48b4",
+    "hooks/codex.js": "0c079b5f58b232ed260826d05a0c507bb852470479e948ac27a3ceec790a0ac7",
+    "hooks/runner.js": "22e2be87881a4d3cf815da7e49aa6992dc06c5e5508648299a35d80d2b75cee6",
+    "hooks/jig-lib.js": "64acf4b141f4979caf20d9617ab30052de7b850ae703380b22fca19cc8a50e02",
+    "scripts/vocab.js": "fe2297fdf00ffb32783cd3576fb6de7125d84191959f9bf58c6a62c6d5a75ad9",
+    "scripts/templates/run.mjs": "fa3f9f13bdae104fbc3ca9433d995ef4b8fdd18c3c7fcde7ded60d6455d9193e"
+  }
+}

@@ -16,10 +16,10 @@ do that for you, as a change you approve like any other.
 
 ## Let jig do it
 
-Ask for it in Claude Code:
+Ask for it in Codex:
 
 ```
-/jig:jig wire the commit lane
+$jig wire the commit lane
 ```
 
 You approve it by name, and jig's own revert puts the setting back exactly as

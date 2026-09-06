@@ -1,3 +1,12 @@
+> **Codex port (2026-09-06).** This branch preserves Jig's behavioral contract
+> and ports its delivery to Codex desktop and CLI. The historical Claude host
+> measurements and roadmap decisions below are provenance, not evidence of
+> Codex compatibility. Current host mappings, tested versions, and limitations
+> are recorded in [docs/CODEX-COMPATIBILITY.md](docs/CODEX-COMPATIBILITY.md).
+> Jig guards owner-selected mistakes; it does not add task-wide edit scope
+> enforcement. Codex permission settings are never written, Stop remains
+> advisory, and named approval, fixture proof, and reversible writes still apply.
+
 # jig scope
 
 - **Status:** shipped. **2.14.0 (2026-09-03)** is the post-derail correctness

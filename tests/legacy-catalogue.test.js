@@ -19,7 +19,7 @@ const fs = require("fs");
 const path = require("path");
 
 const CATALOGUE_PATH = path.join(__dirname, "..", "scripts", "legacy", "catalogue-1.0.1.json");
-const REPO_ROOT = path.join(__dirname, "..", "..");
+const PLUGIN_ROOT = path.join(__dirname, "..");
 const REFERENCE = path.join(__dirname, "..", "skills", "jig", "references", "catalogues.md");
 
 const raw = fs.readFileSync(CATALOGUE_PATH, "utf-8");
@@ -216,7 +216,7 @@ test("every fixture path names a file that exists", () => {
   for (const cls of catalogue.classes) {
     if (!cls.fixtures) continue;
     for (const rel of [...cls.fixtures.violation, ...cls.fixtures.nearMiss]) {
-      const full = path.join(REPO_ROOT, rel);
+      const full = path.join(PLUGIN_ROOT, rel.replace(/^jig\//, ""));
       assert.ok(fs.existsSync(full), `${cls.id}: missing fixture ${rel}`);
       assert.ok(fs.readFileSync(full, "utf-8").trim().length > 0, `${cls.id}: empty fixture ${rel}`);
     }

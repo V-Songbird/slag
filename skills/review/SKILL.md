@@ -9,21 +9,23 @@ description: >-
   mark a report as wrong, or to see what has changed since the install — e.g.
   "what did jig catch", "that jig warning was wrong", "stop the force-push
   guard blocking", "has anything drifted", "are my commit checks running" — or
-  invokes /jig:review. Do NOT use to install or set up guardrails — that is
-  /jig:jig.
-argument-hint: "[fp <guardId>] [fp <guardId> --clear] [arm <guardId>] [disarm <guardId>] [retire <guardId>] [rerun]"
-allowed-tools: Bash, PowerShell, Read, AskUserQuestion
+  invokes $review. Do NOT use to install or set up guardrails — that is
+  $jig.
 ---
 
-# jig:review
+# Jig review
+
+Read [Codex runtime and consent](../jig/references/codex-runtime.md) first. Resolve
+`<JIG_ROOT>` from this loaded skill's path, and keep detector proof separate from
+actual host registration and enforcement.
 
 Everything mechanical is one command. You run it, read its result, and put the
 real decisions — keep, quiet, or retire — to the user. Never re-derive what the
 command already computed.
 
-Every command is `node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" <review|rerun|fp|disarm|arm|retire>`
+Every command is `node "<JIG_ROOT>/scripts/jig.js" <review|rerun|fp|disarm|arm|retire>`
 from the project root. If `node` is not on PATH (fnm/nvm setups), register it
-the way the project's CLAUDE.md says to, then rerun.
+the way the project's AGENTS.md says to, then rerun.
 
 A guard's mode is a choice, not a rank. Checks install proven and blocking;
 observe is something the owner picks, in either direction, at any time. There is
@@ -32,25 +34,27 @@ period.
 
 Anything that takes enforcement AWAY — `fp`, `disarm`, `retire` — plans and
 stops. The command writes a change and changes nothing; its result carries
-`applied: false`, the `change` id, the `path`, and an `apply` string. Put the
-change to the user with ONE `AskUserQuestion` and run the apply only if they say
-yes. Never pre-tick it, never assume it, never run both halves in one breath.
+`applied: false`, the `change` id, the `path`, and an `apply` string. Show the
+change id, exact path and consequence. Apply only with explicit consent for
+that named pair, using the runtime reference's conversational fallback. Reuse
+unchanged authorization already given in this session. Never pre-tick or assume
+consent; a general complaint about a guard does not approve its planned change.
 `arm` is the exception and applies itself: it puts enforcement up, and the owner
 already named the guard.
 
 If a command here refuses because the install predates the rework, that install
-needs upgrading before any of this reads correctly. Send the user to `/jig:jig`,
+needs upgrading before any of this reads correctly. Send the user to `$jig`,
 which runs the migration, and stop.
 
 ## 1. Read the ledger
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" review
+node "<JIG_ROOT>/scripts/jig.js" review
 ```
 
 `installed: false` is the whole report. There is no `.jig/config.json` here — jig
 was never installed, or `revert` took it back out — so there is no activity to
-read. Say `why` and stop; offer `/jig:jig` to install. Do not report the empty
+read. Say `why` and stop; offer `$jig` to install. Do not report the empty
 `guards` list as guards that never fired.
 
 `guards[]` carries one row per installed guard:
@@ -79,7 +83,8 @@ read. Say `why` and stop; offer `/jig:jig` to install. Do not report the empty
   would not load, or it carries nothing for the event it is registered on. Say
   so first and separately. A broken guard reported as "never fired" is coverage
   the user thinks they have.
-- `mode` — `armed` (it blocks) or `observe` (it records and lets the call
+- `mode` — `armed` (eligible to block supported calls with trusted active
+  hooks) or `observe` (it records and lets the call
   through). `why` states what put it there; print it verbatim, because
   paraphrasing an honest limit blurs it.
 - `demoted` — non-null means the config says `armed` and the guard is running as
@@ -92,7 +97,14 @@ read. Say `why` and stop; offer `/jig:jig` to install. Do not report the empty
 `lanes` carries the three places the checks can run, read fresh on every review
 rather than remembered from the install:
 
-- `lanes.session` — the guards above, inside a Claude session. `off: true` means
+These are repository configuration and ledger facts. This command cannot
+inspect whether the current Codex host enabled and trusted the plugin. Verify
+`/hooks` separately before claiming the session lane is active. Synthetic
+selftests and historical counts do not establish current host registration.
+Jig deliberately keeps Stop advisory even though Codex supports blocking and
+continuation there; Jig requests neither.
+
+- `lanes.session` — the guards above, inside a Codex session. `off: true` means
   `.jig/off` is present and NOTHING in this lane runs, whatever the guard rows
   say; `offSince` is when the switch went on. Report that before anything else.
   `shell.watched` is every tool name jig's hooks match. `shell.seen` is every
@@ -120,10 +132,10 @@ Report a dead lane in plain terms: what does not run, what still does, and the
 one command that fixes it. Offer the fix; never run it unasked. Print `fix`
 verbatim — it names the real invocation, and nothing puts `jig` on a PATH.
 Wiring the commit lane is an approved, reversible change like any other — send
-the user to `/jig:jig` to apply it rather than applying it here.
+the user to `$jig` to apply it rather than applying it here.
 
 `verify` is one row per lane entry, and `lastGreen` is the last time jig
-WITNESSED that command run green — in a Claude session, or in this machine's own
+WITNESSED that command run green — in a Codex session, or in this machine's own
 commit lane — a timestamp, or `null` for one nothing here has ever been seen to
 pass. Report it beside the lanes. It is the one fact in this report that
 contradicts a claim rather than recording a catch, and `null` does not mean the
@@ -132,6 +144,17 @@ case to say out loud, because it looks like the opposite: the CI lane writes its
 row into the runner's own checkout, the ledger is git-ignored and the checkout is
 thrown away, so a repository whose CI runs the suite green on every push still
 reads `null`. Say which claim the number answers.
+
+Measured Codex CLI 0.145.0 and 0.153.4 shell PostToolUse payloads contain raw
+stdout without exit status. A matching named run records `verify-unknown`, which
+must not be reported as green or as a failed command. If the user wants a named
+verification run, use the existing driver for the approved entry and its
+configured lane, as described in
+[the runtime guide](../jig/references/codex-runtime.md#reliable-verification-evidence):
+`node .jig/checks/run.mjs --verify --lane commit --entry <id>` when the entry
+includes `commit`. The driver records the true exit itself. The lane label is
+not proof that Git ran a commit or that hosted CI ran a job. A report-only review does not authorize extra test runs; reuse any explicit
+authorization already given for the named verification.
 
 `ledger.lines` is how far the ledger has grown. It is never compacted — deleting
 rows deletes the evidence a wave-off is undone from — so this number only goes
@@ -155,7 +178,7 @@ what each group means:
 When the user says a report was wrong:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" fp <guardId>
+node "<JIG_ROOT>/scripts/jig.js" fp <guardId>
 ```
 
 This writes the judgment into the ledger as its own line — a human judgment,
@@ -164,11 +187,12 @@ a false alarm stops an armed guard refusing tool calls, which is the same step
 down `disarm` takes, so it gets the same pause. The result carries the token:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" apply --change <change> --path <path>
+node "<JIG_ROOT>/scripts/jig.js" apply --change <change> --path <path>
 ```
 
-Ask ONE `AskUserQuestion` — quiet this guard, or leave it blocking and keep the
-report on the record — and run the apply only on a yes. On a no, stop; the
+Show the returned id/path pair and ask whether to quiet this guard or leave it
+blocking with the report on record. Apply only with explicit approval, reusing
+that authorization if it was already given for the same pair and consequence. On a no, stop; the
 ledger line stands as evidence either way and `review` reports it as
 `pendingWaveOff`.
 
@@ -176,7 +200,7 @@ A guard that keeps producing false alarms belongs in section 3 or 4, and the
 ledger is the evidence for that conversation.
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" fp <guardId> --clear
+node "<JIG_ROOT>/scripts/jig.js" fp <guardId> --clear
 ```
 
 The other direction, and it needs no pause: it appends the cleared line the
@@ -188,7 +212,7 @@ through.
 ## 3. Quiet a guard, or let it block again
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" disarm <guardId>
+node "<JIG_ROOT>/scripts/jig.js" disarm <guardId>
 ```
 
 This plans and stops, exactly as `fp` does: put the named change to the user and
@@ -198,11 +222,11 @@ a check that is right often enough to keep and wrong often enough to be in the
 way.
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" arm <guardId>
+node "<JIG_ROOT>/scripts/jig.js" arm <guardId>
 ```
 
-Back to blocking, and this one applies itself. From the next session a match
-denies the call and shows the reason, the alternative and the override path. Say
+Back to blocking, and this one applies itself. With trusted, active Codex
+hooks, a supported PreToolUse match denies the call and shows the reason, the alternative and the override path. Say
 that plainly before the user answers.
 
 `arm` re-derives the guard's proof and refuses when the check module or its
@@ -212,7 +236,7 @@ retry.
 ## 4. Retire a guard
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" retire <guardId>
+node "<JIG_ROOT>/scripts/jig.js" retire <guardId>
 ```
 
 For a guard that never earned its keep. Plans and stops like the rest, and the
@@ -224,7 +248,7 @@ this for a guard the user confirmed, one at a time.
 ## 5. Drift, and the re-run question
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" rerun
+node "<JIG_ROOT>/scripts/jig.js" rerun
 ```
 
 Show `drifted` — files jig installed that have changed since — alongside
@@ -253,7 +277,9 @@ not just the agent sessions the ledger saw. Print it whenever it is non-null:
 `null` is not a finding: it means there is nothing to mine here — no install
 date, not a git repository, or git would not run.
 
-Then ask ONE `AskUserQuestion`, and do exactly the chosen one:
+Then ask one Codex-compatible preference question, and do exactly the chosen
+one. Present these actions as a numbered list if the input tool cannot display
+all four; actions that remove enforcement still require their named plan item:
 
 - **Retire the dead** — `retire <guardId>` for each never-fired guard the user
   confirms, then the `apply` it hands back.
@@ -261,9 +287,9 @@ Then ask ONE `AskUserQuestion`, and do exactly the chosen one:
   indict, then the `apply` it hands back.
 - **Cover something new** — name the `backlog` rows the command already
   computed (`classId` — `reason`), a class `sinceInstall.byClass` shows still
-  climbing first, then hand off to `/jig:jig`, which authors and proves the new
+  climbing first, then hand off to `$jig`, which authors and proves the new
   checks. Never invent a class that is not in `backlog`.
 - **Nothing, just the report** — stop here.
 
-One pass, then done; no follow-up menus. The kill switch for everything at once
-is still a file named `.jig/off`.
+One pass, then done; no follow-up menus. The kill switch for the session guards
+is still a file named `.jig/off`; commit and CI checks keep running.

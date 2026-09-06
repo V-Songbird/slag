@@ -1,6 +1,6 @@
 "use strict";
 
-// jig runners — the Claude-session half of the guard set. Everything a hook
+// jig runners — the host-independent evaluator for session guards. Everything a hook
 // does lives here so `runner.js` stays the thin single-dispatch entry the hook
 // wiring points at.
 //
@@ -70,7 +70,7 @@ const LEVER_TOOLS = {
 // moment. Keeping them out of HOOK_RUNNERS is what stops a hand-edited config
 // naming `runner: "Stop"` and inventing an execution point nothing proves.
 const STOP_EVENTS = ["Stop", "SubagentStop"];
-const HOOK_EVENTS = [...HOOK_RUNNERS, "PostToolUseFailure", ...STOP_EVENTS];
+const HOOK_EVENTS = [...HOOK_RUNNERS, ...STOP_EVENTS];
 
 // The mode a guard takes when its own row asks for nothing. Observe is a
 // choice the owner makes, never a probation a guard serves (SCOPE, "Does the
@@ -517,10 +517,8 @@ function leverTools(det) {
   return (det && LEVER_TOOLS[det.lever]) || [];
 }
 
-// A command lever, whichever shell tool the host names. Asked here rather than
-// spelled `includes("Bash")` at each call site: three files used to carry that
-// literal, and one of them being missed is how the lane went quiet in the
-// session the probe measured, which was offered `PowerShell` and no `Bash`.
+// Shell levers are independent of the operating system. Codex normalizes
+// PowerShell and unified exec to the same Bash hook name.
 function isShellLever(det) {
   return SHELL_TOOLS.some((t) => leverTools(det).includes(t));
 }
@@ -558,7 +556,7 @@ function denyText(guardId, deny, hasDriver) {
     " Instead: " + sentence(deny.alternative) +
     " To override: " + sentence(deny.override) +
     (hasDriver ? " Before calling this work done, run: node .jig/checks/run.mjs." : "") +
-    " (false alarm? /jig:review fp " + guardId + ")";
+    " (false alarm? $review fp " + guardId + ")";
 }
 
 // What an observing guard says when its owner opted it into teaching. The same
@@ -995,6 +993,7 @@ function appendLedger(root, row) {
 function ledgerRow(base, extra) {
   return {
     session: base.session,
+    ...(base.host ? { host: base.host } : {}),
     actor: extra.actor,
     guardId: extra.guardId,
     classId: extra.classId,
@@ -1018,24 +1017,16 @@ function ledgerRow(base, extra) {
 //
 // Two halves that must not blur. A Bash call running a command
 // `.jig/verify.json` names is EVIDENCE — it leaves a row, and pass and fail
-// split on WHICH event fired, because that is the signal the host documents. A
-// Stop is additionalContext ONLY: SCOPE's derail pass answers "May the Stop
+// depend on explicit exit evidence. Native Stop becomes a UI warning only:
+// SCOPE's derail pass answers "May the Stop
 // hook exit 2" with a No, since a block at Stop has no fixture pair behind it.
 //
 // Both halves fail open. A row that cannot be appended and a `git status` that
 // will not run are disclosed, never a reason to hold a tool call or a stop.
 
 function isWitnessEvent(event, tool) {
-  // PostToolUseFailure is registered for the shell tools alone, so it is a
-  // witness however the payload names its tool. PostToolUse carries the edit
-  // guards too, and only its shell half is a witness — a guard must never
-  // evaluate here. A verification run is a verification run whichever shell
-  // tool ran it: gating this on `Bash` alone left the headless win32 session
-  // the probe measured with nothing to witness and `lastGreen` null there
-  // (HOST-PROBE-2026-09-02, section 3). Which names a session sends is that
-  // session's, not its platform's — section 4 is an interactive session on the
-  // same machine carrying both — so the gate reads the list, never the OS.
-  return event === "PostToolUseFailure" || (event === "PostToolUse" && SHELL_TOOLS.includes(tool));
+  // Both successes and failures arrive here. Edit observers are separate.
+  return event === "PostToolUse" && SHELL_TOOLS.includes(tool);
 }
 
 // The lane entries as installed, or none. Read through the engine's own reader
@@ -1063,15 +1054,10 @@ function verifyEntryFor(entries, command) {
     e.argv.every((word, i) => word === argv[i])) || null;
 }
 
-// Recorded only where the payload carries one, and now from the place a live
-// host was measured putting it. Roadmap 230's probe (Claude Code 2.1.257,
-// `docs/research/jig/HOST-PROBE-2026-09-02.md`) found `PostToolUseFailure`
-// carries no `tool_response` at all — the code arrives as the `error` string
-// "Exit code 3" — so without this read the entry's own `expectedExit` could
-// never be honoured on the one event that carries a failure. The structured
-// fields stay first for a host that reports one. Anything else the host phrases
-// as an error is left null rather than guessed at: a number nobody measured is
-// the last thing a file the review surface reads back as fact should hold.
+// Record explicit exit evidence only. Codex delivers successful and failed
+// commands on PostToolUse, so the event alone cannot establish a green run.
+// Additional result shapes require a measured adapter before they can prove
+// verification; arbitrary prose and output numbers are not exit evidence.
 function exitCodeOf(payload) {
   const res = payload && payload.tool_response;
   if (isObject(res)) {
@@ -1111,19 +1097,9 @@ function verifyRows(root) {
   return rows;
 }
 
-// Which shell tools this repository has actually been seen to send, off the
-// rows jig's own hooks wrote. Every payload names its tool and every row records
-// it, so this is an observation. `process.platform` is not one: it was wrong on
-// the first machine it was asked about, where an interactive session offers a
-// `Bash` tool and a `PowerShell` tool at once while a headless one on the same
-// OS offers only `PowerShell`. Nothing seen yet returns an empty list, which the
-// surfaces report as "not yet observed" rather than defaulting to a guess —
-// SCOPE, "It never silently substitutes a default for an answer the owner did
-// not give".
-//
-// A third full-file pass over a ledger that never rotates, on the same terms
-// `verifyRows` states above: paid on every review and every inventory, by a
-// repository that has a session lane at all.
+// Read observed hook names from the ledger, never infer execution from the
+// platform or from an installed guard. Synthetic selftest sessions are not
+// evidence that a real Codex hook was trusted and delivered.
 function shellToolsSeen(root) {
   let lines = [];
   try {
@@ -1212,21 +1188,24 @@ function witness(root, event, base, payload, warn) {
   const entry = verifyEntryFor(verifyEntries(root), (payload.tool_input || {}).command);
   if (!entry) return { jig: { event, decision: "pass", verify: null } };
   const exitCode = exitCodeOf(payload);
-  // Which event fired is the documented signal — and the measured one: roadmap
-  // 230 watched a failing command fire `PostToolUseFailure` and no `PostToolUse`
-  // at all. It stays the answer wherever the payload carries no code. A code it
-  // DID carry outranks it: a row reading
-  // `verified` beside `exitCode: 1` is a coverage claim contradicted by its own
-  // evidence, and a host that routes a failing command to PostToolUse would
-  // otherwise make every red run green on jig's headline surface. The entry's
-  // own `expectedExit` is what green means for it (SCOPE, "What counts as
-  // caught for a non-zero exit"), because a tool that catches by exiting
-  // non-zero has not failed when it does.
+  // The entry's expectedExit defines success. An unknown exit cannot become
+  // green merely because Codex delivered PostToolUse.
   const expected = Number.isInteger(entry.expectedExit) ? entry.expectedExit : 0;
-  const passed = exitCode === null ? event === "PostToolUse" : exitCode === expected;
+  const passed = exitCode === null ? null : exitCode === expected;
+  if (passed === null) {
+    const problem = "the " + entry.id + " run has no exit evidence; verification remains unknown";
+    warn("jig: " + problem);
+    try {
+      appendLedger(root, ledgerRow(base, {
+        actor: "codex-session", guardId: null, classId: null, decision: "verify-unknown", matched: null,
+        durMs: 0, rest: { verify: entry.id, event, exitCode: null, failedOpen: problem },
+      }));
+    } catch (err) { warn("jig: the unknown verification run was not recorded (" + err.message + ")"); }
+    return { jig: { event, decision: "pass", verify: { entry: entry.id, passed: null, exitCode: null } } };
+  }
   try {
     appendLedger(root, ledgerRow(base, {
-      actor: "claude-session", guardId: null, classId: null,
+      actor: "codex-session", guardId: null, classId: null,
       decision: passed ? "verified" : "verify-failed", matched: null, durMs: 0,
       rest: { verify: entry.id, event, exitCode },
     }));
@@ -1275,11 +1254,12 @@ function stopContext(root, event, base, warn) {
 // One event, start to finish
 // ---------------------------------------------------------------------------
 
-function runEvent(root, event, payload, warn) {
+function runEvent(root, event, payload, warn, transport) {
   const input = payload.tool_input || {};
   const base = {
     session: typeof payload.session_id === "string" ? payload.session_id : null,
-    tool: typeof payload.tool_name === "string" ? payload.tool_name : null,
+    host: transport?.host,
+    tool: transport?.ledgerTool || (typeof payload.tool_name === "string" ? payload.tool_name : null),
     path: typeof input.file_path === "string" ? input.file_path : null,
   };
   // The two events that witness a verification run, and the two that read those
@@ -1310,8 +1290,9 @@ function runEvent(root, event, payload, warn) {
     return { jig: { event, mode: DEFAULT_MODE, decision: "pass", config: "invalid", guards: [] } };
   }
 
+  const tool = typeof payload.tool_name === "string" ? payload.tool_name : null;
   const tools = EVENT_TOOLS[event] || [];
-  const running = check.guards.filter((g) => g.runner === event && (!base.tool || tools.includes(base.tool)));
+  const running = check.guards.filter((g) => g.runner === event && (!tool || tools.includes(tool)));
   // The ledger is read once, and only when some guard is asking to arm — a set
   // of observing guards never pays for it. Read on first use rather than up
   // front, so an Edit call whose guards all turn out to read Bash pays for
@@ -1330,7 +1311,7 @@ function runEvent(root, event, payload, warn) {
     const started = process.hrtime.bigint();
     const durMs = () => Math.round(Number(process.hrtime.bigint() - started) / 1e6 * 1000) / 1000;
     const record = loadCheck(root, guard.check);
-    const dets = record.problem ? [] : sessionDetectors(record.mod, event, base.tool);
+    const dets = record.problem ? [] : sessionDetectors(record.mod, event, tool);
     // A bash guard on an Edit call, or an edit guard on a Bash call: both are
     // registered for PreToolUse now, and a guard with nothing to say about this
     // tool did not evaluate. No warning and no row — it is not a broken install

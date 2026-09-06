@@ -31,7 +31,7 @@ const FORCE_PUSH = A.authored({
   title: "A force push over the default branch",
   confidence: "heuristic",
   detectors: [
-    { lever: "bash-guard", actor: "claude-session", confidence: "heuristic",
+    { lever: "bash-guard", actor: "codex-session", confidence: "heuristic",
       params: { patterns: ["git\\s+push\\b[^\\n]*(?:--force\\b(?!-with-lease)|\\s-f\\b)"],
         onlyBranches: ["<default>"] } },
   ],
@@ -50,7 +50,7 @@ const FOCUSED_TEST = A.authored({
   id: "focused-test",
   title: "A focused test left behind",
   detectors: [
-    { lever: "edit-observe-guard", actor: "claude-session", confidence: "deterministic",
+    { lever: "edit-observe-guard", actor: "codex-session", confidence: "deterministic",
       params: { patterns: ["\\b(?:it|test|describe)\\.(?:only|skip)\\s*\\("], onlyWhenIntroduced: true } },
   ],
   fixtures: {
@@ -71,7 +71,7 @@ const SCOPED_CATCH = A.authored({
   id: "scoped-catch",
   title: "A swallowed error under src only",
   detectors: [
-    { lever: "edit-observe-guard", actor: "claude-session", confidence: "deterministic",
+    { lever: "edit-observe-guard", actor: "codex-session", confidence: "deterministic",
       params: { patterns: [A.CATCH_PATTERN], paths: ["src/**/*.js"] } },
   ],
   fixtures: A.EMPTY_CATCH.fixtures,
@@ -86,7 +86,7 @@ const PREVENTED_CATCH = A.authored({
   id: "prevented-catch",
   title: "A swallowed error, refused before it is written",
   detectors: [
-    { lever: "edit-guard", actor: "claude-session", confidence: "deterministic",
+    { lever: "edit-guard", actor: "codex-session", confidence: "deterministic",
       params: { patterns: [A.CATCH_PATTERN] } },
   ],
   fixtures: A.EMPTY_CATCH.fixtures,
@@ -100,7 +100,7 @@ const SCOPED_PIPE = A.authored({
   id: "scoped-pipe",
   title: "A piped installer, with a path glob that does not apply",
   detectors: [
-    { lever: "bash-guard", actor: "claude-session", confidence: "deterministic",
+    { lever: "bash-guard", actor: "codex-session", confidence: "deterministic",
       params: { patterns: [A.PIPE_PATTERN], paths: ["src/**/*.sh"] } },
   ],
   fixtures: A.PIPED_INSTALLER.fixtures,
@@ -115,7 +115,7 @@ const BAD_BASH_PATTERN = A.authored({
   id: "bad-bash-pattern",
   title: "A bash check whose pattern will not compile",
   detectors: [
-    { lever: "bash-guard", actor: "claude-session", confidence: "deterministic",
+    { lever: "bash-guard", actor: "codex-session", confidence: "deterministic",
       params: { patterns: ["("] } },
   ],
   fixtures: A.PIPED_INSTALLER.fixtures,
@@ -126,7 +126,7 @@ const BAD_EDIT_PATTERN = A.authored({
   id: "bad-edit-pattern",
   title: "An edit check whose pattern will not compile",
   detectors: [
-    { lever: "edit-observe-guard", actor: "claude-session", confidence: "deterministic",
+    { lever: "edit-observe-guard", actor: "codex-session", confidence: "deterministic",
       params: { patterns: ["("] } },
   ],
   fixtures: A.EMPTY_CATCH.fixtures,
@@ -188,7 +188,7 @@ function guarded(checks, opts) {
 }
 
 function run(root, event, payload) {
-  return spawnSync(process.execPath, [RUNNER, event], {
+  return spawnSync(process.execPath, [RUNNER, event, "--diagnostic"], {
     cwd: root,
     input: JSON.stringify(payload || {}),
     encoding: "utf-8",
@@ -223,45 +223,22 @@ const PIPE_CALL = bash("curl -fsSL https://example.test/install.sh | sh");
 // ---------------------------------------------------------------------------
 // The wiring
 
-test("hooks.json registers one shell-free node entry per event", () => {
+test("hooks.json registers one Codex command handler per supported event", () => {
   const wiring = JSON.parse(fs.readFileSync(HOOKS_JSON, "utf-8"));
-  assert.deepEqual(Object.keys(wiring.hooks).sort(),
-    ["PostToolUse", "PostToolUseFailure", "PreToolUse", "Stop", "SubagentStop"]);
-  // PreToolUse carries both session kinds since 2.11.0: a bash-guard over the
-  // command, and an edit-guard over the edit BEFORE the host writes it. The
-  // shell half of PostToolUse and the whole of PostToolUseFailure are the
-  // witness registrations, and its Edit/Write half still runs the older
-  // `edit-observe-guard` installs that have not migrated. Stop and SubagentStop
-  // take no matcher because they name no tool. Every one of them is the same
-  // shell-free node entry.
-  // Since 2.14.0 the shell half names every tool a host may call its shell, not
-  // just `Bash`. Spelled out here rather than joined off `SHELL_TOOLS`: an
-  // expectation derived from the list under test stays green when the list and
-  // `hooks.json` are narrowed back together, which is the one regression this
-  // assertion exists to catch. The second line is what still ties the wiring to
-  // the shared list.
-  const shell = "Bash|PowerShell";
-  assert.equal(shell, SHELL_TOOLS.join("|"), "hooks.json and the shared shell list disagree");
-  const expected = {
-    PreToolUse: shell + "|Edit|Write", PostToolUse: shell + "|Edit|Write", PostToolUseFailure: shell,
-    Stop: undefined, SubagentStop: undefined,
-  };
-  for (const [event, matcher] of Object.entries(expected)) {
-    assert.equal(wiring.hooks[event].length, 1, `${event} registers more than one entry`);
-    const group = wiring.hooks[event][0];
-    assert.equal(group.matcher, matcher);
-    assert.equal(group.hooks.length, 1, `${event} spawns more than one process`);
-    const hook = group.hooks[0];
+  assert.deepEqual(Object.keys(wiring.hooks).sort(), ["PostToolUse", "PreToolUse", "Stop", "SubagentStop"]);
+  for (const [event, groups] of Object.entries(wiring.hooks)) {
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].matcher, ["PreToolUse", "PostToolUse"].includes(event) ? "^(Bash|apply_patch)$" : undefined);
+    assert.equal(groups[0].hooks.length, 1);
+    const hook = groups[0].hooks[0];
     assert.equal(hook.type, "command");
-    assert.equal(hook.command, "node");
-    assert.deepEqual(hook.args, ["${CLAUDE_PLUGIN_ROOT}/hooks/runner.js", event]);
+    assert.ok(hook.command.includes("PLUGIN_ROOT"));
+    assert.ok(hook.command.includes("process.env.PLUGIN_ROOT"));
+    assert.ok(hook.command.endsWith(".cli(process.argv.slice(1))\" " + event));
+    assert.equal(hook.commandWindows, undefined, "one portable Node launcher serves every shell");
+    assert.equal(hook.args, undefined, "Codex commands use command strings, not an args extension");
     assert.equal(hook.timeout, 30);
   }
-});
-
-test("no hook entry routes through a shell or a wrapper", () => {
-  const raw = fs.readFileSync(HOOKS_JSON, "utf-8");
-  assert.equal(/\b(sh|bash|cmd|powershell|pwsh|npx)\b/.test(raw), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -460,7 +437,7 @@ test("a command guard evaluates on the host's shell tool, whatever it is called"
   // A loop over the list under test degenerates to the pre-fix single-`Bash`
   // assertion the moment the list narrows, so the name the measured session had
   // and jig did not watch is spelled out here.
-  assert.ok(SHELL_TOOLS.includes("PowerShell"), "the shared shell list narrowed back to Bash");
+  assert.deepEqual(SHELL_TOOLS, ["Bash"], "Codex hooks normalize every shell to Bash");
   for (const tool of SHELL_TOOLS) {
     const out = run(root, "PreToolUse", { ...PIPE_CALL, tool_name: tool });
     assert.equal(JSON.parse(out.stdout).jig.decision, "would-deny", `${tool} never reached the guard`);
@@ -823,7 +800,7 @@ test("every ledger line carries the session and the actor that produced it", () 
   run(root, "PreToolUse", PIPE_CALL);
   const row = ledger(root)[0];
   assert.equal(row.session, "sess-1");
-  assert.equal(row.actor, "claude-session");
+  assert.equal(row.actor, "codex-session");
 });
 
 test("a ledger line records which pattern fired, never the text it matched", () => {
@@ -873,7 +850,7 @@ test("the truth table: every bar to arming holds in order", () => {
 
   // 2.14.0. A check that would not load ships no deny reply either, and grading
   // that as the row above told the owner the check was authored wrong when the
-  // file was simply gone — a reason `/jig:review` prints verbatim. The bar is
+  // file was simply gone — a reason `$review` prints verbatim. The bar is
   // asked first and reports what actually happened.
   const gone = "the installed check `piped-installer` could not be read (Cannot find module 'x')";
   assert.equal(state({}, {}, { ...PROVEN, problem: gone, deny: null, proof: null }).why, gone);
@@ -1017,7 +994,7 @@ test("a deny names the guard that refused and how to report it as a false alarm"
   const guardId = emitted.jig.guards.find((g) => g.decision === "deny").guardId;
   const reason = emitted.hookSpecificOutput.permissionDecisionReason;
   assert.ok(reason.startsWith("[jig guard " + guardId + "] "), reason);
-  assert.ok(reason.endsWith("(false alarm? /jig:review fp " + guardId + ")"), reason);
+  assert.ok(reason.endsWith("(false alarm? $review fp " + guardId + ")"), reason);
 });
 
 // 2.9.0 / C7: the deny reply is jig's only channel to the model and it fires
@@ -1254,7 +1231,7 @@ const TESTS_DELETED_SESSION = A.authored({
   id: "tests-deleted-session",
   title: "Fewer test cases after the edit than before it",
   detectors: [
-    { lever: "edit-guard", actor: "claude-session", confidence: "heuristic",
+    { lever: "edit-guard", actor: "codex-session", confidence: "heuristic",
       params: { paths: ["**/*.test.js"], removed: [A.TEST_COUNT_PATTERN] } },
   ],
   fixtures: {
@@ -1283,7 +1260,7 @@ test("a session guard on a lever this build does not run is reported, never sile
   // The narrowing `continue` that keeps a bash guard quiet on an Edit call also
   // swallowed this: an unknown lever reads no tool, so it was dropped by the
   // tool-narrowed pass AND matched by the tool-less one, and the guard stopped
-  // evaluating with no warning, no ledger row and no `problem` on /jig:review.
+  // evaluating with no warning, no ledger row and no `problem` on $review.
   const root = tmpRoot();
   const dir = path.join(root, ".jig", "checks");
   fs.mkdirSync(dir, { recursive: true });
@@ -1348,7 +1325,7 @@ function repo(root, dirty) {
 function ranBash(command, response) {
   return {
     session_id: "sess-1", tool_name: "Bash", tool_input: { command },
-    ...(response === undefined ? {} : { tool_response: response }),
+    tool_response: response === undefined ? { exit_code: 0 } : response,
   };
 }
 
@@ -1356,7 +1333,7 @@ test("a Bash call that ran a verify entry leaves a green row naming it", () => {
   const root = verified(guarded([]));
   const out = run(root, "PostToolUse", ranBash("npm test"));
   assert.equal(out.status, 0);
-  assert.deepEqual(JSON.parse(out.stdout).jig.verify, { entry: "test-script", passed: true, exitCode: null });
+  assert.deepEqual(JSON.parse(out.stdout).jig.verify, { entry: "test-script", passed: true, exitCode: 0 });
   const rows = ledger(root);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].decision, "verified");
@@ -1369,35 +1346,35 @@ test("a Bash call that ran a verify entry leaves a green row naming it", () => {
 // fired in a session offered `PowerShell` and no `Bash` — the one the probe
 // measured — so `lastGreen` could never be set from a session shaped like that
 // and 2.10.0's Stop line had nothing to read.
-test("the witness sees a verify run on every shell tool, not just Bash", () => {
+test("the witness sees Codex's canonical Bash shell event", () => {
   // As above: the loop proves nothing about `PowerShell` once `PowerShell` is
   // no longer in the list, so the name the title promises is asserted.
-  assert.ok(SHELL_TOOLS.includes("PowerShell"), "the shared shell list narrowed back to Bash");
+  assert.deepEqual(SHELL_TOOLS, ["Bash"], "Codex hooks normalize every shell to Bash");
   for (const tool of SHELL_TOOLS) {
     const root = verified(guarded([]));
     const out = run(root, "PostToolUse", { ...ranBash("npm test"), tool_name: tool });
     assert.deepEqual(JSON.parse(out.stdout).jig.verify,
-      { entry: "test-script", passed: true, exitCode: null }, `${tool} was not witnessed`);
+      { entry: "test-script", passed: true, exitCode: 0 }, `${tool} was not witnessed`);
     assert.equal(ledger(root)[0].decision, "verified");
   }
 });
 
-test("the failure event is what makes a run red, not a code read off the payload", () => {
+test("a completed shell without an exit code never becomes green", () => {
   const root = verified(guarded([]));
-  run(root, "PostToolUseFailure", ranBash("npm test"));
+  run(root, "PostToolUse", ranBash("npm test", {}));
   const rows = ledger(root);
-  assert.equal(rows[0].decision, "verify-failed");
+  assert.equal(rows[0].decision, "verify-unknown");
   assert.equal(rows[0].exitCode, null, "an exit code was recorded where the payload carried none");
 });
 
 test("an exit code is recorded only where the payload carries one", () => {
   const root = verified(guarded([]));
-  run(root, "PostToolUseFailure", ranBash("npm test", { exit_code: 1 }));
+  run(root, "PostToolUse", ranBash("npm test", { exit_code: 1 }));
   assert.equal(ledger(root)[0].exitCode, 1);
 });
 
 // The shape a live host actually sends. Roadmap 230's probe caught
-// `PostToolUseFailure` with no `tool_response` at all and the code in `error`
+// `PostToolUse` with no `tool_response` at all and the code in `error`
 // as "Exit code 3", so this string is the only carrier there is — and without
 // reading it, a linter whose green IS a non-zero exit is recorded red on the
 // one event that ever carries it.
@@ -1405,17 +1382,17 @@ test("an exit code is read from the failure event's error string", () => {
   const root = verified(guarded([]), [
     { id: "linter", argv: ["npm", "test"], expectedExit: 3, paths: [], lanes: ["ci"] },
   ]);
-  const out = run(root, "PostToolUseFailure", { ...ranBash("npm test"), error: "Exit code 3" });
+  const out = run(root, "PostToolUse", { ...ranBash("npm test", {}), error: "Exit code 3" });
   assert.deepEqual(JSON.parse(out.stdout).jig.verify, { entry: "linter", passed: true, exitCode: 3 });
   assert.equal(ledger(root)[0].decision, "verified");
 });
 
 test("an error the host did not phrase as an exit code records none", () => {
   const root = verified(guarded([]));
-  run(root, "PostToolUseFailure", { ...ranBash("npm test"), error: "Command timed out after 2m" });
+  run(root, "PostToolUse", { ...ranBash("npm test", {}), error: "Command timed out after 2m" });
   const row = ledger(root)[0];
   assert.equal(row.exitCode, null, "a number was invented from prose");
-  assert.equal(row.decision, "verify-failed");
+  assert.equal(row.decision, "verify-unknown");
 });
 
 // The event is the documented signal, not the only one. A host that hands jig a
@@ -1434,7 +1411,7 @@ test("a non-zero exit contradicts the event that carried it", () => {
 
 test("a zero exit on the failure event is still a green run", () => {
   const root = verified(guarded([]));
-  run(root, "PostToolUseFailure", ranBash("npm test", { exit_code: 0 }));
+  run(root, "PostToolUse", ranBash("npm test", { exit_code: 0 }));
   assert.equal(ledger(root)[0].decision, "verified");
 });
 
@@ -1514,8 +1491,8 @@ test("Stop says one line about edits nothing has verified, and never blocks", ()
   assert.equal(out.status, 0);
   const emitted = JSON.parse(out.stdout);
   assert.equal(emitted.decision, undefined, "Stop emitted a decision field");
-  assert.equal(emitted.hookSpecificOutput.hookEventName, "Stop");
-  assert.equal(emitted.hookSpecificOutput.additionalContext,
+  assert.equal(emitted.hookSpecificOutput, undefined);
+  assert.equal(emitted.systemMessage,
     "jig: 2 edits under src/**/*.js, and no green run of test-script is recorded.");
 });
 
@@ -1523,7 +1500,7 @@ test("Stop names the last green run once there has been one", () => {
   const root = repo(verified(guarded([])), ["src/a.js"]);
   run(root, "PostToolUse", ranBash("npm test"));
   const line = JSON.parse(run(root, "Stop", { session_id: "sess-1" }).stdout)
-    .hookSpecificOutput.additionalContext;
+    .systemMessage;
   assert.match(line, /^jig: 1 edit under src\/\*\*\/\*\.js since the last green run of test-script \(2\d{3}-/);
 });
 
@@ -1534,10 +1511,11 @@ test("Stop stays silent when nothing in the entry's scope changed", () => {
   assert.equal(emitted.jig.stale, null);
 });
 
-test("SubagentStop is the same additionalContext-only channel", () => {
+test("SubagentStop uses the same nonblocking warning channel", () => {
   const root = repo(verified(guarded([])), ["src/a.js"]);
   const emitted = JSON.parse(run(root, "SubagentStop", { session_id: "sess-1" }).stdout);
-  assert.equal(emitted.hookSpecificOutput.hookEventName, "SubagentStop");
+  assert.equal(emitted.hookSpecificOutput, undefined);
+  assert.match(emitted.systemMessage, /^jig: /);
   assert.equal(emitted.decision, undefined);
 });
 

@@ -18,6 +18,7 @@ const { spawnSync } = require("child_process");
 
 const engine = require("../scripts/jig.js");
 const editions = require("../scripts/editions.js");
+const toolchain = require("../scripts/toolchain.js");
 const A = require("./authored.js");
 
 const PLUGIN_ROOT = path.join(__dirname, "..");
@@ -58,6 +59,15 @@ function install(root, opts, checks) {
   return { plan, applied };
 }
 
+// Keep the real install approval, subprocess, journal, config and manifest
+// behavior while replacing registry access with a portable success process.
+// Each test's mock tracker restores this boundary automatically at test end.
+function fakePackageCommands(t) {
+  const runInstall = toolchain.runInstall;
+  return t.mock.method(toolchain, "runInstall", (projectRoot, item, approval) =>
+    runInstall(projectRoot, { ...item, argv: [process.execPath, "-e", "0"] }, approval));
+}
+
 function readJson(root, rel) {
   return JSON.parse(fs.readFileSync(path.join(root, rel), "utf-8"));
 }
@@ -75,7 +85,7 @@ function synthetic(overrides) {
   };
 }
 
-const HOOK_DETECTOR = { actor: "claude-session", lever: "bash-guard", runner: "PreToolUse", confidence: "deterministic" };
+const HOOK_DETECTOR = { actor: "codex-session", lever: "bash-guard", runner: "PreToolUse", confidence: "deterministic" };
 const DRIVER_DETECTOR = { actor: "human-editor", lever: "check-driver", runner: "checks", confidence: "deterministic" };
 
 // ---------------------------------------------------------------------------
@@ -315,7 +325,7 @@ test("a config composed into a shared file is still the tool's config", () => {
   assert.equal(engine.matrixRow(other, "elicited", changes, []).cells["human-ci"].grade, "GAP");
 });
 
-test("a greenfield python plan grades every tool its own verify.json runs", () => {
+test("a greenfield python plan grades every tool its own verify.json runs", (t) => {
   // Driven end to end, because the unit above cannot see the half that was
   // actually broken: `planFromDraft` rebuilds every change from a whitelist, so
   // the tool list has to ride the plan file too or the matrix reads none.
@@ -340,15 +350,76 @@ test("a greenfield python plan grades every tool its own verify.json runs", () =
   // tools would tell an owner their linter is uncovered while it sits configured
   // and running in CI.
   const payload = engine.planFiles(root).map(engine.readPlan).find((p) => p.planId === plan.planId);
-  const keep = payload.changes.filter((c) => c.kind !== "run-install");
-  engine.cmdApply(root, { _: [], change: keep.map((c) => c.id), path: keep.map((c) => c.path) });
+  // Missing tools carry their config on the install change (pip-audit has its
+  // own file), while tools already on PATH plan config-only writes. Apply both
+  // shapes so coverage cannot depend on what this machine happens to carry.
+  const installer = fakePackageCommands(t);
+  A.applyPlan(engine, root, plan);
+  assert.equal(installer.mock.callCount(), payload.changes.filter((c) => c.kind === "run-install").length);
   const composed = readJson(root, ".jig/manifest.json").artifacts.find((a) => a.path === "pyproject.toml");
   assert.ok(composed.tools.includes("ruff") && composed.tools.includes("mypy"));
   engine.cmdPlan(root, { _: [], change: [], provenance: "elicited", select });
   const again = readJson(root, ".jig/plan.json").rows.flatMap((r) => Object.values(r.cells))
     .filter((c) => c.lever === "tool-rule");
   assert.equal(again.length, 22);
-  assert.ok(again.every((c) => c.grade !== "GAP"), "a re-plan reads its own install as uncovered");
+  assert.ok(again.every((c) => c.grade !== "GAP"),
+    "a re-plan reads its own install as uncovered: " + JSON.stringify(again.filter((c) => c.grade === "GAP")));
+});
+
+// Package installs share their target with a composed config, but carry no
+// replacement body. The last install still owns its journal and uninstall
+// command; it must also retain the config's recorded tool membership.
+test("successive installs preserve composed config membership without inventing it", () => {
+  const rel = "shared.config.json";
+  const body = "{\"alpha\":true,\"beta\":true}\n";
+  const composed = {
+    id: "compose-shared", kind: "write-side-file", path: rel, content: body,
+    tools: ["alpha", "beta"], template: { name: "toolchain-config-shared", version: "composed" },
+  };
+  const installChange = (tool, configBody = null) => ({
+    id: "install-" + tool, kind: "run-install", path: rel,
+    template: { name: "install-" + tool, version: "fixture" },
+    install: {
+      id: tool, edition: "javascript-typescript", role: "linter", installKind: "package",
+      packageManager: "npm", command: "fake install " + tool,
+      argv: [process.execPath, "-e", "0"], configPath: rel, configBody,
+      wiring: null, ciStep: null, uninstallCommand: "fake uninstall " + tool,
+      uninstallArgv: [process.execPath, "-e", "0"], timeoutMs: 20000,
+    },
+  });
+  const apply = (root, changes) => {
+    fs.writeFileSync(path.join(root, "draft.json"), JSON.stringify({ changes }));
+    const plan = engine.cmdPlan(root, { _: [], change: [], from: "draft.json" });
+    return A.applyPlan(engine, root, plan);
+  };
+  const artifact = (root) => readJson(root, ".jig/manifest.json").artifacts.find((a) => a.path === rel);
+
+  const root = nodeProject();
+  apply(root, [composed, installChange("alpha")]);
+  assert.deepEqual(artifact(root).tools, ["alpha", "beta"], "same-apply install erased composition metadata");
+  apply(root, [installChange("beta")]);
+  const latest = artifact(root);
+  assert.deepEqual(latest.tools, ["alpha", "beta"], "a later install erased prior recorded membership");
+  assert.equal(latest.id, "install-beta");
+  assert.equal(latest.install.tool, "beta");
+  assert.equal(latest.install.uninstall, "fake uninstall beta");
+  assert.equal(latest.hash, engine.hashBytes(Buffer.from(body)));
+  engine.cmdRevert(root, { _: [], change: ["install-beta"] });
+  assert.equal(fs.readFileSync(path.join(root, rel), "utf8"), body,
+    "reverting the package install removed the configuration that preceded it");
+  assert.equal(engine.changeState(engine.replayJournal(engine.readJournal(root)).get("install-beta")), "reverted");
+
+  for (const [name, change] of [
+    ["unrelated install", installChange("gamma")],
+    ["replacement config", installChange("alpha", "{}\n")],
+  ]) {
+    const other = nodeProject();
+    apply(other, [composed, change]);
+    assert.equal(artifact(other).tools, undefined, name + " inherited configuration it does not preserve");
+  }
+  const unrecorded = nodeProject({ [rel]: body });
+  apply(unrecorded, [installChange("alpha")]);
+  assert.equal(artifact(unrecorded).tools, undefined, "an install invented unrecorded tool membership");
 });
 
 test("an unreadable lane list is read as no lane at all, never as coverage", () => {
@@ -486,10 +557,15 @@ test("a tool that walks by path is given its own ignore file, and jig's state is
 // so it ticks no tool and proposes no config — while the tool sits installed,
 // configured and in the ci lane on disk. The owner was told their linter was
 // uncovered when it was not.
-test("a re-plan over an installed tool reads the cell off the installed state", () => {
+test("a re-plan over an installed tool reads the cell off the installed state", (t) => {
   const root = nodeProject();
+  const installer = fakePackageCommands(t);
   install(root, { select: "javascript-typescript/focused-test", edition: "javascript-typescript",
     "package-manager": "npm", tools: "eslint" });
+  assert.equal(installer.mock.callCount(), 1);
+  const installedItem = installer.mock.calls[0].arguments[1];
+  assert.equal(installedItem.id, "eslint");
+  assert.equal(installedItem.argv[0], "npm");
   const face = engine.installedToolFace(root);
   assert.equal(face.config.get("eslint"), "eslint.config.mjs");
   assert.equal(face.ci.has("eslint"), true);
@@ -536,9 +612,9 @@ test("the lane list is approved one at a time, and names what will run", () => {
 // linter out of CI because the second interview was about the type checker.
 // Planned and applied without the installs themselves: applying a `run-install`
 // change spawns a package manager, and none of these claims is about npm.
-function installWithTools(root, tools) {
+function installWithTools(root, tools, opts = {}) {
   const plan = planOnly(root, { select: "javascript-typescript/focused-test", edition: "javascript-typescript",
-    "package-manager": "npm", tools });
+    "package-manager": "npm", tools, ...opts });
   // By id, never by position: the plan files are named for their own content
   // hash, so the order they list in says nothing about which came last.
   const payload = engine.planFiles(root).map(engine.readPlan).find((p) => p.planId === plan.planId);
@@ -619,7 +695,7 @@ test("a detector that can be wrong reads PROB carrying the kind of doubt, never 
 });
 
 test("a probabilistic lever says its ceiling is unmeasured rather than inventing one", () => {
-  const prose = { actor: "claude-session", lever: "prose-rule", runner: "none", confidence: "heuristic" };
+  const prose = { actor: "codex-session", lever: "prose-rule", runner: "none", confidence: "heuristic" };
   assert.equal(engine.LEVERS["prose-rule"].probabilistic, true);
   assert.equal(engine.detectorCeiling(prose), "unmeasured");
   assert.equal(engine.detectorCeiling({ ...DRIVER_DETECTOR, confidence: "heuristic" }), "heuristic");
@@ -666,7 +742,7 @@ test("armable is the proof, said in the cell text a person reads", () => {
   const matrix = readJson(root, ".jig/plan.json");
   const row = matrix.rows.find((r) => r.classId === "piped-installer");
   assert.match(row.proof, /^[0-9a-f]{64}$/);
-  assert.match(engine.cellText(row.cells["claude-session"]), /proven by its fixture pair/);
+  assert.match(engine.cellText(row.cells["codex-session"]), /proven by its fixture pair/);
   // A class with no admitted check behind it carries no proof and cannot arm.
   assert.equal(engine.detectorCell(synthetic({}), HOOK_DETECTOR, 0, "elicited", [], []).armable, false);
 });
@@ -946,7 +1022,7 @@ const SESSION_ONLY = A.authored({
   id: "session-only",
   title: "A downloaded script piped straight into a shell",
   detectors: [
-    { lever: "bash-guard", actor: "claude-session", confidence: "deterministic",
+    { lever: "bash-guard", actor: "codex-session", confidence: "deterministic",
       params: { patterns: ["curl[^|\\n]*\\|\\s*(?:sudo\\s+)?(?:ba)?sh\\b"] } },
   ],
   fixtures: {
@@ -979,8 +1055,8 @@ test("what refuses anything is per cell and per lane, on all four plan shapes", 
   install(session, { "no-ci": true }, [SESSION_ONLY]);
   const sessionReview = readJson(session, ".jig/plan.json");
   assert.deepEqual(sessionReview.lanes, { commit: false, ci: false });
-  assert.equal(engine.cellText(sessionReview.rows[0].cells["claude-session"]),
-    "DET session-only-bash-guard-0 [proven by its fixture pair — refuses the call in session]");
+  assert.equal(engine.cellText(sessionReview.rows[0].cells["codex-session"]),
+    "DET session-only-bash-guard-0 [proven by its fixture pair - can refuse the call when Codex loads and delivers its hook; host interception is unverified]");
   assert.equal(headerOf(session), HEADER);
 
   // Shape 2 — a check driver and nothing else, on a repository that wires no
@@ -1026,8 +1102,8 @@ test("what refuses anything is per cell and per lane, on all four plan shapes", 
   assert.equal(engine.cellText(cells["human-editor"]),
     "DET .jig/checks/piped-installer.check.mjs [fails the commit and CI]");
   assert.equal(engine.cellText(cells["human-ci"]), "DET .github/workflows/jig.yml [fails CI]");
-  assert.equal(engine.cellText(cells["claude-session"]),
-    "DET piped-installer-bash-guard-0 [proven by its fixture pair — refuses the call in session]");
+  assert.equal(engine.cellText(cells["codex-session"]),
+    "DET piped-installer-bash-guard-0 [proven by its fixture pair - can refuse the call when Codex loads and delivers its hook; host interception is unverified]");
   assert.equal(headerOf(both), HEADER);
 
   // And the sentence the header stopped making is gone from every shape, not
@@ -1051,7 +1127,7 @@ test("an observing plan's guard cell says it records rather than refuses", () =>
   assert.equal(review.mode, "observe");
   const config = readJson(observing, ".jig/config.json");
   assert.equal(config.guards[0].mode, "observe", "the config this plan writes is the fact the cell answers for");
-  assert.equal(engine.cellText(review.rows[0].cells["claude-session"]),
+  assert.equal(engine.cellText(review.rows[0].cells["codex-session"]),
     "DET session-only-bash-guard-0 [proven by its fixture pair — records the call in session, refuses nothing]");
   // The header and the cell now say the same thing, which is what the page was
   // contradicting itself about.
@@ -1063,8 +1139,8 @@ test("an observing plan's guard cell says it records rather than refuses", () =>
   // modes, which is the way the last four went wrong.
   const armed = nodeProject();
   install(armed, { "no-ci": true }, [SESSION_ONLY]);
-  assert.equal(engine.cellText(readJson(armed, ".jig/plan.json").rows[0].cells["claude-session"]),
-    "DET session-only-bash-guard-0 [proven by its fixture pair — refuses the call in session]");
+  assert.equal(engine.cellText(readJson(armed, ".jig/plan.json").rows[0].cells["codex-session"]),
+    "DET session-only-bash-guard-0 [proven by its fixture pair - can refuse the call when Codex loads and delivers its hook; host interception is unverified]");
 });
 
 // ---------------------------------------------------------------------------
@@ -1702,12 +1778,12 @@ test("the lanes report the shell tools actually seen, and never guess one", () =
   // fills it in — and it fills in exactly what the payloads carried.
   const ledger = path.join(root, ".jig", "ledger.jsonl");
   fs.appendFileSync(ledger, JSON.stringify({ decision: "pass", tool: "PowerShell", guardId: GUARD }) + "\n");
-  assert.deepEqual(engine.cmdInventory(root).lanes.session.shell.seen, ["PowerShell"]);
+  assert.deepEqual(engine.cmdInventory(root).lanes.session.shell.seen, [], "legacy PowerShell is not Codex canonical Bash");
   fs.appendFileSync(ledger, JSON.stringify({ decision: "deny", tool: "Bash", guardId: GUARD }) + "\n");
-  assert.deepEqual(engine.cmdInventory(root).lanes.session.shell.seen, ["Bash", "PowerShell"]);
+  assert.deepEqual(engine.cmdInventory(root).lanes.session.shell.seen, ["Bash"]);
   // A tool nobody watches is not a shell tool jig saw.
   fs.appendFileSync(ledger, JSON.stringify({ decision: "pass", tool: "Write", guardId: GUARD }) + "\n");
-  assert.deepEqual(engine.cmdInventory(root).lanes.session.shell.seen, ["Bash", "PowerShell"]);
+  assert.deepEqual(engine.cmdInventory(root).lanes.session.shell.seen, ["Bash"]);
 });
 
 // The matrix is rendered at plan time, before any guard has run, so it can name
@@ -1751,7 +1827,7 @@ test("review reports which lanes actually run, and the one fix for a dead one", 
   // `jig` on a PATH, so it names the skill and this script by its own path —
   // pinned entire, because a second invocation appended to it would be a second
   // thing to run and nothing here would notice.
-  assert.equal(lanes.commit.fix, "ask /jig:jig to wire the commit lane, or run: node " +
+  assert.equal(lanes.commit.fix, "ask the jig skill to wire the commit lane, or run: node " +
     path.join(__dirname, "..", "scripts", "jig.js").replace(/\\/g, "/") + " plan --wire-commit");
   assert.equal(lanes.session.observing, true);
 
@@ -1793,11 +1869,11 @@ test("a guard reports the shell tools its own evaluated calls arrived on", () =>
 
   const review = engine.cmdReview(root);
   const row = review.guards.find((g) => g.guardId === GUARD);
-  assert.deepEqual(row.evaluatedOn, ["PowerShell"],
-    "the guard's own calls arrived on PowerShell alone; Bash is another guard's row");
+  assert.deepEqual(row.evaluatedOn, [],
+    "legacy PowerShell calls do not assert Codex delivery; Bash belongs to another guard");
   // The repository-wide field carries both, which is exactly what makes it the
   // wrong thing to report beside one guard's catch count.
-  assert.deepEqual(review.lanes.session.shell.seen, ["Bash", "PowerShell"]);
+  assert.deepEqual(review.lanes.session.shell.seen, ["Bash"]);
 });
 
 test("a guard that has never been evaluated names no shell rather than the first watched one", () => {
@@ -2008,23 +2084,23 @@ test("the prose budget refuses a plan that would out-spend it, naming the number
   const root = project({});
   const fat = "x".repeat(engine.PROSE_BUDGET_BYTES + 1) + "\n<!-- generated by jig — evidence: reasoned -->\n";
   const { problems } = engine.planFromDraft({ changes: [{
-    id: "fat", kind: "write-rule", path: ".claude/rules/jig-fat.md", content: fat,
+    id: "fat", kind: "write-agents-region", path: "AGENTS.md", content: "<!-- jig:begin — jig owns what sits between these markers -->\n" + fat + "<!-- jig:end -->\n",
   }] }, root);
   assert.match(problems.join(" "), new RegExp("budget is " + engine.PROSE_BUDGET_BYTES));
 });
 
-test("unlabeled prose is refused, and a rule outside the jig- namespace is refused", () => {
+test("retired Claude rule writes are refused regardless of their label or namespace", () => {
   const root = project({});
   const unlabeled = engine.planFromDraft({ changes: [{
     id: "r", kind: "write-rule", path: ".claude/rules/jig-x.md", content: "- rule text\n",
   }] }, root);
-  assert.match(unlabeled.problems.join(" "), /evidence label/);
+  assert.match(unlabeled.problems.join(" "), /Claude Code surface/);
 
   const squatting = engine.planFromDraft({ changes: [{
     id: "r", kind: "write-rule", path: ".claude/rules/api.md",
     content: "- rule\n<!-- generated by jig — evidence: reasoned -->\n",
   }] }, root);
-  assert.match(squatting.problems.join(" "), /jig-<slug>\.md/);
+  assert.match(squatting.problems.join(" "), /Claude Code surface/);
 });
 
 test("weave-precommit puts jig's line into a committed sh hook, and only there", () => {
@@ -2074,21 +2150,21 @@ test("weave-precommit refuses a repository with no committed hook to weave into"
 
 test("wire-governance emits one computed pointer rule from the scan's own orphans", () => {
   const root = nodeProject({
-    "CLAUDE.md": "# House\n",
+    "AGENTS.md": "# House\n",
     "SCOPE.md": "# Scope\n",
     "docs/adr/0001-x.md": "# ADR\n",
   });
   engine.cmdScan(root, { _: [], change: [] });
   const plan = planOnly(root, { "no-ci": true, "wire-governance": true });
-  const rule = plan.changes.find((c) => c.path === ".claude/rules/jig-governance.md");
+  const rule = plan.changes.find((c) => c.path === "AGENTS.md");
   assert.ok(rule, "no governance rule was planned");
   A.applyPlan(engine, root, plan);
-  const text = fs.readFileSync(path.join(root, ".claude/rules/jig-governance.md"), "utf-8");
+  const text = fs.readFileSync(path.join(root, "AGENTS.md"), "utf-8");
   assert.match(text, /SCOPE\.md/);
   assert.match(text, /docs\/adr\/0001-x\.md/);
   assert.match(text, /generated by jig/);
 
-  const clean = nodeProject({ "CLAUDE.md": "read SCOPE.md\n", "SCOPE.md": "# Scope\n" });
+  const clean = nodeProject({ "AGENTS.md": "read SCOPE.md\n", "SCOPE.md": "# Scope\n" });
   engine.cmdScan(clean, { _: [], change: [] });
   assert.throws(() => planOnly(clean, { "no-ci": true, "wire-governance": true }),
     /no orphaned governance docs/);
@@ -2162,7 +2238,7 @@ test("inventory reports what each guard watches, and counts the matchers rather 
   // session did not have (2.14.0). Spelled out, not read off `SHELL_TOOLS` — this is the
   // only per-guard assertion on the widened list, and an expectation derived
   // from the list under test survives the list narrowing back.
-  assert.deepEqual(row.watches.tools, ["Bash", "PowerShell"]);
+  assert.deepEqual(row.watches.tools, ["Bash"]);
   assert.deepEqual(row.watches.tools, require("../scripts/vocab.js").SHELL_TOOLS,
     "the guard reports a tool list that is not the shared one");
   assert.ok(row.watches.patterns > 0, "the guard reports no matchers at all");
@@ -2327,10 +2403,10 @@ test("a --select id no edition carries under any namespace says so rather than g
 test("a re-plan that does not repeat --verify-commit keeps the commit lane it was given", () => {
   const root = nodeProject();
   const opts = { edition: "javascript-typescript", "package-manager": "npm", tools: "eslint" };
-  const first = install(root, { ...opts, select: "javascript-typescript/focused-test", "verify-commit": true });
+  const first = installWithTools(root, "eslint", { "verify-commit": true });
   assert.deepEqual(readJson(root, ".jig/verify.json").entries.find((e) => e.id === "eslint").lanes,
     ["ci", "commit"], "the flag did not reach the installed file");
-  assert.ok(first.plan.planId);
+  assert.ok(first.planId);
 
   // A second interview about a different class, with the flag not repeated.
   const again = planOnly(root, { ...opts, select: "javascript-typescript/skipped-test" });

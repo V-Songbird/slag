@@ -45,21 +45,20 @@ otherwise never ask. Nothing else in this file changes.
 **Question zero**, header `"Language"`, asked only when `greenfield` on the
 scan is non-empty or nothing detected at all: "Which language is this project
 going to be in?" One option per edition — `javascript-typescript`, `python`,
-`go`, `rust`, `jvm`, `dotnet` — plus a free-text option for anything else,
+`go`, `rust`, `jvm`, `dotnet` — with free text for anything else,
 which is not a refusal: the model authors every check from scratch and the
 fixture pair still admits them.
 
 Its answer becomes `--edition <id>` on every later command, and a second
-question follows in the same call when the edition offers more than one package
-manager: "Which package manager?", options from that edition's own
+question follows after the language answer when that edition offers more than
+one package manager: "Which package manager?", options from that edition's own
 `detect.packageManagers`, answer becoming `--package-manager <name>`.
 
 **Never ask what to build, or whether to build it first.** jig going first is
 what jig is; a question offering to write the application before the harness is
-a defect in the run, not a courtesy. The one thing that can stop a greenfield
-run is an ecosystem whose project file only the owner can name — go, gradle,
-dotnet — and there the scan's own `hint` is the sentence to give them, not a
-question to put to them.
+a defect in the run, not a courtesy. If the scan returns `canWrite: false`, the project file needs an identity only
+the owner can supply. Give the scan's own `hint`; otherwise the named starter
+file remains an item on the plan. Do not invent extra greenfield blockers.
 
 ## The blind-spot pass
 
@@ -113,19 +112,21 @@ decision behind it is a disclosure, printed and not numbered.
 ## The round protocol
 
 Work the tree in rounds. The **frontier** is every question whose
-prerequisites are already settled. Ask the whole frontier in one
-`AskUserQuestion` call (it carries at most four questions — a larger frontier
-splits into consecutive calls in the same round). Number questions `Q1…`
-continuously across rounds. The recommended answer is always the FIRST option
-and carries `(Recommended)` in its label. The interview closes exactly when
-the frontier is empty; nothing is left silently assumed.
+prerequisites are already settled. Use the available Codex input tool within its
+actual limits for optional preferences; split larger frontiers into supported
+batches, or ask concise questions in conversation. Follow
+[codex-runtime.md](codex-runtime.md) for inputs and mandatory approval. Number
+questions `Q1…` continuously across rounds. A recommended preference goes first
+and carries `(Recommended)` in its label; it never counts as an answer by being
+first. The interview closes when the frontier is empty. Reuse answers and
+unchanged explicit authorizations from the current conversation.
 
 - **Round one** — no prerequisites: the language and package manager when there
   is no project here yet, then persona, phase, the mistake list, the
   agent-damage anchor.
 - **Round two** — unlocked by round one: the worst-bug free text; the stale pair
   forensics found, when it found one; the toolchain
-  multi-select; the CI workflow decision; the hook-weave offer when the scan
+  selection table; the CI workflow decision; the hook-weave offer when the scan
   found a committed pre-commit; any decision a blind-spot finding seeded that
   round one's answers left standing.
 - **Round three** — only when round two created it: the blocking-versus-observe
@@ -134,10 +135,10 @@ the frontier is empty; nothing is left silently assumed.
 
 ## Round one — persona, posture, mistakes, anchor
 
-One `AskUserQuestion` call, four questions. The first two are single-select. On
-a project that does not exist yet, question zero and its package-manager
-follow-up lead this round, so the toolchain proposal has an edition to resolve
-against.
+The first two are single-select preferences. Split the questions into the
+number the available Codex input tool supports. On a project that does not
+exist yet, settle question zero before its package-manager follow-up, so the
+toolchain proposal has an edition to resolve against.
 
 **Question one**, header `"Protecting"`: "Who are these guardrails protecting
 this project against?"
@@ -160,7 +161,7 @@ Both answers shape which mistakes lead the list at question three and how
 insistently a gap is stated. Neither answer decides on its own what blocks —
 that is question eight.
 
-**Question three**, header `"Guard against"`, `multiSelect: true`: "Which of
+**Question three**, header `"Guard against"`, an enumerated selection table: "Which of
 these should jig watch for?"
 
 The options are **not a fixed list**. Build them from the matched editions'
@@ -195,7 +196,7 @@ other two personas they go last, after the class rows.
   harness is off with nothing saying so. Four checks, written and proved like any
   other."
 
-Ticking one of those installs nothing. The model authors each offer the owner
+Selecting one of those installs nothing. The model authors each offer the owner
 picks, admission proves it against its own pair like every other check, and the
 owner approves it by name at the item tier — SKILL.md step 4 holds the shapes
 each one takes and the limits to read out. Then, last:
@@ -244,11 +245,12 @@ the whole reason this question exists is that the owner would have to know the
 pair by name before they could ever raise it themselves. Print the incident's
 own `confidence` line with the question.
 
-**Question six**, header `"Toolchain"`, `multiSelect: true`, built from the
+**Question six**, header `"Toolchain"`, an enumerated selection table built from the
 matched edition's `toolchain` rows: "Which of these should jig install and wire
 up?"
 
-One option per tool, and each one states three things in its description: what
+One row per tool. Ask the owner to name the desired tool ids or `none`, and
+state three things in each row: what
 the tool is for, the exact command that would run, and the config path it would
 write. A tool the manifest already carries is shown as present rather than
 offered, and the plan's own version probe settles it either way. A tool with no
@@ -260,14 +262,14 @@ checks run on every push with no plugin and no local node?"
 
 - `Yes (Recommended)` — "One workflow file under `.github/workflows/`, owned
   by jig, running the committed check driver, its selftest, and one step per
-  tool you ticked — each one the exact command in `.jig/verify.json`. Where you
-  ticked no test runner and your `package.json` already has a `test` script,
+  tool you selected — each one the exact command in `.jig/verify.json`. Where you
+  selected no test runner and your `package.json` already has a `test` script,
   that script is a step too. The floor that holds when everything else is
   missing."
 - `No` — "Plan with `--no-ci`. The committed checks still run wherever you run
   them, and no lane runs the tools."
 
-**Question seven-a**, header `"Commit tools"`, only when the user ticked a tool
+**Question seven-a**, header `"Commit tools"`, only when the user selected a tool
 at question six: "Should the linter, type checker and test runner also run when
 you commit, or only in CI?"
 
@@ -289,19 +291,25 @@ the one jig line into it?"
 Asked once the admission test has said which checks survived, so the question is
 about real coverage rather than a wish list.
 
-**Question eight**, header `"Blocking"`, `multiSelect: true`: "Every check below
-is proven against its own fixtures. Which should block, and which should only
-record?"
+**Question eight**, header `"Blocking"`: "Every check below is proven against
+its own fixtures. Should session guards block supported calls or only record?"
 
-- Default every admitted check to blocking, pre-ticked, and let the user
-  untick. A ticked check denies the call and shows its reason, its alternative
-  and its override path; an unticked one writes a ledger line and lets the call
-  through.
-- Say the consequence in one line before the question: observe is a choice they
-  can revisit from `/jig:review` at any time, in either direction. It is not a
-  waiting period and nothing graduates out of it.
+- Offer `Block` and `Observe`, explaining the consequence before the owner
+  answers. Blocking is Jig's normal install mode; it still requires explicit
+  plan approval. **Nothing is pre-ticked.** `--observe` installs all session
+  guards in observe. A silent answer does not choose blocking.
+- The engine's install mode is global, so do not claim the plan applies
+  per-check answers. If the owner wants mixed modes, install with `--observe`
+  and their explicit consent, then use `$review` to arm only the named guards
+  they authorized. Report any guard still waiting for its chosen mode.
+- Observe is a choice they can revisit from `$review` in either direction.
+  It is not a waiting period and nothing graduates out of it.
 - A check that declared `expectedNearMissHits` is named as heuristic in its
   own description, with that number stated.
+- Hooks must be trusted and active in Codex, and only the supported tool
+  payloads are covered. Jig deliberately reports verification gaps at Stop
+  without requesting the blocking or continuation that Codex supports.
+  Fixture proof does not establish host enforcement.
 
 ## What a typed sentence is allowed to become
 
@@ -361,17 +369,17 @@ Print these the moment they become true, not in a summary at the end.
 
 **A hook slot in `occupied` covers a mistake the user named:**
 
-> The `<slot>` slot is already taken by `<source>`. Hooks registered for the
-> same event do not chain reliably across plugins, so jig will not add a second
-> one and claim coverage it cannot deliver. The check driver and the CI workflow
+> The `<slot>` slot is already taken by `<source>`. Jig conservatively leaves that
+> slot alone. A matching registration is not evidence that Jig's hooks are
+> trusted or active in this Codex host, so verify `/hooks` separately. The check driver and the CI workflow
 > still run, and for this mistake they are the floor.
 
-**A tool install was ticked:**
+**A tool install was selected:**
 
 > `<id>` is not installed here. jig will run `<command>` verbatim and write
-> `<configPath>`. Both are journaled, and `revert` removes the tool, restores
-> the manifest and the lockfile, and offers the reconcile command as its own
-> approved step.
+> `<configPath>`. Both are journaled. `revert` restores
+> the manifest and lockfile, then prints the reconcile command for you to run;
+> packages remain on disk until you run it.
 
 **Under `--quick`, once, before the plan review:**
 

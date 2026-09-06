@@ -3,86 +3,155 @@
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg" />
     <img src="assets/logo.svg" alt="jig" width="240" />
   </picture>
-  <h1>jig</h1>
-  <p><strong>Your repo keeps collecting the same mistakes. jig installs the guardrails that catch them — and shows each one working before it claims anything. Point it at an empty folder and it goes first, so the code written next lands into a harness that already works.</strong></p>
+  <h1>jig for Codex</h1>
+  <p><strong>Install the guardrails your project needs, approve every consequential change by name, and watch each check catch a planted mistake before calling it proven.</strong></p>
 </div>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 
-> **TL;DR** — The focused test that mutes the suite, the swallowed error, the AI session that deletes a test to make CI green. jig interviews you, sets up your linter, type checker, test runner and CI, writes checks for the mistakes you actually hit, and proves every one of them against a planted violation before calling anything covered. It works on a project that does not exist yet as readily as on one that does. Nothing is written or installed that you did not approve by name, and one command undoes all of it.
+Jig interviews the project's owner, reads the repository and its Git history,
+and installs reviewed, reversible tooling and checks for the mistakes the owner
+chooses. It can prepare an empty project before application code is written.
+This is the Codex-only port of Jig from the [Slag marketplace](https://github.com/V-Songbird/slag),
+targeting the Codex desktop app and CLI on Windows, macOS and Linux.
 
----
+> Experimental. The supported Codex hook contract and verification limits are
+> recorded in [Codex compatibility](docs/CODEX-COMPATIBILITY.md). Detector tests
+> and a plugin installation do not by themselves prove runtime enforcement in
+> every host.
 
-> [!NOTE]
-> Experimental, and staying that way. No support, no stability promise — it can change shape or vanish without a migration path.
+## What Jig controls
 
-## What is this?
+A focused test that silently narrows a suite, a swallowed error, an assertion
+deleted to make CI green: Jig turns an owner-selected mistake into an executable
+check with a violation and a near miss. A check must catch its violation, spare
+its near miss, and pass cross-check admission before it is offered as coverage.
+An unprovable check is discarded and reported in `.jig/discarded.json`.
 
-Every repo has a greatest-hits album of mistakes. Somebody pins the test suite to a single test and forgets to unpin it, so green runs stop meaning anything. An error gets caught and dropped on the floor. An AI session, cornered by a red test, deletes the test.
+Jig's control is specific to those approved checks. It does not maintain a
+task-wide allowlist of edits, understand every unwanted change, or prevent an
+agent from bypassing every possible route. Its original behavior is preserved:
+named consent, deterministic checks, recorded evidence, and reversible changes.
+[The behavior analysis](docs/BEHAVIOR.md) explains the boundaries.
 
-jig reads your repo and its git history, asks which of these you actually want guarded, and then sets the whole thing up — the tools, their configs, the CI, and checks written for your codebase. Reviewed by you first, reversible to the byte, and demonstrated catching a planted violation before the word "covered" is used.
+Three lanes carry the checks:
 
-Starting something new? Run it on the empty folder. jig writes the project file, installs the toolchain and lands the checks before there is a single line to guard — which is the cheapest moment to get all of it right, and the one where an AI session has the most to gain from a harness that already works.
+- **Session:** trusted Codex hooks inspect supported shell commands and patch
+  operations. An armed PreToolUse match can deny the call with a reason, an
+  alternative and an override. Observe mode records it. Jig deliberately reports
+  missing verification at Stop as advice. Codex supports blocking and continuation
+  there; Jig requests neither, preserving its original behavior.
+- **Commit:** a committed hook runs `.jig/checks/run.mjs` against staged changes.
+  This lane needs Git wiring and Node on the hook's PATH. Existing committed
+  hooks can receive one reviewed line instead of being displaced.
+- **CI:** the generated workflow runs the driver, its selftest and configured
+  verification commands. Index-dependent co-change and removal checks are
+  disclosed as skipped when no changes are staged.
 
-## Why you'd want it
-
-- **It reads before it asks.** The scan and the history mining run first, so the interview never asks a question your repo already answers.
-- **It goes first on a new project.** No code yet is the normal case, not an edge case. jig writes the starter project file, sets up the toolchain and installs the checks, so the first thing anybody writes is already being checked. That covers Node, Python, Rust, Gradle, Maven and .NET. Go is the one exception — a module path is an identity only you can pick, so jig hands you the one command and picks up from there.
-- **It sets up your real tooling.** Linter, formatter, type checker, test runner, CI. jig shows you the exact install command and the exact config it would write, then runs it once you say yes. A tool it cannot uninstall is a tool it refuses to install.
-- **It speaks your language.** Editions ship for JavaScript and TypeScript, Python, Go, Rust, the JVM and .NET, each researched against that ecosystem's own tools and conventions.
-- **Checks that outlive the plugin.** The main guardrail is a small script committed to your repo. Any teammate, any CI, any machine with node runs it — no plugin, no account, no jig.
-- **Every check proves itself first.** A check ships with a violation sample and a near-miss sample. It has to fire on the first and stay silent on the second, and on every other check's near miss too. One that fails is discarded and reported, never quietly counted as coverage.
-- **It finds the documents your sessions never read.** ADRs, scopes, roadmaps — jig checks whether anything actually points Claude at them, and can wire in one small pointer rule when nothing does.
-- **It catches the two files that drifted apart.** The doc that stopped describing the module, the migration that never followed the schema. Name the two sets, and a commit that touches one and leaves the other alone is a finding. These read what you have staged, so they speak at commit time and report themselves skipped in CI rather than pretending to have looked.
-- **It tells you what it put there, and why.** Ask any time and jig lists every guard, every committed check and every file it wrote — what each one watches, what it does when it fires, and the reason you approved it in the first place. It also says whether the checks are really running right now.
-- **It watches the AI too.** Session guards see what an agent is about to do: the downloaded script piped into a shell, the force-push to main, the test file on its way out. A blocked call always shows the reason, an alternative, and the way to override.
-- **One command undoes everything.** Every write is journaled with the original bytes, your manifest and lockfile included. Revert restores every file it touched, then hands you the one command your package manager needs to take the tool off disk.
-
-## How it works
-
-| Moment | What happens |
-| --- | --- |
-| You run `/jig:jig` | It scans the repo, mines the git history, and shows what it found — then asks the things it can't read |
-| The folder is empty | It asks which language, writes the starter project file, and carries on. Nothing about the run changes |
-| You pick what to guard | Describe a mistake in your own words. jig writes a check for it, plus the two samples that prove the check works |
-| The mistake is two files drifting apart | Name both sets. The samples become a commit that should trip it and one that should not, and the proof runs the same way |
-| jig proposes your toolchain | Each tool is one item carrying the exact install command, the config it would write, and the command that removes it again |
-| You approve, item by item | Every path is named before it is written, and every write is journaled with the bytes that were there before |
-| The install closes | Each check is shown catching a planted violation, live — without the demonstration, jig won't claim you're covered |
-| The checks need connecting | jig offers to finish it. Say no and CI still catches everything; say yes and the same checks run the moment you commit |
-| A check turns out unprovable | It is discarded and written to `.jig/discarded.json`, never counted as coverage |
-| A proven guard sees a slip | It blocks, with a reason, an alternative and the override. Put it in observe instead if you'd rather it only watched |
-| A guard cries wolf | Mark the false alarm in review — the guard drops back to observing |
-| You come back a month later | One question: take the next thing, retire the dead, or refresh |
-| You want out | One command puts every byte back, and hands you the command that removes anything it installed |
+The committed checks run without Jig or Codex. Session hooks are an additional
+lane, whose registration and trust must be verified in the active Codex host.
 
 ## Install
 
-Inside Claude Code, run:
+You need Node.js 20 or later, Git for commit/history features, and a Codex host
+with the plugin and hook capabilities listed in [Codex compatibility](docs/CODEX-COMPATIBILITY.md).
+From this repository, create a local marketplace in a new directory:
 
+```text
+node scripts/package-codex.js --out ../jig-codex-marketplace
+codex plugin marketplace add ../jig-codex-marketplace
+codex plugin add jig@jig-local
 ```
-/plugin marketplace add V-Songbird/slag
-/plugin install jig@slag
-```
 
-Takes effect next session. Nothing to configure — the interview is the configuration.
+The packager creates a self-contained marketplace with the Jig plugin. It
+refuses an existing output directory. Use a fresh output directory to package
+an update, then use the Codex plugin manager to update its registration.
+Packaging does not change the current user's Codex configuration.
 
-## What you can do
+Start a fresh Codex task. In the active host, open `/hooks` and review and trust
+Jig's current hook definitions before expecting session guards to run. Check
+trust again after a hook update. Confirm this separately in each desktop or CLI
+installation you use; a successful CLI check does not certify another host.
+If hooks are unavailable or untrusted, report the session lane as unverified.
 
-| You want to… | Command |
+The skills resolve their scripts from the actual loaded `SKILL.md` path. There
+is no requirement to export a plugin-root variable in your shell. Node must
+also be available to the Codex hook process and Git hooks; a working terminal
+alone does not establish that.
+
+## Use
+
+| You want to… | Skill invocation |
 | --- | --- |
-| Set up guardrails, interview included | `/jig:jig` |
-| Set them up with one review and no questions — the engine picks the classes from your own history, records the choice and its basis, and labels every value assumed | `/jig:jig --quick` |
-| Scaffold a new project and guard it from line one | `/jig:jig` in the empty folder |
-| See what the guards caught, and which checks are actually running | `/jig:review` |
-| Put a noisy guard back to watching | `/jig:review` |
-| Call out a false alarm | `/jig:review` — "that warning was wrong" |
-| See everything jig installed, and what each thing watches | `/jig:inventory` |
-| Find out why a check is there at all | `/jig:inventory` |
+| Set up guardrails, interview included | `$jig` |
+| Use the engine's history-based or catalogue selection, with every value labelled assumed, then approve the concrete plan | `$jig --quick` |
+| Prepare a new project's toolchain and checks | `$jig` in the empty folder |
+| Review catches, record a false alarm or change a named guard's mode | `$review` |
+| List every installed guard, check, file and lane, with reasons and drift | `$inventory` |
 
-## Benchmarks
+Select Jig's entry in the skill picker if another installed plugin uses the
+same skill name. Use the qualified name that the host actually displays.
 
-Every check jig runs is measured the same way it is admitted: it must fire on its own planted violation and stay silent on a near miss built to look like one. Every pattern inside a check is held to that separately, so a second pattern cannot be counted as covered because the one beside it matched.
+The scan runs before the interview, so repository facts are read once rather
+than asked again. The owner supplies intent, mistakes, tools and mode choices.
+Selection lists use stable ids and explicit replies; no multi-select UI is
+required and no approval is preselected. Existing explicit authorization for
+an unchanged named change, path and consequence is reused within the session.
+
+Every plan shows a coverage matrix and concrete changes. Reporting artifacts
+can be approved together. Each consequential change—including authored checks,
+tool installs, hook wiring and writes outside `.jig/`—needs its named id/path
+approval. The engine applies it with one `--change <id> --path <rel>` pair.
+Quick mode skips interview rounds, and still requires these approvals.
+
+Jig supports JavaScript/TypeScript, Python, Go, Rust, JVM and .NET catalogues.
+It can write approved starter project files for supported editions. If a
+project needs an owner-selected identity, such as a Go module path, the scan
+returns the exact prerequisite. A starter is a project file, not an application
+template. Tool installs show their exact commands, config bytes and undo steps.
+
+## What “proven” means
+
+An admitted detector has demonstrated its own fixture pair. The fixture
+benchmark below measures catalogue checks separately from Codex host delivery.
+Tool catalogue declarations also remain distinct from actually running the tool
+against a clean baseline and a planted violation.
+
+After installation, `selftest --live` sends synthetic events directly through
+Jig's runner and checks that its ledger grows. It demonstrates detector behavior;
+it does not prove Codex dispatched a hook or blocked a real tool call. Actual
+session enforcement needs trusted registration and a separate safe tool-call
+probe in the host being used. The close reports missing evidence explicitly.
+
+The shell hook name `Bash` is Codex's canonical event name and can carry a
+PowerShell command. Patterns match the command text; a name or operating system
+is not proof of dialect coverage. Patch guards reconstruct supported
+`apply_patch` changes before they land, including exact, trailing-whitespace,
+trimmed and Unicode-normalized context matching. A file that cannot be inspected
+remains a disclosed gap; other readable files still evaluate, and their denials
+are preserved. External edits and shell-driven rewrites remain outside patch
+coverage.
+
+Measured Codex CLI 0.145.0 and 0.153.4 shell PostToolUse events provide raw stdout
+without an exit status. A matching named run therefore records `verify-unknown`;
+a direct successful shell call does not supply Jig with proof of success. For
+an approved verification entry assigned to the commit lane, run:
+
+```text
+node .jig/checks/run.mjs --verify --lane commit --entry <id>
+```
+
+The driver runs the configured command and records its true zero or nonzero exit.
+Read `.jig/verify.json` to select an existing entry and lane; a CI-only entry
+requires `--lane ci`. The lane flag selects commands and labels the ledger row.
+It does not prove a Git commit or hosted CI job occurred. See the
+[Codex runtime guide](skills/jig/references/codex-runtime.md#reliable-verification-evidence)
+for reporting and authorization details.
+
+## Fixture benchmark
+
+These numbers measure the shipped language catalogues, not Codex host delivery.
+They are recalculated by the test suite on every change.
 
 | What | Score |
 | --- | --- |
@@ -91,27 +160,49 @@ Every check jig runs is measured the same way it is admitted: it must fire on it
 | Mistake classes across the six editions | 165 |
 | Cross-sample hits, disclosed | 8 |
 
-> [!NOTE]
-> The eight are disclosed, not hidden. Each is one check firing on a different check's near-miss sample — realistic code written to trap a different pattern, which sometimes contains a genuine instance of another. A check may declare an expected hit up front; what it may never do is fire on its own near miss, and none of them does.
+The eight cross-sample hits are declared findings against other checks' near-miss
+samples; every check still passes its own violation/near-miss pair.
 
-The suite that produces these numbers ships in the repo and reruns on every change, and a check that cannot pass is discarded rather than shipped.
+## Reversibility and maintenance
 
-## Under the hood
+- Every installation write is journaled with its original bytes. Revert restores
+  the manifest and lockfile too, then prints the package manager's reconcile
+  command. Installed packages remain on disk until that command is run.
+- Drift is reported. Jig refuses to overwrite an owner-edited file during apply
+  or revert; forced restoration is an explicit owner decision.
+- False-alarm recording does not silently lower enforcement. Quieting or retiring
+  a guard produces a concrete change that requires named consent. Clearing a
+  mistaken false-alarm record keeps the earlier evidence in the ledger.
+- Governance pointers and the standing checks brief share one bounded Jig fence
+  in the active root `AGENTS.md`, or `AGENTS.override.md` when present. Owner text
+  outside that fence is preserved. A pointer is guidance, not executable scope
+  enforcement.
+- Commit the install: `.jig/config.json`, `manifest.json`, `checks/`, `hooks/`,
+  `activation.md`, `verify.json` and `proposed-permissions.json`. Jig adds ignore
+  entries for derived plans and machine-specific records without rewriting owner
+  entries. Never treat an ignored ledger's absence in a clone as proof of no
+  historical activity.
+- Kill switch: create `.jig/off` to silence session guards. The committed checks,
+  commit hook and CI workflow keep running.
 
-One engine that journals every write, a committed check script that owes jig nothing, an installer that will not touch a tool it cannot remove again, and session guards that read the same checks — the exact mechanics are all in the plugin's files.
+Ask `$jig` to undo all or a named installation change. For direct engine use,
+replace `<JIG_ROOT>` below with this plugin's absolute directory and run from
+the target project root:
 
-## Good to know
-
-- A check that passed its pair blocks from the moment it installs, and says why, what to do instead, and how to override. Ask for observe instead and it only records. A recorded false alarm pulls a blocking guard back to observe.
-- jig names every path before it writes it, and journals the bytes that were there first. That includes your manifest and lockfile when it installs a tool. Revert puts both back and shows you the uninstall command — it never runs a package manager behind your back.
-- jig can finish the commit-time wiring for you, as one more approved item, and one revert puts it back. If you already have a commit hook, jig adds its line to yours rather than pointing git away from it. It never writes a file inside `.git/`, and it never reports the wiring as missing when it is already there. The note it leaves in `.jig/activation.md` is rewritten the moment the wiring lands, so nothing in your repo goes on asking you for something already done.
-- If something else already watches the same events in your repo, jig says so and leaves that slot alone. The committed checks and the CI workflow cover you regardless.
-- Several tools often share one config file — `pyproject.toml`, `.editorconfig`, `Cargo.toml`, `Directory.Build.props`, `build.gradle.kts`. jig writes that file once with every tool's settings in it, and tells you about any setting two tools disagreed on. Where the shared file is one it can't safely compose, or one you already own, it writes none of it and hands you the exact snippet instead.
-- Rules are the exception, not the habit. The one jig writes points your sessions at the governance docs nothing referenced, under its own `jig-` name and a small hard byte cap — because every session pays to carry prose.
-- Working with another AI tool too? On request jig keeps one clearly-fenced block in `AGENTS.md` pointing it at the same checks. Your own text in that file is never touched.
-- Commit the install, not the workings. Seven things under `.jig/` are meant to be committed — `config.json`, `manifest.json`, `checks/`, `hooks/`, `activation.md`, `verify.json` and `proposed-permissions.json` — so a teammate who clones the repository gets the same checks and the same guards. Everything else there is derived or specific to your machine, and jig writes a `.jig/.gitignore` naming it. jig only ever adds a missing line to that file; it never rewrites one you edited.
-- Kill switch: create a file named `.jig/off` and every guard goes silent. It silences the session guards; the committed checks, the commit hook and the CI workflow never read it and go on running.
+```text
+node "<JIG_ROOT>/scripts/jig.js" status
+node "<JIG_ROOT>/scripts/jig.js" revert --all
+```
 
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+## Develop and validate
+
+Run `npm test` for the portable fixture and engine suite, or `npm run test:codex`
+for the Codex-specific regressions. Run `npm run test:toolchains` on a provisioned
+machine to enable the optional real ecosystem starter builds, tool executions
+and version probes. Each unexecuted external smoke check is explicitly reported
+as skipped; it is not counted as verified tool coverage. The CI matrix runs the
+portable suite on Node 20, 22 and 24 across Windows, macOS and Linux.

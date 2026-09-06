@@ -1,0 +1,25 @@
+{
+  "name": "jig",
+  "version": "2.15.1-codex.1",
+  "description": "Interviews you about recurring mistakes, installs the checks you approve, and proves each check against a planted violation. Journals every change for reversal and guards supported Codex shell and patch calls.",
+  "license": "MIT",
+  "author": {
+    "name": "Victor Villegas",
+    "email": "victor.villegas@tuta.com"
+  },
+  "homepage": "https://github.com/V-Songbird/slag/tree/main/jig",
+  "repository": "https://github.com/V-Songbird/slag",
+  "keywords": ["guardrails", "checks", "ci", "pre-commit", "hooks", "tests", "review", "interview"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Jig",
+    "shortDescription": "Proven guardrails, approved by you, reversible to the byte.",
+    "longDescription": "Set up repository tooling and checks through an owner interview. Admit checks with violation and near-miss fixtures, review each enforcing change, and inspect what the guards caught. Includes Codex lifecycle hooks and committed checks for Git and CI.",
+    "developerName": "Victor Villegas",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": ["Set up Jig guardrails for this repository.", "Show everything Jig installed.", "Review what Jig caught."],
+    "logo": "./assets/logo.svg",
+    "logoDark": "./assets/logo-dark.svg"
+  }
+}

@@ -10,15 +10,17 @@ description: >-
   guard works, or whether the checks are really running — e.g. "what guards does
   jig have", "what is jig watching", "why did jig install this", "what did jig do
   to my repo", "how does this check work", "is anything actually running" — or
-  invokes /jig:inventory. Do NOT use to report what jig has CAUGHT or to change a
-  guard — that is /jig:review — or to install anything, which is /jig:jig.
-argument-hint: "[guards] [checks] [files] [lanes]"
-allowed-tools: Bash, PowerShell, Read
+  invokes $inventory. Do NOT use to report what jig has CAUGHT or to change a
+  guard — that is $review — or to install anything, which is $jig.
 ---
 
-# jig:inventory
+# Jig inventory
 
-Three surfaces, one job each. `/jig:jig` installs. `/jig:review` reports what the
+Read [Codex runtime and consent](../jig/references/codex-runtime.md) first. Resolve
+`<JIG_ROOT>` from this loaded skill's path, and keep detector proof separate from
+actual host registration and enforcement.
+
+Three surfaces, one job each. `$jig` installs. `$review` reports what the
 guards have **caught** and acts on it. This one reports what is **here** — and
 stops. Nothing in this skill arms, disarms, retires, waves off or installs
 anything, and offering to would be taking another skill's job.
@@ -26,12 +28,12 @@ anything, and offering to would be taking another skill's job.
 Everything comes from one command:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" inventory
+node "<JIG_ROOT>/scripts/jig.js" inventory
 ```
 
 Run it from the project root. If `node` is not on PATH (fnm/nvm setups),
-register it the way the project's CLAUDE.md says to, then rerun. If the command
-refuses because the install predates the rework, send the user to `/jig:jig`,
+register it the way the project's AGENTS.md says to, then rerun. If the command
+refuses because the install predates the rework, send the user to `$jig`,
 which runs the migration, and stop — nothing below reads correctly until then.
 
 An argument narrows the report to one section: `guards`, `checks`, `files` or
@@ -47,7 +49,7 @@ and a field dump nobody can read is not a report.
 `guardsProblem` non-null comes first, before anything else in the report. It
 means jig refused the guard config outright, so `guards` is empty for that
 reason and not because nothing is installed. Print it verbatim and send the user
-to `/jig:jig`.
+to `$jig`.
 
 `installed: false` is the other reason `guards` can be empty, and it is not the
 same one: there is no `.jig/config.json` here at all — jig was never installed,
@@ -60,14 +62,15 @@ reason this skill exists:
 - `watches.event` — `PreToolUse` (before the call, which is where a `bash-guard`
   and an `edit-guard` both run) or `PostToolUse` (after the edit, where the older
   `edit-observe-guard` runs and the bytes have already landed). `watches.tools`
-  names the tools it sees, and it is the lever that decides them: the two events
-  no longer split Bash from Edit.
+  names the tools it sees, and it is the lever that decides them: the tool contract
+  and supported patch operations determine coverage, not the operating system.
 - `watches.paths` — the globs it looks at. `watches.patterns` — how many
   matchers it carries. The matchers themselves are counted, never printed: they
   live behind an approval boundary and a report is not a place to re-issue one.
 - `watches.deny` — the reply an armed match shows. Null means this guard
   **cannot arm at all**, whatever its row says. Say that out loud.
-- `mode` — `armed` (it blocks) or `observe` (it records and lets the call
+- `mode` — `armed` (eligible to block supported calls with trusted active
+  hooks) or `observe` (it records and lets the call
   through), and `why` says what put it there. Print `why` verbatim; paraphrasing
   an honest limit blurs it.
 - `problem` — non-null means the guard is **broken, not quiet**. Report it first
@@ -116,7 +119,7 @@ lanes.
   recorded. Never supply one.
 - `state` — `active`, `drifted` (edited after jig wrote it, so it is the owner's
   file now) or `retired` (gone). Drift is reported, never repaired: the journal
-  still holds the pre-image if they want it back, and `/jig:jig` is where a
+  still holds the pre-image if they want it back, and `$jig` is where a
   repair is approved.
 - `install` non-null means jig ran a package install, and the row carries the
   exact command that undoes it.
@@ -127,12 +130,19 @@ commit-time checks on", `activation-wired` or `activation-woven` for "they are
 running, here is how to turn them off". If `lanes.commit.runs` is true while the
 template still reads `activation`, the file is handing the owner a task they do
 not have. That is a repository wired under an older jig. Say so, and name
-`jig plan --refresh-activation` through `/jig:jig` as the fix. Never apply it
+`jig plan --refresh-activation` through `$jig` as the fix. Never apply it
 here.
 
 ## 4. Lanes — is any of this actually running
 
 `lanes`, read fresh rather than remembered from the install.
+
+These are repository configuration and ledger facts. This command cannot
+inspect whether the current Codex host enabled and trusted the plugin. Verify
+`/hooks` separately before claiming the session lane is active. Synthetic
+selftests and historical counts do not establish current host registration.
+Jig deliberately keeps Stop advisory even though Codex supports blocking and
+continuation there; Jig requests neither.
 
 - `lanes.session` — whether anything is armed, and whether anything is
   observing. `off: true` means `.jig/off` is present and NOTHING in this lane
@@ -164,20 +174,32 @@ here.
 
 Report a dead lane in plain terms: what does not run, what still does, and the
 one command that fixes it. Name the fix; never run it. Applying it is an
-approved, reversible change like any other, which means `/jig:jig`.
+approved, reversible change like any other, which means `$jig`.
 
 `verify` is one row per lane entry — the commands the lanes run besides the
 check driver — and `lastGreen` is the last time jig WITNESSED that command run
-green — in a Claude session, or in this machine's own commit lane — or `null`
+green — in a Codex session, or in this machine's own commit lane — or `null`
 for one nothing here has been seen to pass. A repository whose CI runs the suite
 green on every push reads `null` too: the CI lane's row is written into the
 runner's own checkout, which is thrown away with the job. Report it with the
 lanes: a lane that is live and an entry that has never run green are two
 different facts, and only the second one answers "do the tests pass".
+Measured Codex CLI 0.145.0 and 0.153.4 shell PostToolUse payloads contain raw
+stdout without exit status. A matching named run records `verify-unknown`, which
+must not be reported as green or as a failed command. If the user wants a named
+verification run, use the existing driver for the approved entry and its
+configured lane, as described in
+[the runtime guide](../jig/references/codex-runtime.md#reliable-verification-evidence):
+`node .jig/checks/run.mjs --verify --lane commit --entry <id>` when the entry
+includes `commit`. The driver records the true exit itself. The lane label is
+not proof that Git ran a commit or that hosted CI ran a job. An inventory request
+is read-only; explain this option without executing it unless the user also
+requested that verification.
+
 
 ## Closing
 
 End with one line naming where to go next, and only if something earned it:
-`/jig:review` for what the guards have caught or to change one, `/jig:jig` to
-install or repair. If nothing is installed, say so and point at `/jig:jig`. The
-kill switch for everything at once is a file named `.jig/off`.
+`$review` for what the guards have caught or to change one, `$jig` to
+install or repair. If nothing is installed, say so and point at `$jig`. The
+kill switch for session guards is `.jig/off`; commit and CI checks keep running.

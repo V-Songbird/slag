@@ -1,6 +1,6 @@
 #!/bin/sh
 # jig:owned — generated from jig's pre-commit shim template. Git does not read
-# this file until it is told to: ask /jig:jig to wire the commit lane and it
+# this file until it is told to: ask $jig to wire the commit lane and it
 # proposes that as an approved, reversible change, or set core.hooksPath at
 # .jig/hooks yourself. jig writes no file inside .git/.
 #

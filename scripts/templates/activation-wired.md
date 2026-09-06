@@ -22,7 +22,7 @@ prints what it found.
 sitting in `.git/hooks` no longer runs.
 
 It applies to your clone only. A teammate who wants the same thing asks
-`/jig:jig` to wire the commit lane in theirs.
+`$jig` to wire the commit lane in theirs.
 
 ## Turning it off
 
@@ -30,7 +30,7 @@ It applies to your clone only. A teammate who wants the same thing asks
 git config --unset core.hooksPath
 ```
 
-Or ask `/jig:jig` to revert, which puts the setting back exactly as it was
+Or ask `$jig` to revert, which puts the setting back exactly as it was
 along with everything else jig wrote.
 
 ## One thing that can go wrong
