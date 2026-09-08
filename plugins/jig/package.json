@@ -1,0 +1,17 @@
+{
+  "name": "jig",
+  "version": "2.16.0-codex.1",
+  "private": true,
+  "description": "Jig repository guardrails for Codex",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node scripts/test.js",
+    "test:codex": "node scripts/test.js --codex",
+    "probe:codex": "node scripts/probes/codex-host.js",
+    "test:toolchains": "node scripts/test.js --toolchains",
+    "probe:workflow": "node scripts/probes/owner-workflow.js"
+  }
+}

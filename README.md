@@ -1,142 +1,78 @@
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg" />
-    <img src="assets/logo.svg" alt="slag" width="240" />
+    <img src="assets/logo.svg" alt="Slag" width="240" />
   </picture>
-  <h1>slag</h1>
-  <p><strong>Experimental Claude Code plugins</strong> — the stuff that didn't make it out of the workshop, kept where it can't hurt anyone.</p>
+  <h1>Slag for Codex</h1>
+  <p>Experimental plugins for Codex.</p>
 </div>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
+This repository's **`Codex` branch** is the home for ports to Codex and new
+Codex plugins. The Codex marketplace is `slag-codex`, defined in
+[`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json).
 
-> **TL;DR** — A sandbox marketplace of plugin experiments. Six are installable from here. Nothing has a support promise, and nothing is guaranteed to still exist tomorrow.
+## Install from this checkout
 
----
+Use a checkout of the `Codex` branch. From its root:
 
-> [!IMPORTANT]
-> Nothing here is a product. These plugins are experiments: half-finished ideas, things being tried out, things kept around to see if they earn their keep. They get rewritten, renamed, and deleted without notice or a migration path. There is no support, no stability promise, and no release schedule.
->
-> You are welcome to install any of them. If one breaks your session, that's the deal you took.
-
-## What this is
-
-Slag is the byproduct that comes off the good metal. This repo is where plugin ideas live before they're worth anyone's trust — and where they stay if they never get there.
-
-Every plugin here works on its own, does one job, and stays out of the others' way. Some are genuinely useful. Some are load-bearing on assumptions that will turn out to be wrong. Nothing tells you which is which except reading the code, which is the honest answer for an experiment.
-
-## Install
-
-Inside Claude Code, run:
-
-```
-/plugin marketplace add V-Songbird/slag
-/plugin install <plugin-name>@slag
+```text
+codex plugin marketplace add .
+codex plugin add jig@slag-codex
 ```
 
-The first command registers this collection (once); the second installs whichever plugin you want. Uninstalling is just as easy: `/plugin uninstall <plugin-name>@slag`.
+Start a new Codex task to load the installed skills. Review the current hook
+trust in the host you use before relying on session enforcement. A successful
+plugin installation alone does not prove that hooks run.
 
----
+## Available in Codex
 
-## The plugins
-
-### [assay](./assay) — Find the rules that can't work as written: vague, never loaded, or better as a hook
-
-You wrote rules for your agent; it keeps ignoring some. assay grades every rule in the files that agent actually loads — `CLAUDE.md`, `.claude/rules/`, the ones in the folders above and below, and the notes Claude keeps about the project — on whether it can tell when a rule fires and what to do. It offers to rewrite the weak ones, and flags the rules that were never meant to be prose: the ones a hook, skill, or subagent would enforce better. Codex gets the same audit against its own `AGENTS.md` chain, from either side — `/assay:codex` here, or `$assay` with the plugin installed on Codex itself. Almost all of the grading is a deterministic script, so a re-run gives the same numbers.
-
-```
-/plugin install assay@slag
-```
-
-### [verity](./verity) — Real documentation instead of guesses
-
-When you ask Claude how Claude Code itself works, it may answer from training memory — which ages badly. Verity makes Claude fetch the current official documentation live and answer from the source, citing the exact page it read. Install and forget; it kicks in whenever a Claude Code question comes up.
-
-```
-/plugin install verity@slag
-```
-
-### [jetbrains-router](./jetbrains-router) — Claude works through your JetBrains IDE
-
-If you code in WebStorm, IntelliJ IDEA, Rider, PyCharm, or another JetBrains IDE, your editor already knows things Claude's native tools don't: which files have errors right now (no build needed), what you've typed but not saved, and which paths are worth searching. jetbrains-router redirects Claude's file reads, searches, and edits through the IDE's MCP server whenever the IDE is running — and steps aside completely when it isn't.
-
-```
-/plugin install jetbrains-router@slag
-```
-
-### [jig](./jig) — Guardrails for the mistakes your repo keeps making
-
-Every repo has a greatest-hits album: the test somebody pinned to one case and never unpinned, the error caught and dropped on the floor, the AI session that deleted a failing test to get CI green. jig reads your repo and its git history, asks which of those you actually want stopped, then sets the whole thing up — your linter, type checker, test runner, CI, and checks written for your codebase. Every check has to catch a planted violation before jig will call anything covered, nothing gets written or installed that you didn't approve by name, and one command puts it all back.
-
-```
-/plugin install jig@slag
-```
-
-### [scribe](./scribe) — Makes Claude ask what you meant before it builds what you didn't
-
-You say "improve this" and Claude picks one of five possible meanings and sprints. scribe makes it stop and ask first — short rounds of numbered options with its best guess marked — and it keeps asking until nothing important is left to guess at. A clear request goes straight through, untouched. Every question and every silent pass lands in a local log, so "does it ask too much?" is a question your own evidence answers.
-
-```
-/plugin install scribe@slag
-```
-
-### [brink](./brink) — A better summary when the context runs out
-
-Long sessions end in an automatic summary that forgets the thing you cared about. brink watches how full the context window is getting and, near the edge, surfaces a one-time nudge to run `/compact` with a ready-made instruction — so the summary keeps the task, the decisions, and the errors instead of an automatic guess.
-
-```
-/plugin install brink@slag
-```
-
-### Which one first?
-
-| You want to… | Install |
+| Plugin | What it does |
 | --- | --- |
-| Know which of your rules actually work | **assay** |
-| Get trustworthy answers about Claude Code | **verity** |
-| Use your JetBrains IDE's brains | **jetbrains-router** |
-| Stop the same mistake landing over and over | **jig** |
-| Stop Claude guessing what you meant | **scribe** |
-| Keep a long session's summary from losing the plot | **brink** |
+| [Jig](plugins/jig/README.md) | Proposes checks for recurring mistakes, applies the concrete changes you approve, reports what it checks or caught, and records how to undo installation changes. |
 
----
+Ask `$jig` what is being checked or what needs attention. `$inventory` and
+`$review` remain direct entries. The full workflow and coverage limits are in
+[Jig's guide](plugins/jig/README.md).
 
-## Repository layout
+`main` holds the Claude Code plugins. This `Codex` branch contains only Jig;
+other plugins will be added when their ports are ready.
 
-```
-slag/
-├── assay/
-├── brink/
-├── jetbrains-router/
-├── jig/
-├── scribe/
-└── verity/
-```
+## Develop and validate
 
-Plugins live in-tree — plain directories, one history, no submodules. Each ships its metadata in `.claude-plugin/plugin.json` and carries its own `README.md`, `CHANGELOG.md`, and `LICENSE`. The marketplace index is [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) — it is also the single owner of every plugin's version number (plugin.json files carry no version field). The conventions a plugin here follows are in [`.claude/rules/plugin-layout.md`](.claude/rules/plugin-layout.md).
+Place each Codex plugin in `plugins/<name>/`, with its native
+`.codex-plugin/plugin.json`, and register it in the Codex marketplace above.
+New Codex work and ports belong on branches based on `Codex` and return there.
 
----
-
-## Development
-
-Run this once after cloning, to enable the commit gates:
-
-```
-git config core.hooksPath scripts/git-hooks
+```text
+node scripts/check-codex-marketplace.js
+node --test scripts/check-codex-marketplace.test.js
 ```
 
-`.claude/settings.json` (committed) registers two repo-wide dev hooks, both dev-only — neither fires for anyone who has merely *installed* a plugin from this repo, only for edits made inside the source tree itself:
+Run Jig's tests from `plugins/jig/`:
 
-- `.claude/hooks/run-tests-on-edit.js` reruns whichever plugin's own test suite after an `Edit`/`Write` lands in that plugin's `scripts/` or `hooks/` dir — detected by walking up to the nearest `.claude-plugin/plugin.json` marker, so it works for any plugin in this repo, not just one. Silent when green; surfaces a failure via `additionalContext` when red.
-- `.claude/hooks/nudge-manifest-curator.js` nudges a follow-up `manifest-curator` audit after an `Edit`/`Write` lands in `.claude-plugin/marketplace.json` or any plugin's `.claude-plugin/plugin.json` — manifest edits are easy to get subtly wrong (stale author info, version drift, schema violations), so a check only helps if something actually reminds you to run it.
-
-Tests, for a plugin that has them:
-
-```
-node --test <plugin>/tests/*.test.js
+```text
+npm test
 ```
 
----
+The Codex CI workflow runs those checks and Jig's suite on Node 20, 22 and 24
+across Windows, macOS and Linux. Its definition is not evidence that a remote
+job has run. These plugins remain experimental; consult each plugin's stated
+validation limits.
 
-## License
+## Source history
 
-MIT — see [LICENSE](./LICENSE).
+Jig was relocated from the standalone `codex/jig` repository, retaining its Git
+history and the working-tree UX improvements. Its native runtime, detectors,
+consent rules and undo behavior are preserved. The earlier Slag host-migration commit is an ancestor of this branch, so its
+implementation and history remain available after the auxiliary branch is retired.
+
+## Author and identity
+
+Created by **Victor Villegas** ([V-Songbird](https://github.com/V-Songbird)).
+Contact: [victor.villegas@tuta.com](mailto:victor.villegas@tuta.com).
+The marketplace uses Slag's existing logo; Jig retains its own light and dark
+logos and supplies its composer icon in the native plugin metadata. Codex's
+marketplace interface currently exposes a display name; author and icon fields
+are provided by the plugin interface.
+
+MIT — see [LICENSE](LICENSE).

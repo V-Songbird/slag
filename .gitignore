@@ -13,7 +13,6 @@ __pycache__/
 Thumbs.db
 node_modules/
 /docs/*
-/plugins/
 /probes/
 
 **/.claude/*
@@ -39,7 +38,10 @@ ROADMAP.jsonl.backup-*
 jig/scripts/probes/results.json
 
 # This repo's dev config ported to other agent CLIs — local-only, not published
-.agents/
+/.agents/*
+!/.agents/plugins/
+/.agents/plugins/*
+!/.agents/plugins/marketplace.json
 .codex/
 
 # Per-plugin internal notes — the scope contract, strategy notes, and any
@@ -47,3 +49,6 @@ jig/scripts/probes/results.json
 /*/SCOPE.md
 /*/PRODUCT-STRATEGY.md
 /*/docs/
+
+# Disposable local validation artifacts
+.codex-test/

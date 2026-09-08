@@ -1,0 +1,65 @@
+{
+  "measuredAt": "2026-09-06T12:14:32.803593+00:00",
+  "feature": "migrate --host codex|claude",
+  "versions": {
+    "codex": "2.16.0-codex.1",
+    "claude": "2.16.0"
+  },
+  "sharedModuleSha256": "5bb1a9cb65dc5e598ef813215d48f814f3b10e2dc22ccba2ed8d68071ad3ab45",
+  "regression": {
+    "windowsCodex": {
+      "total": 1028,
+      "pass": 970,
+      "skip": 58,
+      "fail": 0
+    },
+    "linuxCodex": {
+      "total": 1028,
+      "pass": 967,
+      "skip": 61,
+      "fail": 0
+    },
+    "windowsClaude": {
+      "total": 967,
+      "pass": 947,
+      "skip": 20,
+      "fail": 0
+    },
+    "linuxClaudeFocused": {
+      "total": 108,
+      "pass": 107,
+      "fail": 1,
+      "baselineFailure": "engine.test.js: targetProblem direct Windows-backslash escape expectation fails identically in unmodified original Slag main; all 30 new migration tests passed"
+    }
+  },
+  "projects": {
+    "ilusio": {
+      "copiedFiles": 122,
+      "ok": true,
+      "originalsUnchanged": true,
+      "sourceSnapshotSha256": "e4493956f23da22a040d7512b4f84b28d574a590861aaed110bed48ca6dbe569"
+    },
+    "nawa": {
+      "copiedFiles": 116,
+      "ok": true,
+      "originalsUnchanged": true,
+      "sourceSnapshotSha256": "bfc51402b8479d4d637058b59e3c2a2697ddcd3e64331ec74eb4a070c9d24c93"
+    }
+  },
+  "nativeHostVerified": false,
+  "originalProjectsMigrated": false,
+  "installedCodex": {
+    "version": "2.16.0-codex.1+codex.20260906121915",
+    "enabledSkills": 3,
+    "enabledTrustedHooks": 4,
+    "registrationWarnings": [],
+    "newNativeProbePerformed": false
+  },
+  "limits": [
+    "No native macOS run in this acceptance",
+    "Project-copy tests verify planning, apply, reapply and reversal; they do not verify native hook delivery",
+    "Full Claude Linux suite was not run; focused suite has one reproduced baseline failure",
+    "Source-referenced governance target bytes require owner review; the migration plan fingerprints discovered instruction sources only"
+  ],
+  "evidenceSha256": "464c286e4ac85e299e8a76519554c58af11d0c0776ede5d2d69fec1a6cbb7f9a"
+}

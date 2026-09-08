@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "templates": [
+    {
+      "name": "check-driver",
+      "version": "1.17.0",
+      "file": "run.mjs",
+      "target": ".jig/checks/run.mjs",
+      "kind": "write-side-file",
+      "ownership": "file",
+      "classId": null,
+      "sha256": "fa3f9f13bdae104fbc3ca9433d995ef4b8fdd18c3c7fcde7ded60d6455d9193e"
+    },
+    {
+      "name": "ci-workflow",
+      "version": "1.2.0",
+      "file": "jig.yml",
+      "target": ".github/workflows/jig.yml",
+      "kind": "write-side-file",
+      "ownership": "file",
+      "classId": null,
+      "sha256": "1a615aeedabf68f4c6a8c81e2d09cdcf82452fcf96d2cfbc86c82bf620e1e8fd"
+    },
+    {
+      "name": "activation",
+      "version": "1.2.2",
+      "file": "activation.md",
+      "target": ".jig/activation.md",
+      "kind": "write-side-file",
+      "ownership": "file",
+      "classId": null,
+      "sha256": "257f192ccdb96c76028de8e219edc1ad0a8c4a02eb378c61644aa8138c48350c"
+    },
+    {
+      "name": "activation-woven",
+      "version": "1.1.2",
+      "file": "activation-woven.md",
+      "target": ".jig/activation.md",
+      "kind": "write-side-file",
+      "ownership": "file",
+      "classId": null,
+      "sha256": "41e4469a1c8b30646b3bc74b585d88d761c01764af85bc4fc6db393431436121"
+    },
+    {
+      "name": "activation-wired",
+      "version": "1.1.2",
+      "file": "activation-wired.md",
+      "target": ".jig/activation.md",
+      "kind": "write-side-file",
+      "ownership": "file",
+      "classId": null,
+      "sha256": "bdbebd2ab62404eb378f608180c293c058bc0b41b8f5799e4c61939c91aa2b25"
+    },
+    {
+      "name": "hook-shim",
+      "version": "1.4.2",
+      "file": "hook-pre-commit.sh",
+      "target": ".jig/hooks/pre-commit",
+      "kind": "write-side-file",
+      "ownership": "file",
+      "classId": null,
+      "sha256": "d17d5340e8e95a7509efd68655586f315fc7754fa0581fa42766a3bbe51e45a6"
+    }
+  ]
+}
