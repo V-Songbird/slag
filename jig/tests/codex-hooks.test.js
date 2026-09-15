@@ -29,8 +29,11 @@ function write(root, file, text) { const abs = path.join(root, file); fs.mkdirSy
 function run(root, patch, opts = {}) {
   const event = opts.event || "PreToolUse";
   const cwd = opts.cwd || root;
+  // The payload may spell the working directory differently from the process's
+  // own, as a host does when a symlink sits on the path.
+  const payloadCwd = opts.payloadCwd || cwd;
   const result = spawnSync(process.execPath, [runner, event, "--runtime", "codex", ...(opts.diagnostic === false ? [] : ["--diagnostic"])], { cwd, encoding: "utf8", windowsHide: true,
-    input: JSON.stringify({ session_id: "codex-fixture", turn_id: "turn-1", hook_event_name: event, cwd,
+    input: JSON.stringify({ session_id: "codex-fixture", turn_id: "turn-1", hook_event_name: event, cwd: payloadCwd,
       tool_name: opts.tool || "apply_patch", tool_input: { command: patch }, ...(opts.response ? { tool_response: opts.response } : {}) }) });
   assert.equal(result.status, 0, result.stderr);
   return { ...result, out: result.stdout ? JSON.parse(result.stdout) : null };
@@ -106,7 +109,29 @@ test("a nested working directory finds the repository policy and resolves patch 
   fs.mkdirSync(path.join(root, "src"));
   const result = run(root, patch("*** Add File: a.js", "+try { risky(); } catch {}"), { cwd: path.join(root, "src") });
   assert.equal(result.out.jig.decision, "deny");
-  assert.equal(ledger(root)[0].path, path.join(root, "src/a.js"));
+  // Spelled under the runner's root, which some systems report with symlinks
+  // resolved, so the directory is compared on real paths.
+  const recorded = ledger(root)[0].path;
+  assert.equal(path.basename(recorded), "a.js");
+  assert.equal(fs.realpathSync(path.dirname(recorded)), fs.realpathSync(path.join(root, "src")));
+});
+
+test("a payload cwd spelled through a symlink still resolves patch paths inside the repository", (t) => {
+  const root = fixture({ params: { patterns: [A.CATCH_PATTERN], paths: ["src/**"] } });
+  fs.mkdirSync(path.join(root, "src"));
+  const link = path.join(temp(), "linked-root");
+  try { fs.symlinkSync(root, link, process.platform === "win32" ? "junction" : "dir"); }
+  catch (err) { if (["EPERM", "EACCES", "ENOTSUP"].includes(err.code)) { t.skip("OS does not permit symlink fixtures"); return; } throw err; }
+  // macOS reports a process's working directory with its symlinks resolved,
+  // while the host's payload keeps its own spelling: the runner's root and the
+  // patch's cwd name one directory two ways.
+  const result = run(root, patch("*** Add File: src/b.js", "+try { risky(); } catch {}"), { payloadCwd: link });
+  assert.equal(result.out.jig.failedOpen, undefined, result.out.jig.failedOpen);
+  assert.equal(result.out.jig.decision, "deny");
+  const recorded = ledger(root)[0].path;
+  assert.equal(path.basename(recorded), "b.js");
+  assert.equal(fs.realpathSync(path.dirname(recorded)), fs.realpathSync(path.join(root, "src")));
+  assert.ok(!recorded.includes("linked-root"), "the ledger names the link rather than the repository: " + recorded);
 });
 
 test("a nested checkout never inherits the parent repository policy", () => {

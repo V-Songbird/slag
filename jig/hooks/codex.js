@@ -25,9 +25,13 @@ function inside(root, file) {
   return rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel);
 }
 
+// Judged on real paths and handed back spelled under root. The runner takes its
+// root from the process working directory, which macOS reports with symlinks
+// resolved (/private/var), while the payload's cwd keeps the host's spelling
+// (/var): one directory named two ways, and the evaluator scopes paths and
+// records the ledger relative to root.
 function scopedPath(root, cwd, name) {
   const file = path.resolve(cwd, name);
-  if (!inside(root, file)) throw new Error("patch path is outside this Jig repository: " + name);
   // Check existing parents as well: an added file beneath a symlink can leave
   // the repository even when its spelling is repo-relative.
   let existing = file;
@@ -36,10 +40,13 @@ function scopedPath(root, cwd, name) {
     if (parent === existing) break;
     existing = parent;
   }
-  if (!inside(fs.realpathSync(root), fs.realpathSync(existing))) {
-    throw new Error("patch path resolves outside this Jig repository: " + name);
+  const realRoot = fs.realpathSync(root);
+  const real = path.join(fs.realpathSync(existing), path.relative(existing, file));
+  if (!inside(realRoot, real)) {
+    const spelledInside = inside(root, file) || inside(realRoot, file);
+    throw new Error("patch path " + (spelledInside ? "resolves" : "is") + " outside this Jig repository: " + name);
   }
-  return file;
+  return path.join(root, path.relative(realRoot, real));
 }
 
 function parsePatch(command) {
