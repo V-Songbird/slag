@@ -1,6 +1,6 @@
 "use strict";
 
-// jig runners — the Claude-session half of the guard set. Everything a hook
+// jig runners — the host-independent evaluator for session guards. Everything a hook
 // does lives here so `runner.js` stays the thin single-dispatch entry the hook
 // wiring points at.
 //
@@ -29,8 +29,8 @@ const path = require("path");
 // thousand lines it never called into (`tests/runner.test.js` holds this
 // boundary open).
 const {
-  SCHEMA_VERSION, STATE_DIR, VERIFY_FILE, SHELL_TOOLS,
-  stripBom, fixturePath, proposedVerifyEntries,
+  SCHEMA_VERSION, STATE_DIR, VERIFY_FILE, SHELL_TOOLS, NATIVE_EDIT_TOOLS,
+  stripBom, fixturePath, proposedVerifyEntries, skillCommand,
 } = require("../scripts/vocab.js");
 // The one function that says what binds a proof to the check it proves. A
 // second copy of that hashing rule here would be a second answer to the
@@ -41,6 +41,9 @@ const CONFIG_FILE = "config.json";
 const LEDGER_FILE = "ledger.jsonl";
 const OFF_FILE = "off";
 const CHECKS_DIR = "checks";
+// Every tool a guard evaluation can arrive on: the shell names, and the one
+// native patch tool Codex sends. Edit and Write stay out, as they always have.
+const EVALUATED_TOOLS = [...SHELL_TOOLS, ...NATIVE_EDIT_TOOLS];
 
 // The closed runner set. A config naming anything else is invalid — the whole
 // point of a closed set is that a teammate cannot introduce a new execution
@@ -553,12 +556,12 @@ function sentence(text) {
   return /[.!?]$/.test(t) ? t : t + ".";
 }
 
-function denyText(guardId, deny, hasDriver) {
+function denyText(guardId, deny, hasDriver, runtime) {
   return "[jig guard " + guardId + "] " + sentence(deny.reason) +
     " Instead: " + sentence(deny.alternative) +
     " To override: " + sentence(deny.override) +
     (hasDriver ? " Before calling this work done, run: node .jig/checks/run.mjs." : "") +
-    " (false alarm? /jig:review fp " + guardId + ")";
+    " (false alarm? " + skillCommand("review", runtime) + " fp " + guardId + ")";
 }
 
 // What an observing guard says when its owner opted it into teaching. The same
@@ -775,13 +778,14 @@ function ledgerStats(root) {
       // coverage nobody had, on the row `problem` separately calls broken.
       s.evaluated++;
     }
-    if (s.evaluated > counted && SHELL_TOOLS.includes(row.tool) && !s.evaluatedOn.includes(row.tool)) {
+    if (s.evaluated > counted && EVALUATED_TOOLS.includes(row.tool) && !s.evaluatedOn.includes(row.tool)) {
       s.evaluatedOn.push(row.tool);
     }
   }
   // Reported in the shared list's own order, the way `shellToolsSeen` reports
   // its set, so two surfaces never name the same pair in two orders.
-  for (const s of Object.values(stats)) s.evaluatedOn = SHELL_TOOLS.filter((t) => s.evaluatedOn.includes(t));
+  // A Codex patch evaluation counts too; `shellToolsSeen` stays shell-only.
+  for (const s of Object.values(stats)) s.evaluatedOn = EVALUATED_TOOLS.filter((t) => s.evaluatedOn.includes(t));
   return stats;
 }
 
@@ -995,6 +999,7 @@ function appendLedger(root, row) {
 function ledgerRow(base, extra) {
   return {
     session: base.session,
+    ...(base.host ? { host: base.host } : {}),
     actor: extra.actor,
     guardId: extra.guardId,
     classId: extra.classId,
@@ -1223,10 +1228,27 @@ function witness(root, event, base, payload, warn) {
   // caught for a non-zero exit"), because a tool that catches by exiting
   // non-zero has not failed when it does.
   const expected = Number.isInteger(entry.expectedExit) ? entry.expectedExit : 0;
-  const passed = exitCode === null ? event === "PostToolUse" : exitCode === expected;
+  // Codex is the host where the event proves nothing. It delivers a failed
+  // command on PostToolUse too, and the payloads measured on Codex CLI 0.145.0
+  // and 0.153.4 carry raw stdout with no exit status. A code it did carry still
+  // decides; without one the run is recorded as unknown, never as green.
+  const codex = base.runtime === "codex";
+  const passed = exitCode !== null ? exitCode === expected : codex ? null : event === "PostToolUse";
+  const actor = codex ? "codex-session" : "claude-session";
+  if (passed === null) {
+    const problem = "the " + entry.id + " run has no exit evidence; verification remains unknown";
+    warn("jig: " + problem);
+    try {
+      appendLedger(root, ledgerRow(base, {
+        actor, guardId: null, classId: null, decision: "verify-unknown", matched: null,
+        durMs: 0, rest: { verify: entry.id, event, exitCode: null, failedOpen: problem },
+      }));
+    } catch (err) { warn("jig: the unknown verification run was not recorded (" + err.message + ")"); }
+    return { jig: { event, decision: "pass", verify: { entry: entry.id, passed: null, exitCode: null } } };
+  }
   try {
     appendLedger(root, ledgerRow(base, {
-      actor: "claude-session", guardId: null, classId: null,
+      actor, guardId: null, classId: null,
       decision: passed ? "verified" : "verify-failed", matched: null, durMs: 0,
       rest: { verify: entry.id, event, exitCode },
     }));
@@ -1275,11 +1297,17 @@ function stopContext(root, event, base, warn) {
 // One event, start to finish
 // ---------------------------------------------------------------------------
 
-function runEvent(root, event, payload, warn) {
+// `transport` is the host adapter's, and Claude Code's path passes none. It
+// names the runtime, the host label a ledger row records, and the tool the row
+// records when the adapter evaluates a view of a call rather than the call —
+// a Codex patch arrives as `apply_patch` and is read as Edit views.
+function runEvent(root, event, payload, warn, transport) {
   const input = payload.tool_input || {};
   const base = {
     session: typeof payload.session_id === "string" ? payload.session_id : null,
-    tool: typeof payload.tool_name === "string" ? payload.tool_name : null,
+    runtime: transport && transport.runtime === "codex" ? "codex" : "claude",
+    host: transport ? transport.host : undefined,
+    tool: (transport && transport.ledgerTool) || (typeof payload.tool_name === "string" ? payload.tool_name : null),
     path: typeof input.file_path === "string" ? input.file_path : null,
   };
   // The two events that witness a verification run, and the two that read those
@@ -1310,8 +1338,9 @@ function runEvent(root, event, payload, warn) {
     return { jig: { event, mode: DEFAULT_MODE, decision: "pass", config: "invalid", guards: [] } };
   }
 
+  const tool = typeof payload.tool_name === "string" ? payload.tool_name : null;
   const tools = EVENT_TOOLS[event] || [];
-  const running = check.guards.filter((g) => g.runner === event && (!base.tool || tools.includes(base.tool)));
+  const running = check.guards.filter((g) => g.runner === event && (!tool || tools.includes(tool)));
   // The ledger is read once, and only when some guard is asking to arm — a set
   // of observing guards never pays for it. Read on first use rather than up
   // front, so an Edit call whose guards all turn out to read Bash pays for
@@ -1330,7 +1359,7 @@ function runEvent(root, event, payload, warn) {
     const started = process.hrtime.bigint();
     const durMs = () => Math.round(Number(process.hrtime.bigint() - started) / 1e6 * 1000) / 1000;
     const record = loadCheck(root, guard.check);
-    const dets = record.problem ? [] : sessionDetectors(record.mod, event, base.tool);
+    const dets = record.problem ? [] : sessionDetectors(record.mod, event, tool);
     // A bash guard on an Edit call, or an edit guard on a Bash call: both are
     // registered for PreToolUse now, and a guard with nothing to say about this
     // tool did not evaluate. No warning and no row — it is not a broken install
@@ -1416,7 +1445,7 @@ function runEvent(root, event, payload, warn) {
   // to arm a guard whose check ships an incomplete triple, so a deny that
   // reaches here always carries reason, alternative and override.
   if (deny) {
-    const reason = denyText(denyGuard, deny, fs.existsSync(statePath(root, CHECKS_DIR, "run.mjs")));
+    const reason = denyText(denyGuard, deny, fs.existsSync(statePath(root, CHECKS_DIR, "run.mjs")), base.runtime);
     if (event === "PreToolUse") {
       out.hookSpecificOutput = {
         hookEventName: "PreToolUse",

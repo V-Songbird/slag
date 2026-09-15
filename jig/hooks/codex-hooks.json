@@ -1,0 +1,50 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|apply_patch)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"require(process.env.PLUGIN_ROOT + '/hooks/runner.js').cli(process.argv.slice(1))\" PreToolUse --runtime codex",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(Bash|apply_patch)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"require(process.env.PLUGIN_ROOT + '/hooks/runner.js').cli(process.argv.slice(1))\" PostToolUse --runtime codex",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"require(process.env.PLUGIN_ROOT + '/hooks/runner.js').cli(process.argv.slice(1))\" Stop --runtime codex",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"require(process.env.PLUGIN_ROOT + '/hooks/runner.js').cli(process.argv.slice(1))\" SubagentStop --runtime codex",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

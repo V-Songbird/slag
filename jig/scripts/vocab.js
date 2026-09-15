@@ -35,6 +35,33 @@ const VERIFY_FILE = "verify.json";
 // gate pins `hooks.json` to it.
 const SHELL_TOOLS = ["Bash", "PowerShell"];
 
+// Codex's hook transport is not Claude Code's. Measured on Codex CLI 0.145.0 and
+// 0.153.4: every shell call arrives as `Bash` whatever shell ran it, and an edit
+// arrives as `apply_patch` carrying the whole patch. Codex matchers also accept
+// `Edit` and `Write` as aliases of `apply_patch`, while the payload keeps the
+// canonical name. `hooks/codex.js` turns a patch into the Edit views the
+// evaluator reads, so the evaluator itself never learns which host sent them.
+const CODEX_SHELL_TOOLS = ["Bash"];
+const NATIVE_EDIT_TOOLS = ["apply_patch"];
+const HOOK_TOOL_ALIASES = { apply_patch: ["apply_patch", "Edit", "Write"] };
+
+// Which host this process serves. One plugin directory installs on Claude Code
+// and on Codex, and each host's wiring names itself: the Codex hooks and the
+// Codex skills pass `--runtime codex`, and no flag means Claude Code. Both hosts
+// export CLAUDE_PLUGIN_ROOT to a hook, so nothing the host sets can tell them
+// apart. The engine CLI copies its flag into JIG_RUNTIME for the whole process.
+const RUNTIMES = ["claude", "codex"];
+
+function activeRuntime() {
+  return process.env.JIG_RUNTIME === "codex" ? "codex" : "claude";
+}
+
+// How the owner invokes one of jig's skills on a runtime: `/jig:review` on
+// Claude Code, `$review` on Codex.
+function skillCommand(name, runtime) {
+  return (runtime || activeRuntime()) === "codex" ? "$" + name : "/jig:" + name;
+}
+
 function isObject(v) {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }
@@ -96,5 +123,6 @@ function fixturePath(det) {
 
 module.exports = {
   SCHEMA_VERSION, STATE_DIR, VERIFY_FILE, SHELL_TOOLS,
+  CODEX_SHELL_TOOLS, NATIVE_EDIT_TOOLS, HOOK_TOOL_ALIASES, RUNTIMES, activeRuntime, skillCommand,
   isObject, stripBom, proposedVerifyEntries, concreteSegment, fixturePath,
 };
