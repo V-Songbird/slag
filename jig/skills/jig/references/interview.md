@@ -1,6 +1,6 @@
 # The interview, word for word
 
-The contract printout, the blind-spot pass, the round protocol, every
+The compact introduction, the blind-spot pass, the round protocol, every
 question's wording, what a typed sentence is allowed to become, and the
 disclosures that must land the moment they become true. The flow that calls all
 of this is [../SKILL.md](../SKILL.md).
@@ -9,36 +9,30 @@ One rule sits above every line below. The scan and the forensics run first, and
 whatever they read is never asked. If a question here duplicates something
 `.jig/profile.json` already holds, drop the question, not the fact.
 
-## The contract printout
+## The compact introduction
 
-Print this before the first question, filled from the scan and the forensics
-results. It is the one place the user sees where the boundary between reading
-and asking falls.
+Open **Understand your needs** with two statements, in the owner's own words:
 
-```
-Detected — never asked
-  Language        <editions.join(", ") or "no edition matched — checks written from scratch">
-  Stack           <stack.packageManager or "no manifest"> · <stack.testScript or "no test script">
-  Node            <node.onPath ? node.version : "not on PATH"> <node.versionManager ? "(managed by " + node.versionManager + ")" : "">
-  Guardrails      <guardrails.hooks.length> hook registrations already here · <guardrails.rules.approxTokens> approx tokens of rules
-  Slots           <occupied.join(", ") or "all free">
-  History         <ranking[0].title> leads, <ranking[0].hits> hits  (<ranking[0].basis>)
+- **Already found:** the language, the package manager and the checks that bear
+  on this request, plus any limit of the repository or the runtime that matters
+  — a hook slot already taken, node behind a version manager, a history too
+  young to mine.
+- **Still to decide:** only the preferences the scan and this conversation do
+  not settle — who this protects against, the project's phase, which mistakes to
+  guard, which tools to install, which guards block.
 
-I will ask — never inferred
-  Who these guardrails are protecting against
-  What phase this project is in
-  Which mistakes to guard against, in your own words if the list misses them
-  Which tools to install, and where their config goes
-  Which guards block and which only observe
-```
+For example: "I found TypeScript on pnpm with a test script and no linter. I
+still need to know which recurring mistakes you want caught." Illustrative
+only: every fact comes from what this scan returned. The whole scan stays
+available when asked for; never open with token counts or every hook slot.
 
-Under `--quick`, the second column reads `assumed` on every row instead, because
-nothing in it was asked.
+Then print every line of `disclosures` verbatim, one per line. Those are the
+engine's own words about what it cannot promise, and a short introduction never
+drops one. Under `--quick`, say instead that every value is `assumed` and give
+the quick disclosure below; there is no interview to announce.
 
-Then print every line of `disclosures` verbatim, one per line, under the two
-columns. Those are the engine's own words about what it cannot promise.
-
-**On a project that does not exist yet**, column one is empty and says so. The
+**On a project that does not exist yet**, say that nothing was detected — no
+language, no toolchain — and ask only what is needed to prepare one. The
 interview stands in for the scan, and round one gains a question it would
 otherwise never ask. Nothing else in this file changes.
 
@@ -63,18 +57,13 @@ question to put to them.
 
 ## The blind-spot pass
 
-Four quadrants split the interview's material, and each has exactly one home:
+Detected facts are evidence, answers already given are settled preferences,
+and what the owner does not know they have to decide is this pass's job: it
+finds those and turns each into a branch. It is an internal pass over the
+results, not a set of categories the owner has to learn, and a `(Recommended)`
+first option stays a suggestion until it is answered.
 
-- **Known knowns** — what the scan and forensics read. Printed in the
-  contract's first column, never asked.
-- **Known unknowns** — the questions below. Asked, round by round.
-- **Unknown knowns** — the defaults the user would recognize on sight. They
-  ride as the `(Recommended)` first option on every question, so agreeing
-  costs one click.
-- **Unknown unknowns** — what the user does not know they have to decide.
-  This pass finds them and turns each into a branch.
-
-Walk these sources and write one numbered finding per hit, in plain words:
+Walk these sources and keep one finding per hit, in plain words:
 
 1. A forensics `ranking` leader nobody mentioned — the repository's loudest
    problem may not be on the user's list at all.
@@ -99,26 +88,28 @@ Walk these sources and write one numbered finding per hit, in plain words:
    scratch with nothing to calibrate against; several mean class ids arrive
    namespaced per edition and the same mistake may be guarded twice.
 
-Print them as:
-
-```
-What you may not know you're deciding
-  B1  <finding, one sentence, ending with the decision it seeds>
-  B2  …
-```
+Raise each finding when its decision is due — in the round that asks it, in one
+sentence saying what it affects and what the choice is. Findings that lead to
+the same choice are combined, keeping every id or path they name. A known
+coverage gap is never held for the end and never dropped because the
+introduction was short.
 
 A finding seeds a QUESTION (what to do), never a fact-check. A finding with no
-decision behind it is a disclosure, printed and not numbered.
+decision behind it is a disclosure, printed where it becomes true.
 
 ## The round protocol
 
 Work the tree in rounds. The **frontier** is every question whose
 prerequisites are already settled. Ask the whole frontier in one
 `AskUserQuestion` call (it carries at most four questions — a larger frontier
-splits into consecutive calls in the same round). Number questions `Q1…`
-continuously across rounds. The recommended answer is always the FIRST option
-and carries `(Recommended)` in its label. The interview closes exactly when
-the frontier is empty; nothing is left silently assumed.
+splits into consecutive calls in the same round). Track questions as `Q1…`
+continuously across rounds, and show an id only where it helps the owner answer
+several at once. The recommended answer is always the FIRST option and carries
+`(Recommended)` in its label; being first never counts as an answer. The rounds
+are dependency order, not a questionnaire: skip a branch the answers already
+closed, reuse an answer given earlier in this conversation, and ask no catch-all
+question once the needed decisions are settled. The interview closes exactly
+when the frontier is empty; nothing is left silently assumed.
 
 - **Round one** — no prerequisites: the language and package manager when there
   is no project here yet, then persona, phase, the mistake list, the

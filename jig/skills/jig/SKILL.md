@@ -5,15 +5,17 @@ description: >-
   catch bad work before it lands — linter, type checker, tests, CI and
   project-specific guards proven against their own fixtures before they are
   offered as coverage. Nothing is written or installed without being named and
-  approved first. Works on an empty folder as readily as an existing repo. Use
-  when the user wants guardrails set up, a new project scaffolded so its code is
-  checked from the first edit, or a repeat mistake caught before it lands — e.g.
-  "set up guardrails", "scaffold this project", "stop the AI deleting my tests",
-  "add checks to this repo", "what keeps breaking here", "catch skipped tests
-  before they merge" — or invokes /jig:jig. Do NOT use to grade, audit or author
-  prompt text — rules, skill descriptions or agent instructions: this installs
-  checks that run against a codebase.
-argument-hint: "[--quick] [--edition <id>] [--select <classId,…>] [--no-ci] [--observe]"
+  approved first. Works on an empty folder as readily as an existing repo, and
+  takes a request in plain words — what jig checks, caught or needs attention is
+  answered read-only. Use when the user wants guardrails set up, a new project
+  scaffolded, a repeat mistake caught before it lands, or asks jig anything —
+  e.g. "set up guardrails", "scaffold this project", "stop the AI deleting my
+  tests", "add checks to this repo", "what keeps breaking here", "jig, what are
+  you checking?", "what did jig catch?", "undo the jig install" — or invokes
+  /jig:jig. Do NOT use to grade, audit or author prompt text — rules, skill
+  descriptions or agent instructions: this installs checks that run against a
+  codebase.
+argument-hint: "[what you want, in your own words] [--quick] [--edition <id>] [--select <classId,…>] [--no-ci] [--observe]"
 allowed-tools: Bash, PowerShell, Read, Write, AskUserQuestion
 ---
 
@@ -34,6 +36,28 @@ that tool by name. Say that plainly when the user asks what they just installed.
 A check installs proven and blocking. Observe mode is a choice the owner can
 make per guard, not a probation every guard serves — never describe it as
 something a guard graduates from.
+
+## Route the request before anything else
+
+`$ARGUMENTS` may carry a request in the owner's own words rather than flags.
+Choose the job from what is being asked, never from a word that appears in a
+question, and shape the answer the way
+[references/experience.md](references/experience.md) says. A sibling skill is a
+file: read it and follow it here, in this conversation. Never send the owner to
+invoke another skill or to say the same thing again.
+
+| The owner wants | Do |
+| --- | --- |
+| to know what jig checks, what is installed, why a file is there, whether anything is running, or what needs attention | Read `${CLAUDE_PLUGIN_ROOT}/skills/inventory/SKILL.md`, run its one read-only command, and answer from it. No setup, no migration. |
+| to know what jig caught, to call an alert wrong, to see what drifted, or to change what a guard does on a match | Read `${CLAUDE_PLUGIN_ROOT}/skills/review/SKILL.md`. A report stays read-only; a change takes that skill's own consent step. |
+| jig explained, or how to use it | Answer from this file. Read inventory only when the question is about this project's current state. |
+| checks set up, or one more mistake caught | The setup below, from step 1. On an existing install this is the fresh pass over new material, not the routine review handoff. |
+| a named installation change repaired | Read inventory to name the issue, then the plan/apply repair route in step 7. Named approval and the drift refusal hold; do not widen a repair into a new setup. |
+| an installation change undone | Step 9 directly: `status`, resolve the change or transaction they named, then `revert`. No setup and no migration first. |
+
+Bare `/jig:jig` is the setup and re-run flow below. `--quick` is asked for by
+flag, never chosen because the owner wanted a short answer, and a read-only
+question that also carries a setup flag is clarified before anything runs.
 
 Flags in `$ARGUMENTS`: `--quick` (skip the rounds, pass `--quick` to `scan` and
 take the selection it computes, plan as `assumed`), `--edition <id>` (the user named the language, so
@@ -97,9 +121,12 @@ module that still declares PostToolUse, warns on every call and guards nothing
 until that module lands too. A guard on `refused` cannot move and keeps running
 as it is — say which, and why.
 
-After that, the drift report, the retire offer and the one re-run question
-belong to `/jig:review`. Hand off there and stop, unless the user says they want
-a fresh pass over new material.
+After that, the drift report and the retire offer are the review skill's. Read
+`${CLAUDE_PLUGIN_ROOT}/skills/review/SKILL.md` and continue its ordinary review
+here, in this conversation, keeping the owner's answers and any authorization
+they already gave — unless they asked for a fresh pass over new material, which
+is the setup below. A report-only request was routed before this paragraph and
+never runs the migration above.
 
 ## 1. Scan
 
@@ -110,8 +137,9 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" scan
 If `node` is not on PATH (fnm/nvm setups), register it the way the project's
 CLAUDE.md says to, then rerun.
 
-Writes `.jig/profile.json` and returns its contents. These keys feed the
-column-one list you print at step 2:
+Writes `.jig/profile.json` and returns its contents. These keys are the facts
+the **Already found** line at step 2 is built from, and none of them is ever
+asked:
 
 - `editions` — every catalogue edition that matched this repository. A polyglot
   repository matches several, and class ids are namespaced by edition so a
@@ -209,24 +237,27 @@ Skip forensics here — an empty folder has no history — and say that once.
 
 ## 2. Interview
 
-Before asking anything, print two columns: **Detected — never asked**, holding
-the facts from step 1, and **I will ask — never inferred**, holding who this
-protects against, the project's phase, which mistakes to guard, and which tools
-to install. Then name the unknown unknowns: read the profile and the forensics
-record and write down, as short numbered findings, everything the user probably
-does not know they have to decide. Both templates, the quadrant rule, every
-question's wording and the disclosures are in
-[references/interview.md](references/interview.md).
+Open **Understand your needs** with a short account of what the scan found and
+which decisions are still the owner's — two statements, not a printout. Then
+read the profile and the forensics record for what the owner does not know they
+have to decide, and raise each finding when its decision is due. The compact
+introduction, the blind-spot pass, every question's wording and the disclosures
+are in [references/interview.md](references/interview.md).
 
-The columns exist so the user can see the boundary. Anything in column one that
-you then put to them as a question is a defect in the run.
+The boundary holds without the printout: a fact the scan or the forensics read
+is never put to the owner as a question, and neither is an answer they already
+gave in this conversation. Every material gap is raised where it belongs;
+nothing waits for a summary at the end, and the whole tree is never shown
+before the first question.
 
 The interview is a design tree worked in rounds, not a fixed script. Each round
 asks the whole **frontier** — every question whose prerequisites are already
-answered — as ONE `AskUserQuestion` call, numbered `Q1…`, each question's
-recommended answer listed first and marked `(Recommended)`. A question whose
-answer depends on another still open this round waits for the next round. The
-close is mechanical: the interview ends exactly when the frontier is empty.
+answered — as ONE `AskUserQuestion` call, each question's recommended answer
+listed first and marked `(Recommended)`. Track the questions as `Q1…` across
+rounds, and show an id only where it helps the owner answer several at once. A
+question whose answer depends on another still open this round waits for the
+next round. The close is mechanical: the interview ends exactly when the
+frontier is empty, and no catch-all question follows it.
 
 Three rules bind every round:
 
@@ -290,8 +321,11 @@ show somebody who asks, and nothing jig ever runs. What the lanes run is not on
 this row: `plan` writes each tool's verify argv and its clean exit code into
 `.jig/verify.json`, and the CI workflow gains a step per entry.
 
-Put the proposal to the user as a multi-select, one line per tool: `why`, the
-`command` that would run, and the `configPath` it would write. Show
+Label it **Preferences for the proposal**, and say once that ticking a tool asks
+jig to put it on the plan — the plan review at step 6 is where its concrete
+changes are approved, by name. Reuse a choice the owner already made in this
+conversation. Put the proposal to the user as a multi-select, one line per
+tool: `why`, the `command` that would run, and the `configPath` it would write. Show
 `configSample` alongside for any tool the user asks about, or before they tick
 one that writes a config into a project that already has opinions — the bytes
 are on the row so nobody approves a file sight unseen. **Nothing is installed
@@ -738,8 +772,10 @@ time.
 The result names `review` — that is `.jig/plan.md`. That path always holds the
 LATEST plan's page, and the next plan overwrites it, so the same page is kept
 under this plan's id at `reviewKept` — `.jig/plan-<planId>.md`. Quote that one
-back when somebody asks what they approved. Read the page and walk the user
-through it:
+back when somebody asks what they approved. Open **Review the changes** with a
+short account of the selected mistakes, the files this plan writes and the
+coverage gaps, and name that saved page. Then read the page and walk the user
+through what decides an approval — none of it is optional detail:
 
 - the **coverage matrix**: rows are the admitted checks, columns are the four
   actors (`human-editor`, `human-ci`, `claude-session`, `codex-session`), each
@@ -767,6 +803,10 @@ Where several tools do share a section file jig can compose — `pyproject.toml`
 `Cargo.toml`, `.editorconfig` — the plan carries **one** write for that path
 holding every tool's section, not one write per tool. Say it that way: the
 owner is approving one file, and it is the whole file.
+
+Label the approval **Approve these changes**, and say once that these are the
+exact changes behind the preferences already ticked. Group rows by purpose where
+that reads better; an id, a path or a consequence is never merged with another's.
 
 Then take consent in two tiers, read off `consent` on the result:
 
@@ -802,6 +842,8 @@ stderr with exit 1. Read the message, change the selection, and never route
 around it.
 
 ## 7. Apply
+
+Open **Apply and check** once the concrete changes are approved.
 
 The item tier first, one id at a time:
 
@@ -946,12 +988,14 @@ install unwitnessed at step 9.
 
 ## 9. Close, and how to undo any of it
 
-Say what is now installed, which actors it covers, what it cannot see, and which
-guards the owner put in observe rather than blocking. Describe coverage as
-demonstrated only when step 8 returned `witnessed: true`; otherwise say plainly
-that nothing has been seen catching anything yet. Name the discarded checks
-again, and anything still waiting on the user from `proposals`. Point at
-`/jig:review` as the place the guards' record accrues.
+Close with the summary [references/experience.md](references/experience.md)
+shapes: say what is now installed, which actors it covers, what it cannot see,
+and which guards the owner put in observe rather than blocking. Describe
+coverage as demonstrated only when step 8 returned `witnessed: true`; otherwise
+say plainly that nothing has been seen catching anything yet. Name the discarded
+checks again, and anything still waiting on the user from `proposals`. Say that
+asking jig what it caught reads the guards' record — `/jig:review` directly, or
+`/jig:jig` in plain words.
 
 What is installed, any time, reading the journal and writing nothing ever:
 

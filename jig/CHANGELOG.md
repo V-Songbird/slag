@@ -4,6 +4,15 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.16.0] — 2026-09-08
+
+### Changed
+
+- `/jig:jig` takes a request in plain words and does the right job with it: "what are you checking?", "why is this file here?" and "is anything running?" read the inventory; "what did you catch?", "that alert was wrong" and "quiet that guard" go to the guards' record; "undo it" goes straight to the revert. A question only reads — it never installs, repairs or migrates on the way. `/jig:inventory` and `/jig:review` still work as direct entries.
+- Reports open with the short answer: what jig checks or caught, where that runs with session, commit and CI each on their own, and what needs attention. Anything broken, silenced, drifted or unverified stays in the summary; the full report, one section, one guard or one file comes on request, and a report-only question ends without a menu.
+- Setup runs in three named stages: understand your needs, review the changes, apply and check. The interview opens with what the scan found and what is still yours to decide instead of a printout, never asks a fact it already read or an answer you already gave, and keeps the tools you prefer apart from the changes you approve. Approval by named id and path, detector proof, blocking by default and undo are unchanged.
+- The README leads with what to say to jig.
+
 ## [2.15.1] — 2026-09-04
 
 ### Fixed

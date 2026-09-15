@@ -1,16 +1,18 @@
 ---
 name: review
 description: >-
-  Reads jig's ledger and reports what every installed guard has done. Then acts
-  on it: mark a report as a false alarm. Step a guard down to observe or back to
-  blocking. Retire one that never earned its keep. List installed files that
-  drifted since jig wrote them. Use when the user asks what jig has caught,
-  whether a guard is worth keeping, to change what a guard does on a match, to
-  mark a report as wrong, or to see what has changed since the install — e.g.
-  "what did jig catch", "that jig warning was wrong", "stop the force-push
-  guard blocking", "has anything drifted", "are my commit checks running" — or
-  invokes /jig:review. Do NOT use to install or set up guardrails — that is
-  /jig:jig.
+  Reads jig's ledger and reports what every installed guard has done — the short
+  answer first: what fired, where the checks run, what needs attention. Then
+  acts on it when asked: mark a report as a false alarm. Step a guard down to
+  observe or back to blocking. Retire one that never earned its keep. List
+  installed files that drifted since jig wrote them. A report-only ask stays
+  read-only; a change to a guard keeps its approval step. Use when the user asks
+  what jig has caught, whether a guard is worth keeping, to change what a guard
+  does on a match, to mark a report as wrong, or to see what has changed since
+  the install — e.g. "what did jig catch", "that jig warning was wrong", "stop
+  the force-push guard blocking", "has anything drifted", "are my commit checks
+  running" — or invokes /jig:review. Do NOT use to install or set up guardrails
+  — that is /jig:jig.
 argument-hint: "[fp <guardId>] [fp <guardId> --clear] [arm <guardId>] [disarm <guardId>] [retire <guardId>] [rerun]"
 allowed-tools: Bash, PowerShell, Read, AskUserQuestion
 ---
@@ -20,6 +22,23 @@ allowed-tools: Bash, PowerShell, Read, AskUserQuestion
 Everything mechanical is one command. You run it, read its result, and put the
 real decisions — keep, quiet, or retire — to the user. Never re-derive what the
 command already computed.
+
+`/jig:jig` routes a plain-language question here; `/jig:review` is the direct
+entry. Shape the answer the way
+`${CLAUDE_PLUGIN_ROOT}/skills/jig/references/experience.md` says. For an
+ordinary review, read the ledger and the re-run report (sections 1 and 5), then
+give the summary: what fired, where the checks run, what needs attention. For
+one alert or one guard, read the ledger and the section that acts on it, and
+put no unrelated question to the owner. `full`, or a request for everything,
+gets every applicable detail below. A report-only request ends with the report
+— no action menu, no write. A follow-up the owner asks for that belongs to the
+setup skill is continued here by reading
+`${CLAUDE_PLUGIN_ROOT}/skills/jig/SKILL.md`, never by sending them to invoke it.
+
+The field rules below say what each thing means and how to show it in detail.
+In a summary, healthy rows may be grouped; a `problem`, a guard running below
+its configured mode, a pending wave-off, drift and a verify entry never seen
+green stay visible every time.
 
 Every command is `node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" <review|rerun|fp|disarm|arm|retire>`
 from the project root. If `node` is not on PATH (fnm/nvm setups), register it
@@ -39,8 +58,8 @@ yes. Never pre-tick it, never assume it, never run both halves in one breath.
 already named the guard.
 
 If a command here refuses because the install predates the rework, that install
-needs upgrading before any of this reads correctly. Send the user to `/jig:jig`,
-which runs the migration, and stop.
+needs upgrading before any of this reads correctly. Say so and stop. Offer the
+upgrade through the setup skill; a report request does not authorize it.
 
 ## 1. Read the ledger
 
@@ -119,8 +138,9 @@ rather than remembered from the install:
 Report a dead lane in plain terms: what does not run, what still does, and the
 one command that fixes it. Offer the fix; never run it unasked. Print `fix`
 verbatim — it names the real invocation, and nothing puts `jig` on a PATH.
-Wiring the commit lane is an approved, reversible change like any other — send
-the user to `/jig:jig` to apply it rather than applying it here.
+Wiring the commit lane is an approved, reversible change like any other. When
+the owner asks for it, read the setup skill and continue the repair here; a
+report does not authorize applying it.
 
 `verify` is one row per lane entry, and `lastGreen` is the last time jig
 WITNESSED that command run green — in a Claude session, or in this machine's own
@@ -138,11 +158,13 @@ rows deletes the evidence a wave-off is undone from — so this number only goes
 up, and it is the one signal the user has that it is getting large. Report it
 once, plainly, at the end of this section.
 
-Show the guard rows as three groups: fired, never fired, waved off. Then say
-what each group means:
+In the full report, show the guard rows as three groups: fired, never fired,
+waved off. In the summary, give the activity that matters and every exception,
+with its evidence. Read the groups as follows:
 
-- **Fired** — working, unless the user says otherwise. Ask whether any of the
-  reports were wrong.
+- **Fired** — recorded matches, `denied` kept apart from `wouldDeny`. Working,
+  unless the user says otherwise; say that they can name a report that was
+  wrong. A read-only question needs no follow-up interview.
 - **Never fired** — a guard that has sat quiet through many sessions is a
   candidate for retirement, not pride. Say so plainly. A guard with a non-zero
   `otherLanes` does not belong in this group at all: its class is being caught
@@ -253,7 +275,12 @@ not just the agent sessions the ledger saw. Print it whenever it is non-null:
 `null` is not a finding: it means there is nothing to mine here — no install
 date, not a git repository, or git would not run.
 
-Then ask ONE `AskUserQuestion`, and do exactly the chosen one:
+If the owner already asked for an action, continue it through its section and
+its consent rules. If they asked only for the report, stop after it. Otherwise
+suggest the one next action the findings support, and put the four choices
+below as ONE `AskUserQuestion` only when the owner asks what they can do or
+wants help choosing — then do exactly the chosen one. Anything that takes
+enforcement away still needs its named change:
 
 - **Retire the dead** — `retire <guardId>` for each never-fired guard the user
   confirms, then the `apply` it hands back.
@@ -261,9 +288,10 @@ Then ask ONE `AskUserQuestion`, and do exactly the chosen one:
   indict, then the `apply` it hands back.
 - **Cover something new** — name the `backlog` rows the command already
   computed (`classId` — `reason`), a class `sinceInstall.byClass` shows still
-  climbing first, then hand off to `/jig:jig`, which authors and proves the new
-  checks. Never invent a class that is not in `backlog`.
+  climbing first, then read `${CLAUDE_PLUGIN_ROOT}/skills/jig/SKILL.md` and
+  continue the fresh pass here; it authors and proves the new checks. Never
+  invent a class that is not in `backlog`.
 - **Nothing, just the report** — stop here.
 
-One pass, then done; no follow-up menus. The kill switch for everything at once
-is still a file named `.jig/off`.
+One pass, then done; no follow-up menus. The kill switch for the session guards
+is still a file named `.jig/off`; the commit hook and CI keep running.

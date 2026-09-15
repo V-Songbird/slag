@@ -1,27 +1,35 @@
 ---
 name: inventory
 description: >-
-  Reports everything jig put in this repository and why it is there: every guard
+  Reports what jig checks in this repository and where it runs: every guard
   with what it watches and what happens on a match, every check module including
   the ones only the commit hook and CI run, every file jig wrote with the reason
   it was approved and whether it has drifted, and whether the session, commit and
-  CI lanes are actually live. Read-only — it changes nothing. Use when the user
-  asks what jig has installed, what it is watching, why something is there, how a
-  guard works, or whether the checks are really running — e.g. "what guards does
-  jig have", "what is jig watching", "why did jig install this", "what did jig do
-  to my repo", "how does this check work", "is anything actually running" — or
+  CI lanes are actually live. Opens with the short answer — what jig checks,
+  where that runs, what needs attention — and gives the full report or one
+  section on request. Read-only — it changes nothing. Use when the user asks what
+  jig has installed, what it is watching, why something is there, how a guard
+  works, or whether the checks are really running — e.g. "what guards does jig
+  have", "what is jig watching", "why did jig install this", "what did jig do to
+  my repo", "how does this check work", "is anything actually running" — or
   invokes /jig:inventory. Do NOT use to report what jig has CAUGHT or to change a
   guard — that is /jig:review — or to install anything, which is /jig:jig.
-argument-hint: "[guards] [checks] [files] [lanes]"
+argument-hint: "[full] [guards] [checks] [files] [lanes] [<guard id or path>]"
 allowed-tools: Bash, PowerShell, Read
 ---
 
 # jig:inventory
 
-Three surfaces, one job each. `/jig:jig` installs. `/jig:review` reports what the
-guards have **caught** and acts on it. This one reports what is **here** — and
-stops. Nothing in this skill arms, disarms, retires, waves off or installs
-anything, and offering to would be taking another skill's job.
+Three surfaces, one job each. `/jig:jig` installs, and routes a plain-language
+question here. `/jig:review` reports what the guards have **caught** and acts on
+it. This one reports what is **here** — and stops. Nothing in this skill arms,
+disarms, retires, waves off, migrates or installs anything. When the owner asks
+for one of those by name, read the skill that owns it —
+`${CLAUDE_PLUGIN_ROOT}/skills/review/SKILL.md` or
+`${CLAUDE_PLUGIN_ROOT}/skills/jig/SKILL.md` — and continue its workflow here,
+with every consent step it requires; never send the owner off to invoke it.
+Shape every answer the way `${CLAUDE_PLUGIN_ROOT}/skills/jig/references/experience.md`
+says: the summary first, the detail on request.
 
 Everything comes from one command:
 
@@ -31,23 +39,36 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/jig.js" inventory
 
 Run it from the project root. If `node` is not on PATH (fnm/nvm setups),
 register it the way the project's CLAUDE.md says to, then rerun. If the command
-refuses because the install predates the rework, send the user to `/jig:jig`,
-which runs the migration, and stop — nothing below reads correctly until then.
+refuses because the install predates the rework, say that the install needs
+upgrading before anything below reads correctly, and stop. Offer the upgrade
+through the setup skill; an inventory request does not authorize a migration.
 
-An argument narrows the report to one section: `guards`, `checks`, `files` or
-`lanes`. With no argument, print all four in that order.
+With no argument, give the summary: what jig checks, the session, commit and CI
+states each on their own, and what needs attention. Read all four sections
+below to build it — a check with no guard row is still an installed check — and
+surface every broken configuration, silenced lane, coverage gap, pending
+approval or drifted file the result carries.
 
-Every guard, check and file gets the same two-part treatment: a sentence saying
-what it does in plain words, then the facts under it. Readable first, checkable
-second. Never one without the other — a sentence nobody can verify is a claim,
-and a field dump nobody can read is not a report.
+An argument narrows the detail to one section: `guards`, `checks`, `files` or
+`lanes`; a named guard or file gets its own detail. `full`, or a request for
+everything, prints all four sections in that order, after the summary. These
+are choices about the answer, not flags the engine's `inventory` command takes.
+
+The sections below say what each field means and how to show it when it is
+asked for. Every guard, check and file you detail gets the same two-part
+treatment: a sentence saying what it does in plain words, then the facts under
+it. Readable first, checkable second. Never one without the other — a sentence
+nobody can verify is a claim, and a field dump nobody can read is not a report.
+A `why`, a `problem` or a `fix` the section says to print verbatim stays
+verbatim in the summary too; healthy rows may be grouped, never hidden.
 
 ## 1. Guards — what runs inside a session
 
 `guardsProblem` non-null comes first, before anything else in the report. It
 means jig refused the guard config outright, so `guards` is empty for that
-reason and not because nothing is installed. Print it verbatim and send the user
-to `/jig:jig`.
+reason and not because nothing is installed. Print it verbatim, say what repair
+it needs without applying one, and go on to the checks, the files and the lanes
+— those still read.
 
 `installed: false` is the other reason `guards` can be empty, and it is not the
 same one: there is no `.jig/config.json` here at all — jig was never installed,
@@ -164,7 +185,8 @@ here.
 
 Report a dead lane in plain terms: what does not run, what still does, and the
 one command that fixes it. Name the fix; never run it. Applying it is an
-approved, reversible change like any other, which means `/jig:jig`.
+approved, reversible change like any other, which means the setup skill — read
+it and continue there only when the owner asks for the repair.
 
 `verify` is one row per lane entry — the commands the lanes run besides the
 check driver — and `lastGreen` is the last time jig WITNESSED that command run
@@ -177,7 +199,11 @@ different facts, and only the second one answers "do the tests pass".
 
 ## Closing
 
-End with one line naming where to go next, and only if something earned it:
-`/jig:review` for what the guards have caught or to change one, `/jig:jig` to
-install or repair. If nothing is installed, say so and point at `/jig:jig`. The
-kill switch for everything at once is a file named `.jig/off`.
+End with the answer, and mention once what more there is — the guards, the
+checks, the files, the lanes, or the full report. Name a next step only if a
+finding earned it, in the owner's words: "ask jig to review that alert", "ask
+jig to repair the commit hook". `/jig:review` and `/jig:jig` stay available as
+direct entries; the owner need not learn them to continue. If nothing is
+installed, say so and say that jig can prepare a setup proposal. The kill switch
+for the session guards is a file named `.jig/off`; the commit hook and CI keep
+running.
