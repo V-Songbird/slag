@@ -253,7 +253,8 @@ test("release gate: no template targets an instruction file, and jig ships none 
       kind + " can write inside .git/");
   }
   assert.deepEqual(engine.KIND_TARGETS["write-settings"], [".claude/settings.json"]);
-  const shipped = listFiles(PLUGIN_ROOT, ["fixtures", "node_modules"]);
+  // `.codex-test/` is the Codex host probe's disposable, git-ignored output.
+  const shipped = listFiles(PLUGIN_ROOT, ["fixtures", "node_modules", ".codex-test"]);
   for (const rel of shipped) {
     const base = path.basename(rel);
     assert.equal(["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "AGENTS.override.md", ".cursorrules"].includes(base),

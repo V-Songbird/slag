@@ -1,0 +1,45 @@
+{
+  "name": "jig",
+  "version": "2.16.0",
+  "description": "Add checks for recurring project mistakes, review what they caught, and undo installation changes. Concrete changes need approval; detector proof and runtime coverage are reported separately.",
+  "license": "MIT",
+  "author": {
+    "name": "Victor Villegas",
+    "email": "victor.villegas@tuta.com",
+    "url": "https://github.com/V-Songbird"
+  },
+  "homepage": "https://github.com/V-Songbird/slag/tree/main/jig",
+  "repository": "https://github.com/V-Songbird/slag",
+  "keywords": [
+    "guardrails",
+    "checks",
+    "ci",
+    "pre-commit",
+    "hooks",
+    "tests",
+    "review",
+    "interview"
+  ],
+  "skills": "./codex-skills/",
+  "hooks": "./hooks/codex-hooks.json",
+  "interface": {
+    "displayName": "Jig",
+    "shortDescription": "Catch recurring mistakes with checks you review and can undo.",
+    "longDescription": "Tell Jig which mistakes you want to avoid. It reads the project, proposes checks and tools, and applies the concrete changes you approve. Ask what it checks, what it caught, or what needs attention. Detailed reports and undo remain available.",
+    "developerName": "Victor Villegas",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Help me set up Jig checks for this project.",
+      "What is Jig checking, and what needs attention?",
+      "Show what Jig caught."
+    ],
+    "logo": "./assets/logo.svg",
+    "logoDark": "./assets/logo-dark.svg",
+    "composerIcon": "./assets/logo.svg",
+    "websiteURL": "https://github.com/V-Songbird/slag"
+  }
+}
