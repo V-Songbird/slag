@@ -4,6 +4,12 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.18.1] — 2026-09-15
+
+### Fixed
+
+- Fixed an issue where, on Codex, session guards let an `apply_patch` edit through unchecked when the project was reached through a symlinked folder, as temporary folders are on macOS.
+
 ## [2.18.0] — 2026-09-15
 
 ### Added
