@@ -4,6 +4,22 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.18.0] — 2026-09-15
+
+### Added
+
+- Guided setup for anyone new to coding. Tell jig that an AI writes most of your code, and setup asks two or three questions, recommends the safe choice each time, shows an example of each mistake it will catch, and explains every change in plain words. What needs your approval does not change.
+- Setup offers the checks as two bundles, essential and wider, or one by one. When AI sessions do the work, each bundled check also watches them as they edit, and `--quick` installs the essential bundle the same way.
+- The plan opens with a short summary: the tools it installs, the checks it adds, what happens while an AI session works, when you commit and on every push, what it will not catch, and how many changes you approve.
+- Say yes to checking your commits during setup and jig connects its commit hook in the same install, approved by name like every other change.
+
+### Changed
+
+- Approval questions lead with a plain title for each change, grouped by what the change is for. The change id and path are still on every row and are still what gets applied. On Codex you can approve rows by their number in the table you were just shown.
+- When you write to jig in another language, what it reports reaches you in that language, with every id, path, command and count exactly as written.
+- `.jig/activation.md` opens with a short plain summary of what it means for your commits.
+- The README is shorter: what jig does for you, how setup goes, and what to say to it.
+
 ## [2.17.0] — 2026-09-15
 
 ### Added

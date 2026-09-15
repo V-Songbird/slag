@@ -1,6 +1,6 @@
 {
   "name": "jig",
-  "version": "2.17.0",
+  "version": "2.18.0",
   "description": "Add checks for recurring project mistakes, review what they caught, and undo installation changes. Concrete changes need approval; detector proof and runtime coverage are reported separately.",
   "license": "MIT",
   "author": {
