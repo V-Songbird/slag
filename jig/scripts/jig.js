@@ -1538,10 +1538,6 @@ function matrixActor(actor, runtime) {
   return (runtime || activeRuntime()) === "codex" && actor === "claude-session" ? "codex-session" : actor;
 }
 
-function codexActor(actor) {
-  return matrixActor(actor, "codex");
-}
-
 // What each lever can promise, in the only two terms the matrix grades on:
 // can a human or a CI runner run it with no agent host, and is it a pattern
 // somebody has to read or a fact a machine decides. Also an engine list — the
@@ -6669,7 +6665,7 @@ module.exports = {
   resolveEditions, editionClassById, AUTHORED_RUNNERS, adaptAuthoredDetector, readAuthored, admitAuthored, checkSlug,
   authoredChecksIn, readFromFile, toolchainProposal, toolchainRow, installTouchPaths, guardEvidence,
   PROFILE_KEYS, FILE_SLOTS, HOOK_SLOTS, RULE_FILES, CODEX_HOOK_SLOTS, CODEX_RULE_FILES, hookSlots, matcherToolNames,
-  CODEX_ACTORS, actorsFor, matrixActor, codexActor, codexHostFacts, agentsRegionBody, composeAgentsRegion, agentsInstructionPath,
+  CODEX_ACTORS, actorsFor, matrixActor, codexHostFacts, agentsRegionBody, composeAgentsRegion, agentsInstructionPath,
   CHANGE_KINDS, INSTALLABLE_KINDS, KIND_TARGETS, VALIDATORS, PROSE_BUDGET_BYTES, probeGreen,
   OWNERSHIPS, PROVENANCES, DEFAULT_INSTALL_MODE, installMode, TEMPLATE_DIR, guardProbe, fixturePath,
   execToolchainProbe, readableOutput,
