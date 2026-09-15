@@ -522,16 +522,54 @@ function commentSyntaxFor(edition, ext) {
 // is something they approve by fatigue.
 const QUICK_CAP = 8;
 
+// The wider of the two bundles setup offers (2.18.0): the same ordering as quick
+// start, twice as far down it. Not a severity cut — every edition is almost all
+// `safety`, so "essential plus hygiene" would add two or three classes at most.
+const WIDE_CAP = 16;
+
+// A line from a class's own violation sample that one of its patterns trips, so
+// a question can show the mistake rather than name it. Raw text, not blanked:
+// it illustrates the sample and proves nothing — admission stays the proof.
+const EXAMPLE_MAX = 120;
+
+function classExample(cls) {
+  const text = isObject(cls) && isObject(cls.fixtures) && typeof cls.fixtures.violation === "string"
+    ? cls.fixtures.violation : "";
+  for (const det of (isObject(cls) && Array.isArray(cls.detectors)) ? cls.detectors : []) {
+    const patterns = isObject(det) && det.lever === "check-driver" && isObject(det.params) &&
+      Array.isArray(det.params.patterns) ? det.params.patterns : [];
+    for (const pattern of patterns) {
+      let at = -1;
+      try { at = text.search(new RegExp(pattern)); } catch { continue; }
+      if (at < 0) continue;
+      const end = text.indexOf("\n", at);
+      const line = text.slice(text.lastIndexOf("\n", at - 1) + 1, end < 0 ? text.length : end).trim();
+      return line.length > EXAMPLE_MAX ? line.slice(0, EXAMPLE_MAX - 1) + "…" : line;
+    }
+  }
+  return null;
+}
+
+// Whether the class names source patterns an edit guard could read as well as
+// the driver. A hint for the model authoring the session half, never a promise:
+// the fixture pair still decides whether that half is admitted.
+function sessionReady(cls) {
+  return isObject(cls) && Array.isArray(cls.detectors) && cls.detectors.some((det) =>
+    isObject(det) && det.lever === "check-driver" && isObject(det.params) &&
+    Array.isArray(det.params.patterns) && det.params.patterns.length > 0);
+}
+
 function fallbackReason(forensics) {
   if (!isObject(forensics)) return "it was never run";
   if (typeof forensics.fallback === "string" && forensics.fallback !== "") return forensics.fallback;
   return "nothing ranked";
 }
 
-function quickSelection(profile, forensics, pluginRoot) {
+function quickSelection(profile, forensics, pluginRoot, cap) {
   if (!isObject(profile)) {
     throw expected("editions.quickSelection needs the scan profile, and got " + JSON.stringify(profile));
   }
+  const limit = Number.isInteger(cap) && cap > 0 ? cap : QUICK_CAP;
   const root = typeof pluginRoot === "string" && pluginRoot !== "" ? pluginRoot : path.join(__dirname, "..");
   const editionIds = Array.isArray(profile.editions)
     ? profile.editions.filter((id) => typeof id === "string" && id !== "")
@@ -542,9 +580,11 @@ function quickSelection(profile, forensics, pluginRoot) {
   // authored its classes in. That is forensics' own fallback rule, restated
   // here rather than imported, because forensics requires this file.
   const catalogue = [];
+  const byId = new Map();
   for (const id of editionIds) {
     loadEdition(root, id).classes.forEach((cls, i) => {
       catalogue.push({ classId: namespacedId(id, cls.id), edition: id, severity: cls.severity, order: i });
+      byId.set(namespacedId(id, cls.id), cls);
     });
   }
   catalogue.sort((a, b) =>
@@ -564,10 +604,10 @@ function quickSelection(profile, forensics, pluginRoot) {
       editionIds.includes(row.edition))
     : [];
   const usable = ranking.length > 0;
-  const head = (usable ? ranking : catalogue).slice(0, QUICK_CAP);
+  const head = (usable ? ranking : catalogue).slice(0, limit);
 
   return {
-    cap: QUICK_CAP,
+    cap: limit,
     basis: usable ? "forensics" : "catalogue",
     why: usable
       ? "the head of the forensics ranking over this repository's own history"
@@ -580,13 +620,18 @@ function quickSelection(profile, forensics, pluginRoot) {
       severity: typeof row.severity === "string" ? row.severity : null,
       hits: usable && Number.isInteger(row.hits) ? row.hits : 0,
       basis: usable ? row.basis || "forensics" : "catalogue",
+      title: byId.has(row.classId) ? byId.get(row.classId).title : null,
+      example: classExample(byId.get(row.classId)),
+      sessionReady: sessionReady(byId.get(row.classId)),
     })),
   };
 }
 
 module.exports = {
   QUICK_CAP,
+  WIDE_CAP,
   quickSelection,
+  classExample,
   loadIndex,
   detectEditions,
   loadEdition,

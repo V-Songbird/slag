@@ -57,11 +57,13 @@ stable ids and descriptions, and ask the owner to reply with the ids they want
 (or `none`), plus any free text. A single-select UI cannot represent a multi-select;
 do not silently select a recommended bundle or pretend it returned several ids.
 
-For mandatory plan-item consent, first show the concrete plan and an enumerated
-table of change id, exact path, kind and consequence, including install commands
-and config bytes when applicable. Ask the owner to name approved id/path pairs,
-or refer to rows by id only when that displayed table binds each id to one exact
-path. Use an explicit conversational approval question when the available input
+For mandatory plan-item consent, first show the plan's `## In short` summary and
+an enumerated table built from `consent.rows`: row number, change title, change
+id, exact path, kind and consequence, including install commands and config bytes
+when applicable, grouped by each row's `group`. Ask the owner to name approved
+id/path pairs, or refer to rows by id or by row number only when the table in the
+message they are answering binds each id or number to one exact path. A number
+from an earlier table, or from a table that has since changed, names nothing. Use an explicit conversational approval question when the available input
 tool does not support approval requests. **Nothing is pre-ticked.** Do not apply
 unanswered, declined, or implicitly selected rows. A changed path or consequence
 needs new consent; do not ask again for an unchanged pair already authorized in

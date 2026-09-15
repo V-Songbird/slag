@@ -3,6 +3,10 @@ jig reports it as drifted rather than overwriting your edit. -->
 
 # Commit hook wiring is configured
 
+In short: git is set to run jig's checks before every commit in this clone, and a
+finding stops the commit, as long as the hook can find node ("One thing that can
+go wrong" below). To stop it, see "Turning it off".
+
 The hook is configured to invoke jig's check driver. This file describes that
 wiring and how to undo it; it does not establish that a check has run.
 

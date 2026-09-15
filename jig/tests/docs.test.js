@@ -208,7 +208,11 @@ test("the item tier is asked as an enumerated multi-select, and applied one pair
     "the item tier's page size is not stated");
   assert.match(consent, /\*\*Nothing is pre-ticked\.\*\*/,
     "the item tier does not say that nothing is pre-ticked");
-  assert.match(consent, /label is the change id/, "the option label is not the change id");
+  // 2.18.0: the label is the change's plain title, which the engine keeps unique
+  // on the plan, and the description carries the id and path the approval binds.
+  assert.match(consent, /label is the change's `title`/, "the option label is not the change's title");
+  assert.match(consent, /description is the change id, its path/,
+    "the option no longer names the id and path it approves");
   assert.match(consent, /--change <id> --path <rel>/,
     "the multi-select no longer says the token stays one pair per ticked id");
 });
@@ -374,4 +378,51 @@ test("the permissions probe cites the section its trap was actually recorded in"
   assert.ok(trap.includes("permissions.allow"), "the untrusted-workspace note is gone from the probe");
   assert.ok(!/section 1/.test(trap), "the note still cites section 1, which is `PostToolUseFailure`");
   assert.match(trap, /`## Method`, the traps list/, "the note does not say where the trap is recorded");
+});
+
+// 2.18.0. The words an owner reads in an interview question are the words the
+// question carries, and a term the engine is built from — a lane, a driver, a
+// fixture — is a word they would have to learn before they could answer. Option
+// text is held to the plain vocabulary experience.md maps those terms to. Code
+// spans are exempt: a flag, a path or a command is what it is.
+const ENGINE_WORDS = /\b(?:floor|lanes?|check driver|driver|refspecs?|journal(?:ed)?|item-approved|item tier|include-line|pre-image|provenance|admission|fixtures?|near[- ]miss(?:es)?|ledger|armed)\b/i;
+const ENGINE_GRADES = /\b(?:DET|PROB|GAP)\b/;
+
+test("every interview option is worded without the engine's own vocabulary, on both hosts", () => {
+  const { render } = require("../scripts/build-skills.js");
+  const source = read("skill-sources", "jig", "references", "interview.md");
+  for (const [host, text] of Object.entries(render(source, "interview.md"))) {
+    const options = [];
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const start = /^\s*- `[^`]+` — "(.*)$/.exec(lines[i]);
+      if (!start) continue;
+      let body = start[1];
+      while (!body.endsWith("\"") && i + 1 < lines.length) body += " " + lines[++i].trim();
+      options.push(body);
+    }
+    assert.ok(options.length >= 25, host + ": the option parser found only " + options.length + " options, so it reads nothing");
+    for (const option of options) {
+      const words = option.replace(/`[^`]*`/g, "");
+      assert.doesNotMatch(words, ENGINE_WORDS, host + ": an interview option speaks the engine's language: " + option);
+      assert.doesNotMatch(words, ENGINE_GRADES, host + ": an interview option grades in the matrix's letters: " + option);
+    }
+    assert.match(text, /^## Guided setup$/m, host + ": the interview has no guided route");
+    assert.match(text, /^- `New to coding, using AI` — "/m, host + ": question one does not offer the guided route");
+  }
+});
+
+test("the setup skill and the plain register point at what the engine computes for them", () => {
+  const skill = read("skills", "jig", "SKILL.md");
+  const experience = read("skills", "jig", "references", "experience.md");
+  for (const field of ["`bundles`", "`sessionReady`", "`example`", "`consent.rows`", "## In short", "--wire-commit"]) {
+    assert.ok(skill.includes(field), "SKILL.md never names " + field);
+  }
+  assert.match(experience, /^## The plain register$/m, "experience.md has no plain register");
+  // The vocabulary the options are held to has to be one the owner can be given
+  // words for: every engine term the gate above bans is mapped in the table.
+  for (const term of ["lane", "check driver", "fixture pair", "near miss", "admission", "provenance", "journal",
+    "ledger", "`armed`", "`include-line`", "`DET` / `PROB` / `GAP`"]) {
+    assert.ok(experience.includes("| " + term) || experience.includes(", " + term), "experience.md gives no plain word for " + term);
+  }
 });

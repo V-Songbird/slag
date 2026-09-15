@@ -6,8 +6,7 @@ in — nothing else. Selection, admission, modes, consent, execution and storage
 are exactly what the calling skill states.
 
 Use the owner's own language for explanations and visible labels. Command
-names, guard and change ids, paths, engine output the skill says to quote, and
-the approval token stay exact.
+names, guard and change ids, paths and the approval token stay exact.
 
 ## Answer the request
 
@@ -69,18 +68,58 @@ findings earn it, and a suggestion runs nothing.
 
 | Engine term | What to call it |
 | --- | --- |
-| guard | a check on what a session is about to do |
+| guard | a check on what an AI session is about to do |
 | check | a detector for one mistake |
+| check driver, `run.mjs` | the check runner jig commits to the repository |
 | `armed` | set to block — proof of enforcement only where the lane is live |
 | `observe` | records a match and lets the call through |
-| lane | during a session, at commit, in CI |
-| fixture pair, proof | caught its planted mistake and spared its near miss |
+| lane | when a check runs: while a session works, when you commit, on push |
+| fixture pair, proof | caught its planted mistake and spared the look-alike |
+| near miss | a look-alike that is not the mistake |
+| admission | the test every check passes before it counts |
+| `DET` / `PROB` / `GAP` | caught / caught some of the time / not caught |
+| batch and item tiers | approved together / approved one at a time |
+| provenance | whether the owner picked it, took history's ranking, or jig assumed it |
+| `assumed` | chosen by jig from history or the catalogue, not answered by the owner |
+| bundle | a set of checks jig recommends, picked by its name |
 | drift | a file changed after jig wrote it |
-| `assumed` | chosen from history or the catalogue, not answered by the owner |
+| journal, pre-image | jig's copy of every file as it was, which undo puts back |
+| ledger | jig's record of what each guard saw |
+| `core.hooksPath`, wiring the commit lane | pointing git at jig's commit hook |
+| `include-line`, weave | one marked line added to a hook the owner already has |
+| edition, class | the checks for one language, and one mistake among them |
 | `lastGreen: null` | nothing here has been seen to run that command green |
 
-Give the technical id beside the plain word wherever the owner might act on it,
-and never call configured blocking "protected" while enforcement is unverified.
+For Spanish, prefer "comprobación", "guarda", "registra sin bloquear", "archivo
+modificado" and "resultado sin confirmar". Give the technical id beside the plain
+word wherever the owner might act on it, and never call configured blocking
+"protected" while enforcement is unverified.
+
+Engine prose a calling skill says to give the owner — a disclosure, a `why`, a
+refusal, a probe's notes — keeps every clause. "Verbatim" means nothing is
+dropped, softened or merged: when the owner writes in another language, give it
+in theirs, with every id, path, command, count and tool name exactly as the
+engine wrote it. A command is never translated, and the engine's own English is
+quoted whenever the owner asks for it.
+
+## The plain register
+
+Guided setup, and any owner who says they are new to this, gets the plain
+register for the rest of the conversation. It changes the words, never the facts
+and never the approvals:
+
+- The plain word from the table above, never an engine term on its own. An id or
+  a path appears where the owner acts on it — an approval, a file they asked
+  about — and nowhere else.
+- One idea per sentence. Say what happens to their project, not how jig is
+  built.
+- A mistake is shown, not only named: the `example` its bundle row carries, or a
+  short line from the check's own violation sample, with what catches it and
+  when.
+- A choice leads with the recommended option and one sentence on why. The owner
+  never has to know a flag.
+- A limit is still said, in one plain sentence — "this one is checked on push,
+  not while the AI edits". A limit is never dropped for being technical.
 
 ## Setup in three visible stages
 
@@ -90,19 +129,21 @@ change:
 - **Understand your needs** — the scan, the history, the preferences still
   open, the toolchain proposal. Facts already read and answers already given are
   reused, never asked again.
-- **Review the changes** — author and prove the selected checks, then the
-  coverage matrix and the concrete plan. Group rows by purpose for reading; each
-  change keeps its id, path, consequence, command and config bytes.
+- **Review the changes** — author and prove the selected checks, then the plan's
+  `## In short` summary, the coverage matrix and the concrete plan. Group the
+  changes by their `group`; each keeps its title, id, path, consequence, command
+  and config bytes.
 - **Apply and check** — apply only what was approved, in dependency order;
-  demonstrate the detectors; report the runtime evidence; say how to undo it.
+  connect the commit hook when the owner asked for that; demonstrate the
+  detectors; report the runtime evidence; say how to undo it.
 
 Label the mistake and tool selections **Preferences for the proposal**, and say
-once that ticking a tool asks jig to put it on the plan. Label the id/path table
-**Approve these changes**. An explicit approval is reused for the same id, path
-and consequence; a preference is never read as consent. Approval details never
-move behind optional detail, and no blanket yes replaces the named ones.
-`--quick` is asked for by flag, never assumed; it labels every assumption and
-takes the same approvals.
+once that ticking a tool asks jig to put it on the plan. Label the approval
+questions and the id/path list **Approve these changes**. An explicit approval is
+reused for the same id, path and consequence; a preference is never read as
+consent. Approval details never move behind optional detail, and no blanket yes
+replaces the named ones. `--quick` is asked for by flag, never assumed; it labels
+every assumption and takes the same approvals.
 
 The closing summary names what was applied, what was declined, what was proven,
 what remains unverified, and how to undo it — with the probe output, the

@@ -3537,6 +3537,44 @@ function laneWords(lanes) {
   return live.length ? live.join(" and ") : null;
 }
 
+// What a person calls a change, and the shelf it sits on (2.18.0). The id and the
+// path stay the approval token; this is the words an approval question leads
+// with, and `buildReview` keeps it unique on the page, because the label somebody
+// picks is how their answer comes back.
+const CHANGE_GROUPS = ["checks", "tools", "commit-and-ci", "project-files", "ai-instructions", "jig-records"];
+
+function plainChange(change, tier, classes) {
+  const p = toPosix(change.path || "");
+  const name = (change.template && change.template.name) || "";
+  if (change.migrationReview !== undefined) return { group: "ai-instructions", title: "Instruction bridge in " + p };
+  if (change.kind === "run-install") {
+    const item = change.install || {};
+    return { group: "tools", title: (item.installKind === "audit" ? "Set up " : "Install ") + (item.id || p) };
+  }
+  if (change.kind === "set-git-config") return { group: "commit-and-ci", title: "Check every commit" };
+  if (change.kind === "include-line") return { group: "commit-and-ci", title: "jig's line in " + p };
+  if (change.kind === "write-rule") return { group: "ai-instructions", title: "Session rule " + p };
+  if (change.kind === "write-agents-region") return { group: "ai-instructions", title: "jig's block in " + p };
+  if (change.kind === "write-settings") return { group: "ai-instructions", title: "Host settings in " + p };
+  if (change.kind === "write-config") {
+    return tier === "item" ? { group: "checks", title: "Guard settings" } : { group: "jig-records", title: "jig's settings" };
+  }
+  if (isCheckModule(p)) {
+    const cls = (classes || []).find((c) => (change.classIds || []).includes(c.id));
+    return { group: "checks", title: "Check: " + (cls && cls.title ? cls.title : path.posix.basename(p, ".check.mjs")) };
+  }
+  if (p.startsWith(".github/workflows/")) return { group: "commit-and-ci", title: "CI workflow" };
+  if (p === STATE_DIR + "/checks/run.mjs") return { group: "commit-and-ci", title: "Check runner" };
+  if (p === STATE_DIR + "/hooks/pre-commit") return { group: "commit-and-ci", title: "Commit hook script" };
+  if (p === STATE_DIR + "/" + VERIFY_FILE) return { group: "commit-and-ci", title: "Tool commands to run" };
+  if (p === STATE_DIR + "/" + ACTIVATION_FILE) return { group: "jig-records", title: "Note on commit checks" };
+  if (p === STATE_DIR + "/" + PERMISSIONS_FILE) return { group: "jig-records", title: "Suggested permission rules" };
+  if (name.startsWith("starter-")) return { group: "project-files", title: "Starter " + p };
+  if (name.startsWith("toolchain-")) return { group: "tools", title: "Tool settings in " + p };
+  if (p.startsWith(STATE_DIR + "/")) return { group: "jig-records", title: "jig file " + p };
+  return { group: "project-files", title: "Write " + p };
+}
+
 function consentFor(change, guards, installed, context) {
   if (change.migrationReview !== undefined) {
     return { tier: "item", why: "adds a reviewed host instruction bridge in " + change.path + "; approve its exact change and path" };
@@ -3747,6 +3785,96 @@ function toolchainRow(row) {
   };
 }
 
+// The page's first section (2.18.0): what the plan does, in words somebody new
+// to all of this can act on. Read off the same lanes, guard rows, matrix rows and
+// changes every later section reads, so it can say nothing the matrix does not.
+function planSummary(root, changes, artifacts, rows, guards, mode, lanes, tools) {
+  const planned = (rel) => changes.find((c) => toPosix(c.path) === rel);
+  const verify = planned(STATE_DIR + "/" + VERIFY_FILE);
+  const raw = verify ? verify.content : readIfExists(path.join(root, STATE_DIR, VERIFY_FILE));
+  const entries = raw === null || raw === undefined ? [] : proposedVerifyEntries(raw.toString("utf8")) || [];
+  const onLane = (lane) => entries.filter((e) => Array.isArray(e.lanes) && e.lanes.includes(lane)).map((e) => e.id);
+  // Every module the driver will find once this lands: this plan's, and any an
+  // earlier install left, counted once.
+  const modules = new Set(changes.filter((c) => isCheckModule(c.path)).map((c) => toPosix(c.path)));
+  try {
+    for (const name of fs.readdirSync(path.join(root, STATE_DIR, "checks"))) {
+      if (name.endsWith(".check.mjs")) modules.add(STATE_DIR + "/checks/" + name);
+    }
+  } catch { /* nothing installed yet */ }
+  // The guard rows the config this plan writes would leave, installed ones
+  // included — the same face the consent line for that config reads.
+  const config = changes.find((c) => c.kind === "write-config");
+  const face = (config && proposedGuards(config.content)) || guards;
+  const hook = Boolean(planned(STATE_DIR + "/hooks/pre-commit")) ||
+    fs.existsSync(path.join(root, STATE_DIR, "hooks", "pre-commit"));
+  return {
+    install: tools.filter((t) => !t.present).map((t) => t.id),
+    configure: tools.filter((t) => t.present).map((t) => t.id),
+    checks: artifacts.filter((a) => isCheckModule(a.path)).map((a) => a.title.replace(/^Check: /, "")),
+    session: {
+      blocking: face.filter((g) => g.mode === "armed").length,
+      recording: face.filter((g) => g.mode !== "armed").length,
+    },
+    commit: { state: lanes.commit ? "runs" : hook ? "not-wired" : "none", checks: modules.size, tools: onLane("commit") },
+    push: { state: lanes.ci ? "runs" : "none", checks: modules.size, tools: onLane("ci") },
+    notCaught: titlesAt(rows, 0),
+    partly: titlesAt(rows, 1),
+    approvals: {
+      item: artifacts.filter((a) => a.tier === "item").length,
+      batch: artifacts.filter((a) => a.tier === "batch").length,
+    },
+  };
+}
+
+// 0: every cell GAP. 1: caught somewhere, but no host-neutral deterministic lever
+// covers it end to end — the ENFORCEMENT GAP list. 2: cleared. A title is placed at
+// the best rank any row carrying it reached, because a bundled mistake arrives as
+// its edition row and as the module authored for it, and the owner reads one mistake.
+function titlesAt(rows, rank) {
+  const best = new Map();
+  for (const r of rows) {
+    if (r.unmatched) continue;
+    const at = r.allCellsGap ? 0 : r.enforcementGap ? 1 : 2;
+    best.set(r.title, Math.max(best.has(r.title) ? best.get(r.title) : 0, at));
+  }
+  return [...best].filter(([, at]) => at === rank).map(([title]) => title);
+}
+
+function renderSummary(s) {
+  const code = (ids) => ids.map((id) => "`" + id + "`").join(", ");
+  const plural = (n, one, many) => n + " " + (n === 1 ? one : many);
+  const out = ["## In short", ""];
+  out.push("- **Tools it installs:** " + (s.install.length ? code(s.install) + "." : "none.") +
+    (s.configure.length ? " Already here, so only configured: " + code(s.configure) + "." : ""));
+  out.push("- **Checks it adds:** " + (s.checks.length ? s.checks.length + " — " + s.checks.join("; ") + "." : "none."));
+  const watching = [
+    s.session.blocking ? plural(s.session.blocking, "guard", "guards") + " set to block a matching edit or command" : null,
+    s.session.recording ? plural(s.session.recording, "guard", "guards") + " that only record one and let it through" : null,
+  ].filter(Boolean);
+  out.push("- **While an AI session works:** " + (watching.length
+    ? watching.join(", and ") + (activeRuntime() === "codex" ? ", once Codex has loaded and trusted jig's hooks." : ".")
+    : "nothing watches the session."));
+  const runs = (where, lane) => {
+    const what = [lane.checks ? plural(lane.checks, "check", "checks") : null, lane.tools.length ? code(lane.tools) : null]
+      .filter(Boolean);
+    return where + (what.length ? " runs " + what.join(" and ") + "." : " runs, and has nothing to check yet.");
+  };
+  out.push("- **When you commit:** " + (s.commit.state === "runs" ? runs("the commit hook", s.commit)
+    : s.commit.state === "not-wired"
+      ? "nothing runs yet. The commit hook is written, and git only uses it once you ask jig to turn on commit checks."
+      : "nothing runs."));
+  out.push("- **On every push:** " + (s.push.state === "runs" ? runs("the CI workflow", s.push)
+    : "nothing runs, because this plan adds no CI workflow."));
+  if (s.notCaught.length) out.push("- **Not caught by this plan:** " + s.notCaught.join("; ") + ".");
+  if (s.partly.length) {
+    out.push("- **Only partly covered:** " + s.partly.join("; ") + ". The gap list further down says what each one misses.");
+  }
+  out.push("- **You approve:** " + plural(s.approvals.item, "change", "changes") + " one at a time and " +
+    s.approvals.batch + " together.");
+  return out;
+}
+
 function buildReview(payload, generated, root) {
   const { selection, classes, provenance, refused, toolchain, discarded, discardedFile, editions } = generated;
   const mode = generated.mode || DEFAULT_INSTALL_MODE;
@@ -3756,14 +3884,21 @@ function buildReview(payload, generated, root) {
   // one repository, and the block used to describe a different one.
   const lanes = planLanes(root, payload.changes);
   const consentContext = { lanes, ciCanFail: ciCanFail(root, payload.changes) };
-  const artifacts = payload.changes.map((c) => ({
-    id: c.id,
-    path: c.path,
-    kind: c.kind,
-    classIds: c.classIds,
-    enforcementGap: c.enforcementGap,
-    ...consentFor(c, guards, generated.installedGuards || [], consentContext),
-  }));
+  const artifacts = payload.changes.map((c) => {
+    const consent = consentFor(c, guards, generated.installedGuards || [], consentContext);
+    return {
+      id: c.id,
+      path: c.path,
+      kind: c.kind,
+      classIds: c.classIds,
+      enforcementGap: c.enforcementGap,
+      ...consent,
+      ...plainChange(c, consent.tier, classes),
+    };
+  });
+  const titled = new Map();
+  for (const a of artifacts) titled.set(a.title, (titled.get(a.title) || 0) + 1);
+  for (const a of artifacts) if (titled.get(a.title) > 1) a.title += " (" + a.path + ")";
   const installedTools = installedToolFace(root);
   const backlog = backlogFor(generated.loaded || [], selection, installedTools.commitLane);
   const rows = classes.map((cls) => matrixRow(cls, provenance, payload.changes, guards, installedTools, lanes));
@@ -3828,7 +3963,11 @@ function buildReview(payload, generated, root) {
     consent: {
       batch: artifacts.filter((a) => a.tier === "batch").map((a) => a.id),
       item: artifacts.filter((a) => a.tier === "item").map((a) => a.id),
+      // The same changes in the words an approval question leads with, and the
+      // shelf each sits on. The id/path pair is still the only token apply takes.
+      rows: artifacts.map((a) => ({ id: a.id, path: a.path, tier: a.tier, group: a.group, title: a.title, why: a.why })),
     },
+    summary: planSummary(root, payload.changes, artifacts, rows, guards, mode, lanes, toolchain.items.map(toolchainRow)),
     enforcementGaps: payload.changes.filter((c) => c.enforcementGap).map((c) => c.path),
     // The floor, as a report. Every class nothing host-neutral catches, named
     // on the surface the owner reads instead of thrown before they see it.
@@ -3889,6 +4028,7 @@ function renderReviewMd(review, backlog) {
     out.push("Codex hook delivery, project trust and plugin loading are not verified by this plan. Session detector grades describe the admitted runtime; they do not prove host interception.");
     out.push("");
   }
+  if (review.summary) out.push(...renderSummary(review.summary), "");
   out.push("## Coverage by actor");
   out.push("");
   out.push("| class | provenance | " + review.actors.join(" | ") + " |");
@@ -4106,15 +4246,20 @@ function renderReviewMd(review, backlog) {
   out.push("");
   out.push("Approve in one go — these only ever report:");
   out.push("");
-  for (const a of review.artifacts.filter((x) => x.tier === "batch")) {
-    out.push("- `" + a.id + "` → `" + a.path + "` — " + a.why);
-  }
+  // Led by the change's plain title and ordered by what it is for, so the list an
+  // owner reads matches the grouped questions they answer. The id and path follow
+  // on every line: they are what the approval binds.
+  const line = (a) => "- " + (a.title ? "**" + a.title + "** — " : "") + "`" + a.id + "` → `" + a.path + "` — " + a.why;
+  const shelved = (tier) => review.artifacts.filter((x) => x.tier === tier)
+    .map((a, i) => ({ a, i, g: CHANGE_GROUPS.indexOf(a.group) }))
+    .sort((x, y) => x.g - y.g || x.i - y.i).map(({ a }) => a);
+  for (const a of shelved("batch")) out.push(line(a));
   out.push("");
   out.push("Approve one at a time — each of these can refuse something:");
   out.push("");
-  const item = review.artifacts.filter((x) => x.tier === "item");
+  const item = shelved("item");
   if (!item.length) out.push("- nothing in this plan can refuse anything");
-  for (const a of item) out.push("- `" + a.id + "` → `" + a.path + "` — " + a.why);
+  for (const a of item) out.push(line(a));
   out.push("");
 
   // The one thing on this plan the owner cannot read anywhere else: the exact
@@ -5258,7 +5403,7 @@ function cmdSelftest(root, opts) {
 const PROFILE_FILE = "profile.json";
 
 const PROFILE_KEYS = ["schemaVersion", "scannedAt", "stack", "languages", "edition", "editions", "node",
-  "guardrails", "governance", "slots", "occupied", "greenfield", "disclosures", "quick"];
+  "guardrails", "governance", "slots", "occupied", "greenfield", "disclosures", "quick", "bundles"];
 
 // The files jig writes at v1 — the same targets the engine's per-kind
 // allowlist permits, named here as slots a human can be shown.
@@ -5877,22 +6022,32 @@ function cmdScan(root, opts) {
     // Null on an ordinary scan: quick start is the only run that selects
     // without asking, so it is the only one that owes a recorded answer.
     quick: null,
+    bundles: null,
     disclosures,
   };
 
+  // The two bundles setup offers in place of a class-by-class list (2.18.0), and
+  // the selection quick start takes without asking — the same computation, so
+  // "essential" means one thing on every route. Both are computed here from this
+  // repository's own history and written with their basis, so what somebody
+  // picked by a bundle's name can be checked afterwards class by class.
+  let mined = null;
+  try {
+    mined = require("./forensics.js").runForensics(root, {});
+  } catch {
+    // History is an improvement on catalogue order, never a gate. A git that
+    // will not run leaves the catalogue fallback, which says so in `basis`.
+  }
+  profile.bundles = {
+    essential: editionsLib.quickSelection(profile, mined),
+    wide: editionsLib.quickSelection(profile, mined, undefined, editionsLib.WIDE_CAP),
+  };
+
   // `--quick` skips every round, so the selection cannot be a decision somebody
-  // makes in the moment and nobody can check afterwards. The engine computes it
-  // here from this repository's own history, writes it with its basis, and says
-  // what quick start still costs.
+  // makes in the moment and nobody can check afterwards. It is the essential
+  // bundle, and the disclosure says what quick start still costs.
   if (opts && opts.quick) {
-    let mined = null;
-    try {
-      mined = require("./forensics.js").runForensics(root, {});
-    } catch {
-      // History is an improvement on catalogue order, never a gate. A git that
-      // will not run leaves the catalogue fallback, which says so in `basis`.
-    }
-    profile.quick = editionsLib.quickSelection(profile, mined);
+    profile.quick = profile.bundles.essential;
     disclosures.push("Quick start selected " + profile.quick.classes.length + " of " + profile.quick.considered +
       " classes on a " + profile.quick.basis + " basis — " + profile.quick.why + ". The selection is written to " +
       STATE_DIR + "/" + PROFILE_FILE + " under `quick`, so what was assumed on your behalf is on disk rather than" +

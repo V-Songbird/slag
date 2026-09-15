@@ -31,6 +31,7 @@ skills or repeat the request.
 | Set up or add a protection | Follow the setup/fresh-pass procedure below. |
 | Repair a named installation change | Read inventory to identify the issue, then use the existing plan/apply repair procedure for that issue. Preserve named approval and drift refusal; do not widen it into new setup. |
 | Undo an installation change | Go directly to section 9: read `status`, resolve the requested change or transaction, then use the existing `revert` procedure. Do not run setup or migration first. |
+| Check commits on this machine ("wire the commit lane", "check my commits") | Use step 7's commit wiring: `plan --wire-commit`, with its changes approved by name. Do not run setup first. |
 
 Bare `$jig` keeps the ordinary setup/re-run behavior below. `--quick` remains an
 explicit setup option; never use it just because the owner asked for a short
@@ -64,7 +65,8 @@ make per guard, not a probation every guard serves — never describe it as
 something a guard graduates from.
 
 Flags in the user's invocation text: `--quick` (skip the rounds, pass `--quick` to `scan` and
-take the selection it computes, plan as `assumed`), `--edition <id>` (the user named the language, so
+take the selection it computes — the essential bundle, each check's session half
+written at step 4 — and plan as `assumed`), `--edition <id>` (the user named the language, so
 work against that edition rather than detection — the flag a project that does
 not exist yet runs on), `--select <classId,…>` (the user already named the
 classes, so skip that question and treat them as elicited), `--no-ci` (pass
@@ -162,9 +164,19 @@ column-one list you print at step 2:
 - `governance` — the ADRs, scopes, roadmaps and north-stars the repo carries,
   each with the loaded surfaces that reference it. `orphans` lists the ones
   nothing references — vital documents every session is blind to.
+- `bundles` — `essential` and `wide`, the two selections question three offers
+  by name. Each is computed the way quick start's is — the head of the forensics
+  ranking where history is usable, otherwise classes by tier and catalogue order
+  — capped at its own `cap`, with `basis` and `why` beside it. Every class row
+  carries `title`, an `example` line from its own violation sample (or null) and
+  `sessionReady`, whether it names source patterns an edit guard can reuse. Never
+  substitute a selection of your own for a bundle the owner picked.
 
-`disclosures` is prose the engine wrote for a human. Print those lines
-**verbatim**; paraphrasing them is how an honest limit turns into a vague one.
+`disclosures` is prose the engine wrote for a human. Give every line in the
+owner's language, with every id, path, command, count and tool name exactly as
+the engine wrote it and no clause dropped or softened — paraphrasing a limit into
+something vaguer is how an honest limit stops being one
+([references/experience.md](references/experience.md)).
 
 **An occupied slot is a coverage disclosure.** Jig conservatively avoids a
 slot the scan reports occupied. Name it without claiming every Codex host has
@@ -262,6 +274,15 @@ with `(Recommended)` in its label. A question whose answer depends on another
 open question waits for the next round. The interview ends when the frontier is
 empty. Reuse answers already in this conversation.
 
+**Guided setup.** Question one's `New to coding, using AI` answer is the guided
+route in [references/interview.md](references/interview.md): question three as its
+bundles, one tools question and the commit-checks question, recommended defaults
+for everything else, and the plain register in
+[references/experience.md](references/experience.md) for the rest of the
+conversation. It changes how much is asked and how it is said. It never changes
+what is approved: every default reaches the owner as a named change they can
+decline, and nothing is pre-ticked.
+
 Three rules bind every round:
 
 - **Facts are never questions.** Anything the scan or the forensics read is
@@ -280,7 +301,10 @@ take the selection from `quick.classes` on the profile — the engine computes i
 tier and then catalogue order, capped at `quick.cap`) and records `quick.basis`
 and `quick.why` beside it. Never substitute a selection of your own: the whole
 point of the recorded one is that the owner can check afterwards what was
-assumed. Then plan with `--provenance assumed` and tag every assumed value in
+assumed. It is the essential bundle, `bundles.essential`. Quick start assumes the
+AI-sessions persona — jig runs inside an agent session — so step 4 writes the
+session half for every class in it whose row is `sessionReady`, exactly as it
+would for an owner who gave that answer. Then plan with `--provenance assumed` and tag every assumed value in
 the printout: an `assumed` row is a default the owner never saw, and it is
 disclosed as one everywhere it appears. Quick start's one interaction is the
 plan review at step 6.
@@ -326,7 +350,9 @@ this row: `plan` writes each tool's verify argv and its clean exit code into
 
 Label this **Preferences for the proposal**: selecting a tool includes it in
 the plan; the later review authorizes its concrete changes. Reuse tool choices
-already made. Put the proposal to the user as an enumerated selection table, one row per tool: `why`, the
+already made. On the guided route, ask the tools question in
+[references/interview.md](references/interview.md) first, and show this table only
+for `Choose one by one`. Put the proposal to the user as an enumerated selection table, one row per tool: `why`, the
 `command` that would run, and the `configPath` it would write. Show
 `configSample` alongside for any tool the user asks about, or before they select
 one that writes a config into a project that already has opinions — the bytes
@@ -358,8 +384,8 @@ goes back as `--package-manager <name>`.
 
 ## 4. Check authoring
 
-For each mistake the interview surfaced — from the class list, from free text,
-or from a forensics leader the user confirmed — write one check. Read the
+For each mistake the interview surfaced — from a bundle, from the class list,
+from free text, or from a forensics leader the user confirmed — write one check. Read the
 matched edition for shape, naming, severity and calibration in the language at
 hand; it is reference material, and it never bounds what may be written — see
 [references/catalogues.md](references/catalogues.md). There is one
@@ -445,7 +471,8 @@ check that simply does not work.
 
 ### When the owner said their AI sessions are the point
 
-Round one, question one. Answered `Me and my AI sessions`, the laziness
+Round one, question one. Answered `Me and my AI sessions` or `New to coding,
+using AI` — or assumed under `--quick` — the laziness
 mistakes — a suite narrowed to one case, a warning suppressed, a stub returned
 in place of the work, an error swallowed — are authored as ONE module carrying
 TWO detectors over the same `patterns` and the same `paths`:
@@ -455,11 +482,27 @@ TWO detectors over the same `patterns` and the same `paths`:
   it denies the edit that ADDS the match and says nothing about the one already
   in the file.
 
-Authored as a driver alone — which is all an edition class carries, so all
-`--select` installs — a mistake of this kind is caught at commit time and in CI
-and never in the session that produced it. The owner reads it in a pre-commit
-failure, hours after the agent moved on, which is the opposite of the answer
-they gave. Adding the session half is authoring, at this step, per mistake.
+Selected with `--select` alone, an edition class writes no module at all: it is
+covered only where a tool rule it names runs, which is CI, and nothing reads it
+in the session that produced the mistake or at the commit that carries it. The
+owner reads it in a failed push, hours after the agent moved on, which is the
+opposite of the answer they gave. Adding both halves is authoring, at this step,
+per mistake.
+
+**A bundle's classes are written from their own rows.** For every class in the
+bundle the owner picked, or the one quick start took, whose row is
+`sessionReady`, copy the class's `check-driver` detector as it stands, add an
+`edit-guard` detector over the same `patterns`, `paths`, `stripComments` and
+`stripStrings` with `onlyWhenIntroduced: true`, carry the class's own `fixtures`
+inline, and write the deny triple in plain words. Keep every bundle class on
+`--select` as well, so the tool rules it names still grade. A class whose row is
+not `sessionReady` goes to `--select` alone. When admission discards one of these
+modules, author it again with its `check-driver` detector alone and plan once
+more; if that is discarded too, drop it and say the mistake is covered only where
+its tool rules run. Never loosen a pattern and never declare
+`expectedNearMissHits` to get one through, and give the owner the disclosure
+[references/interview.md](references/interview.md) carries for a session half
+that did not survive.
 
 ```json
 {
@@ -780,9 +823,11 @@ The result names `review` — that is `.jig/plan.md`. That path always holds the
 LATEST plan's page, and the next plan overwrites it, so the same page is kept
 under this plan's id at `reviewKept` — `.jig/plan-<planId>.md`. Quote that one
 back when somebody asks what they approved. Start **Review the changes** with
-a short account of the selected mistakes, proposed files and coverage gaps.
-Link the exact saved review page. Read it and walk the user through the
-decision-relevant content below; approval details are never optional:
+the page's `## In short` section in the owner's language, then the selected
+mistakes, proposed files and coverage gaps. Link the exact saved review page.
+Read it and walk the user through the decision-relevant content below; approval
+details are never optional. On the guided route, read the matrix out as when each
+mistake is caught, in plain words:
 
 - `host` — the engine reports `projectTrust`, `hooksEnabled` and `pluginLoaded`
   as `unknown` because its file scan cannot inspect the active Codex session.
@@ -827,12 +872,14 @@ Then take consent in two tiers, read off `consent` on the result:
   item tier, because it can fail a build.
 
 Show the item tier as an enumerated table, not a series of vague approval
-paragraphs. Each row's label is the change id, with the exact path, kind and
+paragraphs, grouped by each row's `group` on `consent.rows`. Each row carries its
+number and the change's `title`, then the change id, with the exact path, kind and
 consequence beside it: the hook it wires, the tool it installs, or the build it
 can fail. Include the exact command and config bytes before approval. Ask the
-owner to name the approved ids from that displayed id/path table, or write the
-approved id/path pairs explicitly; `none` declines all. Page a long table into
-manageable groups without inferring approval for later pages.
+owner to name the approved ids from that displayed id/path table, the row numbers
+of that same table, or the approved id/path pairs explicitly; `none` declines all.
+Page a long table into manageable groups without inferring approval for later
+pages.
 
 **Nothing is pre-ticked.** No default, unanswered question, recommended option,
 or approval of the batch tier selects an item. Reuse an existing explicit
@@ -927,6 +974,16 @@ hook is not unsetting `core.hooksPath`.
 
 A file the owner edited is refused rather than rewritten, and the plan says so in
 `refused` while still proposing the wiring. Their file, their words.
+
+**When the owner asked for their commits to be checked** — question seven-c, or
+the guided route — the stage does not end at the install. Once every approved
+change has landed, run `plan --wire-commit`, open its `## In short`, and put its
+changes to the owner by name exactly as step 6 does: the git setting, and the
+rewritten `.jig/activation.md` beside it. Apply them in the same order as any
+plan, then carry on to step 8, so the commit hook runs before anything is
+demonstrated. When the plan refuses because a pre-commit hook of the owner's own
+would stop running, relay the refusal and offer question seven-b's weave instead;
+when it refuses because commits are already checked, say so and move on.
 
 A repository wired under an older jig has the stale file and no plan coming to
 fix it. When the scan says the commit lane is live and `.jig/activation.md` still

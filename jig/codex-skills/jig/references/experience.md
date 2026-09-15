@@ -1,9 +1,9 @@
 # Conversation and reporting
 
 Use the user's language for explanations and visible labels. Keep command names,
-guard and change ids, paths, engine output that must be quoted, and approval
-tokens exact. These are presentation rules for the existing workflows; they do
-not change selection, admission, modes, consent, execution, or storage.
+guard and change ids, paths and approval tokens exact. These are presentation
+rules for the existing workflows; they do not change selection, admission, modes,
+consent, execution, or storage.
 
 ## Answer the request
 
@@ -57,27 +57,65 @@ An explicit request for all/everything/full detail gets the complete report.
 An explicit section, named guard, file, or count gets that information directly,
 with the limitations relevant to it. Never make someone ask twice for detail
 they already requested. Report-only requests end with the answer, without a
-mandatory action menu. Suggest at most one next action when the findings warrant
-it; a suggestion does not execute it.
+mandatory action menu. Suggest at most one next action when the findings
+warrant it; a suggestion does not execute it.
 
 ## Plain labels, exact meaning
 
 | Engine term | User-facing meaning |
 | --- | --- |
-| guard | A check on a supported action during the session |
-| check | A detector for a particular mistake |
-| `armed` | Set to block supported calls, when trusted hooks are active |
-| `observe` | Records matches without blocking |
-| lane | During the session / at commit / in CI |
-| fixture proof | Detected a planted mistake and spared its valid example |
-| drift | A file changed after Jig wrote it |
-| `assumed` | Suggested from repository history or the catalogue, not answered by you |
-| `verify-unknown` | The command's result is unconfirmed |
+| guard | a check on what an AI session is about to do |
+| check | a detector for one mistake |
+| check driver, `run.mjs` | the check runner jig commits to the repository |
+| `armed` | set to block supported calls, when trusted hooks are active |
+| `observe` | records a match and lets the call through |
+| lane | when a check runs: while a session works, when you commit, on push |
+| fixture pair, proof | caught its planted mistake and spared the look-alike |
+| near miss | a look-alike that is not the mistake |
+| admission | the test every check passes before it counts |
+| `DET` / `PROB` / `GAP` | caught / caught some of the time / not caught |
+| batch and item tiers | approved together / approved one at a time |
+| provenance | whether the owner picked it, took history's ranking, or jig assumed it |
+| `assumed` | chosen by jig from history or the catalogue, not answered by the owner |
+| bundle | a set of checks jig recommends, picked by its name |
+| drift | a file changed after jig wrote it |
+| journal, pre-image | jig's copy of every file as it was, which undo puts back |
+| ledger | jig's record of what each guard saw |
+| `core.hooksPath`, wiring the commit lane | pointing git at jig's commit hook |
+| `include-line`, weave | one marked line added to a hook the owner already has |
+| edition, class | the checks for one language, and one mistake among them |
+| `verify-unknown` | the command's result is unconfirmed |
 
-For Spanish, prefer "comprobación", "registra sin bloquear", "archivo modificado"
-and "resultado sin confirmar". Include the technical identifier when it helps
-inspect evidence or select an action. Never shorten configured blocking to
-"protected" when runtime enforcement is unverified.
+For Spanish, prefer "comprobación", "guarda", "registra sin bloquear", "archivo
+modificado" and "resultado sin confirmar". Give the technical id beside the plain
+word wherever the owner might act on it, and never call configured blocking
+"protected" while enforcement is unverified.
+
+Engine prose a calling skill says to give the owner — a disclosure, a `why`, a
+refusal, a probe's notes — keeps every clause. "Verbatim" means nothing is
+dropped, softened or merged: when the owner writes in another language, give it
+in theirs, with every id, path, command, count and tool name exactly as the
+engine wrote it. A command is never translated, and the engine's own English is
+quoted whenever the owner asks for it.
+
+## The plain register
+
+Guided setup, and any owner who says they are new to this, gets the plain
+register for the rest of the conversation. It changes the words, never the facts
+and never the approvals:
+
+- The plain word from the table above, never an engine term on its own. An id or
+  a path appears where the owner acts on it — an approval, a file they asked
+  about — and nowhere else.
+- One idea per sentence. Say what happens to their project, not how jig is
+  built.
+- A mistake is shown, not only named: the `example` its bundle row carries, or a
+  short line from the check's own violation sample, with what catches it and
+  when.
+- A choice leads with the recommended option and one sentence on why. The owner
+  never has to know a flag.
+- A limit is still said, in one plain sentence — "this one is checked on push,
+  not while the AI edits". A limit is never dropped for being technical.
 
 ## Setup in three visible stages
 
@@ -86,10 +124,12 @@ Use these labels for progress; retain the execution order in the setup skill:
 - **Understand your needs:** scan, relevant history, unresolved preferences,
   and the tool proposal. Reuse repository facts and answers already given.
 - **Review the changes:** author and prove the selected checks, then show the
-  coverage matrix and concrete plan. Group rows by purpose for readability;
-  each change keeps its exact id, path, consequence, commands and config bytes.
-- **Apply and check:** apply only approved changes in dependency order,
-  demonstrate detectors, report runtime evidence, and explain undo.
+  plan's `## In short` summary, the coverage matrix and concrete plan. Group the
+  changes by their `group` for readability; each change keeps its exact title,
+  id, path, consequence, commands and config bytes.
+- **Apply and check:** apply only approved changes in dependency order, connect
+  the commit hook when the owner asked for that, demonstrate detectors, report
+  runtime evidence, and explain undo.
 
 Label tool and mistake selection as **Preferences for the proposal**. Explain
 once that choosing a tool asks Jig to include it in the plan. Label the later

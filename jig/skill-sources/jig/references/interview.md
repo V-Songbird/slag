@@ -5,11 +5,11 @@
 <!-- host: end -->
 
 <!-- host: claude -->
-The compact introduction, the blind-spot pass, the round protocol, every
-question's wording, what a typed sentence is allowed to become, and the
+The compact introduction, the blind-spot pass, the round protocol, the guided
+route, every question's wording, what a typed sentence is allowed to become, and the
 <!-- host: codex -->
-The compact introduction, the blind-spot pass, the round protocol, the
-questions, what a typed sentence is allowed to become, and the
+The compact introduction, the blind-spot pass, the round protocol, the guided
+route, the questions, what a typed sentence is allowed to become, and the
 <!-- host: end -->
 disclosures that must land the moment they become true. The flow that calls all
 of this is [../SKILL.md](../SKILL.md).
@@ -41,7 +41,9 @@ still need to know which recurring mistakes you want caught." Illustrative
 only: every fact comes from what this scan returned. The whole scan stays
 available when asked for; never open with token counts or every hook slot.
 
-Then print every line of `disclosures` verbatim, one per line. Those are the
+Then give every line of `disclosures`, one per line, in the owner's language:
+every id, path, command, count and tool name exactly as the engine wrote it, and
+no clause dropped or softened ([experience.md](experience.md)). Those are the
 engine's own words about what it cannot promise, and a short introduction never
 drops one. Under `--quick`, say instead that every value is `assumed` and give
 the quick disclosure below; there is no interview to announce.
@@ -61,11 +63,13 @@ know which recurring mistakes you want to catch." This is illustrative: use
 only facts actually returned for this repository. Keep the full scan available
 when requested; do not print internal token counts or every hook slot up front.
 
-Print every line of engine `disclosures` verbatim. A material gap stays visible
-even when the introduction is short. Under `--quick`, label the selected values
-`assumed` and use the quick disclosure below; there is no interview to announce.
-On an empty project, say no language or toolchain was detected and ask only the
-missing choices needed to prepare it.
+Give every line of engine `disclosures` in the owner's language, keeping every
+id, path, command, count and tool name exact and dropping no clause
+([experience.md](experience.md)). A material gap stays visible even when the
+introduction is short. Under `--quick`, label the selected values `assumed` and
+use the quick disclosure below; there is no interview to announce. On an empty
+project, say no language or toolchain was detected and ask only the missing
+choices needed to prepare it.
 <!-- host: end -->
 
 **Question zero**, header `"Language"`, asked only when `greenfield` on the
@@ -192,9 +196,11 @@ skip already answered branches and do not ask a final catch-all question after
 the needed decisions are settled.
 <!-- host: end -->
 
-- **Round one** — no prerequisites: the language and package manager when there
-  is no project here yet, then persona, phase, the mistake list, the
-  agent-damage anchor.
+- **Round one** — no prerequisites: question one, with the language and package
+  manager beside it when there is no project here yet. Question one goes first
+  and on its own, unless this conversation already answers it, because its guided
+  answer replaces the rest of the interview — nothing else is on the frontier
+  until it is settled. Then phase, the mistake list and the agent-damage anchor.
 - **Round two** — unlocked by round one: the worst-bug free text; the stale pair
   forensics found, when it found one; the toolchain
 <!-- host: claude -->
@@ -202,40 +208,98 @@ the needed decisions are settled.
 <!-- host: codex -->
   selection table; the CI workflow decision; the hook-weave offer when the scan
 <!-- host: end -->
-  found a committed pre-commit; any decision a blind-spot finding seeded that
-  round one's answers left standing.
+  found a committed pre-commit, or the commit-checks question when it did not;
+  any decision a blind-spot finding seeded that round one's answers left standing.
 - **Round three** — only when round two created it: the blocking-versus-observe
   question over the checks that survived, and any branch a round-two answer
   opened.
 
+## Guided setup
+
+Question one's `New to coding, using AI` answer is the owner saying they cannot
+weigh the trade-offs this interview normally puts to them, and want jig to carry
+them. It changes how much is asked and how it is said. It changes nothing about
+what is approved: every change still reaches the owner by name, nothing is
+pre-ticked, and every default below is a change they can still decline at the
+review.
+
+It settles, as recommended defaults the review shows:
+
+- the persona is the AI one, so SKILL.md step 4 writes each bundled check's
+  session half;
+- phase `Normal`, every admitted guard blocking, the CI workflow, and the tools
+  running on push only — no `--verify-commit`.
+
+<!-- host: claude -->
+What is still asked goes in one `AskUserQuestion` call after question one:
+<!-- host: codex -->
+What is still asked follows question one, one focused question at a time:
+<!-- host: end -->
+
+1. **Question three**, as its three options.
+2. **Tools**, header `"Tools"`, single-select: "Which tools should jig set up?"
+   - `The recommended set (Recommended)` — every row `toolchain` proposes for
+     this project, each named with what it is for.
+   - `Only the linter and tests` — the rows whose `role` is `linter` and
+     `test-runner`, named; offered only when the edition proposes both.
+   - `Choose one by one` — question six as written.
+   - `None` — "jig still adds its own checks."
+3. **Question seven-c**, or **seven-b** when the scan found a committed
+   pre-commit hook.
+4. **Question five-a**, only when forensics found a stale pair.
+
+On a project that does not exist yet, question zero and its package-manager
+follow-up ride with question one, and the package manager's recommended option is
+the first entry of that edition's `detect.packageManagers`.
+
+Questions two, four, five, seven, seven-a and eight are not asked. Say once, in
+one sentence, that the owner can describe any other mistake in their own words at
+any time and jig will write a check for it.
+
+For the rest of the conversation jig speaks in the plain register
+[experience.md](experience.md) describes, and shows each mistake through the
+`example` its bundle row carries: "for example, a line like
+`it.only('adds two numbers', () => {` would be caught". A row whose `example` is
+null gets one plain sentence instead. Before the review, say in three short lines
+what the defaults mean for them: what blocks, where the checks run, and that any
+guard can be switched to only recording later by asking jig.
+
 ## Round one — persona, posture, mistakes, anchor
 
 <!-- host: claude -->
-One `AskUserQuestion` call, four questions. The first two are single-select. On
-a project that does not exist yet, question zero and its package-manager
-follow-up lead this round, so the toolchain proposal has an edition to resolve
-against.
+Two `AskUserQuestion` calls: question one, then the other three. The first two
+questions are single-select. On a project that does not exist yet, question zero
+and its package-manager follow-up ride with question one, so the toolchain
+proposal has an edition to resolve against.
 <!-- host: codex -->
-The first two are single-select preferences. Split the questions into the
-number the available Codex input tool supports. On a project that does not
-exist yet, settle question zero before its package-manager follow-up, so the
-toolchain proposal has an edition to resolve against.
+The first two are single-select preferences, and question one is settled before
+the others. Split the questions into the number the available Codex input tool
+supports. On a project that does not exist yet, settle question zero before its
+package-manager follow-up, so the toolchain proposal has an edition to resolve
+against.
 <!-- host: end -->
 
 **Question one**, header `"Protecting"`: "Who are these guardrails protecting
 this project against?"
 
-- `A team` — "Other people commit here. The floor has to hold for someone who
-  never runs jig and never reads its output."
-- `Me and my AI sessions` — "Mostly solo, with agents doing real work in the
-  repository. The session guards are the point."
-- `Me` — "Solo, no agents. The check driver and CI carry everything."
+- `A team` — "Other people commit here too. The checks have to work for someone
+  who never runs jig and never reads what it says."
+- `Me and my AI sessions` — "Mostly solo, with AI sessions doing real work here.
+  Catching their mistakes while they work is the point."
+- `Me` — "Solo, no AI sessions. The checks that run when you commit and on every
+  push carry everything."
+- `New to coding, using AI` — "An AI writes most of the code. jig asks two or
+  three questions, recommends the safe choice each time, and explains every
+  change in plain words."
+
+The fourth answer is the guided route above; nothing else in this round is asked
+after it.
 
 **Question two**, header `"Phase"`: "What phase is this project in?"
 
 - `Prototype` — "Moving fast, breakage is cheap. Fewer checks, and more of them
   observing."
-- `Normal` — "Shipping and maintained. The usual floor."
+- `Normal` — "Shipping and maintained. The usual set of checks."
 - `Locked down` — "Breakage is expensive. Every mistake worth naming, guarded,
   and blocking."
 
@@ -243,25 +307,51 @@ Both answers shape which mistakes lead the list at question three and how
 insistently a gap is stated. Neither answer decides on its own what blocks —
 that is question eight.
 
-<!-- host: claude -->
-**Question three**, header `"Guard against"`, `multiSelect: true`: "Which of
-<!-- host: codex -->
-**Question three**, header `"Guard against"`, an enumerated selection table: "Which of
-<!-- host: end -->
-these should jig watch for?"
+**Question three**, header `"Guard against"`: "What should jig watch for?"
 
-The options are **not a fixed list**. Build them from the matched editions'
-class rows, ordered by the forensics `ranking`, highest `hits` first, and put
-the real hit count into the description when `basis` is `"forensics"`. Use the
-edition's own `title` and write the description in one sentence: what the
-mistake is, and what a check for it would read. Ten to twelve options is
-plenty; the rest are reachable through the free text below. When class ids
-arrive namespaced from more than one edition, say which language each row is
+A single-select over the two bundles `scan` computed, and a way to pick one by
+one:
+
+- `Essential protection (Recommended)` — `bundles.essential`: say how many
+  checks, name the first two or three by `title`, and on the two AI personas add
+  that each one also watches AI sessions as they edit and that three risky
+  commands are stopped too.
+- `Wider protection` — `bundles.wide`: how many checks, and that it is the
+  essential set continued down the same list.
+- `Choose one by one` — the full list below, with an example of each mistake.
+
+Say what ordered the bundles, from their `basis`: this repository's own history
+when it is `forensics`, the catalogue's order when it is `catalogue` — never
+present the second as evidence. A bundle is picked by its name, not class by
+class, so it plans as `--provenance assumed`, and the review names every class it
+holds before anything is approved. Never swap a class into or out of a bundle; an
+owner who wants that picks one by one.
+
+On the two AI personas — `New to coding, using AI` and `Me and my AI sessions` —
+the essential bundle also carries `hook-bypassed`, `force-push-to-default` and
+`pipe-to-shell`, and the wide bundle all four standing offers. On `A team` and
+`Me` a bundle carries none of them, and the standing offers follow as one more
+selection of their own.
+
+**Choosing one by one.** The options are **not a fixed list**. Build them from
+the matched editions' class rows, ordered by the forensics `ranking`, highest
+`hits` first, and put the real hit count into the description when `basis` is
+`"forensics"`. Use the edition's own `title` and write the description in one
+sentence: what the mistake is, and what a check for it would read. Ten to twelve
+options is plenty; the rest are reachable through the free text below. When class
+ids arrive namespaced from more than one edition, say which language each row is
 for.
+<!-- host: claude -->
+`AskUserQuestion` carries at most four options a question and four questions a
+call, so page the list four options at a time with `multiSelect: true`, in
+ranking order, and say how many pages there are.
+<!-- host: codex -->
+Show the list as an enumerated selection table and ask for the ids, or `none`.
+<!-- host: end -->
 
-When no edition matched, there are no class rows to draw from. Ask the mistakes
-as free text instead — "Describe the mistakes you want caught, one per line" —
-and keep the standing offers below, which need no edition.
+When no edition matched, there are no class rows and no bundles to draw from. Ask
+the mistakes as free text instead — "Describe the mistakes you want caught, one
+per line" — and keep the standing offers below, which need no edition.
 
 **The standing offers.** Four options are always there, whatever the editions
 matched. They are routes around the harness rather than mistakes in the code, so
@@ -271,15 +361,15 @@ thought of them would otherwise have to describe all four from scratch. On the
 that persona is the one whose sessions can take every one of these routes. On the
 other two personas they go last, after the class rows.
 
-- `hook-bypassed` — "A session commits with `--no-verify`, or reaches past the
-  hook another way, and the commit lane never runs on what lands."
+- `hook-bypassed` — "A session commits with `--no-verify`, or gets past the hook
+  another way, and nothing checks what lands."
 - `force-push-to-default` — "A force push rewrites the default branch and takes
-  history nobody kept with it, under whichever refspec spelling names it."
+  history nobody kept with it, however the command spells the branch."
 - `pipe-to-shell` — "A command pipes a download straight into a shell, so what
   runs is whatever the server sent and nothing recorded what that was."
 - `harness-switched-off` — "An agent edits `.jig/config.json`, guts a check under
   `.jig/checks/`, drops `.jig/off` in place or defuses the CI workflow, and the
-  harness is off with nothing saying so. Four checks, written and proved like any
+  checks are off with nothing saying so. Four checks, written and tested like any
   other."
 
 <!-- host: claude -->
@@ -292,8 +382,7 @@ owner approves it by name at the item tier — SKILL.md step 4 holds the shapes
 each one takes and the limits to read out. Then, last:
 
 - `Something else — I'll describe it` — "Type it in your own words. jig writes
-  the check, and proves it against a violation and a near-miss before it counts
-  as coverage."
+  the check and tests it on a planted example before it counts."
 
 **Question four**, header `"Agent damage"`: "What has an AI session done here
 that you had to undo?"
@@ -306,7 +395,7 @@ that you had to undo?"
   later."
 - `Nothing I noticed` — "No incident to anchor on. The ranking stands as it is."
 
-## Round two — the anchor's tail, the tools, the workflow, the weave
+## Round two — the anchor's tail, the tools, the workflow, the commit
 
 Asked only after round one settles; drop any question whose subject the
 answers already closed.
@@ -324,7 +413,7 @@ day?"
 commits that carried both. Should jig watch that pair?"
 
 - `Yes, warn when one moves without the other (Recommended)` — "A check over the
-  two paths, proved against a violation and a near-miss like every other."
+  two paths, tested on a planted example first like every other."
 - `They are not related any more` — "Take the pair off the table. Nothing is
   installed and the incident stays in the report as history."
 - `Ask me about a different pair` — "Name the two files yourself; the rest of
@@ -354,12 +443,15 @@ write. A tool the manifest already carries is shown as present rather than
 offered, and the plan's own version probe settles it either way. A tool with no
 way back out for this package manager is refused by the plan — say which one and
 why the moment that comes back.
+<!-- host: claude -->
+Page it four options at a time when the edition proposes more than four tools.
+<!-- host: end -->
 
 **Question seven**, header `"CI floor"`: "Should jig add its CI workflow, so the
 checks run on every push with no plugin and no local node?"
 
-- `Yes (Recommended)` — "One workflow file under `.github/workflows/`, owned
-  by jig, running the committed check driver, its selftest, and one step per
+- `Yes (Recommended)` — "One workflow file under `.github/workflows/` that jig
+  owns. On every push it runs jig's checks, their selftest, and one step per
 <!-- host: claude -->
   tool you ticked — each one the exact command in `.jig/verify.json`. Where you
   ticked no test runner and your `package.json` already has a `test` script,
@@ -367,10 +459,9 @@ checks run on every push with no plugin and no local node?"
   tool you selected — each one the exact command in `.jig/verify.json`. Where you
   selected no test runner and your `package.json` already has a `test` script,
 <!-- host: end -->
-  that script is a step too. The floor that holds when everything else is
-  missing."
-- `No` — "Plan with `--no-ci`. The committed checks still run wherever you run
-  them, and no lane runs the tools."
+  that script is a step too. It keeps checking when nothing else is set up."
+- `No` — "Plan with `--no-ci`. jig's checks still run wherever you run them,
+  and nothing runs the tools on push."
 
 <!-- host: claude -->
 **Question seven-a**, header `"Commit tools"`, only when the user ticked a tool
@@ -381,17 +472,32 @@ at question six: "Should the linter, type checker and test runner also run when
 you commit, or only in CI?"
 
 - `Only in CI (Recommended)` — "A full type-check on every commit costs seconds
-  every time. The commit hook still runs the committed checks."
+  every time. The commit hook still runs jig's own checks."
 - `At commit too` — "Pass `--verify-commit`. The same commands run from the
   pre-commit hook, and a red one stops the commit."
 
 **Question seven-b**, header `"Hook weave"`, only when the scan found a
-committed pre-commit: "Your pre-commit hook is committed at `<path>`. Weave
-the one jig line into it?"
+committed pre-commit: "Your pre-commit hook is committed at `<path>`. Add jig's
+one line to it?"
 
-- `Yes, show me the change (Recommended)` — "An `include-line` change: one
-  marked line, item-approved at the plan review, journaled, reversible."
-- `No, print it instead` — "The line stays as a proposal for you to paste."
+- `Yes, show me the change (Recommended)` — "jig adds one marked line to your
+  hook. You approve that exact line by name in the review, and undo takes it
+  back out."
+- `No, print it instead` — "The line stays a proposal for you to paste yourself."
+
+**Question seven-c**, header `"Commit checks"`, only when the scan's
+`guardrails.commitLane` does not already run the checks and question seven-b is
+not asked: "Should your commits be checked on this machine too?"
+
+- `Yes, check my commits (Recommended)` — "Once the install lands, jig proposes
+  one more change: pointing git at the commit hook it wrote. You approve it by
+  name like the rest, and undo puts the setting back."
+- `Not now` — "Nothing checks your commits on this machine until you ask jig.
+  The note it leaves in `.jig/activation.md` says how."
+
+When the scan disclosed that node may not be on a hook's PATH, say so beside this
+question in one plain sentence: whenever the hook cannot find node, the commit
+goes through and says its checks were skipped.
 
 ## Round three — what blocks
 
@@ -405,7 +511,7 @@ record?"
 
 - Default every admitted check to blocking, pre-ticked, and let the user
   untick. A ticked check denies the call and shows its reason, its alternative
-  and its override path; an unticked one writes a ledger line and lets the call
+  and its override path; an unticked one records the match and lets the call
   through.
 - Say the consequence in one line before the question: observe is a choice they
   can revisit from `/jig:review` at any time, in either direction. It is not a
@@ -467,6 +573,13 @@ Print these the moment they become true, not in a summary at the end.
 > on everything is worse than none. The reason is recorded in
 > `.jig/discarded.json`.
 
+**A bundled check lost its session half at admission:**
+
+> `<title>` is still checked when you commit and on every push, but not while an
+> AI session edits. The part that watched the session failed its test on a
+> planted example, so jig left that part out rather than install a guard that
+> cries wolf. The reason is recorded in `.jig/discarded.json`.
+
 **A class carries a gap no lever closes:**
 
 > `<title>` installs, and it still carries a gap. Nothing host-neutral and
@@ -525,14 +638,17 @@ Print these the moment they become true, not in a summary at the end.
 > Every value here was assumed rather than asked. Each assumed row is labelled
 > as one wherever it appears, so nothing you never saw is reported back to you
 > as a decision you made. The classes were not picked in the moment either —
-> `quick` in `.jig/profile.json` records which ones, on what basis, and out of
-> how many.
+> they are the essential bundle, and `quick` in `.jig/profile.json` records
+> which ones, on what basis, and out of how many.
+>
+> Quick start assumes the work here is done with AI sessions, so each of those
+> checks that can watch a session edit is written with that half too, and tested
+> on its own samples like every other.
 >
 > Quick start skips the rounds, not the approvals. Every item-tier change —
 > anything that wires a guard into a hook, installs a tool, writes outside
 > `.jig/`, or can fail a build — is still put to you by name with nothing
 > pre-ticked, and applied one `--change <id> --path <rel>` pair at a time.
 >
-> The commit lane stays unwired. Nothing runs at commit time until git is
-> pointed at the hook jig writes, and that is its own plan after the install:
-> `plan --wire-commit`.
+> Nothing checks your commits on this machine until git is pointed at the hook
+> jig writes, and that is its own plan after the install: `plan --wire-commit`.

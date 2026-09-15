@@ -3,6 +3,10 @@ jig reports it as drifted rather than overwriting your edit. -->
 
 # Catching mistakes at commit time
 
+In short: jig's checks do not run when you commit on this machine yet. To turn
+that on, say `wire the commit lane` to jig in your AI session. The rest of this
+file explains what that does, and how to do it by hand.
+
 Git can invoke jig's check driver on your machine at the moment you commit.
 This file explains how to configure that invocation and which checks it can run.
 

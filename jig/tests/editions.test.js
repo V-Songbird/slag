@@ -462,6 +462,49 @@ test("quickSelection selects nothing when the whole ranking is another edition's
   assert.equal(quick.basis, "catalogue", "an empty scoped ranking was still reported as evidence");
 });
 
+// 2.18.0. Setup offers the selection as a named bundle, and a question can only
+// show the mistake a bundle guards against if the row carries it.
+test("a selection row carries its class's title, a line its own pattern trips, and whether an edit guard can reuse it", () => {
+  for (const edition of editions.loadIndex(PLUGIN_ROOT).editions.map((row) => row.id)) {
+    const rows = editions.quickSelection({ editions: [edition] }, null, undefined, editions.WIDE_CAP).classes;
+    const shelf = editions.loadEdition(PLUGIN_ROOT, edition).classes;
+    for (const row of rows) {
+      const cls = shelf.find((c) => editions.namespacedId(edition, c.id) === row.classId);
+      assert.equal(row.title, cls.title, row.classId);
+      const patterns = cls.detectors
+        .filter((d) => d.lever === "check-driver" && Array.isArray(d.params.patterns))
+        .flatMap((d) => d.params.patterns);
+      assert.equal(row.sessionReady, patterns.length > 0, row.classId);
+      if (row.example === null) continue;
+      const shown = row.example.endsWith("…") ? row.example.slice(0, -1) : row.example;
+      assert.ok(cls.fixtures.violation.split("\n").some((line) => line.trim().startsWith(shown)),
+        row.classId + " shows a line its own violation sample does not carry: " + row.example);
+      assert.ok(patterns.some((p) => new RegExp(p).test(cls.fixtures.violation)),
+        row.classId + " shows an example no pattern of its own trips");
+    }
+    assert.ok(rows.some((row) => row.example), edition + ": no row in the wide bundle shows an example");
+  }
+});
+
+test("classExample shows nothing rather than a line no pattern trips", () => {
+  const driver = { lever: "check-driver", params: { patterns: ["eval\\("] } };
+  assert.equal(editions.classExample({ fixtures: { violation: "fine\n" }, detectors: [driver] }), null);
+  assert.equal(editions.classExample({ fixtures: { violation: "a\n  eval(x)\nb\n" },
+    detectors: [{ lever: "tool-rule", params: {} }, driver] }), "eval(x)");
+  assert.equal(editions.classExample({ fixtures: { violation: "eval(x)\n" }, detectors: [{ lever: "tool-rule" }] }), null);
+  assert.equal(editions.classExample(null), null);
+});
+
+test("the wide bundle is the essential one continued down the same order", () => {
+  assert.ok(editions.WIDE_CAP > editions.QUICK_CAP);
+  const essential = editions.quickSelection({ editions: ["python"] }, null);
+  const wide = editions.quickSelection({ editions: ["python"] }, null, undefined, editions.WIDE_CAP);
+  assert.equal(wide.cap, editions.WIDE_CAP);
+  assert.equal(wide.classes.length, Math.min(editions.WIDE_CAP, wide.considered));
+  assert.deepEqual(wide.classes.slice(0, essential.classes.length).map((c) => c.classId),
+    essential.classes.map((c) => c.classId));
+});
+
 // ---------------------------------------------------------------------------
 // The seed and the config that has to see it (2.9.0)
 // ---------------------------------------------------------------------------

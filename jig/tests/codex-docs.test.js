@@ -20,7 +20,10 @@ test("the Codex item tier keeps explicit named consent without a multi-select de
   const runtime = read(...RUNTIME);
   assert.ok(consent.includes("consent.item"), "the item consent tier is missing");
   assert.match(consent, /enumerated table/, "consequential changes are not individually enumerated");
-  assert.match(consent, /label is the change id/, "a row is not bound to a stable change id");
+  assert.match(consent, /the change's `title`, then the change id/, "a row is not bound to a stable change id");
+  assert.match(runtime, /by row number only when the table in the\s+message they are answering binds/,
+    "a row number can approve something other than the row the owner read");
+  assert.match(runtime, /A number\s+from an earlier table, or from a table that has since changed, names nothing/);
   assert.match(consent, /exact path, kind and/, "the approval surface omits the path or consequence");
   assert.match(consent, /\*\*Nothing is pre-ticked\.\*\*/, "item consent permits preselection");
   assert.match(consent, /--change <id> --path <rel>/, "approval no longer preserves each exact token pair");

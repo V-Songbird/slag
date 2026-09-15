@@ -4,12 +4,12 @@
     <img src="assets/logo.svg" alt="jig" width="240" />
   </picture>
   <h1>jig</h1>
-  <p><strong>Your repo keeps collecting the same mistakes. jig installs the guardrails that catch them, shows each one working before it claims anything, and answers a plain question — what are you checking? what did you catch? — with the short version first.</strong></p>
+  <p><strong>Your repo keeps making the same mistakes. jig installs the guardrails that catch the next one.</strong></p>
 </div>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
 
-> **TL;DR** — The focused test, the swallowed error, the AI session that deletes a test to make CI green. jig interviews you, sets up your tooling and CI, writes checks for the mistakes you actually hit, and proves each one on a planted violation. Nothing lands unapproved, one command undoes it all, and you talk to it in plain words.
+> **TL;DR** — The test marked to run alone, the swallowed error, the AI session that deletes a failing test to go green. jig asks what to guard, sets up the tools and CI, and proves every check on a planted mistake first. Nothing lands unapproved; one command undoes it all.
 
 ---
 
@@ -18,43 +18,25 @@
 
 ## What is this?
 
-Every repo has a greatest-hits album of mistakes. Somebody pins the test suite to a single test and forgets to unpin it, so green runs stop meaning anything. An error gets caught and dropped on the floor. An AI session, cornered by a red test, deletes the test.
-
-jig reads your repo and its git history, asks which of these you actually want guarded, and then sets the whole thing up — the tools, their configs, the CI, and checks written for your codebase. Reviewed by you first, reversible to the byte, and demonstrated catching a planted violation before the word "covered" is used.
-
-Starting something new? Run it on the empty folder. jig writes the project file, installs the toolchain and lands the checks before there is a single line to guard — which is the cheapest moment to get all of it right, and the one where an AI session has the most to gain from a harness that already works.
+Every repo has a greatest-hits album of mistakes, and AI sessions have learned to cover the old classics. jig reads your repo and its git history, asks which of those mistakes you want guarded, then sets up the linter, the tests, the CI and checks written for your codebase. It speaks JavaScript and TypeScript, Python, Go, Rust, the JVM and .NET, and on an empty folder it goes first, so the first line anybody writes is already checked.
 
 ## Why you'd want it
 
-- **You say what you want, in your words.** "What are you checking?", "what did you catch?", "why is this file here?", "undo it" — one entry, and jig picks the right job. A question reads; it never installs anything on the way.
-- **It reads before it asks.** The scan and the history mining run first, so the interview opens with what it found and what is still yours to decide, and never asks a question your repo already answers.
-- **It goes first on a new project.** No code yet is the normal case, not an edge case. jig writes the starter project file, sets up the toolchain and installs the checks, so the first thing anybody writes is already being checked. That covers Node, Python, Rust, Gradle, Maven and .NET. Go is the one exception — a module path is an identity only you can pick, so jig hands you the one command and picks up from there.
-- **It sets up your real tooling.** Linter, formatter, type checker, test runner, CI. jig shows you the exact install command and the exact config it would write, then runs it once you say yes. A tool it cannot uninstall is a tool it refuses to install.
-- **It speaks your language.** Editions ship for JavaScript and TypeScript, Python, Go, Rust, the JVM and .NET, each researched against that ecosystem's own tools and conventions.
-- **Checks that outlive the plugin.** The main guardrail is a small script committed to your repo. Any teammate, any CI, any machine with node runs it — no plugin, no account, no jig.
-- **Every check proves itself first.** A check ships with a violation sample and a near-miss sample. It has to fire on the first and stay silent on the second, and on every other check's near miss too. One that fails is discarded and reported, never quietly counted as coverage.
-- **It finds the documents your sessions never read.** ADRs, scopes, roadmaps — jig checks whether anything actually points Claude at them, and can wire in one small pointer rule when nothing does.
-- **It catches the two files that drifted apart.** The doc that stopped describing the module, the migration that never followed the schema. Name the two sets, and a commit that touches one and leaves the other alone is a finding. These read what you have staged, so they speak at commit time and report themselves skipped in CI rather than pretending to have looked.
-- **The short answer comes first.** Ask what it put there, or what it caught, and you get three lines — what jig checks, where that runs, what needs attention — with anything broken, silenced or unverified kept in view. The full list, one section, one guard or one file is a word away.
-- **It watches the AI too.** Session guards see what an agent is about to do: the downloaded script piped into a shell, the force-push to main, the test file on its way out. A blocked call always shows the reason, an alternative, and the way to override.
-- **One command undoes everything.** Every write is journaled with the original bytes, your manifest and lockfile included. Revert restores every file it touched, then hands you the one command your package manager needs to take the tool off disk.
+- **You talk to it like a person.** Ask what it checks, what it caught or to undo it, and if you're new to coding, setup shrinks to two or three questions with the safe choice recommended each time.
+- **"Covered" means caught.** A check counts only after it's shown catching a planted mistake, and one that can't is thrown out instead of padding the numbers.
+- **It watches the AI while it works.** The deleted test, the force-push to main and the downloaded script piped into a shell get stopped as the AI reaches for them, not found later in CI.
+- **Leaving takes one command.** Revert puts back every file jig touched, down to the byte, and hands you the one uninstall command your package manager needs.
 
 ## How it works
 
 | Moment | What happens |
 | --- | --- |
-| You run `/jig:jig` and say what you want | Plain words are enough. "What are you checking?" reads the inventory, "what did you catch?" reads the guards' record, "undo it" goes to the revert — and a bare `/jig:jig` starts setup |
-| **Understand your needs** | It scans the repo, mines the git history, says in two lines what it found and what is still yours to decide, then asks only that |
-| The folder is empty | It asks which language, writes the starter project file, and carries on. Nothing about the run changes |
-| You pick what to guard | Describe a mistake in your own words. jig writes a check for it, plus the two samples that prove the check works |
-| The mistake is two files drifting apart | Name both sets. The samples become a commit that should trip it and one that should not, and the proof runs the same way |
-| **Review the changes** | Ticking a tool is a preference. The plan shows the coverage and every change by path and consequence, and you approve those by name — nothing pre-ticked |
-| **Apply and check** | Only what you approved lands, each check is shown catching a planted violation live, and whatever could not be verified is said as such |
-| The checks need connecting | jig offers to finish it. Say no and CI still catches everything; say yes and the same checks run the moment you commit |
-| A proven guard sees a slip | It blocks, with a reason, an alternative and the override. Put it in observe instead if you'd rather it only watched |
-| A guard cries wolf | Tell jig the alert was wrong. It records that, and drops the guard back to observing only with your say-so |
-| You come back a month later | Ask what it caught. What fired, where the checks run, what needs attention — and the full report is one word away |
-| You want out | One command puts every byte back, and hands you the command that removes anything it installed |
+| **Understand your needs** | jig reads the repo and its history, then asks only what's still yours to decide, including which checks: the essential bundle, the wider one, or one at a time. |
+| **Review the changes** | The plan opens with a short summary in plain words, then lists every change by its title, grouped by what it's for, and you approve each one by name with nothing pre-ticked. |
+| **Apply and check** | Only what you approved lands, each check is shown catching a planted mistake, and anything jig couldn't verify gets called unverified. |
+| You said yes to checking your commits | The commit hook is connected in the same install, approved by name like everything else. |
+| An AI session reaches for a risky move | The guard blocks it and says why, what to do instead and how to override, or only watches if you picked observe. |
+| You come back a month later | Ask what it caught and the short answer comes first: what fired, where the checks run, what needs attention. |
 
 ## Install
 
@@ -65,58 +47,30 @@ Inside Claude Code, run:
 /plugin install jig@slag
 ```
 
-Takes effect next session. Nothing to configure — the interview is the configuration.
+Takes effect next session. Nothing to configure — the interview is the configuration. On Codex, install jig from this repository's Codex marketplace, `Slag · Codex`, and talk to it through `$jig`.
 
 ## What you can do
 
 | You want to… | Command |
 | --- | --- |
-| Set up guardrails, interview included | `/jig:jig` |
-| Adopt an existing Jig project in Codex | `/jig:jig migrate --host codex` |
-| Adopt an existing Jig project in Claude Code | `/jig:jig migrate --host claude` |
-| Set them up with one review and no questions — the engine picks the classes from your own history, records the choice and its basis, and labels every value assumed | `/jig:jig --quick` |
-| Scaffold a new project and guard it from line one | `/jig:jig` in the empty folder |
-| Know what jig checks here, and what needs attention | `/jig:jig what are you checking, and what needs attention?` |
-| See what the guards caught | `/jig:jig what did you catch?` |
+| Set up guardrails, in a repo or an empty folder | `/jig:jig` |
+| Set up guardrails when you're new to coding | `/jig:jig`, then pick `New to coding, using AI` |
+| Skip the questions and review one plan — jig picks the essential bundle, from your own history where it can, and labels every value it assumed | `/jig:jig --quick` |
+| Know what jig checks here, and what needs attention | `/jig:jig what are you checking?` |
 | Find out why a file is there | `/jig:jig why is .jig/activation.md here?` |
-| Call out a false alarm | `/jig:jig that alert was wrong` — name the guard |
-| Catch one more mistake | `/jig:jig help me catch skipped tests` |
+| See what the guards caught | `/jig:jig what did you catch?` |
+| Call out a false alarm | `/jig:jig that alert was wrong`, naming the guard |
+| Catch one more mistake in your own words, like a doc that stopped matching its code | `/jig:jig help me catch skipped tests` |
+| Move an existing jig project between Claude Code and Codex | `/jig:jig migrate --host codex`, or `--host claude` |
 | Take it all back out | `/jig:jig undo everything` |
-| Go straight to the full inventory, or one part of it | `/jig:inventory full`, or `/jig:inventory guards`, `checks`, `files`, `lanes` |
-| Go straight to the guards' record, or quiet a guard | `/jig:review` |
+| Go straight to the full report, or the guards' record | `/jig:inventory full`, `/jig:review` |
+| Do any of this on Codex | `$jig` in the same words; `$inventory` and `$review` work directly |
 
-A question reads and answers; it never installs, repairs or migrates on the way. When what you asked could mean two things, jig asks which before it changes anything.
-
-## Move an existing Jig project between hosts
-
-Run `/jig:jig migrate --host codex` or `/jig:jig migrate --host claude`
-in the intended project checkout. Either plugin build can prepare either
-destination. This is a separate, plan-only workflow: it inventories the existing
-installation and writes a review plan, then waits for approval of the exact
-instruction change and path before applying it. Plain `migrate` keeps its legacy
-format-upgrade behavior.
-
-The approved change adds scoped pointers to the source instructions in a
-separate owned region of the destination's root instruction file. Codex uses a
-nonempty `AGENTS.override.md` when present, otherwise `AGENTS.md`; Claude uses
-`CLAUDE.md`. Source instruction files remain required. Existing checks, guard
-IDs, modes, proofs, driver and historical records are retained, including any
-reported drift. The new transaction has its own undo record.
-
-The report names missing local history and instruction-discovery limits.
-Referenced governance documents, external or user instructions, host settings
-and policy conflicts still need review. Applying a bridge does not register
-hooks or prove that session, commit or CI checks run. Verify the destination
-plugin and lanes in the actual checkout and host; desktop, CLI and operating
-systems require their own evidence.
-
-See the [host migration workflow](skills/jig/references/host-migration.md) for
-the engine commands, named approval, stale-plan refusal, verification and exact
-transaction reversal. No existing project is migrated merely by updating Jig.
+A question only reads: it never installs, repairs or migrates on the way, and if a request could mean two things, jig asks which first.
 
 ## Benchmarks
 
-Every check jig runs is measured the same way it is admitted: it must fire on its own planted violation and stay silent on a near miss built to look like one. Every pattern inside a check is held to that separately, so a second pattern cannot be counted as covered because the one beside it matched.
+Every check jig runs catches its own planted mistake, and none of them fires on the lookalike built to fool it.
 
 | What | Score |
 | --- | --- |
@@ -126,24 +80,18 @@ Every check jig runs is measured the same way it is admitted: it must fire on it
 | Cross-sample hits, disclosed | 8 |
 
 > [!NOTE]
-> The eight are disclosed, not hidden. Each is one check firing on a different check's near-miss sample — realistic code written to trap a different pattern, which sometimes contains a genuine instance of another. A check may declare an expected hit up front; what it may never do is fire on its own near miss, and none of them does.
+> A cross-sample hit is one check firing on the lookalike written for a different check, which sometimes really does contain that other mistake. They're counted here, not hidden.
 
-The suite that produces these numbers ships in the repo and reruns on every change, and a check that cannot pass is discarded rather than shipped.
+How we tested: the suite behind these numbers ships in the repo and reruns on every change.
 
 ## Under the hood
 
-One engine that journals every write, a committed check script that owes jig nothing, an installer that will not touch a tool it cannot remove again, and session guards that read the same checks — the exact mechanics are all in the plugin's files.
+One engine that keeps the original bytes of every file it writes, a committed check script that owes jig nothing, an installer that won't touch a tool it can't remove again, and session guards that read the same checks — the exact mechanics are in the plugin's files.
 
 ## Good to know
 
-- A check that passed its pair blocks from the moment it installs, and says why, what to do instead, and how to override. Ask for observe instead and it only records. A recorded false alarm pulls a blocking guard back to observe.
-- jig names every path before it writes it, and journals the bytes that were there first. That includes your manifest and lockfile when it installs a tool. Revert puts both back and shows you the uninstall command — it never runs a package manager behind your back.
-- jig can finish the commit-time wiring for you, as one more approved item, and one revert puts it back. If you already have a commit hook, jig adds its line to yours rather than pointing git away from it. It never writes a file inside `.git/`, and it never reports the wiring as missing when it is already there. The note it leaves in `.jig/activation.md` is rewritten the moment the wiring lands, so nothing in your repo goes on asking you for something already done.
-- If something else already watches the same events in your repo, jig says so and leaves that slot alone. The committed checks and the CI workflow cover you regardless.
-- Several tools often share one config file — `pyproject.toml`, `.editorconfig`, `Cargo.toml`, `Directory.Build.props`, `build.gradle.kts`. jig writes that file once with every tool's settings in it, and tells you about any setting two tools disagreed on. Where the shared file is one it can't safely compose, or one you already own, it writes none of it and hands you the exact snippet instead.
-- Rules are the exception, not the habit. The one jig writes points your sessions at the governance docs nothing referenced, under its own `jig-` name and a small hard byte cap — because every session pays to carry prose.
-- Working with another AI tool too? On request jig keeps one clearly-fenced block in `AGENTS.md` pointing it at the same checks. Your own text in that file is never touched.
-- Commit the install, not the workings. Seven things under `.jig/` are meant to be committed — `config.json`, `manifest.json`, `checks/`, `hooks/`, `activation.md`, `verify.json` and `proposed-permissions.json` — so a teammate who clones the repository gets the same checks and the same guards. Everything else there is derived or specific to your machine, and jig writes a `.jig/.gitignore` naming it. jig only ever adds a missing line to that file; it never rewrites one you edited.
+- Commit what jig puts in `.jig/`, so a teammate who clones the repo gets the same checks and guards; the `.jig/.gitignore` jig writes already leaves out what's derived or belongs to your machine.
+- jig doesn't overwrite what's already yours: an existing commit hook gets jig's line added, a shared config file you own gets a snippet to paste instead, and your own text in `AGENTS.md` stays untouched.
 - Kill switch: create a file named `.jig/off` and every guard goes silent. It silences the session guards; the committed checks, the commit hook and the CI workflow never read it and go on running.
 
 ## License

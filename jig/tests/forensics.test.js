@@ -941,3 +941,22 @@ test("scan --quick records the selection and its basis; an ordinary scan records
   assert.equal(said.length, 1, "the quick selection was not disclosed");
   assert.match(said[0], /\.jig\/profile\.json under `quick`/);
 });
+
+// 2.18.0. Setup offers two bundles by name. What somebody picked by a name has to
+// be on disk class by class, and "essential" has to mean the same selection on
+// the guided route and under `--quick`.
+test("every scan records the essential and wide bundles, and quick start takes the essential one", () => {
+  const root = project({ "src/a.js": "//a\n", "package.json": "{\"name\":\"q\"}\n" });
+  const out = engine.cmdScan(root, { _: [], change: [] });
+  const { bundles } = engine.readProfile(root).profile;
+  assert.deepEqual(out.bundles, bundles, "the profile on disk disagrees with what scan returned");
+  assert.equal(bundles.essential.cap, editions.QUICK_CAP);
+  assert.equal(bundles.wide.cap, editions.WIDE_CAP);
+  assert.equal(bundles.essential.basis, bundles.wide.basis, "the two bundles were ranked on different evidence");
+  assert.ok(bundles.essential.classes.length > 0);
+  assert.deepEqual(bundles.wide.classes.slice(0, bundles.essential.classes.length).map((c) => c.classId),
+    bundles.essential.classes.map((c) => c.classId));
+
+  const quick = engine.cmdScan(root, { _: [], change: [], quick: true });
+  assert.deepEqual(quick.quick, quick.bundles.essential, "quick start took something other than the essential bundle");
+});
