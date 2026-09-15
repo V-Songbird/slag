@@ -38,9 +38,16 @@ ROADMAP.jsonl.backup-*
 !.jig/checks/
 jig/scripts/probes/results.json
 
-# This repo's dev config ported to other agent CLIs — local-only, not published
-.agents/
+# This repo's dev config ported to other agent CLIs — local-only, not published.
+# The one exception is the Codex marketplace, which publishes plugins to Codex.
+/.agents/*
+!/.agents/plugins/
+/.agents/plugins/*
+!/.agents/plugins/marketplace.json
 .codex/
+
+# Disposable output of jig's Codex host probe
+.codex-test/
 
 # Per-plugin internal notes — the scope contract, strategy notes, and any
 # working docs beside a plugin. Local-only, never published.

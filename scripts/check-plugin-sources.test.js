@@ -6,7 +6,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const { verify } = require("./check-plugin-sources.js");
+const { verify, verifyCodex } = require("./check-plugin-sources.js");
 
 // Builds a throwaway repo root with one plugin dir, so verify() runs against
 // real files rather than a mocked fs.
@@ -64,6 +64,51 @@ test("passes when the codex manifest version matches the marketplace entry", () 
   fs.writeFileSync(path.join(codexDir, "plugin.json"), JSON.stringify({ name: "widget", version: "1.0.0" }));
   const problems = verify(root, { plugins: [{ name: "widget", source: "./widget", version: "1.0.0" }] });
   assert.deepStrictEqual(problems, []);
+});
+
+test("flags a codex skills or hooks path Codex would not honor", () => {
+  const root = repoWith("widget", { name: "widget" });
+  const codexDir = path.join(root, "widget", ".codex-plugin");
+  fs.mkdirSync(codexDir, { recursive: true });
+  fs.mkdirSync(path.join(root, "widget", "codex-skills"));
+  const write = (fields) => fs.writeFileSync(path.join(codexDir, "plugin.json"), JSON.stringify({ name: "widget", version: "1.0.0", ...fields }));
+  const entry = { plugins: [{ name: "widget", source: "./widget", version: "1.0.0" }] };
+
+  write({ skills: "./codex-skills/", hooks: "hooks/codex-hooks.json" });
+  let problems = verify(root, entry);
+  assert.strictEqual(problems.length, 1);
+  assert.match(problems[0], /hooks "hooks\/codex-hooks\.json" must start with "\.\/"/);
+
+  write({ skills: "./codex-skills/", hooks: "./hooks/codex-hooks.json" });
+  problems = verify(root, entry);
+  assert.strictEqual(problems.length, 1);
+  assert.match(problems[0], /names nothing on disk/);
+
+  fs.mkdirSync(path.join(root, "widget", "hooks"));
+  fs.writeFileSync(path.join(root, "widget", "hooks", "codex-hooks.json"), "{}");
+  assert.deepStrictEqual(verify(root, entry), []);
+});
+
+test("passes a Codex marketplace whose local sources resolve to their Codex manifests", () => {
+  const root = repoWith("widget", { name: "widget" });
+  const codexDir = path.join(root, "widget", ".codex-plugin");
+  fs.mkdirSync(codexDir, { recursive: true });
+  fs.writeFileSync(path.join(codexDir, "plugin.json"), JSON.stringify({ name: "widget", version: "1.0.0" }));
+  const entry = { name: "widget", source: { source: "local", path: "./widget" },
+    policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" }, category: "Productivity" };
+  assert.deepStrictEqual(verifyCodex(root, { name: "slag-codex", plugins: [entry] }), []);
+});
+
+test("flags a Codex marketplace entry that escapes, misses its manifest, or lacks its policy", () => {
+  const root = repoWith("widget", { name: "widget" });
+  const base = { name: "widget", policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" }, category: "Productivity" };
+  let problems = verifyCodex(root, { name: "slag-codex", plugins: [{ ...base, source: { source: "local", path: "../widget" } }] });
+  assert.match(problems.join("\n"), /inside this repo/);
+  problems = verifyCodex(root, { name: "slag-codex", plugins: [{ ...base, source: { source: "local", path: "./widget" } }] });
+  assert.match(problems.join("\n"), /has no \.codex-plugin\/plugin\.json/);
+  problems = verifyCodex(root, { name: "slag-codex", plugins: [{ name: "widget", source: { source: "local", path: "./widget" } }] });
+  assert.match(problems.join("\n"), /policy/);
+  assert.match(verifyCodex(root, { plugins: [] }).join("\n"), /valid name/);
 });
 
 test("flags a non-relative source", () => {
