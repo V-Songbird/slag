@@ -122,7 +122,7 @@
       "name": "jig",
       "source": "./jig",
       "description": "Interviews you about the mistakes your repo keeps making, then sets up what catches them: linter, type checker, tests, CI and checks written for your code. Works on an empty folder. Every check proves itself on a planted violation, nothing lands unapproved, and a plain question gets a short answer.",
-      "version": "2.16.0",
+      "version": "2.17.0",
       "license": "MIT",
       "author": {
         "name": "Victor Villegas",

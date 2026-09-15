@@ -4,6 +4,24 @@ All notable changes to jig are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); alpha releases may introduce breaking changes in minor versions.
 
+## [2.17.0] — 2026-09-15
+
+### Added
+
+- jig installs on Codex from the same plugin directory it uses on Claude Code. On Codex, ask `$jig` in plain words; `$review` and `$inventory` are the direct entries.
+- On Codex, session guards read shell commands and `apply_patch` edits, including multi-file patches, moves and deletions, before they run. The checks brief and governance pointers go into one fenced region of the active `AGENTS.md` or `AGENTS.override.md`, and jig never writes `.claude/` or permission settings there.
+- On Codex, a shell run that reports no exit code is recorded as unknown instead of green, the stop reminder arrives as a warning, and reports call session enforcement unverified until Codex has loaded and trusted the hooks.
+
+### Changed
+
+- The region jig writes into `AGENTS.md` keeps the checks brief and the governance pointers in separate sections, so updating one no longer replaces the other. Apply refuses when that region changed after you reviewed it, or when an `AGENTS.override.md` has appeared since.
+- The activation guide, the pre-commit hook message and the note after install no longer say CI catches everything when no workflow runs your checks, and they name no host's command syntax.
+
+### Fixed
+
+- A plan path with `..` or backslash segments could point at `.git` or jig's own journal before the boundary check saw its real target. Paths are normalized first, and apply checks the boundary again.
+- Installing a second tool into a shared config file no longer drops the record of which tools that file already configures.
+
 ## [2.16.0] — 2026-09-08
 
 ### Added
