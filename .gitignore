@@ -47,3 +47,6 @@ jig/scripts/probes/results.json
 /*/SCOPE.md
 /*/PRODUCT-STRATEGY.md
 /*/docs/
+
+# Results written by plugin eval runs
+/*/evals/results/

@@ -9,7 +9,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) [![Claude Code](https://img.shields.io/badge/Claude_Code-E5582B)](https://docs.anthropic.com/en/docs/claude-code)
 
-> **TL;DR** — A sandbox marketplace of plugin experiments. Six are installable from here. Nothing has a support promise, and nothing is guaranteed to still exist tomorrow.
+> **TL;DR** — A sandbox marketplace of plugin experiments. Seven are installable from here. Nothing has a support promise, and nothing is guaranteed to still exist tomorrow.
 
 ---
 
@@ -87,6 +87,14 @@ Long sessions end in an automatic summary that forgets the thing you cared about
 /plugin install brink@slag
 ```
 
+### [anneal](./anneal) — Reshape a repo so Claude stops getting lost in it
+
+Every session, Claude learns your project from scratch by searching it. A folder called `helpers`, a pile of files all named `index`, and a test command nobody wrote down turn that into a scavenger hunt. anneal scans for those snags without touching anything, proposes a layout you approve, and migrates one step at a time — your project's own checks run before the first change and after every step, and each step is its own commit.
+
+```
+/plugin install anneal@slag
+```
+
 ### Which one first?
 
 | You want to… | Install |
@@ -97,6 +105,7 @@ Long sessions end in an automatic summary that forgets the thing you cared about
 | Stop the same mistake landing over and over | **jig** |
 | Stop Claude guessing what you meant | **scribe** |
 | Keep a long session's summary from losing the plot | **brink** |
+| Make a repo easier for Claude to find its way around | **anneal** |
 
 ---
 
@@ -104,6 +113,7 @@ Long sessions end in an automatic summary that forgets the thing you cared about
 
 ```
 slag/
+├── anneal/
 ├── assay/
 ├── brink/
 ├── jetbrains-router/

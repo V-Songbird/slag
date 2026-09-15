@@ -1,0 +1,469 @@
+#!/usr/bin/env node
+"use strict";
+
+// anneal's audit: what makes an agent search, read or guess more than it needs
+// to in a repository. Read-only. The file list comes from git, so the scan sees
+// what search sees: tracked files plus untracked files that are not ignored.
+// Outside git it walks the tree and reports that as a finding.
+
+const fs = require("node:fs");
+const path = require("node:path");
+const { execFileSync } = require("node:child_process");
+
+const MAP_FILE_MAX_LINES = 200;
+const LARGE_FILE_LINES = 800;
+const INDEX_FILES_MIN = 3;
+const MAX_READ_BYTES = 2 * 1024 * 1024;
+const EVIDENCE_LIMIT = 15;
+const SEVERITY_ORDER = ["high", "medium", "low"];
+
+const CODE_EXTENSIONS = new Set([
+  "js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "vue", "svelte",
+  "py", "rb", "php", "go", "rs", "java", "kt", "kts", "scala", "groovy",
+  "cs", "fs", "vb", "swift", "m", "mm", "c", "h", "cc", "cpp", "cxx", "hpp", "hh",
+  "dart", "lua", "ex", "exs", "erl", "clj", "cljs", "hs", "ml", "r", "jl",
+  "sh", "bash", "ps1", "gd",
+]);
+const JS_EXTENSIONS = new Set(["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"]);
+
+// File names a framework or language requires; repeating them is expected.
+const REQUIRED_NAMES = new Set([
+  "index", "__init__", "__main__", "mod", "lib", "main", "conftest", "setup", "program", "startup", "assemblyinfo",
+  "page", "layout", "route", "loading", "error", "not-found", "template", "default", "middleware",
+  "+page", "+layout", "+server", "+error", "+page.server", "+layout.server",
+]);
+const GENERIC_NAMES = new Set(["utils", "util", "helpers", "helper", "common", "misc", "stuff", "general", "functions"]);
+
+// Folders that usually hold build output or installed dependencies.
+const BUILD_DIRS = new Set([
+  "node_modules", "dist", "build", "out", "target", "bin", "obj", "coverage",
+  ".next", ".nuxt", ".svelte-kit", ".turbo", ".parcel-cache", "__pycache__", ".venv", "venv",
+  ".gradle", ".dart_tool", "Library", "Temp", "Logs",
+]);
+// Committed files under these count as generated. build/ and bin/ are left
+// out: projects keep real sources and assets there often enough.
+const OUTPUT_DIRS = new Set([
+  "node_modules", "dist", "out", "target", "obj", "coverage",
+  ".next", ".nuxt", ".svelte-kit", "__pycache__", ".venv", "venv", "Library", "Temp",
+]);
+const COMPILED_EXTENSIONS = new Set(["class", "pyc", "o", "obj", "pdb"]);
+
+// A computed lookup on a name, call or index. The keywords are ones an array
+// literal can follow, as in `for (const x of [...])`, which is not a lookup.
+const NOT_A_LOOKUP = "(?:of|in|return|case|yield|await|typeof|instanceof|void|delete|throw|else|do|new|default)";
+const JS_LOOKUP = String.raw`(?:(?:^|[^\w$])(?!${NOT_A_LOOKUP}\b)[\w$]+|[)\]])\s*\[\s*`;
+
+// One pattern per line of code. A literal lookup is searchable; these are not.
+const RUNTIME_NAME_PATTERNS = [
+  [JS_EXTENSIONS, new RegExp(JS_LOOKUP + "(['\"])[^'\"\\n]*\\1\\s*\\+")],
+  [JS_EXTENSIONS, new RegExp(JS_LOOKUP + "`[^`\\n]*\\$\\{")],
+  [JS_EXTENSIONS, /\beval\s*\(|\bnew\s+Function\s*\(/],
+  [new Set(["py"]), /\bgetattr\s*\(\s*[^,\n]+,\s*(?!\s|["']\w+["']\s*[,)])/],
+  [new Set(["py"]), /\bimportlib\.import_module\s*\(\s*(?!\s|["'][\w.]+["']\s*[,)])/],
+  [new Set(["py"]), /(?<![\w.])(?:eval|exec)\s*\(|\bglobals\s*\(\s*\)\s*\[/],
+  [new Set(["rb"]), /\.(?:public_)?send\s*\(\s*(?!\s|:\w+\s*[,)]|["'][\w?!]+["']\s*[,)])/],
+  [new Set(["php"]), /\$\$\w+|\bcall_user_func(?:_array)?\s*\(/],
+  [new Set(["cs"]), /\b(?:Type\.GetType|Activator\.CreateInstance|GetMethod|InvokeMember)\s*\(|\b(?:SendMessage|SendMessageUpwards|BroadcastMessage|Invoke|InvokeRepeating|StartCoroutine)\s*\(\s*"/],
+  [new Set(["java", "kt", "kts", "scala", "groovy"]), /\bClass\.forName\s*\(|\.getDeclaredMethod\s*\(|\.getMethod\s*\(/],
+  [new Set(["go"]), /\.MethodByName\s*\(/],
+];
+
+const CHECK_SCRIPT = /^(test|lint|typecheck|type-check|types|check|verify|validate|ci)(:[\w-]+)?$/;
+const COMBINED_CHECK = /^(check|verify|validate|ci)$/;
+const CHECK_TARGET = /^(check|test|lint|typecheck|verify|validate|ci)\b/;
+
+function git(root, args) {
+  return execFileSync("git", ["-C", root, ...args], {
+    encoding: "utf8",
+    maxBuffer: 512 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+}
+
+function walk(root) {
+  const files = [];
+  const pending = [""];
+  while (pending.length) {
+    const dir = pending.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(path.join(root, dir), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const rel = dir ? `${dir}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (entry.name !== ".git" && !BUILD_DIRS.has(entry.name)) pending.push(rel);
+      } else if (entry.isFile()) {
+        files.push(rel);
+      }
+    }
+  }
+  return files.sort();
+}
+
+function listFiles(root) {
+  try {
+    git(root, ["rev-parse", "--is-inside-work-tree"]);
+  } catch {
+    return { isGit: false, tracked: walk(root), untracked: [] };
+  }
+  const split = (output) => output.split("\0").filter(Boolean);
+  return {
+    isGit: true,
+    tracked: split(git(root, ["ls-files", "-z", "--cached"])),
+    untracked: split(git(root, ["ls-files", "-z", "--others", "--exclude-standard"])),
+  };
+}
+
+function extensionOf(file) {
+  const base = path.posix.basename(file);
+  const dot = base.lastIndexOf(".");
+  return dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
+}
+
+function stemOf(file) {
+  const base = path.posix.basename(file);
+  const dot = base.lastIndexOf(".");
+  return (dot > 0 ? base.slice(0, dot) : base).toLowerCase();
+}
+
+const dirsOf = (file) => file.split("/").slice(0, -1);
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function readFile(root, file) {
+  try {
+    const full = path.join(root, file);
+    const { size } = fs.statSync(full);
+    if (size > MAX_READ_BYTES) return { size, text: null };
+    const buffer = fs.readFileSync(full);
+    return { size, text: buffer.subarray(0, 8000).includes(0) ? null : buffer.toString("utf8") };
+  } catch {
+    return null;
+  }
+}
+
+function countLines(text) {
+  if (!text) return 0;
+  let newlines = 0;
+  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) newlines++;
+  return text.endsWith("\n") ? newlines : newlines + 1;
+}
+
+function rootReader(root) {
+  let names;
+  try {
+    names = new Set(fs.readdirSync(root));
+  } catch {
+    names = new Set();
+  }
+  const text = (file) => {
+    const info = readFile(root, file);
+    return info && info.text !== null ? info.text : "";
+  };
+  const json = (file) => {
+    try {
+      return JSON.parse(text(file));
+    } catch {
+      return null;
+    }
+  };
+  return { names, has: (name) => names.has(name), text, json };
+}
+
+function mapFileFindings(root, add) {
+  const map = ["CLAUDE.md", ".claude/CLAUDE.md"].find((file) => fs.existsSync(path.join(root, file)));
+  if (!map) {
+    const pointer = fs.existsSync(path.join(root, "AGENTS.md")) ? " (AGENTS.md exists and can be pointed to)" : "";
+    add("map-file-missing", "high", "No CLAUDE.md, so every session starts by exploring", [`CLAUDE.md${pointer}`]);
+    return;
+  }
+  const lines = countLines(readFile(root, map)?.text || "");
+  if (lines > MAP_FILE_MAX_LINES) {
+    add("map-file-long", "medium", `${map} has ${lines} lines, over ${MAP_FILE_MAX_LINES}, and loads into every session`, [map]);
+  }
+}
+
+function detectToolchain(root, reader) {
+  const { has, text, json } = reader;
+  const toolVersions = text(".tool-versions");
+  const pinnedIn = (tool) => new RegExp(`^\\s*${tool}\\s+\\S`, "m").test(toolVersions);
+  const ecosystems = [];
+  const missing = [];
+  const need = (name, declared, hint) => {
+    ecosystems.push(name);
+    if (!declared) missing.push(`${name} (${hint})`);
+  };
+
+  if (has("package.json")) {
+    const pkg = json("package.json") || {};
+    const volta = Boolean(pkg.volta && pkg.volta.node);
+    need("node", has(".nvmrc") || has(".node-version") || pinnedIn("nodejs") || pinnedIn("node") || volta, ".nvmrc or .node-version");
+  }
+  if (["pyproject.toml", "requirements.txt", "setup.py", "Pipfile"].some(has)) {
+    need("python", has(".python-version") || pinnedIn("python"), ".python-version");
+  }
+  if (has("Cargo.toml")) need("rust", has("rust-toolchain.toml") || has("rust-toolchain"), "rust-toolchain.toml");
+  if (has("go.mod")) need("go", /^go\s+\d/m.test(text("go.mod")), "a go directive in go.mod");
+  if (fs.existsSync(path.join(root, "ProjectSettings", "ProjectVersion.txt"))) {
+    ecosystems.push("unity");
+  } else if ([...reader.names].some((name) => /\.(sln|slnx|csproj|fsproj|vbproj)$/i.test(name))) {
+    need("dotnet", has("global.json"), "global.json");
+  }
+  if (has("Gemfile")) need("ruby", has(".ruby-version") || pinnedIn("ruby"), ".ruby-version");
+  if (["pom.xml", "build.gradle", "build.gradle.kts"].some(has)) {
+    const build = text("pom.xml") + text("build.gradle") + text("build.gradle.kts");
+    const toolchain = /languageVersion|<maven\.compiler\.release>|<release>\d/.test(build);
+    need("jvm", has(".java-version") || has(".sdkmanrc") || pinnedIn("java") || toolchain, ".java-version or a toolchain in the build file");
+  }
+  return { ecosystems, missing };
+}
+
+function checkKind(name) {
+  if (COMBINED_CHECK.test(name)) return "combined";
+  if (name.startsWith("test")) return "test";
+  if (name.startsWith("lint")) return "lint";
+  return "types";
+}
+
+function detectChecks(reader, ecosystems) {
+  const { has, text, json } = reader;
+  const commands = [];
+  const kinds = new Set();
+  let combined = false;
+  const found = (command, source, name) => {
+    commands.push({ command, source });
+    const kind = checkKind(name);
+    if (kind === "combined") combined = true;
+    else kinds.add(kind);
+  };
+
+  if (has("package.json")) {
+    const pkg = json("package.json") || {};
+    const runner = has("pnpm-lock.yaml") ? "pnpm" : has("yarn.lock") ? "yarn" : has("bun.lock") || has("bun.lockb") ? "bun run" : "npm run";
+    for (const name of Object.keys(pkg.scripts || {})) {
+      if (!CHECK_SCRIPT.test(name) || /watch|fix|update|debug/.test(name)) continue;
+      found(runner === "npm run" && name === "test" ? "npm test" : `${runner} ${name}`, "package.json", name);
+    }
+  }
+  for (const makefile of ["Makefile", "makefile", "GNUmakefile"]) {
+    if (!has(makefile)) continue;
+    for (const match of text(makefile).matchAll(/^([\w-]+)\s*:(?!=)/gm)) {
+      if (CHECK_TARGET.test(match[1])) found(`make ${match[1]}`, makefile, match[1]);
+    }
+  }
+  for (const justfile of ["justfile", "Justfile"]) {
+    if (!has(justfile)) continue;
+    for (const match of text(justfile).matchAll(/^([\w-]+)[^:\n]*:(?!=)/gm)) {
+      if (CHECK_TARGET.test(match[1])) found(`just ${match[1]}`, justfile, match[1]);
+    }
+  }
+  if (has("Cargo.toml")) commands.push({ command: "cargo test", source: "Cargo.toml" });
+  if (has("go.mod")) commands.push({ command: "go test ./...", source: "go.mod" });
+  if (ecosystems.includes("dotnet")) commands.push({ command: "dotnet test", source: "solution" });
+  if (ecosystems.includes("python")) {
+    if (has("tox.ini")) commands.push({ command: "tox", source: "tox.ini" });
+    if (has("noxfile.py")) commands.push({ command: "nox", source: "noxfile.py" });
+    if (has("pytest.ini") || has("conftest.py") || text("pyproject.toml").includes("[tool.pytest")) {
+      commands.push({ command: "pytest", source: "pytest config" });
+    }
+  }
+  return { commands, combined, split: !combined && kinds.size > 1 };
+}
+
+function isGeneratedPath(file) {
+  const base = path.posix.basename(file).toLowerCase();
+  if (dirsOf(file).some((dir) => OUTPUT_DIRS.has(dir))) return true;
+  if (/\.min\.(js|css)$/.test(base) || /\.(js|mjs|cjs|css|ts)\.map$/.test(base)) return true;
+  return COMPILED_EXTENSIONS.has(extensionOf(file));
+}
+
+const inBuildDir = (file) => dirsOf(file).some((dir) => BUILD_DIRS.has(dir));
+
+function groupByDir(files, dirSet) {
+  const groups = new Map();
+  for (const file of files) {
+    const dirs = dirsOf(file);
+    const index = dirs.findIndex((dir) => dirSet.has(dir));
+    const key = index === -1 ? file : `${dirs.slice(0, index + 1).join("/")}/`;
+    groups.set(key, (groups.get(key) || 0) + 1);
+  }
+  return [...groups].map(([key, n]) => (key.endsWith("/") ? `${key} (${plural(n, "file")})` : key));
+}
+
+function isConfigFile(file) {
+  const base = path.posix.basename(file);
+  return /\.config\.[cm]?[jt]sx?$/.test(base) || /^\.?[\w-]+rc\.[cm]?[jt]s$/.test(base) || /\.stories\.[jt]sx?$/.test(base);
+}
+
+function isReexportOnly(text) {
+  const body = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "").replace(/\s+/g, " ").trim();
+  return body !== "" && /^(?:export (?:type )?(?:\*(?: as [\w$]+)?|\{[^}]*\}) from ['"][^'"]+['"] ?;? ?)+$/.test(body);
+}
+
+function scanContents(root, codeFiles) {
+  const large = [];
+  const runtimeNames = [];
+  const defaultExports = [];
+  const reexportFiles = [];
+  for (const file of codeFiles) {
+    const info = readFile(root, file);
+    if (!info) continue;
+    if (info.text === null) {
+      if (info.size > MAX_READ_BYTES) large.push({ file, lines: null });
+      continue;
+    }
+    const lines = countLines(info.text);
+    if (lines > LARGE_FILE_LINES) large.push({ file, lines });
+
+    const ext = extensionOf(file);
+    const patterns = RUNTIME_NAME_PATTERNS.filter(([exts]) => exts.has(ext)).map(([, pattern]) => pattern);
+    if (patterns.length) {
+      info.text.split("\n").forEach((line, i) => {
+        if (patterns.some((pattern) => pattern.test(line))) runtimeNames.push(`${file}:${i + 1}`);
+      });
+    }
+    if (!JS_EXTENSIONS.has(ext)) continue;
+    const stem = stemOf(file);
+    if (!isConfigFile(file) && !REQUIRED_NAMES.has(stem) && /^\s*export\s+default\b/m.test(info.text)) defaultExports.push(file);
+    if (stem === "index" && isReexportOnly(info.text)) reexportFiles.push(file);
+  }
+  large.sort((a, b) => (b.lines ?? Infinity) - (a.lines ?? Infinity));
+  return { large, runtimeNames, defaultExports, reexportFiles };
+}
+
+function audit(rootArg) {
+  const root = path.resolve(rootArg);
+  const listing = listFiles(root);
+  const files = [...listing.tracked, ...listing.untracked];
+  const codeFiles = files.filter((file) => CODE_EXTENSIONS.has(extensionOf(file)) && !inBuildDir(file) && !isGeneratedPath(file));
+  const reader = rootReader(root);
+  const findings = [];
+  const add = (id, severity, title, evidence) => {
+    findings.push({ id, severity, title, count: evidence.length, evidence: evidence.slice(0, EVIDENCE_LIMIT) });
+  };
+
+  if (!listing.isGit) add("not-a-git-repo", "high", "Not a git repository, so search can't use .gitignore to skip generated files", ["."]);
+  mapFileFindings(root, add);
+
+  const { ecosystems, missing } = detectToolchain(root, reader);
+  if (missing.length) add("toolchain-version-missing", "medium", "No declared toolchain version to run the project with", missing);
+
+  const checks = detectChecks(reader, ecosystems);
+  if (!checks.commands.length && codeFiles.length) {
+    add("check-command-missing", "high", "No test or check command found", ["no package script, make target or test runner config"]);
+  } else if (checks.split) {
+    add("check-command-split", "low", "Checks run as separate commands; no single one runs them all", checks.commands.map((entry) => entry.command));
+  }
+
+  if (listing.isGit) {
+    const notIgnored = listing.untracked.filter(inBuildDir);
+    if (notIgnored.length) add("build-output-not-ignored", "high", "Build or dependency folders not ignored by git, so they show up in search", groupByDir(notIgnored, BUILD_DIRS));
+    const committed = listing.tracked.filter(isGeneratedPath);
+    if (committed.length) add("build-output-tracked", "medium", "Generated files committed to git", groupByDir(committed, OUTPUT_DIRS));
+  }
+
+  const byStem = new Map();
+  for (const file of codeFiles) {
+    const stem = stemOf(file);
+    if (!REQUIRED_NAMES.has(stem)) byStem.set(stem, [...(byStem.get(stem) || []), file]);
+  }
+  const duplicates = [...byStem].filter(([, group]) => group.length > 1).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  if (duplicates.length) {
+    const evidence = duplicates.map(([stem, group]) => `${stem}: ${group.slice(0, 5).join(", ")}${group.length > 5 ? `, +${group.length - 5} more` : ""}`);
+    add("duplicate-names", "medium", "File names used more than once, so a search by name is ambiguous", evidence);
+  }
+
+  const genericDirs = new Set();
+  const genericFiles = [];
+  for (const file of codeFiles) {
+    const dirs = dirsOf(file);
+    dirs.forEach((dir, i) => {
+      if (GENERIC_NAMES.has(dir.toLowerCase())) genericDirs.add(`${dirs.slice(0, i + 1).join("/")}/`);
+    });
+    if (GENERIC_NAMES.has(stemOf(file).replace(/\.(test|spec)$/, ""))) genericFiles.push(file);
+  }
+  if (genericDirs.size || genericFiles.length) {
+    add("generic-names", "medium", "Generic file or folder names that say nothing about what is inside", [...genericDirs, ...genericFiles]);
+  }
+
+  const indexFiles = codeFiles.filter((file) => stemOf(file) === "index");
+  if (indexFiles.length >= INDEX_FILES_MIN) add("index-files", "low", "Several files named index, so a search by name is ambiguous", indexFiles);
+
+  const contents = scanContents(root, codeFiles);
+  if (contents.large.length) {
+    const evidence = contents.large.map(({ file, lines }) => `${file} (${lines === null ? "over 2 MB" : `${lines} lines`})`);
+    add("large-files", "medium", `Code files over ${LARGE_FILE_LINES} lines, expensive to read whole`, evidence);
+  }
+  if (contents.runtimeNames.length) add("runtime-names", "low", "Names built at runtime, which search can't follow", contents.runtimeNames);
+  if (contents.defaultExports.length) add("default-exports", "low", "Default exports, which can be imported under another name", contents.defaultExports);
+  if (contents.reexportFiles.length) add("re-export-files", "low", "Index files that only re-export, adding a hop to every lookup", contents.reexportFiles);
+
+  findings.sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity));
+  return {
+    tool: "anneal-audit",
+    schemaVersion: 1,
+    root,
+    git: listing.isGit,
+    ecosystems,
+    files: { scanned: files.length, code: codeFiles.length },
+    checks,
+    findings,
+  };
+}
+
+function formatSummary(report) {
+  const lines = [
+    `anneal audit: ${report.root}`,
+    `${plural(report.files.scanned, "file")} (${report.files.code} code) | git: ${report.git ? "yes" : "no"} | ecosystems: ${report.ecosystems.join(", ") || "none detected"}`,
+    "",
+  ];
+  if (!report.findings.length) lines.push("No findings.");
+  for (const severity of SEVERITY_ORDER) {
+    const group = report.findings.filter((finding) => finding.severity === severity);
+    if (!group.length) continue;
+    lines.push(severity);
+    for (const finding of group) {
+      lines.push(`  ${finding.id} (${finding.count}): ${finding.title}`);
+      const shown = finding.evidence.slice(0, 3);
+      for (const item of shown) lines.push(`    ${item}`);
+      if (finding.count > shown.length) lines.push(`    +${finding.count - shown.length} more`);
+    }
+  }
+  const commands = report.checks.commands.map((entry) => entry.command);
+  const note = report.checks.split ? " (no single command runs them all)" : "";
+  lines.push("", `checks: ${commands.length ? commands.join(" | ") : "none found"}${note}`);
+  return `${lines.join("\n")}\n`;
+}
+
+function main(argv) {
+  const args = argv.slice(2);
+  let root = process.cwd();
+  let json = false;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--json") json = true;
+    else if (args[i] === "--root" && i + 1 < args.length) root = args[++i];
+    else {
+      process.stderr.write("usage: audit.js [--root <dir>] [--json]\n");
+      return 2;
+    }
+  }
+  let isDirectory = false;
+  try {
+    isDirectory = fs.statSync(root).isDirectory();
+  } catch {
+    isDirectory = false;
+  }
+  if (!isDirectory) {
+    process.stderr.write(`audit.js: not a directory: ${root}\n`);
+    return 2;
+  }
+  const report = audit(root);
+  process.stdout.write(json ? `${JSON.stringify(report, null, 2)}\n` : formatSummary(report));
+  return 0;
+}
+
+if (require.main === module) process.exitCode = main(process.argv);
+
+module.exports = { audit, formatSummary, main };
