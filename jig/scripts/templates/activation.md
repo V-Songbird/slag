@@ -3,12 +3,18 @@ jig reports it as drifted rather than overwriting your edit. -->
 
 # Catching mistakes at commit time
 
-Your checks already run in CI, and CI stops a bad change before it merges.
-Nothing below is needed to stay covered.
+Git can invoke jig's check driver on your machine at the moment you commit.
+This file explains how to configure that invocation and which checks it can run.
 
-What is missing is the *earlier* catch: the same checks running on your own
-machine the moment you commit, so a mistake never travels as far as a pull
-request. That is the whole difference. It is convenience, not safety.
+Only check-driver detectors in the installed modules run through the driver.
+Session-only detectors do not gain commit or CI coverage from this wiring.
+Optional tool verification runs here only when its entry in `.jig/verify.json`
+names the `commit` lane.
+
+CI coverage requires a configured workflow and checks or verification entries
+that the workflow runs. A workflow file alone does not prove a run succeeded
+or that a merge is blocked. Ask jig's inventory for the configured lanes and
+jig's review for recorded runs.
 
 Git can run a script before every commit. jig wrote one for you at
 `.jig/hooks/pre-commit`, and git will not use it until it is told to. jig can
@@ -16,10 +22,10 @@ do that for you, as a change you approve like any other.
 
 ## Let jig do it
 
-Ask for it in Claude Code:
+Ask jig for it, in whichever agent session runs it here:
 
 ```
-/jig:jig wire the commit lane
+wire the commit lane
 ```
 
 You approve it by name, and jig's own revert puts the setting back exactly as
@@ -71,9 +77,10 @@ require("child_process").execFileSync(process.execPath, [".jig/checks/run.mjs"],
 A git hook does not read your shell's startup files. If node reaches your
 terminal through fnm, nvm, volta, or asdf, the hook may not find node at all.
 
-The hook jig wrote handles this: when it cannot find node, it lets the commit
-through rather than blocking it, and CI still catches the problem. A hook you
-write yourself should do the same, or give node an absolute path.
+The hook jig wrote lets the commit through when it cannot find node and
+reports that its checks were skipped. That commit has no coverage from this
+hook. Restore node on the hook's PATH or give node an absolute path; inspect
+CI separately before relying on it.
 
 ## Trying it first
 

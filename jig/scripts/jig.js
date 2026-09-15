@@ -90,7 +90,8 @@ const sectionsLib = require("./sections.js");
 // module so a hook can name a constant without requiring this file, which a
 // hook spawn would otherwise parse in full on every tool call.
 const {
-  SCHEMA_VERSION, STATE_DIR, VERIFY_FILE, SHELL_TOOLS,
+  SCHEMA_VERSION, STATE_DIR, VERIFY_FILE, SHELL_TOOLS, CODEX_SHELL_TOOLS, NATIVE_EDIT_TOOLS, HOOK_TOOL_ALIASES,
+  RUNTIMES, activeRuntime, skillCommand,
   isObject, stripBom, proposedVerifyEntries, fixturePath,
 } = require("./vocab.js");
 
@@ -100,8 +101,10 @@ const PLUGIN_ROOT = path.dirname(__dirname);
 // owner can actually run. Nothing puts jig on a PATH, so a report that handed
 // out `jig plan --wire-commit` handed out a command that answers "command not
 // found" — it is either the skill that offers it, or this script by its path.
-const WIRE_COMMIT_FIX = "ask /jig:jig to wire the commit lane, or run: node " +
-  toPosix(__filename) + " plan --wire-commit";
+function wireCommitFix() {
+  return "ask " + skillCommand("jig") + " to wire the commit lane, or run: node " +
+    toPosix(__filename) + " plan --wire-commit";
+}
 
 const JOURNAL_FILE = "journal.jsonl";
 const PREIMAGE_DIR = "preimages";
@@ -161,8 +164,68 @@ function harnessBriefText(selection, ci) {
     "visibly and say so. The coverage matrix is at .jig/plan.md.\n";
 }
 
-function agentsRegionText(selection, ci) {
-  return AGENTS_BEGIN + "\n\n" + harnessBriefText(selection, ci) + "\n" + AGENTS_END + "\n";
+// jig's region inside the root instruction file Codex loads. It holds two
+// sections, checks and governance, so a plan that writes one keeps the other
+// byte for byte, whichever runtime wrote it last.
+const AGENTS_SECTION_NAMES = ["checks", "governance"];
+
+function agentsRegionBody(text) {
+  const host = stripBom(String(text || "")).replace(/\r\n/g, "\n");
+  const begins = host.split(AGENTS_BEGIN).length - 1;
+  const ends = host.split(AGENTS_END).length - 1;
+  if (begins === 0 && ends === 0) return null;
+  const begin = host.indexOf(AGENTS_BEGIN), end = host.indexOf(AGENTS_END);
+  if (begins !== 1 || ends !== 1 || end < begin) {
+    throw expected("the jig region has incomplete, duplicated or reversed markers; repair its boundaries before planning a write");
+  }
+  return host.slice(begin + AGENTS_BEGIN.length, end).trim();
+}
+
+function agentsSection(body, name, content) {
+  const begin = "<!-- jig:" + name + ":begin -->";
+  const end = "<!-- jig:" + name + ":end -->";
+  const first = body.indexOf(begin), last = body.indexOf(end);
+  if ((first === -1) !== (last === -1) || (first !== -1 &&
+      (last < first || body.indexOf(begin, first + begin.length) !== -1 || body.indexOf(end, last + end.length) !== -1))) {
+    throw expected("the jig " + name + " section has malformed markers; repair it before planning a write");
+  }
+  const section = begin + "\n" + content.trim() + "\n" + end;
+  return first === -1 ? [body.trim(), section].filter(Boolean).join("\n\n")
+    : body.slice(0, first) + section + body.slice(last + end.length);
+}
+
+// Codex reads AGENTS.override.md in place of AGENTS.md in the same directory.
+function agentsInstructionPath(root) {
+  return fs.existsSync(path.join(root, "AGENTS.override.md")) ? "AGENTS.override.md" : "AGENTS.md";
+}
+
+function composeAgentsRegion(root, selection, ci, checks, orphans) {
+  const target = agentsInstructionPath(root);
+  const prior = readIfExists(path.join(root, target));
+  let body = agentsRegionBody(prior === null ? "" : prior.toString("utf8")) || "";
+  // Old installs had one unsectioned harness brief. Wrap it before either
+  // update so adding governance retains that approved brief byte for byte.
+  if (body.startsWith("jig guards this repository.") && !AGENTS_SECTION_NAMES.some((n) => body.includes("<!-- jig:" + n + ":begin -->"))) {
+    body = agentsSection("", "checks", body);
+  }
+  if (checks) body = agentsSection(body, "checks", harnessBriefText(selection, ci));
+  if (orphans) {
+    // The next scan excludes pointers already reachable through this region.
+    // Its orphan list is therefore an addition, never the complete approved
+    // governance set. Retain the old section while adding newly approved paths.
+    const begin = "<!-- jig:governance:begin -->";
+    const end = "<!-- jig:governance:end -->";
+    const first = body.indexOf(begin), last = body.indexOf(end);
+    const previous = first !== -1 && last > first ? body.slice(first + begin.length, last).trim() : "";
+    const evidence = "<!-- " + PROSE_EVIDENCE_MARK + ": governance pointers computed from the scan; evidence: repository paths -->";
+    const retained = previous.split("\n").filter((line) => line !== evidence).join("\n").trim();
+    const pointers = orphans.map((p) => "- Before structural work, read `" + p + "`; it governs this repository.");
+    const existingLines = new Set(retained.split("\n"));
+    const additions = [...new Set(pointers)].filter((line) => !existingLines.has(line));
+    const content = [retained, ...additions].filter(Boolean).join("\n");
+    body = agentsSection(body, "governance", content + "\n\n" + evidence);
+  }
+  return { path: target, content: AGENTS_BEGIN + "\n\n" + body.trim() + "\n\n" + AGENTS_END + "\n" };
 }
 
 // write-settings is additionally gated behind the permissions probe series
@@ -171,6 +234,8 @@ function agentsRegionText(selection, ci) {
 // sits beside it. Probes first, capability second — a missing or red record
 // keeps the gate closed. JIG_PROBE_RESULTS points tests at a fixture.
 function probeGreen() {
+  // Claude Code evidence only; the Codex runtime writes no permission settings.
+  if (activeRuntime() === "codex") return false;
   const file = process.env.JIG_PROBE_RESULTS || path.join(__dirname, "probes", "results.json");
   try {
     const record = JSON.parse(stripBom(fs.readFileSync(file, "utf8")));
@@ -196,7 +261,7 @@ const KIND_TARGETS = {
   "include-line": ["scripts/git-hooks/", ".husky/"],
   "write-settings": [".claude/settings.json"],
   "write-rule": [".claude/rules/"],
-  "write-agents-region": ["AGENTS.md"],
+  "write-agents-region": ["AGENTS.md", "AGENTS.override.md"],
   "run-install": null,
   // The narrowest list in the table: one sentinel, one setting.
   "set-git-config": [GIT_SETTING_PATH],
@@ -281,9 +346,9 @@ function applyStyle(text, style) {
 // Lexical containment. A draft plan is JSON somebody assembled; an absolute path
 // or a `..` segment in it must never become a write outside the project.
 function resolveInsideRoot(root, rel) {
-  if (typeof rel !== "string" || !rel.trim() || path.isAbsolute(rel) || /^[A-Za-z]:/.test(rel)) return null;
+  if (typeof rel !== "string" || !rel.trim() || path.posix.isAbsolute(toPosix(rel)) || /^[A-Za-z]:/.test(rel)) return null;
   const base = path.resolve(root);
-  const full = path.resolve(base, rel);
+  const full = path.resolve(base, toPosix(rel));
   return full === base || full.startsWith(base + path.sep) ? full : null;
 }
 
@@ -326,6 +391,9 @@ function isEngineOwned(rel) {
 // Returns null when the path is writable for that kind, otherwise the reason.
 function targetProblem(root, kind, rel) {
   if (typeof rel !== "string" || !rel.trim()) return "the change has no path";
+  // Plan paths use the same separators on every OS. Check the canonical target
+  // so dot segments cannot conceal Git metadata or journal-owned files.
+  rel = path.posix.normalize(toPosix(rel));
   // First, and for every kind including the git-setting one: no path under
   // `.git/` is writable, whatever it was approved for.
   if (matchesTarget(rel, GIT_DIR)) {
@@ -342,6 +410,15 @@ function targetProblem(root, kind, rel) {
       : rel + " — set-git-config only ever names " + GIT_SETTING_PATH;
   }
   if (!resolveInsideRoot(root, rel)) return rel + " escapes the project root";
+  if (activeRuntime() === "codex") {
+    const target = rel.toLowerCase();
+    if (target === ".claude" || target.startsWith(".claude/")) {
+      return rel + " is a Claude Code surface, and the Codex runtime never writes it. Historical writes remain reversible.";
+    }
+    if (kind === "write-settings" || kind === "write-rule") {
+      return rel + " uses a Claude Code change kind; on Codex, use a reviewed write-agents-region";
+    }
+  }
   if (isEngineOwned(rel)) return rel + " belongs to the engine — a change may not rewrite the transaction record";
   if (!Object.prototype.hasOwnProperty.call(KIND_TARGETS, kind)) {
     return rel + " — " + JSON.stringify(kind) + " is not a change kind this engine writes";
@@ -691,7 +768,8 @@ function planFromDraft(draft, root) {
     if (raw.kind === "write-settings" && !probeGreen()) {
       problems.push(label + ": jig does not write permission rules into your settings. They stay a" +
         " printed proposal you apply yourself, which is the only shipped behaviour." +
-        " (Maintainers: the capability unlocks behind scripts/probes/permissions.js.)");
+        (activeRuntime() === "codex" ? " Claude Code permission probes do not enable settings writes on the Codex runtime."
+          : " (Maintainers: the capability unlocks behind scripts/probes/permissions.js.)"));
       continue;
     }
     const rel = toPosix(typeof raw.path === "string" ? raw.path.trim() : "");
@@ -742,6 +820,12 @@ function planFromDraft(draft, root) {
       problems.push(label + ": " + rel + " has no `content` string"); continue;
     }
 
+    if (raw.kind === "write-agents-region") {
+      try {
+        if (agentsRegionBody(raw.content) === null) problems.push(label + ": an instruction region must carry its complete jig markers");
+      } catch (err) { problems.push(label + ": " + err.message); }
+    }
+
     // The last line of defence under the config face. Whatever computed it —
     // a plan, a retirement, a hand-written draft — a config holding no guards
     // proposed over one that holds some is a repository being disarmed, and
@@ -769,6 +853,9 @@ function planFromDraft(draft, root) {
       // the file existing at apply time is then itself the staleness.
       sourceHash: current === null ? null : hashBytes(current),
       ...(migrationReview === undefined ? {} : { migrationReview }),
+      // The region as review saw it, so apply can refuse a region that moved.
+      ...(raw.kind === "write-agents-region"
+        ? { sourceRegionHash: hashBytes(Buffer.from(agentsRegionBody(current === null ? "" : current.toString("utf8")) || "")) } : {}),
       eol: style.eol,
       bom: style.bom,
       format,
@@ -828,7 +915,10 @@ function planFromDraft(draft, root) {
         PROSE_EVIDENCE_MARK + " …\") — unlabeled prose is folklore");
     }
   }
-  const proseBytes = proseChanges.reduce((n, c) => n + Buffer.byteLength(c.content, "utf8"), 0);
+  // On Codex the always-loaded prose is jig's instruction region.
+  const proseBytes = (activeRuntime() === "codex"
+    ? changes.filter((c) => c.kind === "write-rule" || c.kind === "write-agents-region") : proseChanges)
+    .reduce((n, c) => n + Buffer.byteLength(c.content, "utf8"), 0);
   if (proseBytes > PROSE_BUDGET_BYTES) {
     problems.push("this plan adds " + proseBytes + " bytes of always-loaded prose and the budget is " +
       PROSE_BUDGET_BYTES + " — drop a rule rather than paying it; every session carries what you emit here");
@@ -1258,8 +1348,17 @@ function applyGitConfig(root, ctx, change) {
 
 function applyChange(root, ctx, change) {
   if (change.migrationReview !== undefined) require("./migrate-host.js").assertReview(root, change);
+  // The plan's boundary is asked again at the write: the tree and the runtime
+  // can both have moved since the plan was made.
+  const boundary = targetProblem(root, change.kind, change.path);
+  if (boundary) throw expected("Refusing to apply change " + change.id + ": " + boundary);
   if (change.kind === "run-install") return applyInstall(root, ctx, change);
   if (change.kind === "set-git-config") return applyGitConfig(root, ctx, change);
+
+  if (change.kind === "write-agents-region" && change.path !== agentsInstructionPath(root)) {
+    throw expected("Refusing to apply change " + change.id + ": the active instruction file is now " +
+      agentsInstructionPath(root) + "; re-plan and approve that path instead of writing the shadowed " + change.path);
+  }
 
   const full = path.join(root, change.path);
   const current = readIfExists(full);
@@ -1272,6 +1371,13 @@ function applyChange(root, ctx, change) {
     // checked on the WHOLE result, because a file past it stops being read
     // and that would silently kill the user's own instructions too.
     const host = current === null ? "" : stripBom(current.toString("utf8")).replace(/\r\n/g, "\n");
+    const currentRegion = agentsRegionBody(host);
+    const proposedRegion = agentsRegionBody(change.content);
+    if (proposedRegion === null) throw expected("an AGENTS region change must carry its complete jig markers");
+    if (change.sourceRegionHash && hashBytes(Buffer.from(currentRegion || "")) !== change.sourceRegionHash &&
+        currentRegion !== proposedRegion) {
+      throw expected("Refusing to apply change " + change.id + ": jig's instruction region changed since review; re-plan so that update is preserved");
+    }
     const begin = host.indexOf(AGENTS_BEGIN);
     const end = host.indexOf(AGENTS_END);
     let next;
@@ -1282,7 +1388,7 @@ function applyChange(root, ctx, change) {
     }
     if (Buffer.byteLength(next, "utf8") > AGENTS_BUDGET_BYTES) {
       appendJournal(root, { event: "reject", tx: ctx.tx, plan: ctx.plan, change: change.id, path: change.path, cause: "size" });
-      throw expected("Refusing to apply change " + change.id + ": AGENTS.md would be " +
+      throw expected("Refusing to apply change " + change.id + ": " + change.path + " would be " +
         Buffer.byteLength(next, "utf8") + " bytes, past the " + AGENTS_BUDGET_BYTES +
         " loadability ceiling — a file that big stops being read at all.");
     }
@@ -1419,6 +1525,22 @@ const DRIVER_SKIPS = [
 // edition that could add a column would be an edition deciding what jig
 // reports.
 const ACTORS = ["human-editor", "human-ci", "claude-session", "codex-session"];
+// On the Codex runtime the session column is Codex's own. Catalogues and
+// installed checks keep their `claude-session` actor bytes and proof hashes;
+// only the matrix reads a session lever as the runtime that runs it.
+const CODEX_ACTORS = ["human-editor", "human-ci", "codex-session"];
+
+function actorsFor(runtime) {
+  return (runtime || activeRuntime()) === "codex" ? CODEX_ACTORS : ACTORS;
+}
+
+function matrixActor(actor, runtime) {
+  return (runtime || activeRuntime()) === "codex" && actor === "claude-session" ? "codex-session" : actor;
+}
+
+function codexActor(actor) {
+  return matrixActor(actor, "codex");
+}
 
 // What each lever can promise, in the only two terms the matrix grades on:
 // can a human or a CI runner run it with no agent host, and is it a pattern
@@ -2253,8 +2375,8 @@ function composeConfigs(items, manifests) {
 }
 
 // Which face of the activation doc a plan writes. The unwired one tells the
-// owner how to turn commit-time checks on. The wired ones say the checks are
-// already running and how to turn them off, and there are two because undoing
+// owner how to configure commit-time invocation. The wired ones describe that
+// configuration and how to undo it, and there are two because undoing
 // the two routes is two different things: unsetting `core.hooksPath` for the
 // hook jig wrote, taking one line back out of a hook the owner already had.
 //
@@ -2428,12 +2550,12 @@ function draftFromTemplates(root, opts, checks) {
     const lane = commitLane(root);
     if (lane.state !== "live") {
       throw expected("commit-time checks do not run here yet, so " + STATE_DIR + "/" + ACTIVATION_FILE +
-        " already says the right thing. " + WIRE_COMMIT_FIX + " — that is what turns them on.");
+        " already says the right thing. " + wireCommitFix() + " — that is what turns them on.");
     }
     const entry = byName.get(face);
     const current = readIfExists(path.join(root, STATE_DIR, ACTIVATION_FILE));
     if (entry && current !== null && templateText(current) === templateBody(entry)) {
-      throw expected(STATE_DIR + "/" + ACTIVATION_FILE + " already says the checks are running — nothing to refresh.");
+      throw expected(STATE_DIR + "/" + ACTIVATION_FILE + " already describes the current hook wiring — nothing to refresh.");
     }
   }
   // A plan with no coverage behind it is a wiring plan — `--wire-commit`,
@@ -2705,20 +2827,32 @@ function draftFromTemplates(root, opts, checks) {
     }
   }
 
-  // The Codex region (0.5.0): computed from the selection, marker-fenced,
-  // capped by the loadability ceiling at apply time. Explicit request only.
-  if (opts["agents-region"]) {
-    const content = agentsRegionText(selection, !opts["no-ci"]);
+  // jig's instruction region (0.5.0, sectioned since 2.17.0): computed from the
+  // selection, marker-fenced, capped by the loadability ceiling at apply time,
+  // explicit request only. It is composed over the region already on disk, so
+  // a checks brief never erases a governance section the other runtime wrote.
+  // On Codex the checks rule and the governance pointers are sections of that
+  // same region: one region and one approval, whichever flags asked for it.
+  const codex = activeRuntime() === "codex";
+  const checksBrief = !!(opts["agents-region"] || (codex && opts["checks-rule"]));
+  let governancePointers = null;
+  if (codex && opts["wire-governance"]) {
+    const { profile } = readProfile(root);
+    governancePointers = (profile.governance && profile.governance.orphans) || [];
+    if (!governancePointers.length) throw expected("the scan found no orphaned governance docs — nothing to wire");
+  }
+  if (checksBrief || governancePointers) {
+    const region = composeAgentsRegion(root, selection, !opts["no-ci"], checksBrief, governancePointers);
     changes.push({
-      id: changeId("agents-region", content),
+      id: changeId("agents-region", region.path + region.content),
       kind: "write-agents-region",
-      path: "AGENTS.md",
-      content,
-      classIds: selection,
+      ...region,
+      classIds: checksBrief ? selection : [],
       ownership: "line",
       provenance,
-      template: { name: "agents-region", version: "1.0.0" },
-      rationale: "point Codex sessions at the committed checks",
+      template: { name: "agents-region", version: "1.1.0" },
+      rationale: [checksBrief ? "point Codex sessions at the committed checks" : null,
+        governancePointers ? "point Codex sessions at orphaned governance documents" : null].filter(Boolean).join("; "),
     });
   }
   // The same brief for the other host (2.9.0). A Claude Code session never
@@ -2726,7 +2860,7 @@ function draftFromTemplates(root, opts, checks) {
   // with no standing instruction at all — only the deny reply, which arrives
   // after the tool call. Opt-in and item tier like every other file outside
   // `.jig/`, because it is always-loaded prose the owner has to want.
-  if (opts["checks-rule"]) {
+  if (!codex && opts["checks-rule"]) {
     const content = "# jig's checks\n\n" + harnessBriefText(selection, !opts["no-ci"]) +
       "\n<!-- " + PROSE_EVIDENCE_MARK + " — the harness brief, computed from the selection." +
       " evidence: reasoned, claude-opus-5 2026-09 -->\n";
@@ -2812,7 +2946,7 @@ function draftFromTemplates(root, opts, checks) {
 
   // The governance pointer rule: computed from the scan's own orphan list,
   // never from anything a person typed — the same discipline as the config.
-  if (opts["wire-governance"]) {
+  if (!codex && opts["wire-governance"]) {
     const { profile } = readProfile(root);
     const orphans = (profile.governance && profile.governance.orphans) || [];
     if (!orphans.length) throw expected("the scan found no orphaned governance docs — nothing to wire");
@@ -3238,7 +3372,9 @@ function cellBlocks(cls, det, grade, lanes, guard) {
     // reason the lanes are (SCOPE, "Does top-level config.mode survive").
     return guard && guard.mode === "observe"
       ? "proven by its fixture pair — records the call in session, refuses nothing"
-      : "proven by its fixture pair — refuses the call in session";
+      : activeRuntime() === "codex"
+        ? "proven by its fixture pair - can refuse the call when Codex loads and delivers its hook; host interception is unverified"
+        : "proven by its fixture pair — refuses the call in session";
   }
   if (det.lever === "agents-region") return "prose an agent reads — it refuses nothing";
   // Everything else is a lane. The commit lane counts for the driver alone: a
@@ -3277,7 +3413,7 @@ function detectorCell(cls, det, index, provenance, changes, guards, installed, l
     const blind = driverBlindDir(det);
     why = blind ? "the check driver never walks " + blind + "/"
       : removalOnlyDetector(det) ? "a removal is only visible between two versions of a file, so only the" +
-        " commit lane counts it — and no pre-commit hook here runs the driver. " + WIRE_COMMIT_FIX +
+        " commit lane counts it — and no pre-commit hook here runs the driver. " + wireCommitFix() +
         " — that is what turns this cell on"
       : det.lever === "tool-rule"
         ? "no lane runs " + ((det.params && det.params.tool) || det.lever)
@@ -3302,10 +3438,10 @@ function detectorCell(cls, det, index, provenance, changes, guards, installed, l
 
 function matrixRow(cls, provenance, changes, guards, installed, lanes) {
   const cells = {};
-  for (const actor of ACTORS) {
+  for (const actor of actorsFor()) {
     const found = cls.detectors
       .map((det, i) => ({ det, i }))
-      .filter(({ det }) => det.actor === actor)
+      .filter(({ det }) => matrixActor(det.actor) === actor)
       .map(({ det, i }) => detectorCell(cls, det, i, provenance, changes, guards, installed, lanes));
     // Best-of, not first-of: a class with both a shipping lever and a later one
     // for the same actor is covered today by the one that ships today.
@@ -3455,7 +3591,7 @@ function consentFor(change, guards, installed, context) {
     return { tier: "item", why: "adds always-loaded prose every session will carry" };
   }
   if (change.kind === "write-agents-region") {
-    return { tier: "item", why: "owns a fenced region inside AGENTS.md, which every Codex session loads" };
+    return { tier: "item", why: "owns a fenced region inside " + change.path + ", which every Codex session loads" };
   }
   if (change.kind === "run-install") {
     return { tier: "item", why: "runs " + JSON.stringify(change.install ? change.install.command : "an install") + " against this machine" };
@@ -3671,7 +3807,8 @@ function buildReview(payload, generated, root) {
     // The lanes this plan leaves live, once applied. Every claim on the page
     // about a commit or a CI run is read off these two booleans.
     lanes,
-    actors: ACTORS,
+    actors: actorsFor(),
+    ...(activeRuntime() === "codex" ? { host: codexHostFacts(root) } : {}),
     editions,
     denyReplies,
     selection,
@@ -3752,6 +3889,10 @@ function renderReviewMd(review, backlog) {
     : "you asked for observe, so every guard records what it would have blocked and refuses nothing"));
   out.push("- editions read: " + ((review.editions || []).map((e) => "`" + e + "`").join(", ") || "none — every class here was authored"));
   out.push("");
+  if (review.host) {
+    out.push("Codex hook delivery, project trust and plugin loading are not verified by this plan. Session detector grades describe the admitted runtime; they do not prove host interception.");
+    out.push("");
+  }
   out.push("## Coverage by actor");
   out.push("");
   out.push("| class | provenance | " + review.actors.join(" | ") + " |");
@@ -3847,7 +3988,7 @@ function renderReviewMd(review, backlog) {
       } else {
         out.push(names(driven) + " — their module is installed and **no lane here runs the driver**: no");
         out.push("pre-commit hook invokes it and there is no CI workflow, so nothing evaluates their");
-        out.push("patterns until one of those exists. To wire the commit lane, " + WIRE_COMMIT_FIX + ".");
+        out.push("patterns until one of those exists. To wire the commit lane, " + wireCommitFix() + ".");
       }
       out.push("");
     }
@@ -3881,7 +4022,7 @@ function renderReviewMd(review, backlog) {
     out.push("command guard's patterns against the syntax an agent will actually send here.");
     out.push("");
     out.push("Which of those names a session sends cannot be read before a guard has run, and is not");
-    out.push("guessed. Afterwards `/jig:review` reports `evaluatedOn` per guard — the names that guard's");
+    out.push("guessed. Afterwards `" + skillCommand("review") + "` reports `evaluatedOn` per guard — the names that guard's");
     out.push("own calls arrived on — and `lanes.session.shell.seen`, which is every name any of jig's");
     out.push("rows recorded in this repository and is not scoped to one guard, one host or one session.");
     out.push("");
@@ -4380,6 +4521,18 @@ function writeManifest(root, ctx, selected, results) {
 
   const byId = new Map(readManifest(root).artifacts.map((a) => [a.id, a]));
   for (const row of rows) {
+    const change = selected.find((c) => c.id === row.id);
+    const prior = [...byId.values()].find((a) => a.path === row.path);
+    // Composition writes the shared config before package installs run. Those
+    // installs carry configBody:null precisely because they do not replace its
+    // configuration; replacing the manifest row must not erase the explicit
+    // tool list that proves whose configuration is already in this file. Carry
+    // only recorded membership, never infer it from an install targeting the
+    // same path. A real config replacement supplies its own metadata instead.
+    if (change && change.kind === "run-install" && change.install && change.install.configBody === null &&
+        prior && Array.isArray(prior.tools) && prior.tools.includes(change.install.id)) {
+      row.tools = [...prior.tools];
+    }
     // A change id carries the content hash, so rewriting an artifact from a
     // different template — or the same one at a new version — arrives under a
     // new id. Keyed by id alone the old row survives beside the new one, both
@@ -4418,18 +4571,19 @@ function proposalNotes(root, results) {
   const wrote = new Set(results.map((r) => r.path));
   const lane = commitLane(root);
   if (wrote.has(STATE_DIR + "/" + ACTIVATION_FILE) && lane.state !== "live") {
-    notes.push("Your checks run in CI, and CI catches everything before it merges. What is missing is the" +
-      " earlier catch, on your own machine, at the moment you commit — so a mistake never reaches a" +
-      " pull request at all." +
+    notes.push("Git does not invoke jig's driver here yet. Wiring it can run check-driver detectors and" +
+      " opted-in verification entries at the moment you commit. Session-only detectors do not gain" +
+      " commit or CI coverage from this wiring." +
       (lane.state === "hook-without-jig"
         ? "\n  You already have a commit hook at " + lane.path + ". Add jig's one line to it:" +
           "\n    " + ACTIVATION.sh.line +
           "\n  " + STATE_DIR + "/" + ACTIVATION_FILE + " has the same line for other kinds of hook."
         : "\n  jig wrote a ready-made hook at " + lane.shim + ". One command tells git to use it:" +
           "\n    git config " + GIT_SETTING + " " + STATE_DIR + "/hooks" +
-          "\n  Or have jig propose that as an approved, reversible change instead: " + WIRE_COMMIT_FIX +
+          "\n  Or have jig propose that as an approved, reversible change instead: " + wireCommitFix() +
           "\n  " + STATE_DIR + "/" + ACTIVATION_FILE + " explains both routes and what each costs.") +
-      "\n  Skipping this costs you nothing except finding out later. CI still stops the merge.");
+      "\n  CI coverage requires a configured workflow and checks or verification entries that it runs." +
+      " This note does not establish that CI ran or that a merge is blocked.");
   }
   if (wrote.has(STATE_DIR + "/" + PERMISSIONS_FILE)) {
     notes.push("Permission rules are proposed, not applied. " + STATE_DIR + "/" + PERMISSIONS_FILE + " says what" +
@@ -4618,7 +4772,8 @@ function guardProbe(guard, record, seen) {
     // names a tool this repository has actually recorded when there is one, and
     // falls back to the first watched name only where nothing has run yet —
     // which is a name jig watches, never a guess about the host.
-    const tool = (Array.isArray(seen) ? seen : []).find((t) => SHELL_TOOLS.includes(t)) || SHELL_TOOLS[0];
+    const shells = activeRuntime() === "codex" ? CODEX_SHELL_TOOLS : SHELL_TOOLS;
+    const tool = (Array.isArray(seen) ? seen : []).find((t) => shells.includes(t)) || shells[0];
     return { event: guard.runner, tool, input: { command: violation }, what };
   }
   // The blanker reads comment and string syntax off a filename, and the guard
@@ -4627,7 +4782,19 @@ function guardProbe(guard, record, seen) {
   // a directory-scoped guard's globs reports `caught: false` for a guard doing
   // exactly what it was installed to do.
   const file_path = fixturePath({ params: det.params || {} });
-  return { event: guard.runner, tool: "Write", input: { file_path, content: violation }, what };
+  if (activeRuntime() !== "codex") return { event: guard.runner, tool: "Write", input: { file_path, content: violation }, what };
+  // A Codex edit arrives as apply_patch, so the probe goes through the adapter a
+  // real patch does. A removal fixture needs a before-image an added file
+  // cannot carry, so that one keeps the admitted Edit view.
+  if (!(det.params && det.params.removed && det.params.removed.length)) {
+    const command = "*** Begin Patch\n*** Add File: " + file_path + "\n" +
+      violation.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n").map((line) => "+" + line).join("\n") +
+      "\n*** End Patch\n";
+    return { event: guard.runner, tool: NATIVE_EDIT_TOOLS[0], input: { command }, what };
+  }
+  const halves = admission.fencedHalves(violation);
+  if (!halves) return null;
+  return { event: guard.runner, tool: "Edit", input: { file_path, old_string: halves.before, new_string: halves.after }, what };
 }
 
 function ledgerLines(root) {
@@ -4658,13 +4825,21 @@ function readableOutput(text) {
 // A probe never throws. It either ran and says what it saw, or it did not run
 // and says what to run instead.
 function runProbe(root, guardId, probe, live) {
-  const payload = { session_id: "jig-selftest", tool_name: probe.tool, tool_input: probe.input };
-  const command = "echo '" + JSON.stringify(payload) + "' | node " + JSON.stringify(RUNNER_PATH) + " " + probe.event;
+  // The Codex probe carries the fields a Codex hook payload does and asks the
+  // runner for the diagnostic object Codex itself is never shown.
+  const codex = activeRuntime() === "codex";
+  const payload = codex
+    ? { session_id: "jig-selftest", cwd: root, hook_event_name: probe.event, tool_name: probe.tool, tool_input: probe.input }
+    : { session_id: "jig-selftest", tool_name: probe.tool, tool_input: probe.input };
+  const flags = codex ? ["--runtime", "codex", "--diagnostic"] : [];
+  const command = "echo '" + JSON.stringify(payload) + "' | node " + JSON.stringify(RUNNER_PATH) + " " + [probe.event, ...flags].join(" ");
   const expected_ = 'the runner names guard ' + guardId + ' with a "deny" or "would-deny" decision';
-  const base = { probe: guardId, kind: "guard", event: probe.event, what: probe.what, command, expected: expected_ };
+  const base = { probe: guardId, kind: "guard", event: probe.event, what: probe.what, command, expected: expected_,
+    ...(codex ? { evidence: "runtime-selftest", hostVerified: false,
+      transport: probe.tool === "apply_patch" || SHELL_TOOLS.includes(probe.tool) ? "codex-payload" : "internal-fixture" } : {}) };
   if (!live) return { ...base, ran: false, why: "selftest was not run with --live" };
 
-  const run = spawnSync(process.execPath, [RUNNER_PATH, probe.event], {
+  const run = spawnSync(process.execPath, [RUNNER_PATH, probe.event, ...flags], {
     cwd: root, input: JSON.stringify(payload), encoding: "utf-8", windowsHide: true,
   });
   if (run.error) return { ...base, ran: false, why: "node could not be spawned (" + run.error.message + ")" };
@@ -5040,7 +5215,10 @@ function cmdSelftest(root, opts) {
 
   const after = ledgerLines(root);
   const caught = probes.filter((p) => p.caught === true);
-  const notes = [];
+  const codex = activeRuntime() === "codex";
+  const notes = codex
+    ? ["Session probes replay synthetic payloads through jig locally. They do not verify that Codex loaded, trusted, delivered, or honored a hook."]
+    : [];
   if (!guards.length) {
     notes.push("No guards are installed in this project, so there is nothing for a guard probe to catch." +
       (read.problems.length ? " " + read.problems.join("; ") : "") +
@@ -5052,6 +5230,7 @@ function cmdSelftest(root, opts) {
   return {
     ok: true,
     live,
+    ...(codex ? { evidence: "runtime-selftest", hostVerified: false } : {}),
     // The exit criterion, stated as a fact rather than a hope: something was
     // seen catching something AND the ledger grew a line proving it. A guard
     // where there are guards; the check driver where there are none, because
@@ -5115,6 +5294,23 @@ const RULE_FILES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".claude/CLAUDE
 
 const SETTINGS_FILES = [".claude/settings.json", ".claude/settings.local.json"];
 
+// The Codex runtime's own registrations and files. Codex matches its canonical
+// tool names, so the slots are named for them; Edit and Write stay internal
+// fixture payloads for historical checks, never advertised as hook slots.
+const CODEX_HOOK_SLOTS = [
+  { id: "PreToolUse:" + CODEX_SHELL_TOOLS.join("|"), event: "PreToolUse", tools: CODEX_SHELL_TOOLS, what: "the command guard" },
+  { id: "PreToolUse:" + NATIVE_EDIT_TOOLS.join("|"), event: "PreToolUse", tools: NATIVE_EDIT_TOOLS, what: "the patch guard" },
+  { id: "PostToolUse:" + NATIVE_EDIT_TOOLS.join("|"), event: "PostToolUse", tools: NATIVE_EDIT_TOOLS, what: "the historical edit observer" },
+];
+
+const CODEX_RULE_FILES = ["AGENTS.override.md", "AGENTS.md"];
+
+const CODEX_SETTINGS_FILES = [".codex/hooks.json"];
+
+function hookSlots() {
+  return activeRuntime() === "codex" ? CODEX_HOOK_SLOTS : HOOK_SLOTS;
+}
+
 const LOCKFILES = {
   "package-lock.json": "npm",
   "pnpm-lock.yaml": "pnpm",
@@ -5143,7 +5339,7 @@ function firstExisting(root, names) {
   return names.find((n) => fs.existsSync(path.join(root, n))) || null;
 }
 
-// A Claude Code matcher is a regex tested against the tool name. An absent or
+// A hook matcher on either host is a regex tested against the tool name. An absent or
 // wildcard matcher takes every tool, which is what makes a bare PreToolUse
 // entry the widest possible occupant of a slot.
 function matcherMatches(matcher, tool) {
@@ -5153,6 +5349,12 @@ function matcherMatches(matcher, tool) {
   } catch (err) {
     return String(matcher) === tool;
   }
+}
+
+// Codex accepts compatibility names in matchers while keeping apply_patch as
+// the canonical payload tool. Occupancy must test every name the host matches.
+function matcherToolNames(matcher, tool) {
+  return (HOOK_TOOL_ALIASES[tool] || [tool]).filter((name) => matcherMatches(matcher, name));
 }
 
 // Flatten one settings.json / hooks.json `hooks` block into rows a human can
@@ -5176,12 +5378,15 @@ function hookRows(source, block) {
 // repository that builds it would otherwise have jig report its own two hooks
 // as the thing occupying its own two slots, and refuse to install anywhere.
 const OWN_HOOKS = path.join(path.dirname(__dirname), "hooks", "hooks.json");
+const OWN_CODEX_HOOKS = path.join(path.dirname(__dirname), "hooks", "codex-hooks.json");
 
 // Project settings, the user's own settings, and any plugin living in the
 // tree. The user-level file is read because a hook registered there fires in
 // this project too — a conflict jig could not see would be a conflict jig
-// walks straight into.
+// walks straight into. On Codex the same question reads Codex's hook files and
+// the in-tree plugins that carry a Codex manifest.
 function collectHooks(root) {
+  if (activeRuntime() === "codex") return collectCodexHooks(root);
   const rows = [];
   for (const rel of SETTINGS_FILES) {
     const settings = readJsonIfExists(path.join(root, rel));
@@ -5203,6 +5408,61 @@ function collectHooks(root) {
     if (found) rows.push(...hookRows(dir.name + "/hooks/hooks.json", found.hooks));
   }
   return rows;
+}
+
+function codexHome() {
+  return process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+}
+
+function collectCodexHooks(root) {
+  const rows = [];
+  const locations = [...CODEX_SETTINGS_FILES.map((rel) => ({ file: path.join(root, rel), source: rel })),
+    { file: path.join(codexHome(), "hooks.json"), source: path.join(codexHome(), "hooks.json") }];
+  for (const location of locations) {
+    const settings = readJsonIfExists(location.file);
+    if (settings) rows.push(...hookRows(location.source, settings.hooks));
+  }
+  // A plugin copied into a project is a candidate registration, never proof
+  // that it has been installed or trusted by the current session. Its manifest
+  // may point Codex at another hooks file, which then replaces the default one.
+  let entries = [];
+  try { entries = fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()); } catch { /* no tree, no plugins */ }
+  for (const dir of entries) {
+    const manifest = readJsonIfExists(path.join(root, dir.name, ".codex-plugin", "plugin.json"));
+    if (!manifest) continue;
+    const declared = typeof manifest.hooks === "string" && manifest.hooks.startsWith("./") ? manifest.hooks.slice(2) : "hooks/hooks.json";
+    const full = path.join(root, dir.name, ...declared.split("/"));
+    if ([OWN_HOOKS, OWN_CODEX_HOOKS].some((own) => path.resolve(full) === path.resolve(own))) continue;
+    const found = readJsonIfExists(full);
+    if (found) rows.push(...hookRows(dir.name + "/" + declared, found.hooks));
+  }
+  return rows;
+}
+
+// This is an on-disk inventory, not a claim that Codex trusted this project's
+// configuration, enabled hooks, or loaded a plugin. Those are session facts.
+function codexHostFacts(root) {
+  const candidates = [
+    { scope: "project", path: path.join(root, ".codex", "config.toml"), format: "toml" },
+    { scope: "project", path: path.join(root, ".codex", "hooks.json"), format: "json" },
+    { scope: "user", path: path.join(codexHome(), "config.toml"), format: "toml" },
+    { scope: "user", path: path.join(codexHome(), "hooks.json"), format: "json" },
+  ];
+  const files = candidates.map((entry) => {
+    try {
+      const text = fs.readFileSync(entry.path, "utf8");
+      if (entry.format === "json") {
+        const parsed = JSON.parse(stripBom(text));
+        return { ...entry, exists: true, inspection: isObject(parsed.hooks) ? "hooks-readable" : "no-hooks-object" };
+      }
+      return { ...entry, exists: true, inspection: "not-interpreted" };
+    } catch (err) {
+      return { ...entry, exists: err.code === "ENOENT" ? false : null,
+        inspection: err.code === "ENOENT" ? "absent" : "unreadable", problem: err.code === "ENOENT" ? null : err.message };
+    }
+  });
+  return { host: "codex", projectTrust: "unknown", hooksEnabled: "unknown", pluginLoaded: "unknown", files,
+    evidence: "On-disk files only. Active Codex trust, hook enablement, plugin loading and interception are not observable from this CLI." };
 }
 
 function gitConfig(root, key) {
@@ -5276,6 +5536,16 @@ function stackFacts(root) {
 // one. jig has no tokenizer and adding one to answer "roughly how big is the
 // rule corpus" would be a dependency bought for a rounding error.
 function ruleCorpus(root) {
+  if (activeRuntime() === "codex") {
+    // In one directory the override file takes the place of AGENTS.md. Deeper
+    // directories add instructions; they do not erase the ancestor's text.
+    const found = CODEX_RULE_FILES.filter((rel) => fs.existsSync(path.join(root, rel)));
+    const active = found.includes("AGENTS.override.md") ? "AGENTS.override.md" : "AGENTS.md";
+    const files = found.map((rel) => ({ path: rel, bytes: fs.statSync(path.join(root, rel)).size, loaded: rel === active }));
+    const bytes = files.filter((f) => f.loaded).reduce((n, f) => n + f.bytes, 0);
+    return { files, bytes, approxTokens: Math.round(bytes / 4), estimate: "four bytes per token, not a tokenizer",
+      scope: "project root only; ancestor, descendant, user instructions and configured fallback names may add context" };
+  }
   const rels = RULE_FILES.filter((rel) => fs.existsSync(path.join(root, rel)));
   const rulesDir = path.join(root, ".claude", "rules");
   if (fs.existsSync(rulesDir)) {
@@ -5301,8 +5571,10 @@ function conflictPreflight(root, hooks) {
       occupiedBy: occupied ? [slot.path] : [],
     });
   }
-  for (const slot of HOOK_SLOTS) {
-    const clashes = hooks.filter((h) => h.event === slot.event && slot.tools.some((t) => matcherMatches(h.matcher, t)));
+  for (const slot of hookSlots()) {
+    const clashes = hooks.filter((h) => h.event === slot.event && slot.tools.some((t) => matcherToolNames(h.matcher, t).length > 0));
+    const aliases = [...new Set(slot.tools.flatMap((tool) => clashes.flatMap((h) =>
+      matcherToolNames(h.matcher, tool).filter((name) => name !== tool))))];
     slots.push({
       slot: slot.id,
       kind: "hook",
@@ -5315,7 +5587,8 @@ function conflictPreflight(root, hooks) {
       // takes the slot on a session that sends that name and no other — so an
       // owner refused a guard is shown the contested name rather than a flat
       // "taken" (SCOPE, "Is a foreign hook on one shell tool a full occupancy").
-      overlap: slot.tools.filter((t) => clashes.some((c) => matcherMatches(c.matcher, t))),
+      overlap: slot.tools.filter((t) => clashes.some((c) => matcherToolNames(c.matcher, t).length > 0)),
+      ...(aliases.length ? { aliases } : {}),
       occupiedBy: clashes.map((c) => c.source + " [" + (c.matcher || "*") + "] " + c.commands.join("; ")),
     });
   }
@@ -5437,17 +5710,18 @@ function governanceFacts(root, rules, hooks) {
   // every in-tree skill body. A doc is referenced when any of them carries its
   // path or its basename.
   const surfaces = [];
-  for (const rule of rules.files) {
+  for (const rule of rules.files.filter((r) => r.loaded !== false)) {
     const buf = readIfExists(path.join(root, rule.path));
     if (buf) surfaces.push({ name: rule.path, text: buf.toString("utf8") });
   }
   surfaces.push({ name: "hooks", text: hooks.map((h) => (h.commands || []).join(" ")).join("\n") });
-  const skillsDir = path.join(root, ".claude", "skills");
+  const skillsRel = activeRuntime() === "codex" ? ".agents/skills" : ".claude/skills";
+  const skillsDir = path.join(root, ...skillsRel.split("/"));
   if (fs.existsSync(skillsDir)) {
     for (const name of fs.readdirSync(skillsDir)) {
       const skill = path.join(skillsDir, name, "SKILL.md");
       const buf = readIfExists(skill);
-      if (buf) surfaces.push({ name: ".claude/skills/" + name, text: buf.toString("utf8") });
+      if (buf) surfaces.push({ name: skillsRel + "/" + name, text: buf.toString("utf8") });
     }
   }
 
@@ -5468,8 +5742,11 @@ function cmdScan(root, opts) {
   const disclosures = [];
   if (occupied.some((s) => s.kind === "hook")) {
     disclosures.push(
-      "Hooks registered for the same event do not chain reliably across plugins. A guard jig adds beside one that" +
-        " already runs here could silently never fire, which is why the occupied slot is refused rather than shared.",
+      activeRuntime() === "codex"
+        ? "Composition with existing Codex hooks has not been verified here. jig reserves an occupied slot rather than" +
+          " claiming that its guard will compose correctly with another registration."
+        : "Hooks registered for the same event do not chain reliably across plugins. A guard jig adds beside one that" +
+          " already runs here could silently never fire, which is why the occupied slot is refused rather than shared.",
     );
   }
   // A shell slot names two tools and a foreign hook may hold only one of them,
@@ -5485,6 +5762,10 @@ function cmdScan(root, opts) {
       " knowable from here, and jig's matcher is one registration covering " + slot.tools.join(" and ") +
       ", so it is refused whole rather than taken in part.");
   }
+  for (const slot of occupied.filter((s) => s.kind === "hook" && s.aliases)) {
+    disclosures.push("Codex matches " + slot.aliases.join(", ") + " as aliases of " + slot.overlap.join(", ") +
+      "; this occupies " + slot.slot + " even though the payload keeps the canonical tool name.");
+  }
   for (const slot of occupied.filter((s) => s.kind === "file")) {
     disclosures.push(slot.path + " already exists — jig will not write over it, so " + slot.what + " has no slot here.");
   }
@@ -5495,19 +5776,36 @@ function cmdScan(root, opts) {
     disclosures.push(node.note);
   }
 
-  // The AGENTS.md chain: a nested file shadows the root one for its subtree,
-  // so a region written at the root may never be read where the work happens.
-  // Disclosed, never guessed around.
-  try {
-    const nested = fs.readdirSync(root, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && !["node_modules", ".git", ".jig"].includes(e.name))
-      .filter((e) => fs.existsSync(path.join(root, e.name, "AGENTS.md")))
-      .map((e) => e.name + "/AGENTS.md");
-    if (nested.length && fs.existsSync(path.join(root, "AGENTS.md"))) {
-      disclosures.push("AGENTS.md is shadowed for part of the tree: " + nested.join(", ") +
-        " override the root file in their own directories, so a jig region at the root is not read there.");
+  const codexHost = activeRuntime() === "codex" ? codexHostFacts(root) : null;
+  if (codexHost) {
+    disclosures.push(codexHost.evidence);
+    if (fs.existsSync(path.join(root, "AGENTS.override.md"))) {
+      disclosures.push("AGENTS.override.md takes precedence over AGENTS.md in this directory. jig's instruction region targets the override file while it exists.");
     }
-  } catch { /* a scan disclosure is never worth failing the scan for */ }
+    try {
+      const nested = fs.readdirSync(root, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && !["node_modules", ".git", ".jig"].includes(e.name))
+        .flatMap((e) => CODEX_RULE_FILES.filter((f) => fs.existsSync(path.join(root, e.name, f))).map((f) => e.name + "/" + f));
+      if (nested.length) {
+        disclosures.push("Additional subtree instructions: " + nested.join(", ") +
+          ". Codex combines ancestor and deeper-directory instructions; more specific instructions take precedence on conflicts.");
+      }
+    } catch { /* instruction discovery must not prevent a scan */ }
+  } else {
+    // The AGENTS.md chain: a nested file shadows the root one for its subtree,
+    // so a region written at the root may never be read where the work happens.
+    // Disclosed, never guessed around.
+    try {
+      const nested = fs.readdirSync(root, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && !["node_modules", ".git", ".jig"].includes(e.name))
+        .filter((e) => fs.existsSync(path.join(root, e.name, "AGENTS.md")))
+        .map((e) => e.name + "/AGENTS.md");
+      if (nested.length && fs.existsSync(path.join(root, "AGENTS.md"))) {
+        disclosures.push("AGENTS.md is shadowed for part of the tree: " + nested.join(", ") +
+          " override the root file in their own directories, so a jig region at the root is not read there.");
+      }
+    } catch { /* a scan disclosure is never worth failing the scan for */ }
+  }
 
   const precommit = precommitHosts(root);
   const lane = commitLane(root);
@@ -5575,7 +5873,7 @@ function cmdScan(root, opts) {
     edition: working[0] || stack.edition,
     editions: working,
     node,
-    guardrails: { hooks, coreHooksPath: gitConfig(root, GIT_SETTING), rules, precommit, commitLane: lane },
+    guardrails: { ...(codexHost ? { host: codexHost } : {}), hooks, coreHooksPath: gitConfig(root, GIT_SETTING), rules, precommit, commitLane: lane },
     governance,
     slots,
     occupied: occupied.map((s) => s.slot),
@@ -5953,11 +6251,23 @@ function lanesOf(root, rows) {
   // review's guard row. The platform is never asked either way, because on win32
   // it answers `PowerShell` for a session that also offers `Bash`
   // (HOST-PROBE-2026-09-02, sections 3 and 4).
-  const shell = { seen: require("../hooks/jig-lib.js").shellToolsSeen(root), watched: SHELL_TOOLS };
-  return {
-    session: off
+  const codex = activeRuntime() === "codex";
+  const shell = { seen: require("../hooks/jig-lib.js").shellToolsSeen(root), watched: codex ? CODEX_SHELL_TOOLS : SHELL_TOOLS };
+  // On Codex a readable guard configuration proves nothing about delivery: the
+  // host has to load and trust the hooks, and no command can observe that. The
+  // lane is configured or off there, and whether it runs is left unknown.
+  const session = !codex
+    ? (off
       ? { runs: false, observing: false, off: true, offSince, shell }
-      : { runs: rows.some((r) => r.mode === "armed"), observing: rows.some((r) => r.mode === "observe"), off: false, offSince: null, shell },
+      : { runs: rows.some((r) => r.mode === "armed"), observing: rows.some((r) => r.mode === "observe"), off: false, offSince: null, shell })
+    : off
+      ? { runs: false, observing: false, off: true, offSince, shell, state: "off", host: "codex" }
+      : { runs: rows.length ? null : false, observing: rows.some((r) => r.mode === "observe"),
+        configured: rows.some((r) => r.mode === "armed"), off: false, offSince: null, shell,
+        state: rows.length ? "unverified-host" : "no-guards", host: "codex",
+        evidence: "Guard configuration is readable; active Codex hook delivery and blocking have not been verified by this report." };
+  return {
+    session,
     commit: {
       runs: lane.state === "live",
       state: lane.state,
@@ -5970,7 +6280,7 @@ function lanesOf(root, rows) {
       fix: lane.state === "live" ? null
         : lane.state === "hook-without-jig"
           ? "add jig's line to " + lane.path + ": " + ACTIVATION.sh.line
-          : WIRE_COMMIT_FIX,
+          : wireCommitFix(),
     },
     ci,
   };
@@ -6327,6 +6637,15 @@ function main(argv) {
       "       jig.js migrate --host <codex|claude> [--root <path>]\n");
     process.exit(1);
   }
+  // The host the owner is working in. The Codex skills pass it on every command,
+  // and every function this command calls reads it back.
+  if (opts.runtime !== undefined) {
+    if (!RUNTIMES.includes(opts.runtime)) {
+      process.stderr.write("--runtime takes " + RUNTIMES.join(" or ") + "\n");
+      process.exit(1);
+    }
+    process.env.JIG_RUNTIME = opts.runtime;
+  }
   const root = typeof opts.root === "string" ? path.resolve(opts.root) : process.cwd();
   try {
     const result = COMMANDS[command](root, opts);
@@ -6349,7 +6668,8 @@ module.exports = {
   detectorCell, cellBlocks, planLanes, matrixRow, consentFor, bestGrade, backlogFor, buildReview, cellText, renderReviewMd,
   resolveEditions, editionClassById, AUTHORED_RUNNERS, adaptAuthoredDetector, readAuthored, admitAuthored, checkSlug,
   authoredChecksIn, readFromFile, toolchainProposal, toolchainRow, installTouchPaths, guardEvidence,
-  PROFILE_KEYS, FILE_SLOTS, HOOK_SLOTS, RULE_FILES,
+  PROFILE_KEYS, FILE_SLOTS, HOOK_SLOTS, RULE_FILES, CODEX_HOOK_SLOTS, CODEX_RULE_FILES, hookSlots, matcherToolNames,
+  CODEX_ACTORS, actorsFor, matrixActor, codexActor, codexHostFacts, agentsRegionBody, composeAgentsRegion, agentsInstructionPath,
   CHANGE_KINDS, INSTALLABLE_KINDS, KIND_TARGETS, VALIDATORS, PROSE_BUDGET_BYTES, probeGreen,
   OWNERSHIPS, PROVENANCES, DEFAULT_INSTALL_MODE, installMode, TEMPLATE_DIR, guardProbe, fixturePath,
   execToolchainProbe, readableOutput,

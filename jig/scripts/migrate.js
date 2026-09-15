@@ -35,6 +35,7 @@ const path = require("path");
 
 const jig = require("./jig.js");
 const admission = require("./admission.js");
+const { skillCommand } = require("./vocab.js");
 const editionsLib = require("./editions.js");
 // The 1.0.1 catalogue is the record of the install being migrated: it holds the
 // deny triple each class shipped with and the fixture pair its patterns were
@@ -254,7 +255,7 @@ function tombstoneSource(id, why) {
     "//   " + why,
     "//",
     "// It exports nothing, so nothing runs it. Its ledger history is untouched,",
-    "// `revert` puts the original file back, and /jig:jig can author a",
+    "// `revert` puts the original file back, and " + skillCommand("jig") + " can author a",
     "// replacement that earns its place on a pair of its own.",
     "",
   ].join("\n");
@@ -803,7 +804,7 @@ function cmdMigrate(root, opts) {
       "Undo the whole thing with `revert --tx " + applied.tx + "`.",
     ].concat(discarded.length
       ? ["The discarded checks stopped running and their files are now records of why." +
-        " Author replacements with /jig:jig if those mistakes still matter."]
+        " Author replacements with " + skillCommand("jig") + " if those mistakes still matter."]
       : []),
   };
 }

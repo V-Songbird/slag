@@ -351,6 +351,62 @@ test("a greenfield python plan grades every tool its own verify.json runs", () =
   assert.ok(again.every((c) => c.grade !== "GAP"), "a re-plan reads its own install as uncovered");
 });
 
+// Package installs share their target with a composed config, but carry no
+// replacement body. The last install still owns its journal and uninstall
+// command; it must also retain the config's recorded tool membership.
+test("successive installs preserve composed config membership without inventing it", () => {
+  const rel = "shared.config.json";
+  const body = "{\"alpha\":true,\"beta\":true}\n";
+  const composed = {
+    id: "compose-shared", kind: "write-side-file", path: rel, content: body,
+    tools: ["alpha", "beta"], template: { name: "toolchain-config-shared", version: "composed" },
+  };
+  const installChange = (tool, configBody = null) => ({
+    id: "install-" + tool, kind: "run-install", path: rel,
+    template: { name: "install-" + tool, version: "fixture" },
+    install: {
+      id: tool, edition: "javascript-typescript", role: "linter", installKind: "package",
+      packageManager: "npm", command: "fake install " + tool,
+      argv: [process.execPath, "-e", "0"], configPath: rel, configBody,
+      wiring: null, ciStep: null, uninstallCommand: "fake uninstall " + tool,
+      uninstallArgv: [process.execPath, "-e", "0"], timeoutMs: 20000,
+    },
+  });
+  const apply = (root, changes) => {
+    fs.writeFileSync(path.join(root, "draft.json"), JSON.stringify({ changes }));
+    const plan = engine.cmdPlan(root, { _: [], change: [], from: "draft.json" });
+    return A.applyPlan(engine, root, plan);
+  };
+  const artifact = (root) => readJson(root, ".jig/manifest.json").artifacts.find((a) => a.path === rel);
+
+  const root = nodeProject();
+  apply(root, [composed, installChange("alpha")]);
+  assert.deepEqual(artifact(root).tools, ["alpha", "beta"], "same-apply install erased composition metadata");
+  apply(root, [installChange("beta")]);
+  const latest = artifact(root);
+  assert.deepEqual(latest.tools, ["alpha", "beta"], "a later install erased prior recorded membership");
+  assert.equal(latest.id, "install-beta");
+  assert.equal(latest.install.tool, "beta");
+  assert.equal(latest.install.uninstall, "fake uninstall beta");
+  assert.equal(latest.hash, engine.hashBytes(Buffer.from(body)));
+  engine.cmdRevert(root, { _: [], change: ["install-beta"] });
+  assert.equal(fs.readFileSync(path.join(root, rel), "utf8"), body,
+    "reverting the package install removed the configuration that preceded it");
+  assert.equal(engine.changeState(engine.replayJournal(engine.readJournal(root)).get("install-beta")), "reverted");
+
+  for (const [name, change] of [
+    ["unrelated install", installChange("gamma")],
+    ["replacement config", installChange("alpha", "{}\n")],
+  ]) {
+    const other = nodeProject();
+    apply(other, [composed, change]);
+    assert.equal(artifact(other).tools, undefined, name + " inherited configuration it does not preserve");
+  }
+  const unrecorded = nodeProject({ [rel]: body });
+  apply(unrecorded, [installChange("alpha")]);
+  assert.equal(artifact(unrecorded).tools, undefined, "an install invented unrecorded tool membership");
+});
+
 test("an unreadable lane list is read as no lane at all, never as coverage", () => {
   const cls = synthetic({ detectors: [TOOL_RULE] });
   const torn = { id: "verify", path: ".jig/verify.json", kind: "write-side-file", content: "{ not json" };
