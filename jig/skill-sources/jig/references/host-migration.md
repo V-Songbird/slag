@@ -11,15 +11,24 @@ format migration.
 Confirm the intended project checkout and current branch with read-only Git
 commands. Follow the owner's branch instructions and retain existing local work.
 Use that checkout's absolute path as `<PROJECT_ROOT>`. Resolve `<JIG_ROOT>` from
+<!-- host: claude -->
 the actual loaded `skills/jig/SKILL.md` location, two directories above the skill
+<!-- host: codex -->
+the actual loaded `codex-skills/jig/SKILL.md` location, two directories above the skill
+<!-- host: end -->
 directory, and verify `scripts/jig.js` exists there. Substitute absolute paths in
 these commands; the angle-bracket names are placeholders, not shell variables.
 
 Run the command for the requested destination:
 
 ```text
+<!-- host: claude -->
 node "<JIG_ROOT>/scripts/jig.js" migrate --host codex --root "<PROJECT_ROOT>"
 node "<JIG_ROOT>/scripts/jig.js" migrate --host claude --root "<PROJECT_ROOT>"
+<!-- host: codex -->
+node "<JIG_ROOT>/scripts/jig.js" --runtime codex migrate --host codex --root "<PROJECT_ROOT>"
+node "<JIG_ROOT>/scripts/jig.js" --runtime codex migrate --host claude --root "<PROJECT_ROOT>"
+<!-- host: end -->
 ```
 
 This reads the existing `.jig/config.json`, manifest, local history, instruction
@@ -103,7 +112,11 @@ does not approve the instruction write.
 Apply each approved change by its named pair, never a batch plan approval:
 
 ```text
+<!-- host: claude -->
 node "<JIG_ROOT>/scripts/jig.js" apply --change <id> --path <path> --root "<PROJECT_ROOT>"
+<!-- host: codex -->
+node "<JIG_ROOT>/scripts/jig.js" --runtime codex apply --change <id> --path <path> --root "<PROJECT_ROOT>"
+<!-- host: end -->
 ```
 
 The engine rechecks discovered source bytes and scope, installed state and the
@@ -116,7 +129,11 @@ reviewed state still matches; it may still append audit records.
 Record the transaction id returned by `apply`. To undo this migration transaction:
 
 ```text
+<!-- host: claude -->
 node "<JIG_ROOT>/scripts/jig.js" revert --tx <tx> --root "<PROJECT_ROOT>"
+<!-- host: codex -->
+node "<JIG_ROOT>/scripts/jig.js" --runtime codex revert --tx <tx> --root "<PROJECT_ROOT>"
+<!-- host: end -->
 ```
 
 The change also supports `revert --change <id>` for its instruction-file write.
