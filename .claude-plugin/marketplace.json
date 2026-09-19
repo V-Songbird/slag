@@ -227,7 +227,7 @@
       "name": "anneal",
       "source": "./anneal",
       "description": "Audits how easy an existing repository is for an AI agent to find its way around — map file, toolchain version, names, layout, build output, check commands — then proposes a layout you approve and migrates in small commits, each checked against the project's own tests.",
-      "version": "0.1.0-alpha",
+      "version": "0.2.0-alpha",
       "license": "MIT",
       "author": {
         "name": "Victor Villegas",
@@ -244,6 +244,7 @@
         "migration",
         "refactoring",
         "CLAUDE.md",
+        "AGENTS.md",
         "layout"
       ],
       "tags": [
@@ -254,6 +255,7 @@
         "migration",
         "refactoring",
         "CLAUDE.md",
+        "AGENTS.md",
         "layout"
       ],
       "strict": true

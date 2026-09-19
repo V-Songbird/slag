@@ -102,6 +102,25 @@ function verify(root, marketplace) {
         }
       }
     }
+
+    // Antigravity reads a plugin.json at the plugin root, and like Codex it
+    // requires a version there. Same failure mode: a stale number ships.
+    const antigravityPath = path.join(root, source, "plugin.json");
+    if (fs.existsSync(antigravityPath)) {
+      let antigravity;
+      try {
+        antigravity = readJson(antigravityPath);
+      } catch (err) {
+        problems.push(`"${entry.name}": ${source}/plugin.json is not valid JSON -- ${err.message}`);
+        continue;
+      }
+      if (antigravity.name !== entry.name) {
+        problems.push(`"${entry.name}": ${source}/plugin.json declares name "${antigravity.name}"`);
+      }
+      if (antigravity.version !== entry.version) {
+        problems.push(`"${entry.name}": ${source}/plugin.json version "${antigravity.version}" does not match marketplace version "${entry.version}"`);
+      }
+    }
   }
   return problems;
 }

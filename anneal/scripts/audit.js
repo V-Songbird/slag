@@ -13,6 +13,7 @@ const { execFileSync } = require("node:child_process");
 const MAP_FILE_MAX_LINES = 200;
 const LARGE_FILE_LINES = 800;
 const INDEX_FILES_MIN = 3;
+const MAX_DIR_DEPTH = 6;
 const MAX_READ_BYTES = 2 * 1024 * 1024;
 const EVIDENCE_LIMIT = 15;
 const SEVERITY_ORDER = ["high", "medium", "low"];
@@ -172,17 +173,42 @@ function rootReader(root) {
   return { names, has: (name) => names.has(name), text, json };
 }
 
+// The map file every host loads at the start of a session. Which name a host
+// reads is the host's business; the audit only cares that one of them exists
+// and stays short, and reports the ones it found so the plan can point a
+// missing name at an existing file instead of copying it.
+const MAP_FILES = [
+  "CLAUDE.md", ".claude/CLAUDE.md",
+  "AGENTS.md", ".agents/AGENTS.md",
+  "GEMINI.md", ".gemini/GEMINI.md",
+];
+
 function mapFileFindings(root, add) {
-  const map = ["CLAUDE.md", ".claude/CLAUDE.md"].find((file) => fs.existsSync(path.join(root, file)));
-  if (!map) {
-    const pointer = fs.existsSync(path.join(root, "AGENTS.md")) ? " (AGENTS.md exists and can be pointed to)" : "";
-    add("map-file-missing", "high", "No CLAUDE.md, so every session starts by exploring", [`CLAUDE.md${pointer}`]);
-    return;
+  const found = MAP_FILES.filter((file) => fs.existsSync(path.join(root, file)));
+  if (!found.length) {
+    add("map-file-missing", "high", "No map file, so every session starts by exploring", [MAP_FILES.join(", ")]);
+    return found;
   }
-  const lines = countLines(readFile(root, map)?.text || "");
-  if (lines > MAP_FILE_MAX_LINES) {
-    add("map-file-long", "medium", `${map} has ${lines} lines, over ${MAP_FILE_MAX_LINES}, and loads into every session`, [map]);
+  for (const map of found) {
+    const lines = countLines(readFile(root, map)?.text || "");
+    if (lines > MAP_FILE_MAX_LINES) {
+      add("map-file-long", "medium", `${map} has ${lines} lines, over ${MAP_FILE_MAX_LINES}, and loads into every session`, [map]);
+    }
   }
+  return found;
+}
+
+// A .env that no template describes is a runtime the agent cannot reproduce:
+// the names it needs are in a file it must never read. Only fires when an env
+// file is actually there, so a project without one is never nagged.
+const ENV_FILES = [".env", ".env.local", ".env.development", ".env.test", ".env.production"];
+const ENV_TEMPLATES = [".env.example", ".env.template", ".env.sample", ".env.dist"];
+
+function envFindings(root, add) {
+  const present = ENV_FILES.filter((file) => fs.existsSync(path.join(root, file)));
+  if (!present.length) return;
+  if (ENV_TEMPLATES.some((file) => fs.existsSync(path.join(root, file)))) return;
+  add("env-template-missing", "medium", "Environment files with no template naming the variables they set", present);
 }
 
 function detectToolchain(root, reader) {
@@ -345,7 +371,8 @@ function audit(rootArg) {
   };
 
   if (!listing.isGit) add("not-a-git-repo", "high", "Not a git repository, so search can't use .gitignore to skip generated files", ["."]);
-  mapFileFindings(root, add);
+  const mapFiles = mapFileFindings(root, add);
+  envFindings(root, add);
 
   const { ecosystems, missing } = detectToolchain(root, reader);
   if (missing.length) add("toolchain-version-missing", "medium", "No declared toolchain version to run the project with", missing);
@@ -391,6 +418,11 @@ function audit(rootArg) {
   const indexFiles = codeFiles.filter((file) => stemOf(file) === "index");
   if (indexFiles.length >= INDEX_FILES_MIN) add("index-files", "low", "Several files named index, so a search by name is ambiguous", indexFiles);
 
+  const deepFiles = codeFiles.filter((file) => dirsOf(file).length >= MAX_DIR_DEPTH);
+  if (deepFiles.length) {
+    add("deep-nesting", "low", `Code ${MAX_DIR_DEPTH} or more folders deep, so listing the way down costs a step each time`, deepFiles);
+  }
+
   const contents = scanContents(root, codeFiles);
   if (contents.large.length) {
     const evidence = contents.large.map(({ file, lines }) => `${file} (${lines === null ? "over 2 MB" : `${lines} lines`})`);
@@ -408,6 +440,7 @@ function audit(rootArg) {
     git: listing.isGit,
     ecosystems,
     files: { scanned: files.length, code: codeFiles.length },
+    mapFiles,
     checks,
     findings,
   };
@@ -433,7 +466,8 @@ function formatSummary(report) {
   }
   const commands = report.checks.commands.map((entry) => entry.command);
   const note = report.checks.split ? " (no single command runs them all)" : "";
-  lines.push("", `checks: ${commands.length ? commands.join(" | ") : "none found"}${note}`);
+  lines.push("", `map files: ${report.mapFiles.length ? report.mapFiles.join(" | ") : "none"}`);
+  lines.push(`checks: ${commands.length ? commands.join(" | ") : "none found"}${note}`);
   return `${lines.join("\n")}\n`;
 }
 

@@ -4,13 +4,16 @@ Each rule removes steps an agent repeats every session: searches, file reads and
 
 ## Orientation
 
-- **A short map file at the root.** `CLAUDE.md` loads into every session: what the project is, the commands, where things live, known pitfalls. Keep it under 200 lines and link to longer docs instead of copying them.
+- **A short map file at the root.** `CLAUDE.md`, `AGENTS.md` or `GEMINI.md`, whichever the host reads, loads into every session: what the project is, the commands, where things live, known pitfalls. Keep it under 200 lines and link to longer docs instead of copying them. A project that serves more than one host writes the content once and points the other names at it.
 - **A declared toolchain version.** `.nvmrc` or `.node-version`, `.python-version`, `rust-toolchain.toml`, `global.json`, `.ruby-version`, `.java-version`. Without one, the agent has to find and verify a version before it can run anything.
 - **One check command.** Types, lint and tests behind one entry, runnable for a single file and quiet when it passes. Every line of passing output lands in the agent's context and tells it nothing.
+- **A template for the environment.** `.env.example` with the variable names and empty values. The names live in the file the agent must never read, so without a template the only way to learn one is to run the project and read the crash.
 
 ## Finding code
 
 - **Group by feature or domain, not by file type.** Search finds what you already know to look for; a feature folder also shows the related files you didn't know existed.
+- **A shallow tree.** Each folder on the way down is a listing, and every path repeats in every search result. Framework routing earns its depth; `src/lib/modules/core/services/internal/` does not.
+- **Tests beside the code they test.** `cart.test.ts` next to `cart.ts` turns "does this have tests?" into something the agent already saw, instead of a second tree to walk.
 - **Unique, full-word names.** Name a file after its main export and keep names unique across the repository. `helpers`, `utils`, `common` and a dozen `index` files make every search ambiguous. A search for `Total` finds `calculateOrderTotal` but not `calcTot`.
 - **Build output and dependencies ignored by git.** Text search skips ignored files; everything else shows up in results that have to be read past.
 

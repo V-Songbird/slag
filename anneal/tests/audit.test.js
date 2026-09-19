@@ -54,22 +54,52 @@ function assertNo(report, id) {
 const codeLines = (n) => Array.from({ length: n }, (_, i) => `const v${i} = ${i};`).join("\n") + "\n";
 
 describe("map file", () => {
-  test("a missing CLAUDE.md is reported, pointing at AGENTS.md when it exists", () => {
-    const report = audit(repo({ tracked: { "AGENTS.md": "# rules\n", "src/app.js": "" } }));
+  test("a repository with no map file at all is reported", () => {
+    const report = audit(repo({ tracked: { "src/app.js": "" } }));
     const hit = finding(report, "map-file-missing");
     assert.strictEqual(hit.severity, "high");
-    assert.match(hit.evidence[0], /AGENTS\.md exists/);
+    assert.match(hit.evidence[0], /CLAUDE\.md.*AGENTS\.md.*GEMINI\.md/);
+    assert.deepStrictEqual(report.mapFiles, []);
   });
 
-  test("a short CLAUDE.md counts, at the root or under .claude/", () => {
-    assertNo(audit(repo({ tracked: { "CLAUDE.md": "# map\n" } })), "map-file-missing");
-    assertNo(audit(repo({ tracked: { ".claude/CLAUDE.md": "# map\n" } })), "map-file-missing");
+  test("any host's map file counts, and the report names the ones it found", () => {
+    for (const file of ["CLAUDE.md", ".claude/CLAUDE.md", "AGENTS.md", "GEMINI.md"]) {
+      const report = audit(repo({ tracked: { [file]: "# map\n", "src/app.js": "" } }));
+      assertNo(report, "map-file-missing");
+      assert.deepStrictEqual(report.mapFiles, [file]);
+    }
   });
 
-  test("a CLAUDE.md over 200 lines is reported as long", () => {
-    const report = audit(repo({ tracked: { "CLAUDE.md": "line\n".repeat(201) } }));
-    assert.match(finding(report, "map-file-long").title, /201 lines/);
-    assertNo(audit(repo({ tracked: { "CLAUDE.md": "line\n".repeat(200) } })), "map-file-long");
+  test("a map file over 200 lines is reported as long, whichever name it has", () => {
+    for (const file of ["CLAUDE.md", "AGENTS.md", "GEMINI.md"]) {
+      const report = audit(repo({ tracked: { [file]: "line\n".repeat(201) } }));
+      assert.match(finding(report, "map-file-long").title, new RegExp(`${file.replace(".", "\\.")} has 201 lines`));
+      assertNo(audit(repo({ tracked: { [file]: "line\n".repeat(200) } })), "map-file-long");
+    }
+  });
+
+  test("every map file present is measured, not just the first", () => {
+    const report = audit(repo({ tracked: { "CLAUDE.md": "# map\n", "AGENTS.md": "line\n".repeat(201) } }));
+    assert.deepStrictEqual(finding(report, "map-file-long").evidence, ["AGENTS.md"]);
+  });
+});
+
+describe("environment template", () => {
+  test("an env file with no template is reported", () => {
+    const report = audit(repo({ tracked: { "CLAUDE.md": "", ".env": "API_KEY=secret\n" } }));
+    const hit = finding(report, "env-template-missing");
+    assert.strictEqual(hit.severity, "medium");
+    assert.deepStrictEqual(hit.evidence, [".env"]);
+  });
+
+  test("any of the usual template names satisfies it", () => {
+    for (const template of [".env.example", ".env.template", ".env.sample", ".env.dist"]) {
+      assertNo(audit(repo({ tracked: { ".env": "A=1\n", [template]: "A=\n" } })), "env-template-missing");
+    }
+  });
+
+  test("a project with no env file at all is never nagged", () => {
+    assertNo(audit(repo({ tracked: { "src/app.js": "" } })), "env-template-missing");
   });
 });
 
@@ -142,6 +172,16 @@ describe("names", () => {
     const three = audit(repo({ tracked: { "a/index.ts": "", "b/index.ts": "", "c/index.ts": "" } }));
     assert.strictEqual(finding(three, "index-files").count, 3);
     assertNo(audit(repo({ tracked: { "a/index.ts": "", "b/index.ts": "" } })), "index-files");
+  });
+});
+
+describe("nesting", () => {
+  test("code six folders deep is reported, five is not", () => {
+    const report = audit(repo({ tracked: { "a/b/c/d/e/f/deep.js": "", "a/b/c/near.js": "" } }));
+    const hit = finding(report, "deep-nesting");
+    assert.strictEqual(hit.severity, "low");
+    assert.deepStrictEqual(hit.evidence, ["a/b/c/d/e/f/deep.js"]);
+    assertNo(audit(repo({ tracked: { "a/b/c/d/e/edge.js": "" } })), "deep-nesting");
   });
 });
 

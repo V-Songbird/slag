@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: audit-reports-without-changes
-description: A small repository with a generic file name, two files named format.js, no CLAUDE.md and an unignored dist folder. The user asks how easy it is to navigate and says not to change anything.
+description: A small repository with a generic file name, two files named format.js, no map file and an unignored dist folder. The user asks how easy it is to navigate and says not to change anything.
 tags: [smoke]
 context:
   scaffold_script: fixture.sh

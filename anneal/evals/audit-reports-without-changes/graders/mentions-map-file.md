@@ -1,5 +1,5 @@
 ---
 type: regex
-pattern: 'CLAUDE\.md'
+pattern: '(CLAUDE|AGENTS|GEMINI)\.md'
 target: last_message
 ---
