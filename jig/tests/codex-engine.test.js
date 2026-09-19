@@ -9,6 +9,11 @@ const A = require("./authored.js");
 
 // Every test here runs the engine the way the Codex skills do, with --runtime codex.
 process.env.JIG_RUNTIME = "codex";
+// ...and against a Codex home of their own, so a scan inventories the fixture's
+// hooks rather than whatever this developer has in ~/.codex.
+const CODEX_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "jig-codex-home-"));
+process.env.CODEX_HOME = CODEX_HOME;
+test.after(() => fs.rmSync(CODEX_HOME, { recursive: true, force: true }));
 
 function project(t, files = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "jig-codex-engine-"));

@@ -44,6 +44,11 @@ function tmpDir(tag) {
   return dir;
 }
 
+// Every scan below is about its fixture project, not about whatever this
+// developer has in their own ~/.claude. Aim the user-scope read at a temp path
+// with nothing in it, so the hook inventory is the fixture's alone.
+process.env.JIG_USER_SETTINGS = path.join(tmpDir("home"), "settings.json");
+
 function git(root, args, env) {
   const r = spawnSync("git", args, {
     cwd: root, encoding: "utf-8", windowsHide: true, env: { ...process.env, ...(env || {}) },
@@ -879,6 +884,25 @@ test("unreadable settings are skipped rather than crashing the scan", () => {
   const out = engine.cmdScan(root);
   assert.equal(out.ok, true);
   assert.deepEqual(out.guardrails.hooks, []);
+});
+
+// The stub above must not have cost the scan its reach: a hook registered at
+// user scope fires in this project too, so it is still inventoried and still
+// takes the slot.
+test("a hook in the user's own settings is inventoried and holds its slot", () => {
+  const file = path.join(tmpDir("home-hooks"), "settings.json");
+  fs.writeFileSync(file, JSON.stringify({
+    hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "node", args: ["./bell.js"] }] }] },
+  }));
+  const had = process.env.JIG_USER_SETTINGS;
+  process.env.JIG_USER_SETTINGS = file;
+  try {
+    const out = engine.cmdScan(project({}));
+    assert.deepEqual(out.guardrails.hooks.map((h) => h.source), ["~/.claude/settings.json"]);
+    assert.deepEqual(out.occupied, ["PreToolUse:Bash|PowerShell"]);
+  } finally {
+    process.env.JIG_USER_SETTINGS = had;
+  }
 });
 
 // ---------------------------------------------------------------------------

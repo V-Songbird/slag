@@ -5521,6 +5521,12 @@ function hookRows(source, block) {
 const OWN_HOOKS = path.join(path.dirname(__dirname), "hooks", "hooks.json");
 const OWN_CODEX_HOOKS = path.join(path.dirname(__dirname), "hooks", "codex-hooks.json");
 
+// Where the user's own settings live. Overridable so a test can aim the scan
+// at a fixture instead of whatever the developer happens to have at home.
+function userSettingsFile() {
+  return process.env.JIG_USER_SETTINGS || path.join(os.homedir(), ".claude", "settings.json");
+}
+
 // Project settings, the user's own settings, and any plugin living in the
 // tree. The user-level file is read because a hook registered there fires in
 // this project too — a conflict jig could not see would be a conflict jig
@@ -5533,7 +5539,7 @@ function collectHooks(root) {
     const settings = readJsonIfExists(path.join(root, rel));
     if (settings) rows.push(...hookRows(rel, settings.hooks));
   }
-  const userSettings = readJsonIfExists(path.join(os.homedir(), ".claude", "settings.json"));
+  const userSettings = readJsonIfExists(userSettingsFile());
   if (userSettings) rows.push(...hookRows("~/.claude/settings.json", userSettings.hooks));
 
   let entries = [];
