@@ -8,80 +8,6 @@
   },
   "plugins": [
     {
-      "name": "assay",
-      "source": "./assay",
-      "description": "Analyzes the instruction files an agent loads — CLAUDE.md, .claude/rules/, AGENTS.md, skills and hooks — flagging what is vague, stale, buried, or better served by a mechanism, and rewriting the weak ones. /assay:opus5, /assay:sonnet5, /assay:haiku45 and /assay:fable5 audit this host, one per model; /assay:codex audits the other; craft-rules and craft-skill write new ones.",
-      "version": "2.1.0",
-      "license": "MIT",
-      "author": {
-        "name": "Victor Villegas",
-        "email": "victor.villegas@tuta.com"
-      },
-      "homepage": "https://github.com/V-Songbird/slag/tree/main/assay",
-      "repository": "https://github.com/V-Songbird/slag",
-      "category": "quality",
-      "keywords": [
-        "rules",
-        "CLAUDE.md",
-        "audit",
-        "quality",
-        "instructions",
-        "scoring",
-        "hooks",
-        "placement",
-        "skills"
-      ],
-      "tags": [
-        "rules",
-        "CLAUDE.md",
-        "audit",
-        "quality",
-        "instructions",
-        "scoring",
-        "hooks",
-        "placement",
-        "skills"
-      ],
-      "strict": true
-    },
-    {
-      "name": "jig",
-      "source": "./jig",
-      "description": "Interviews you about the mistakes your repo keeps making, then sets up what catches them: linter, type checker, tests, CI and checks written for your code. Works on an empty folder. Every check proves itself on a planted violation, nothing lands unapproved, and a plain question gets a short answer.",
-      "version": "2.18.1",
-      "license": "MIT",
-      "author": {
-        "name": "Victor Villegas",
-        "email": "victor.villegas@tuta.com"
-      },
-      "homepage": "https://github.com/V-Songbird/slag/tree/main/jig",
-      "repository": "https://github.com/V-Songbird/slag",
-      "category": "quality",
-      "keywords": [
-        "guardrails",
-        "checks",
-        "ci",
-        "pre-commit",
-        "hooks",
-        "tests",
-        "safety",
-        "review",
-        "interview"
-      ],
-      "tags": [
-        "guardrails",
-        "checks",
-        "ci",
-        "pre-commit",
-        "hooks",
-        "tests",
-        "safety",
-        "review",
-        "interview"
-      ],
-      "strict": true
-    },
-    {
       "name": "anneal",
       "source": "./anneal",
       "description": "Audits how easy an existing repository is for an AI agent to find its way around — map file, toolchain version, names, layout, build output, check commands — then proposes a layout you approve and migrates in small commits, each checked against the project's own tests.",
@@ -147,6 +73,8 @@
   ],
   "renames": {
     "forge": null,
-    "proof": null
+    "proof": null,
+    "assay": null,
+    "jig": null
   }
 }
