@@ -151,7 +151,7 @@ Expected output:
 ## Support
 
 - Bugs and questions: the [issue tracker](https://github.com/V-Songbird/slag/issues) for this repository.
-- anneal keeps no changelog yet. Its version lives in the marketplace entry, [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json).
+- What changed: [CHANGELOG.md](./CHANGELOG.md), which follows Keep a Changelog. The version lives in the marketplace entry, [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json).
 
 ## License
 

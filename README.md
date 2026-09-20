@@ -68,7 +68,7 @@ conventions a change has to respect.
 ## Support
 
 - Bugs and questions: the [issue tracker](https://github.com/V-Songbird/slag/issues) for this repository. It is the only channel.
-- What changed: each plugin's own `CHANGELOG.md`, where it has one. collet has one; anneal does not yet.
+- What changed: each plugin's own `CHANGELOG.md` — [anneal](./anneal/CHANGELOG.md), [collet](./collet/CHANGELOG.md).
 - This repository accepts no outside contributions and carries no `CONTRIBUTING.md`.
 
 ## License
