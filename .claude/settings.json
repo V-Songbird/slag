@@ -13,6 +13,21 @@
   "skillListingMaxDescChars": 800,
   "autoMemoryEnabled": true,
   "autoMemoryDirectory": "D:/Projects/Songbird/Slag/.claude/memory",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "^(Edit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/scripts/claude-hooks/run-tests-on-edit.js\"",
+            "commandWindows": "node \"$env:CLAUDE_PROJECT_DIR\\scripts\\claude-hooks\\run-tests-on-edit.js\"",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "deny": [
       "Read(./.env*)",

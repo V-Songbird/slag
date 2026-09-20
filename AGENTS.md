@@ -10,7 +10,7 @@ No dependencies to install, no build step. Node 20, as `.nvmrc` declares and `pa
 requires. That is the oldest version the suite has been run on, not the oldest it might work on.
 
 ```bash
-npm run check                            # node --test, 117 tests: 49 in anneal, 68 in collet
+npm run check                            # node --test, 129 tests: 49 anneal, 68 collet, 12 the hook
 node anneal/scripts/audit.js --root .    # anneal's own audit, run against this repo
 claude plugin eval ./anneal --no-publish # 2 eval cases; slow, drives real sessions
 ```
@@ -30,10 +30,11 @@ There is no CI. Any open work is in
 slag/
 ├── .agents/plugins/marketplace.json   Codex marketplace index
 ├── .claude-plugin/marketplace.json    Claude Code marketplace index
-├── .claude/settings.json              committed; no hooks, deny-reads only
+├── .claude/                           committed; settings, one scoped rule, cut-release
 ├── anneal/                            repository layout auditor and migrator
 ├── collet/                            session task harness
 ├── docs/                              two documents, see below
+├── scripts/claude-hooks/              reruns a plugin's suite after an edit inside it
 └── scripts/git-hooks/                 the commit gate, armed by hand after a clone
 ```
 
@@ -121,7 +122,14 @@ this repository. Nothing is copied back except a number or a line a document cit
 - **The commit gate is silent until a blocklist exists.** `scripts/git-hooks/` scans the staged
   change and the commit message for names in `docs/research/reference-names.txt`, which is
   gitignored and not in your clone. With no blocklist it passes everything, on purpose, so a
-  standalone clone can still commit. A green commit is not proof the gate ran.
+  standalone clone can still commit. A green commit is not proof the gate ran. The rule it was
+  built to enforce holds regardless, and commit messages are in scope:
+  [.claude/rules/reference-names.md](.claude/rules/reference-names.md).
+- **`node --test` takes different arguments on 20 and 22.** A glob argument, `<plugin>/tests/*.test.js`,
+  only expands on 22; on 20 it exits `Could not find`. A bare directory argument only recurses on 20;
+  on 22 it is read as a test file and fails. What works on both is naming a file, or running
+  `node --test` with no argument from the directory you want walked. Node 22 also skips
+  dot-directories when it walks, which is why the hook that reruns suites lives under `scripts/`.
 - **`anneal/plugin.json` carries a `version` and `anneal/.claude-plugin/plugin.json` does not.**
   That is the rule above working, not drift. Do not "fix" it by deleting one. The two do differ on
   one keyword, and nothing checks them: the validator was deleted in `5278887`.
