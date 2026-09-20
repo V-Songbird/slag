@@ -6,14 +6,15 @@ freely; that is the point of the repository.
 
 ## Commands
 
-No dependencies to install. Node 18 or later, no package manager, no build step.
+No dependencies to install, no build step. Node 22, as `.nvmrc` declares and `package.json`
+requires.
 
 ```bash
-node --test collet/tests/*.test.js     # 68 tests, the only suite in the repo
+npm run check                          # node --test, 68 tests, the only suite in the repo
 node anneal/scripts/audit.js --root .  # anneal's own audit, run against this repo
 ```
 
-There is no single check command yet, and no CI. Both are open in
+There is no CI. That and the rest of the open work are in
 [docs/documentation-cleanup.md](docs/documentation-cleanup.md).
 
 ## Where things live
@@ -93,6 +94,11 @@ this repository. Nothing is copied back except a number or a line a document cit
 
 ## Known pitfalls
 
+- **collet is ESM, anneal is CommonJS, and neither declares it.** Every `.js` under `collet/` uses
+  `import`; every `.js` under `anneal/` uses `require`. Only Node 22's syntax detection makes that
+  work, so the suite fails on Node 20 with `Cannot use import statement outside a module`. Never put
+  `"type": "module"` in the root `package.json` — it would break anneal. A `collet/package.json`
+  declaring it would scope the fix correctly.
 - **`core.hooksPath` points at `scripts/git-hooks`, which does not exist.** It was deleted in
   `5278887`. Commits work, because git finds no hooks there. Unset it or restore the directory
   before relying on a commit gate.

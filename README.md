@@ -8,7 +8,7 @@ Two plugins are installable from here. Both work on their own and stay out of th
 
 ## Requirements
 
-- Node 18 or later, for the scripts both plugins run.
+- Node, for the scripts both plugins run. anneal needs 18 or later; collet's own test suite needs 22.
 - Claude Code or Codex. anneal also runs on Antigravity.
 
 ## Install
@@ -75,12 +75,12 @@ Both marketplace indexes own every plugin's version number. A `plugin.json` for 
 ## Development
 
 ```bash
-node --test collet/tests/*.test.js
+npm run check
 ```
 
-68 tests, all in collet. anneal ships no test suite in this repository.
+That runs `node --test`: 68 tests, all in collet. anneal ships no test suite in this repository.
 
-There is no single check command covering the whole repository yet, and no CI. anneal's own audit reports both as `high` findings against this repository, which you can reproduce:
+There is no CI. Reproduce what anneal's own audit says about this repository:
 
 ```bash
 node anneal/scripts/audit.js --root .

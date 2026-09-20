@@ -8,7 +8,7 @@ Use it on a repository where an agent drifts past the task, or calls work finish
 
 ## Requirements
 
-- Node, with no other dependencies. Verified on v22.22.2.
+- Node 22, with no other dependencies. The test suite fails on Node 20.
 - A git repository. The scope check reads `git diff` and `git ls-files` to see what changed.
 - Claude Code or Codex for the session hooks. The checks themselves run on plain `node`, with no plugin installed.
 
