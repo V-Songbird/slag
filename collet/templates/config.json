@@ -1,0 +1,8 @@
+{
+  "project": "REPLACE ME: one line on what this repository is and what it runs on.",
+  "conventions": [
+    "REPLACE ME: a decision that constrains what a change here may look like, in one sentence.",
+    "REPLACE ME: another, or delete this array."
+  ],
+  "accept": "REPLACE ME: the command that proves a task worked."
+}

@@ -45,80 +45,6 @@
       "strict": true
     },
     {
-      "name": "verity",
-      "source": "./verity",
-      "description": "Fetches current official Claude Code documentation on demand, giving Claude truth-grounding from primary sources instead of training memory.",
-      "version": "0.1.4-alpha",
-      "license": "MIT",
-      "author": {
-        "name": "Victor Villegas",
-        "email": "victor.villegas@tuta.com"
-      },
-      "homepage": "https://github.com/V-Songbird/slag/tree/main/verity",
-      "repository": "https://github.com/V-Songbird/slag",
-      "category": "reference",
-      "keywords": [
-        "documentation",
-        "grounding",
-        "truth",
-        "fetch",
-        "Claude Code docs",
-        "MCP tools",
-        "reference",
-        "live fetch"
-      ],
-      "tags": [
-        "documentation",
-        "grounding",
-        "truth",
-        "fetch",
-        "Claude Code docs",
-        "MCP tools",
-        "reference",
-        "live fetch"
-      ],
-      "strict": true
-    },
-    {
-      "name": "jetbrains-router",
-      "source": "./jetbrains-router",
-      "description": "Routes Claude's reads, searches, and edits through your running JetBrains IDE for live error detection, unsaved-change visibility, and index-aware search.",
-      "version": "2.0.4-alpha",
-      "license": "MIT",
-      "author": {
-        "name": "Victor Villegas",
-        "email": "victor.villegas@tuta.com"
-      },
-      "homepage": "https://github.com/V-Songbird/slag/tree/main/jetbrains-router",
-      "repository": "https://github.com/V-Songbird/slag",
-      "category": "integration",
-      "keywords": [
-        "JetBrains",
-        "WebStorm",
-        "Rider",
-        "IntelliJ",
-        "PyCharm",
-        "IDE",
-        "MCP",
-        "routing",
-        "diagnostics",
-        "hooks"
-      ],
-      "tags": [
-        "JetBrains",
-        "WebStorm",
-        "Rider",
-        "IntelliJ",
-        "PyCharm",
-        "IDE",
-        "MCP",
-        "routing",
-        "diagnostics",
-        "hooks"
-      ],
-      "strict": true
-    },
-    {
       "name": "jig",
       "source": "./jig",
       "description": "Interviews you about the mistakes your repo keeps making, then sets up what catches them: linter, type checker, tests, CI and checks written for your code. Works on an empty folder. Every check proves itself on a planted violation, nothing lands unapproved, and a plain question gets a short answer.",
@@ -156,74 +82,6 @@
       "strict": true
     },
     {
-      "name": "scribe",
-      "source": "./scribe",
-      "description": "Stops Claude from guessing at an unclear request. When the task could honestly go several ways, Claude asks focused questions — options, recommendation first — and keeps asking until nothing material is left to guess at. Every ask is logged locally so the asking bar tunes from evidence.",
-      "version": "1.3.1",
-      "license": "MIT",
-      "author": {
-        "name": "Victor Villegas",
-        "email": "victor.villegas@tuta.com"
-      },
-      "homepage": "https://github.com/V-Songbird/slag/tree/main/scribe",
-      "repository": "https://github.com/V-Songbird/slag",
-      "category": "workflow",
-      "keywords": [
-        "clarify",
-        "questions",
-        "ambiguity",
-        "requirements",
-        "scoping",
-        "prompt",
-        "unknowns",
-        "interview"
-      ],
-      "tags": [
-        "clarify",
-        "questions",
-        "ambiguity",
-        "requirements",
-        "scoping",
-        "prompt",
-        "unknowns",
-        "interview"
-      ],
-      "strict": true
-    },
-    {
-      "name": "brink",
-      "source": "./brink",
-      "description": "Watches how full the context window is getting and, once you near the edge, nudges you to run /compact with a ready-made instruction — so the summary keeps the current task, decisions, and errors instead of an automatic guess.",
-      "version": "0.5.0-alpha",
-      "license": "MIT",
-      "author": {
-        "name": "Victor Villegas",
-        "email": "victor.villegas@tuta.com"
-      },
-      "homepage": "https://github.com/V-Songbird/slag/tree/main/brink",
-      "repository": "https://github.com/V-Songbird/slag",
-      "category": "workflow",
-      "keywords": [
-        "context-window",
-        "compact",
-        "compaction",
-        "tokens",
-        "session",
-        "hooks",
-        "nudge"
-      ],
-      "tags": [
-        "context-window",
-        "compact",
-        "compaction",
-        "tokens",
-        "session",
-        "hooks",
-        "nudge"
-      ],
-      "strict": true
-    },
-    {
       "name": "anneal",
       "source": "./anneal",
       "description": "Audits how easy an existing repository is for an AI agent to find its way around — map file, toolchain version, names, layout, build output, check commands — then proposes a layout you approve and migrates in small commits, each checked against the project's own tests.",
@@ -257,6 +115,32 @@
         "CLAUDE.md",
         "AGENTS.md",
         "layout"
+      ],
+      "strict": true
+    },
+    {
+      "name": "collet",
+      "source": "./collet",
+      "description": "Holds a session inside the task it was given: one open task with the files it may touch and the command that ends it, a guard that refuses writes outside that list, and checks that each ship with a violation and a near miss so none of them counts as coverage before it has been shown to work. On a project that already keeps a ROADMAP.jsonl it writes no ledger of its own and enforces the files that roadmap declares.",
+      "version": "0.1.0-alpha",
+      "license": "MIT",
+      "author": {
+        "name": "Victor Villegas",
+        "email": "victor.villegas@tuta.com"
+      },
+      "homepage": "https://github.com/V-Songbird/slag/tree/main/collet",
+      "repository": "https://github.com/V-Songbird/slag",
+      "category": "quality",
+      "keywords": [
+        "harness",
+        "scope",
+        "guardrails",
+        "checks",
+        "handoff",
+        "roadmap",
+        "claude-code",
+        "codex",
+        "AGENTS.md"
       ],
       "strict": true
     }

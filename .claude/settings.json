@@ -1,23 +1,27 @@
 {
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "^(Edit|Write)$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/run-tests-on-edit.js\"",
-            "commandWindows": "node \"$env:CLAUDE_PROJECT_DIR\\.claude\\hooks\\run-tests-on-edit.js\"",
-            "timeout": 120
-          },
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/nudge-manifest-curator.js\"",
-            "commandWindows": "node \"$env:CLAUDE_PROJECT_DIR\\.claude\\hooks\\nudge-manifest-curator.js\"",
-            "timeout": 10
-          }
-        ]
-      }
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "promptCacheTtl": "1h",
+  "subagentPromptCacheTtl": "1h",
+  "syncClaudeAiSkills": false,
+  "syncClaudeAiPlugins": false,
+  "includeGitInstructions": false,
+  "showClearContextOnPlanAccept": true,
+  "disableClaudeAiConnectors": true,
+  "bashOutputMaxChars": 8000,
+  "taskOutputMaxChars": 8000,
+  "skillListingBudgetFraction": 0.005,
+  "skillListingMaxDescChars": 800,
+  "autoMemoryEnabled": true,
+  "autoMemoryDirectory": "D:/Projects/Songbird/Slag/.claude/memory",
+  "permissions": {
+    "deny": [
+      "Read(./.env*)",
+      "Read(./dist/**)",
+      "Read(./build/**)",
+      "Read(./node_modules/**)",
+      "Read(**/*.map)",
+      "Read(**/*.log)",
+      "Read(**/*.idea)"
     ]
   }
 }

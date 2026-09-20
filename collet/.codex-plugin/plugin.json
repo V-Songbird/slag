@@ -1,0 +1,37 @@
+{
+  "name": "collet",
+  "version": "0.1.0-alpha",
+  "description": "Holds a session inside the task it was given: one open task with the files it may touch and the command that ends it, a guard that refuses writes outside that list, and checks that each ship with a violation and a near miss so none of them counts as coverage before it has been shown to work.",
+  "license": "MIT",
+  "author": {
+    "name": "Victor Villegas",
+    "email": "victor.villegas@tuta.com",
+    "url": "https://github.com/V-Songbird"
+  },
+  "homepage": "https://github.com/V-Songbird/slag/tree/main/collet",
+  "repository": "https://github.com/V-Songbird/slag",
+  "keywords": [
+    "harness",
+    "scope",
+    "guardrails",
+    "checks",
+    "handoff",
+    "roadmap",
+    "codex",
+    "AGENTS.md"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/codex-hooks.json",
+  "interface": {
+    "displayName": "collet",
+    "shortDescription": "Hold a session inside the task it was given",
+    "longDescription": "One open task at a time, with the files it may touch and the command that ends it. A guard refuses a write outside that list and prints the one command that widens it with a recorded reason. Closing runs the accept command and checks that nothing landed outside the list first. On a project that already plans its work in a roadmap, collet writes no ledger of its own and enforces the files that plan declares.",
+    "developerName": "Victor Villegas",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "websiteURL": "https://github.com/V-Songbird/slag/tree/main/collet",
+    "composerIcon": "./assets/logo.svg",
+    "logo": "./assets/logo.svg",
+    "logoDark": "./assets/logo-dark.svg"
+  }
+}
