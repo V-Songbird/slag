@@ -9,7 +9,7 @@ description: >-
   step, migrates it in small commits that keep the project's own checks
   passing. Use when the user asks to make a codebase easier for an agent to
   navigate, to apply AI-friendly conventions to an existing project, to audit
-  how findable its code is, or invokes /anneal:anneal or $anneal. Pass "audit"
+  how findable its code is, or invokes /anneal:anneal, $anneal or /anneal. Pass "audit"
   to report without changing anything. Do NOT use for a single rename, a
   refactor with another goal, or scaffolding a new project.
 argument-hint: "[audit]"

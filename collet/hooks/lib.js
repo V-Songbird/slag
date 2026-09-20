@@ -12,8 +12,14 @@ export const COLLET = '.collet';
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-export function root() {
-  return process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
+/**
+ * Where the project is. Claude Code sets CLAUDE_PROJECT_DIR; Codex sends the directory as `cwd`
+ * in the event; Antigravity sends `workspacePaths` and runs the hook from the plugin's own
+ * directory, which is why process.cwd() is the last resort and never the first.
+ */
+export function root(event = {}) {
+  const workspace = Array.isArray(event.workspacePaths) ? event.workspacePaths[0] : null;
+  return process.env.CLAUDE_PROJECT_DIR ?? event.cwd ?? workspace ?? process.cwd();
 }
 
 /** A project that has collet mounted and has not switched it off, or null. */
@@ -76,10 +82,39 @@ export function emit(event, context) {
   );
 }
 
-export function deny(event, reason) {
-  process.stdout.write(
-    JSON.stringify({
-      hookSpecificOutput: { hookEventName: event, permissionDecision: 'deny', permissionDecisionReason: reason },
-    })
-  );
+// Antigravity names its tools differently and passes their arguments in PascalCase. The scope
+// check speaks Claude Code's vocabulary, so the call is translated here, at the wire, and the
+// check stays one function that runs the same way in a session, at commit time and in CI.
+const file = (args) => ({ file_path: args.AbsolutePath ?? args.TargetFile ?? null });
+const ANTIGRAVITY_TOOLS = {
+  run_command: (args) => ({ tool: 'Bash', input: { command: args.CommandLine ?? '' } }),
+  write_to_file: (args) => ({ tool: 'Write', input: file(args) }),
+  replace_file_content: (args) => ({ tool: 'Edit', input: file(args) }),
+  multi_replace_file_content: (args) => ({ tool: 'Edit', input: file(args) }),
+};
+
+// The two payload shapes a PreToolUse hook can be handed, and the two answers. Claude Code and
+// Codex agree on both, and take silence as consent. Antigravity nests the call under `toolCall`,
+// answers with a bare decision, and is told the allow out loud.
+const HOSTS = {
+  claude: {
+    call: (event) => ({ tool: event.tool_name ?? '', input: event.tool_input ?? {} }),
+    deny: (reason) => ({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
+    }),
+    allow: () => null,
+  },
+  antigravity: {
+    call: (event) => {
+      const name = event.toolCall?.name ?? '';
+      const args = event.toolCall?.args ?? {};
+      return ANTIGRAVITY_TOOLS[name]?.(args) ?? { tool: name, input: args };
+    },
+    deny: (reason) => ({ decision: 'deny', reason }),
+    allow: () => ({ decision: 'allow' }),
+  },
+};
+
+export function host(name) {
+  return HOSTS[name] ?? HOSTS.claude;
 }

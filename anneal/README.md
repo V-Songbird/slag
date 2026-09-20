@@ -25,7 +25,7 @@ Takes effect next session.
 
 **Codex** — add this repository as a marketplace, then install `anneal` from `Slag · Codex`.
 
-**Antigravity** — copy the `anneal/` directory to `~/.gemini/config/plugins/anneal/` for every project, or to `.agents/plugins/anneal/` for one workspace.
+**Antigravity** — there is no marketplace. Clone the repository and run `agy plugin install <path-to-clone>/anneal`, or copy the `anneal/` directory to `~/.gemini/config/plugins/anneal/` for every project, or to `.agents/plugins/anneal/` for one workspace.
 
 Nothing runs until you ask for it.
 
@@ -37,7 +37,7 @@ Ask for an audit. It reads the repository and writes nothing.
 /anneal:anneal audit
 ```
 
-On Codex and Antigravity, type `$anneal audit` instead.
+On Codex, type `$anneal audit` instead; on Antigravity, `/anneal audit`.
 
 anneal answers by running its scan script and reporting what came back. Below is that script, run against a small demo repository. The demo has a generic file name, two files sharing a name, no map file and an unignored `dist` folder.
 
@@ -78,8 +78,8 @@ Nothing on disk has changed. Add `--json` for the full evidence behind each coun
 
 | You want to… | Ask for |
 | --- | --- |
-| See what slows an agent down here, changing nothing | `/anneal:anneal audit`, or `$anneal audit` |
-| Audit, plan and migrate, approving each step | `/anneal:anneal`, or `$anneal` |
+| See what slows an agent down here, changing nothing | `/anneal:anneal audit`, `$anneal audit` or `/anneal audit` |
+| Audit, plan and migrate, approving each step | `/anneal:anneal`, `$anneal` or `/anneal` |
 
 ## What the audit looks for
 
@@ -154,7 +154,7 @@ Expected output:
 # fail 0
 ```
 
-`npm run check` from the repository root runs anneal's 49 alongside collet's 59.
+`npm run check` from the repository root runs anneal's 49 alongside collet's 62.
 
 Two eval cases live in `evals/`. They check what a unit test cannot: that the skill fires, that `audit` creates no file, and that a migration stops on a dirty tree. Each run drives a real session, so it is slow.
 

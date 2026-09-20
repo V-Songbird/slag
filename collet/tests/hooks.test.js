@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { clean, CONFIG, hook, hookOutput, mount, project, task, TREE } from './temp-project.js';
+import { clean, CONFIG, hook, hookOutput, mount, PLUGIN, project, task, TREE } from './temp-project.js';
 
 function ready(extra = {}) {
   const root = project({ ...TREE, ...extra });
@@ -115,5 +115,57 @@ test('with no task open the guard allows everything, and says nothing', () => {
   const root = ready();
   const out = hook('guard.js', root, { tool_name: 'Write', tool_input: { file_path: 'anything.txt' } });
   assert.equal(out.stdout, '');
+  clean(root);
+});
+
+// Codex sets no CLAUDE_PROJECT_DIR. The project arrives as `cwd` in the event, and the hook may
+// well be run from somewhere else.
+test('a host that names the project in the event needs no environment variable', () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const event = { tool_name: 'Write', tool_input: { file_path: 'src/theme.mjs' }, cwd: root };
+  const out = hook('guard.js', root, event, { cwd: PLUGIN, project: null });
+  assert.equal(hookOutput(out).permissionDecision, 'deny');
+  clean(root);
+});
+
+// Antigravity runs the hook from the plugin directory, nests the call under toolCall with
+// PascalCase arguments, and reads a bare decision back — including the allow.
+test('on Antigravity the guard reads toolCall and answers with a bare decision', () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const run = (toolCall) =>
+    JSON.parse(
+      hook('guard.js', root, { toolCall, workspacePaths: [root] }, { args: ['antigravity'], cwd: PLUGIN, project: null })
+        .stdout
+    );
+
+  const write = run({ name: 'write_to_file', args: { TargetFile: 'src/theme.mjs', CodeContent: '' } });
+  assert.equal(write.decision, 'deny');
+  assert.match(write.reason, /src\/theme\.mjs is outside the open task/);
+  assert.match(write.reason, /node \.collet\/task\.mjs widen/);
+
+  const edit = run({ name: 'replace_file_content', args: { AbsolutePath: join(root, 'src', 'report.mjs') } });
+  assert.equal(edit.decision, 'deny');
+
+  const shell = run({ name: 'run_command', args: { CommandLine: 'echo x > src/theme.mjs', Cwd: root } });
+  assert.equal(shell.decision, 'deny');
+
+  assert.deepEqual(run({ name: 'write_to_file', args: { TargetFile: 'src/cli.mjs' } }), { decision: 'allow' });
+  assert.deepEqual(run({ name: 'view_file', args: { AbsolutePath: join(root, 'src', 'theme.mjs') } }), {
+    decision: 'allow',
+  });
+  clean(root);
+});
+
+test('on Antigravity a project without collet is allowed out loud, not in silence', () => {
+  const root = project(TREE);
+  const out = hook(
+    'guard.js',
+    root,
+    { toolCall: { name: 'write_to_file', args: { TargetFile: 'anything.txt' } }, workspacePaths: [root] },
+    { args: ['antigravity'], cwd: PLUGIN, project: null }
+  );
+  assert.deepEqual(JSON.parse(out.stdout), { decision: 'allow' });
   clean(root);
 });

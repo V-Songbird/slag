@@ -1,13 +1,37 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/session-start.js\"",
+            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"where.exe /q '$PATH:fnm'; if ($LASTEXITCODE -eq 0) { fnm env --use-on-cd | Out-String | Invoke-Expression }; & node ($env:PLUGIN_ROOT + '/hooks/session-start.js'); exit $LASTEXITCODE\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
-        "matcher": "^(Bash|PowerShell|apply_patch)$",
+        "matcher": "^(Bash|PowerShell|Write|Edit|apply_patch)$",
         "hooks": [
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/hooks/guard.js\"",
             "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"where.exe /q '$PATH:fnm'; if ($LASTEXITCODE -eq 0) { fnm env --use-on-cd | Out-String | Invoke-Expression }; & node ($env:PLUGIN_ROOT + '/hooks/guard.js'); exit $LASTEXITCODE\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/handoff.js\"",
+            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"where.exe /q '$PATH:fnm'; if ($LASTEXITCODE -eq 0) { fnm env --use-on-cd | Out-String | Invoke-Expression }; & node ($env:PLUGIN_ROOT + '/hooks/handoff.js'); exit $LASTEXITCODE\"",
             "timeout": 10
           }
         ]

@@ -6,8 +6,18 @@ All notable changes to collet are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Runs on Antigravity, from the same plugin directory. The guard refuses a write outside the open
+  task there too; the session start and handoff notes stay on Claude Code and Codex, which are the
+  hosts with those events.
+- On Codex, the session is told the open task when it starts and a handoff is written before
+  compaction, as on Claude Code, and the guard now also reads the `Write` and `Edit` tools.
+
 ### Changed
 
+- The hooks take the project from the event when the host does not name it in the environment, so
+  they work from whatever directory a host runs them in.
 - A project that already keeps a `ROADMAP.jsonl` or a `.foreman/` directory is now left alone
   entirely. `mount.mjs` writes nothing there and exits 2, instead of writing the harness in a
   second shape that read that roadmap and enforced the files its open entry named.

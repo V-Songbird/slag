@@ -10,7 +10,8 @@ import { join } from 'node:path';
 
 import { COLLET, mounted, projectModule, readEvent, root } from './lib.js';
 
-const dir = root();
+const event = readEvent();
+const dir = root(event);
 if (!mounted(dir)) process.exit(0);
 
 const state = await projectModule(dir, 'state.mjs');
@@ -23,7 +24,6 @@ if (!task) {
   process.exit(0);
 }
 
-const event = readEvent();
 const body = [
   '# Handoff',
   '',

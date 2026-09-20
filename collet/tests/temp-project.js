@@ -43,13 +43,20 @@ export function checks(root, args = []) {
   });
 }
 
-/** Run a hook the way the host does: the event on stdin, the project in the environment. */
-export function hook(name, root, event = {}) {
-  return spawnSync(process.execPath, [join(PLUGIN, 'hooks', name)], {
-    cwd: root,
+/**
+ * Run a hook the way a host does: the event on stdin, and the project wherever that host puts it.
+ * Claude Code names it in the environment; `project: null` is a host that does not, and `cwd` is
+ * where that host runs the hook from.
+ */
+export function hook(name, root, event = {}, { args = [], cwd = root, project = root } = {}) {
+  const env = { ...process.env };
+  if (project) env.CLAUDE_PROJECT_DIR = project;
+  else delete env.CLAUDE_PROJECT_DIR;
+  return spawnSync(process.execPath, [join(PLUGIN, 'hooks', name), ...args], {
+    cwd,
     input: JSON.stringify(event),
     encoding: 'utf8',
-    env: { ...process.env, CLAUDE_PROJECT_DIR: root },
+    env,
   });
 }
 

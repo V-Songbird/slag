@@ -12,9 +12,9 @@
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { COLLET, config, emit, fileText, mounted, projectModule, root } from './lib.js';
+import { COLLET, config, emit, fileText, mounted, projectModule, readEvent, root } from './lib.js';
 
-const dir = root();
+const dir = root(readEvent());
 if (!mounted(dir)) process.exit(0); // not a collet project, or switched off: stay out of the way
 
 const state = await projectModule(dir, 'state.mjs');

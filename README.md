@@ -9,7 +9,7 @@ Two plugins are installable from here. Both work on their own and stay out of th
 ## Requirements
 
 - Node, for the scripts both plugins run. anneal needs 18 or later. collet and the test suite need 20.
-- Claude Code or Codex. anneal also runs on Antigravity.
+- Claude Code, Codex or Antigravity.
 
 ## Install
 
@@ -21,6 +21,8 @@ Two plugins are installable from here. Both work on their own and stay out of th
 The first command registers this collection once. The second installs one plugin, and takes effect next session. Uninstall with `/plugin uninstall <plugin-name>@slag`.
 
 On Codex, add this repository as a marketplace and install from `Slag · Codex`.
+
+Antigravity has no marketplace to add. Clone this repository, then either run `agy plugin install <path-to-clone>/<plugin-name>` or copy the plugin directory to `.agents/plugins/<plugin-name>/` in a workspace, or to `~/.gemini/config/plugins/<plugin-name>/` for every workspace.
 
 ## The plugins
 
@@ -59,7 +61,7 @@ They compose: anneal gets the layout into shape, and collet keeps a session from
 npm run check
 ```
 
-That runs `node --test`: 120 tests, 49 in anneal, 59 in collet and 12 for the hook. There is no CI.
+That runs `node --test`: 123 tests, 49 in anneal, 62 in collet and 12 for the hook. There is no CI.
 
 Plugins live in-tree as plain directories, with one history and no submodules.
 [AGENTS.md](AGENTS.md) is the map: the layout, the three manifests each plugin ships, and the

@@ -10,6 +10,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 - The closing report suggests a harness you can install to keep the result from drifting, instead of one that is no longer here.
 - On Codex, the plugin no longer carries an icon.
+- The root manifest declares the Agent Plugins schema, so a host that reads the portable plugin format loads it as one.
+- On Antigravity the skill is invoked as `/anneal`; the README said `$anneal`, which is Codex's form.
 
 ## [0.2.0-alpha] — 2026-09-19
 

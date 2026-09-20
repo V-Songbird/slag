@@ -10,7 +10,7 @@ No dependencies to install, no build step. Node 20, as `.nvmrc` declares and `pa
 requires. That is the oldest version the suite has been run on, not the oldest it might work on.
 
 ```bash
-npm run check                            # node --test, 120 tests: 49 anneal, 59 collet, 12 the hook
+npm run check                            # node --test, 123 tests: 49 anneal, 62 collet, 12 the hook
 node anneal/scripts/audit.js --root .    # anneal's own audit, run against this repo
 claude plugin eval ./anneal --no-publish # 2 eval cases; slow, drives real sessions
 ```
@@ -33,7 +33,7 @@ slag/
 ├── .claude/                           committed; settings, one scoped rule, cut-release
 ├── anneal/                            repository layout auditor and migrator
 ├── collet/                            session task harness
-├── docs/knowledge/                    two documents, see below
+├── docs/knowledge/                    three documents, see below
 ├── docs/decisions/                    one decision record, see below
 ├── scripts/claude-hooks/              reruns a plugin's suite after an edit inside it
 └── scripts/git-hooks/                 the commit gate, armed by hand after a clone
@@ -47,6 +47,7 @@ Inside a plugin: `skills/<name>/SKILL.md` for what the host loads, `scripts/` fo
 | --- | --- |
 | [docs/knowledge/collet-design.md](docs/knowledge/collet-design.md) | changing collet's guard, scope check or task CLI |
 | [docs/knowledge/plugin-trim.md](docs/knowledge/plugin-trim.md) | restoring a file the trim deleted, or adding a document |
+| [docs/knowledge/host-plugin-formats.md](docs/knowledge/host-plugin-formats.md) | touching a manifest, a hooks file, or how a hook reads a host's event |
 | [docs/decisions/roadmap-ownership.md](docs/decisions/roadmap-ownership.md) | changing how collet behaves on a project that keeps a `ROADMAP.jsonl` |
 
 ## Each plugin ships three manifests, one per host
@@ -54,15 +55,21 @@ Inside a plugin: `skills/<name>/SKILL.md` for what the host loads, `scripts/` fo
 | Host | File | Notes |
 | --- | --- | --- |
 | Claude Code | `<plugin>/.claude-plugin/plugin.json` | carries **no** `version` field |
-| Codex | `<plugin>/.codex-plugin/plugin.json` | carries the `interface` block |
-| Antigravity | `<plugin>/plugin.json` | anneal only |
+| Codex | `<plugin>/.codex-plugin/plugin.json` | carries the `interface` block and the `hooks` path |
+| Antigravity | `<plugin>/plugin.json` | also the portable Agent Plugins manifest, hence its `$schema` |
 
 They are hand-maintained copies of the same description and drift easily. Change one, check the
 others.
 
+The root `plugin.json` is read by two things: Antigravity, which wants only `name`, and Codex's
+portable loader, which requires the Agent Plugins `$schema` and then applies
+`.codex-plugin/plugin.json` on top. Never add `extensions.com.openai` to it — that would make
+Codex ignore the `.codex-plugin` file, including the path to its hooks.
+
 Hooks split the same way: `<plugin>/hooks/hooks.json` for Claude Code,
 `<plugin>/hooks/codex-hooks.json` for Codex, and `<plugin>/hooks.json` at the plugin root for
-Antigravity.
+Antigravity. One script serves all three; the host is an argument, and it decides how the call is
+read off the event and what a denial looks like on the wire.
 
 ## Conventions that constrain a change
 
@@ -100,7 +107,7 @@ check is worse than no number.
 missing, say it is missing rather than filling it in.
 
 **A plugin with scripted behaviour carries a `node:test` suite** under `tests/`. Both do: 49 in
-anneal, 59 in collet.
+anneal, 62 in collet.
 
 **Documents under `docs/` follow the documentation schema**: YAML frontmatter with `type`, `summary`
 and `related_files`, plus `status` for a `task_summary`. One current document per topic, updated in
@@ -135,9 +142,19 @@ this repository. Nothing is copied back except a number or a line a document cit
   on 22 it is read as a test file and fails. What works on both is naming a file, or running
   `node --test` with no argument from the directory you want walked. Node 22 also skips
   dot-directories when it walks, which is why the hook that reruns suites lives under `scripts/`.
-- **`anneal/plugin.json` carries a `version` and `anneal/.claude-plugin/plugin.json` does not.**
-  That is the rule above working, not drift. Do not "fix" it by deleting one. The two do differ on
+- **`<plugin>/plugin.json` carries a `version` and `<plugin>/.claude-plugin/plugin.json` does not.**
+  That is the rule above working, not drift. Do not "fix" it by deleting one. anneal's two differ on
   one keyword, and nothing checks them: the validator was deleted in `5278887`.
+- **Antigravity runs a plugin hook from the plugin directory, not the project.** `process.cwd()`
+  is `<plugin>/` there, which is why the root `hooks.json` can say `./hooks/guard.js` and why the
+  hooks take the project from the event — `CLAUDE_PROJECT_DIR` on Claude Code, `cwd` on Codex,
+  `workspacePaths[0]` on Antigravity — and fall back to `process.cwd()` last. The event itself is
+  nested there, `toolCall.name` and `toolCall.args` in PascalCase, and the answer is a bare
+  `{ "decision": "allow" | "deny" }` with the allow said out loud.
+- **Antigravity has no marketplace file and no `SessionStart` or `PreCompact`.** A user copies the
+  plugin directory or runs `agy plugin install <path>`; `.agents/plugins/` here is Codex's index,
+  and Antigravity finding no plugin directory under it is expected. Only the guard is wired on that
+  host; the rules block in `AGENTS.md` carries the rest.
 - **The scope of a collet task is derived by reading the code, not from the task title.** A scope
   one file too narrow does not block work — it pushes the change into the wrong file.
 - **anneal's audit is a heuristic.** A flagged `index` file may be exactly what a framework expects,

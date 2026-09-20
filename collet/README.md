@@ -10,7 +10,7 @@ Use it on a repository where an agent drifts past the task, or calls work finish
 
 - Node 20 or later, with no other dependencies.
 - A git repository. The scope check reads `git diff` and `git ls-files` to see what changed.
-- Claude Code or Codex for the session hooks. The checks themselves run on plain `node`, with no plugin installed.
+- Claude Code, Codex or Antigravity for the session hooks. The checks themselves run on plain `node`, with no plugin installed.
 
 ## Install
 
@@ -24,6 +24,8 @@ Use it on a repository where an agent drifts past the task, or calls work finish
 Takes effect next session.
 
 **Codex** — add this repository as a marketplace, then install `collet` from `Slag · Codex`.
+
+**Antigravity** — there is no marketplace. Clone the repository and run `agy plugin install <path-to-clone>/collet`, or copy the `collet/` directory to `.agents/plugins/collet/` for one workspace or `~/.gemini/config/plugins/collet/` for every workspace. Only the guard is wired there: Antigravity has no session start or compaction event, so the open task is stated by the rules block and by `node .collet/task.mjs status`.
 
 ## Quick start
 
@@ -142,7 +144,7 @@ Every check ships with planted mistakes and the lookalikes written to fool it.
 | --- | --- |
 | Planted violations the scope check catches | **5 of 5** |
 | Lookalikes it leaves alone | **6 of 6** |
-| Behaviour tests across the plugin | **59 of 59** |
+| Behaviour tests across the plugin | **62 of 62** |
 
 Reproduce them with `node --test collet/tests/*.test.js` and `node .collet/checks/run.mjs`, which reads the same fixtures it uses for admission.
 
@@ -160,11 +162,11 @@ Reproduce them with `node --test collet/tests/*.test.js` and `node .collet/check
 node --test collet/tests/*.test.js
 ```
 
-59 tests across five suites. The hooks are driven the way a host drives them, with the event on stdin.
+62 tests across five suites. The hooks are driven the way each host drives them, with the event on stdin: Claude Code's shape, Codex's shape with the project in the event, and Antigravity's nested `toolCall` run from the plugin directory.
 
 Why each mechanism exists, and the defect behind it, is in [the design notes](../docs/knowledge/collet-design.md).
 
-Two things are not proven. No session has loaded the plugin and reported `Loading hooks from plugin: collet`. The Codex wiring has unit coverage, but has never run on that host.
+Two things are not proven. No session has loaded the plugin and reported `Loading hooks from plugin: collet`. The Codex and Antigravity wiring has unit coverage, but has never run on either host.
 
 ## Support
 
