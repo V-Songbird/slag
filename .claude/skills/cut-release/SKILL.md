@@ -103,8 +103,10 @@ The audit should report only `runtime-names` three times, in anneal's own test f
 else is new and worth reading before pushing.
 
 The `pre-commit` and `commit-msg` gates scan for private reference names. If either blocks, reword
-generically. Do not bypass with `--no-verify`. The gate fails open when the blocklist is absent, so
-a clean pass is not proof it ran — see `.claude/rules/reference-names.md`.
+generically, or — when the name is in a benchmark the release means to publish — take it off the
+private blocklist deliberately and say so. Do not bypass with `--no-verify`. The gate fails open
+when the blocklist is absent, so a clean pass is not proof it ran. See
+`.claude/rules/reference-names.md`.
 
 Nothing here is pre-approved beyond reading and editing: every command in this skill goes through
 the usual permission prompt, and the push is the one you should read before allowing.
