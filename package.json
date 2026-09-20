@@ -4,7 +4,7 @@
   "description": "Experimental agent plugins, in-tree. The marketplace manifests own every plugin's version, so this file carries none.",
   "license": "MIT",
   "engines": {
-    "node": ">=22"
+    "node": ">=20"
   },
   "scripts": {
     "check": "node --test"

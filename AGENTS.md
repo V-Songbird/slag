@@ -6,8 +6,8 @@ freely; that is the point of the repository.
 
 ## Commands
 
-No dependencies to install, no build step. Node 22, as `.nvmrc` declares and `package.json`
-requires.
+No dependencies to install, no build step. Node 20, as `.nvmrc` declares and `package.json`
+requires. That is the oldest version the suite has been run on, not the oldest it might work on.
 
 ```bash
 npm run check                          # node --test, 68 tests, the only suite in the repo
@@ -94,11 +94,13 @@ this repository. Nothing is copied back except a number or a line a document cit
 
 ## Known pitfalls
 
-- **collet is ESM, anneal is CommonJS, and neither declares it.** Every `.js` under `collet/` uses
-  `import`; every `.js` under `anneal/` uses `require`. Only Node 22's syntax detection makes that
-  work, so the suite fails on Node 20 with `Cannot use import statement outside a module`. Never put
-  `"type": "module"` in the root `package.json` — it would break anneal. A `collet/package.json`
-  declaring it would scope the fix correctly.
+- **collet is ESM, anneal is CommonJS.** Every `.js` under `collet/` uses `import`, and
+  `collet/package.json` declares `"type": "module"` so it does not depend on Node's syntax
+  detection. Every `.js` under `anneal/` uses `require` and relies on the root `package.json`
+  having no `type`. Never add one there, and never move collet's declaration up to the root.
+- **What a project receives from collet is all `.mjs`.** No `.js` file is ever written into a
+  mounted project, so that project's own `package.json` and its `type` never come into it. Keep new
+  templates on `.mjs`.
 - **`core.hooksPath` points at `scripts/git-hooks`, which does not exist.** It was deleted in
   `5278887`. Commits work, because git finds no hooks there. Unset it or restore the directory
   before relying on a commit gate.

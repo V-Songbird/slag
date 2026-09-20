@@ -8,7 +8,7 @@ Two plugins are installable from here. Both work on their own and stay out of th
 
 ## Requirements
 
-- Node, for the scripts both plugins run. anneal needs 18 or later; collet's own test suite needs 22.
+- Node, for the scripts both plugins run. anneal needs 18 or later. collet and the test suite need 20.
 - Claude Code or Codex. anneal also runs on Antigravity.
 
 ## Install
