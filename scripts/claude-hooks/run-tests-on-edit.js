@@ -77,7 +77,7 @@ function findPluginRoot(root, filePath) {
 // `node --test <glob>` only expands on node 22+; on node 20, which .nvmrc and
 // package.json pin as this repo's floor, it exits with "Could not find" and
 // this hook would report a failed suite after every single edit. A bare
-// `node --test` recurses from cwd and finds all 49 in anneal and 68 in collet
+// `node --test` recurses from cwd and finds all 49 in anneal and 59 in collet
 // on both v20.11.1 and v22.22.2.
 
 // Strip node's own test-runner IPC markers before spawning the nested

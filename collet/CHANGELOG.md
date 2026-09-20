@@ -6,6 +6,20 @@ All notable changes to collet are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A project that already keeps a `ROADMAP.jsonl` or a `.foreman/` directory is now left alone
+  entirely. `mount.mjs` writes nothing there and exits 2, instead of writing the harness in a
+  second shape that read that roadmap and enforced the files its open entry named.
+
+### Removed
+
+- The roadmap-backed mode: no roadmap is parsed, no entry is read as the open task, and no write is
+  refused against the files such an entry declares. Those files are a forecast the owning tool
+  re-reads and rewrites, so enforcing them turned a prediction into a permission boundary and
+  pushed sessions into editing that prediction mid-task. `ROADMAP.jsonl` and `.foreman/` remain on
+  the scope check's never-refuse list, for a project that adopts one after collet is installed.
+
 ## [0.1.0-alpha] — 2026-09-19
 
 First release.

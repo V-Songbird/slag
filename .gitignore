@@ -42,6 +42,7 @@ labs/spikes/*
 !labs/spikes/.gitkeep
 labs/**/*.log
 labs/**/.ipynb_checkpoints/
+*.log
 
 # Evaluation outputs and run telemetry (keep fixtures and scenarios)
 evals/results/
@@ -71,3 +72,10 @@ docs/research/
 # ==============================================================================
 .DS_Store
 Thumbs.db
+
+# ==============================================================================
+# 6. Common files and folders
+# ==============================================================================
+node_modules/
+out/
+dist/

@@ -46,7 +46,7 @@ if (live) {
     console.log('no task is open — nothing enforced. Open one with: node .collet/task.mjs add ...');
     process.exit(0);
   }
-  console.log(`open task ${task.id} — "${task.title}" (${task.owner} owns the ledger)`);
+  console.log(`open task ${task.id} — "${task.title}"`);
   let failed = 0;
   let skipped = 0;
   for (const { file, module, broken } of await loadChecks()) {

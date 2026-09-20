@@ -29,21 +29,12 @@ if (project) lines.push(project);
 
 const task = state.openTask(dir);
 if (task) {
-  const ends =
-    task.accept === null
-      ? ' Completion is decided by the tool that owns this project’s roadmap; `node .collet/checks/run.mjs --live` reports whether the work so far stayed inside the declared files.'
-      : ` The task ends when \`${task.accept}\` exits zero, which \`node .collet/task.mjs close\` runs after checking that nothing landed outside the list.`;
   lines.push(
     `The open task is ${task.id} — "${task.title}" (status ${task.status}).` +
       ` Writable files: ${(task.scope ?? []).join(', ') || 'none declared'}.` +
       ` Writes outside that list are refused, and \`node .collet/task.mjs widen --add <path> --why "<reason>"\` is the way to extend it.` +
-      ends
+      ` The task ends when \`${task.accept}\` exits zero, which \`node .collet/task.mjs close\` runs after checking that nothing landed outside the list.`
   );
-  if (task.owner !== 'collet') {
-    lines.push(
-      'That task is recorded in ROADMAP.jsonl, which collet neither writes nor guards; it only enforces the files that entry declares.'
-    );
-  }
 } else {
   lines.push('No task is open, and nothing is being enforced until one is opened.');
 }

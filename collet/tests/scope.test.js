@@ -14,7 +14,6 @@ const TASK = {
   status: 'in_progress',
   scope: ['src/cli.mjs', 'src/digest.mjs', 'test/**'],
   accept: 'node -e 0',
-  owner: 'collet',
 };
 
 function fires(root, call, task = TASK) {

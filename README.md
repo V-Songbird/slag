@@ -36,7 +36,7 @@ Read the [anneal README](./anneal/README.md).
 
 ### [collet](./collet) — hold a session inside the task it was given
 
-A session will finish work it never did. collet gives it one open task, the exact files it may touch, and a command that decides when it is over. A write outside the list is refused as it happens. Closing runs the accept command and checks that nothing landed outside the list first. On a project that already plans its work in a roadmap, collet writes no ledger of its own.
+A session will finish work it never did. collet gives it one open task, the exact files it may touch, and a command that decides when it is over. A write outside the list is refused as it happens. Closing runs the accept command and checks that nothing landed outside the list first. A project that already plans its work in a roadmap it does not own is left alone: the mount writes nothing there.
 
 ```text
 /plugin install collet@slag
@@ -59,7 +59,7 @@ They compose: anneal gets the layout into shape, and collet keeps a session from
 npm run check
 ```
 
-That runs `node --test`: 117 tests, 49 in anneal and 68 in collet. There is no CI.
+That runs `node --test`: 120 tests, 49 in anneal, 59 in collet and 12 for the hook. There is no CI.
 
 Plugins live in-tree as plain directories, with one history and no submodules.
 [AGENTS.md](AGENTS.md) is the map: the layout, the three manifests each plugin ships, and the

@@ -45,15 +45,9 @@ try {
   /* the refusal matters more than the record of it */
 }
 
-// The remedy has to be a command that works here. Under another owner the widening command is
-// that tool's, and naming collet's would send the session at a CLI that refuses.
-const widen =
-  task.owner === 'collet'
-    ? 'widen it first: node .collet/task.mjs widen --add <path> --why "<reason>". That is allowed and recorded.'
-    : "correct the open entry's declared files through the CLI that owns ROADMAP.jsonl. That is allowed and recorded.";
-
 deny(
   'PreToolUse',
-  `${result.reason} If the file is genuinely part of the task, ${widen} ` +
+  `${result.reason} If the file is genuinely part of the task, widen it first: ` +
+    `node .collet/task.mjs widen --add <path> --why "<reason>". That is allowed and recorded. ` +
     `Otherwise leave it alone and say in your summary what you found instead.`
 );

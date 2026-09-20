@@ -31,9 +31,7 @@ const body = [
   `Written ${new Date().toISOString()}${event.trigger ? ` (context ${event.trigger})` : ''}.`,
   '',
   `"${task.title}" is still open. Writable: ${(task.scope ?? []).join(', ') || 'none declared'}.`,
-  task.accept === null
-    ? 'Completion is decided by the tool that owns this project’s roadmap. `node .collet/checks/run.mjs --live` says whether the work so far stayed inside the declared files.'
-    : `It ends when \`${task.accept}\` exits zero, which \`node .collet/task.mjs close\` runs.`,
+  `It ends when \`${task.accept}\` exits zero, which \`node .collet/task.mjs close\` runs.`,
   'Run `git status` and `git diff` for what has changed so far.',
   'Anything claimed but not yet checked belongs in `.collet/unverified.md`.',
   '',

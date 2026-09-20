@@ -35,15 +35,14 @@ not an accept command.
 ## Check first: who owns the plan here
 
 Look for a `ROADMAP.jsonl` at the project root or a `.foreman/` directory. If either is there,
-**this project already has a ledger and collet does not write a second one.** `mount.mjs` detects
-this on its own and writes the harness in its other shape: no ledger, no `add`/`widen`/`close`, and
-the guard enforcing the files the open roadmap entry already declares.
+**this project plans its work somewhere collet does not reach, and collet is not mounted here.**
+`mount.mjs` detects it on its own, writes nothing and exits non-zero. Report that and stop; do not
+work around it.
 
-Say that out loud when you report. Two records of what a task may touch, with nobody sure which is
-authoritative, is a worse outcome than having only one — and that is the outcome this split exists
-to avoid. The gap collet fills there is real and narrow: a roadmap *declares* the files a task
-should touch, and nothing stops a write landing somewhere else. This does, at the moment of the
-write.
+Two records of what a task may touch, with nobody sure which is authoritative, is the outcome this
+refusal exists to avoid. There is also nothing to add: the files such a roadmap names are a
+forecast the owning tool re-reads and rewrites, so refusing a write against them would enforce a
+rule that tool never made.
 
 ## Mount
 

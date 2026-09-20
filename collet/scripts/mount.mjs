@@ -11,8 +11,6 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { foremanProject } from '../templates/state.mjs';
-
 const HERE = dirname(dirname(fileURLToPath(import.meta.url)));
 const TEMPLATES = join(HERE, 'templates');
 const target = resolve(process.argv[2] ?? '');
@@ -24,7 +22,49 @@ if (!process.argv[2] || !existsSync(target)) {
   process.exit(2);
 }
 
-const external = foremanProject(target);
+/**
+ * True when the project already records its work in a roadmap another tool owns.
+ *
+ * Read from the directory, from the format marker, or from an entry's own shape — a roadmap
+ * written before that marker existed carries none, and missing it would mean mounting anyway.
+ */
+function plannedElsewhere(dir) {
+  if (existsSync(join(dir, '.foreman'))) return true;
+  let entries = [];
+  try {
+    entries = readFileSync(join(dir, 'ROADMAP.jsonl'), 'utf8')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch {
+    return false;
+  }
+  if (!entries.length) return false;
+  if (Object.prototype.hasOwnProperty.call(entries[0], 'foreman_roadmap_format')) return true;
+  return entries.some(
+    (entry) => entry.id && (Array.isArray(entry.planned_touches) || Array.isArray(entry.touches))
+  );
+}
+
+// A project that already plans its work elsewhere is left alone, entirely. collet has one ledger
+// and no way to share one, so mounting here would put a second record of the same work on disk
+// with nobody able to say which is authoritative. It also has nothing to add: the files an entry
+// declares there are a forecast that tool re-reads and rewrites, not a boundary to enforce.
+if (plannedElsewhere(target)) {
+  console.error(`${target} already plans its work in a roadmap collet does not own.`);
+  console.error('Nothing was written. That tool owns the plan, the files an entry names and when');
+  console.error('the entry is done. collet mounts on a project that keeps no such roadmap.');
+  process.exit(2);
+}
+
 const wrote = [];
 const skipped = [];
 
@@ -78,17 +118,10 @@ if (!existsSync(unverified)) {
 // for whichever tool happened to be configured first.
 const block = readFileSync(join(TEMPLATES, 'rules.md'), 'utf8')
   .trim()
-  .replace(
-    '{{WIDEN}}',
-    external
-      ? 'correct the entry in ROADMAP.jsonl through its own CLI, which is where this project records what a task may touch.'
-      : '`node .collet/task.mjs widen --add <path> --why "<reason>"`.'
-  )
+  .replace('{{WIDEN}}', '`node .collet/task.mjs widen --add <path> --why "<reason>"`.')
   .replace(
     '{{CLOSE}}',
-    external
-      ? 'Completion here is decided by the tool that owns the roadmap; run `node .collet/checks/run.mjs --live` first, so "done" also means nothing landed outside the entry.'
-      : '`node .collet/task.mjs close` checks the working tree against the task, then runs the accept command.'
+    '`node .collet/task.mjs close` checks the working tree against the task, then runs the accept command.'
   );
 
 const surfaces = ['AGENTS.md', 'CLAUDE.md'];
@@ -123,19 +156,11 @@ next:
   1. Fill in .collet/config.json — the project line and the conventions a change must respect.
      A task cannot be opened while those placeholders are still there.`);
 
-if (external) {
-  console.log(`  2. This project already plans its work in ROADMAP.jsonl, so collet wrote no ledger.
-     It enforces the open entry's declared files; that plugin's own CLI stays in charge.
-  3. Prove the harness before trusting it:
-       node .collet/task.mjs status
-       node .collet/checks/run.mjs`);
-} else {
-  console.log(`  2. Open the first task, with the scope derived from reading the code it touches:
+console.log(`  2. Open the first task, with the scope derived from reading the code it touches:
        node .collet/task.mjs add --title "..." --why "..." --scope "src/**,test/**"
   3. Prove the harness before trusting it:
        node .collet/task.mjs status
        node .collet/checks/run.mjs`);
-}
 
 console.log(`  4. With no task open, nothing is enforced. That is the documented hole, not a bug.
      \`.collet/off\` switches every session guard off on purpose; the checks keep running.`);

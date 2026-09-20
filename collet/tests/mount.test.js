@@ -95,15 +95,28 @@ test('the rules a project receives name commands that work in that project', () 
   assert.match(mine, /node \.collet\/task\.mjs widen/);
   assert.match(mine, /node \.collet\/task\.mjs close/);
   assert.doesNotMatch(mine, /\{\{/);
-
-  const planned = project({ ...TREE, 'ROADMAP.jsonl': '{"foreman_roadmap_format":2}\n' });
-  mount(planned);
-  const theirs = readFileSync(join(planned, 'AGENTS.md'), 'utf8');
-  assert.match(theirs, /ROADMAP\.jsonl/);
-  assert.doesNotMatch(theirs, /node \.collet\/task\.mjs widen/);
-  assert.doesNotMatch(theirs, /\{\{/);
   clean(own);
-  clean(planned);
+});
+
+// The whole of collet's relationship with a project that plans its work elsewhere: it stays out.
+// Mounting would put a second record of the same work on disk, and the files such a roadmap names
+// are a forecast its own tool rewrites rather than a boundary worth refusing a write against.
+// Three signals, because a roadmap written before the format marker existed carries none.
+test('a project that plans its work elsewhere is left alone entirely', () => {
+  const entry = '{"id":"002","status":"in_progress","planned_touches":["src/auth/"]}\n';
+  for (const files of [
+    { '.foreman/config.json': '{}' },
+    { 'ROADMAP.jsonl': '{"foreman_roadmap_format":2}\n' },
+    { 'ROADMAP.jsonl': entry },
+  ]) {
+    const root = project({ ...TREE, ...files });
+    const out = mount(root);
+    assert.equal(out.status, 2, JSON.stringify(files));
+    assert.match(out.stderr, /roadmap collet does not own/);
+    assert.equal(existsSync(join(root, '.collet')), false);
+    assert.equal(existsSync(join(root, 'AGENTS.md')), false);
+    clean(root);
+  }
 });
 
 test('mounting refuses a directory that is not there rather than creating one', () => {

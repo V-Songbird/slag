@@ -14,7 +14,7 @@ import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-import { colletLedger, config, filled, foremanProject, openTask } from './state.mjs';
+import { colletLedger, config, filled, openTask } from './state.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const STATE = join(ROOT, '.collet');
@@ -196,7 +196,7 @@ function describe(task) {
     `task ${task.id} — ${task.title} [${task.status}]`,
     `  why:    ${task.why ?? ''}`,
     `  scope:  ${(task.scope ?? []).join(', ')}`,
-    `  accept: ${task.accept ?? '(the tool that owns the roadmap decides when this is done)'}`,
+    `  accept: ${task.accept ?? 'none recorded'}`,
     task.widenings?.length
       ? `  widened ${task.widenings.length}x: ${task.widenings.map((w) => `${w.path} (${w.why})`).join('; ')}`
       : '  widened 0x',
@@ -220,25 +220,15 @@ function recentDenials(limit = 3) {
   }
 }
 
-function refuseUnderOtherOwner(command) {
-  console.error('this project plans its work in ROADMAP.jsonl, which collet does not write.');
-  console.error(`Use that plugin's own CLI for \`${command}\`; collet enforces the files it declares.`);
-  console.error('`node .collet/task.mjs status` reads the open entry, and');
-  console.error('`node .collet/checks/run.mjs --live` checks the tree against it.');
-  process.exit(2);
-}
-
 // ---- commands ---------------------------------------------------------------------------------
 
 const [command, ...rest] = process.argv.slice(2);
 const args = flags(rest);
-const external = foremanProject(ROOT);
 const tasks = colletLedger(ROOT);
 const task = openTask(ROOT);
 
 switch (command) {
   case 'add': {
-    if (external) refuseUnderOtherOwner('add');
     const settings = config(ROOT) ?? {};
     if (!filled(settings.project) || !filled(settings.accept)) {
       console.error('.collet/config.json still carries its placeholders.');
@@ -286,9 +276,6 @@ switch (command) {
       break;
     }
     console.log(describe(task));
-    if (task.owner !== 'collet') {
-      console.log("  ledger: ROADMAP.jsonl — collet enforces this entry's files and writes nothing");
-    }
     const denials = recentDenials();
     if (denials.length) {
       console.log(`\n  last ${denials.length} refusal(s):`);
@@ -298,15 +285,10 @@ switch (command) {
   }
 
   case 'list':
-    if (external) {
-      console.error('this project plans its work in ROADMAP.jsonl; list it with that plugin.');
-      process.exit(2);
-    }
     for (const entry of tasks) console.log(`${describe(entry)}\n`);
     break;
 
   case 'widen': {
-    if (external) refuseUnderOtherOwner('widen');
     if (!task) {
       console.error('no task open to widen');
       process.exit(2);
@@ -341,7 +323,6 @@ switch (command) {
   }
 
   case 'close': {
-    if (external) refuseUnderOtherOwner('close');
     if (!task) {
       console.error('no task open to close');
       process.exit(2);

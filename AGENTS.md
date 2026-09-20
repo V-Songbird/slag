@@ -10,7 +10,7 @@ No dependencies to install, no build step. Node 20, as `.nvmrc` declares and `pa
 requires. That is the oldest version the suite has been run on, not the oldest it might work on.
 
 ```bash
-npm run check                            # node --test, 129 tests: 49 anneal, 68 collet, 12 the hook
+npm run check                            # node --test, 120 tests: 49 anneal, 59 collet, 12 the hook
 node anneal/scripts/audit.js --root .    # anneal's own audit, run against this repo
 claude plugin eval ./anneal --no-publish # 2 eval cases; slow, drives real sessions
 ```
@@ -21,8 +21,8 @@ Once after cloning, to arm the commit gate:
 git config core.hooksPath scripts/git-hooks
 ```
 
-There is no CI. Any open work is in
-[docs/documentation-cleanup.md](docs/documentation-cleanup.md).
+There is no CI. The one gap the seven-plugin trim left open is in
+[docs/knowledge/plugin-trim.md](docs/knowledge/plugin-trim.md).
 
 ## Where things live
 
@@ -33,7 +33,8 @@ slag/
 ├── .claude/                           committed; settings, one scoped rule, cut-release
 ├── anneal/                            repository layout auditor and migrator
 ├── collet/                            session task harness
-├── docs/                              two documents, see below
+├── docs/knowledge/                    two documents, see below
+├── docs/decisions/                    one decision record, see below
 ├── scripts/claude-hooks/              reruns a plugin's suite after an edit inside it
 └── scripts/git-hooks/                 the commit gate, armed by hand after a clone
 ```
@@ -44,8 +45,9 @@ Inside a plugin: `skills/<name>/SKILL.md` for what the host loads, `scripts/` fo
 
 | Document | Read it when |
 | --- | --- |
-| [docs/collet-design.md](docs/collet-design.md) | changing collet's guard, scope check or task CLI |
-| [docs/documentation-cleanup.md](docs/documentation-cleanup.md) | restoring a deleted file, or adding a document |
+| [docs/knowledge/collet-design.md](docs/knowledge/collet-design.md) | changing collet's guard, scope check or task CLI |
+| [docs/knowledge/plugin-trim.md](docs/knowledge/plugin-trim.md) | restoring a file the trim deleted, or adding a document |
+| [docs/decisions/roadmap-ownership.md](docs/decisions/roadmap-ownership.md) | changing how collet behaves on a project that keeps a `ROADMAP.jsonl` |
 
 ## Each plugin ships three manifests, one per host
 
@@ -98,12 +100,15 @@ check is worse than no number.
 missing, say it is missing rather than filling it in.
 
 **A plugin with scripted behaviour carries a `node:test` suite** under `tests/`. Both do: 49 in
-anneal, 68 in collet.
+anneal, 59 in collet.
 
 **Documents under `docs/` follow the documentation schema**: YAML frontmatter with `type`, `summary`
 and `related_files`, plus `status` for a `task_summary`. One current document per topic, updated in
 place, with a stable kebab-case name and no date in the filename. Git holds history, not archive
 copies. Keep useful rejected approaches in a `Rejected Alternatives` section.
+A document sits in the folder for its `type`: `docs/knowledge/` and `docs/decisions/` today, with
+`docs/tasks/` or `docs/apis/` added only when one is needed. `docs/research/` is gitignored,
+holds the commit gate's blocklist, and is not a place for documents.
 
 **Disposable work goes in the session scratchpad.** Benchmark arms, throwaway fixtures, headless
 probe workspaces and scratch git repositories are created under the scratchpad path given at

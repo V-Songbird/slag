@@ -51,8 +51,8 @@ function repoRelative(target, root) {
  * Does one declared entry cover one path?
  *
  * A plain entry owns what sits beneath it, so `src/auth` and `src/auth/` both cover
- * `src/auth/token.ts`. That is the shape a roadmap's declared paths already use, and it costs
- * nothing for a single file, which nothing can sit beneath.
+ * `src/auth/token.ts`. A scope is written by hand, and a folder is the natural unit to name; it
+ * costs nothing for a single file, which nothing can sit beneath.
  */
 export function matchScope(pattern, path) {
   const glob = String(pattern)

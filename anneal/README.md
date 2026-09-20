@@ -154,7 +154,7 @@ Expected output:
 # fail 0
 ```
 
-`npm run check` from the repository root runs anneal's 49 alongside collet's 68.
+`npm run check` from the repository root runs anneal's 49 alongside collet's 59.
 
 Two eval cases live in `evals/`. They check what a unit test cannot: that the skill fires, that `audit` creates no file, and that a migration stops on a dirty tree. Each run drives a real session, so it is slow.
 

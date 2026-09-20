@@ -92,7 +92,7 @@ Expected output:
 
 ```text
 checking the working tree against the task:
-open task t1 — "Round the cart total" (collet owns the ledger)
+open task t1 — "Round the cart total"
 ok   scope — everything changed is inside the task
 
 running accept command: node -e 0
@@ -107,7 +107,7 @@ Either half failing leaves the task open.
 - **Drift gets refused, not reported.** The guard reads write tools, patches, and the shell forms it can read with certainty. It also reads `rm -rf` on a directory, which is the one command worth catching before it lands.
 - **The list corrects itself.** Name the module that owns the behaviour, and collet pulls in what that module imports. It prints the reason for each addition. A list one file too narrow does not block work. It quietly pushes the change into the wrong file.
 - **"Covered" means caught.** Every check ships with a planted mistake and a lookalike. One that cannot catch its own violation is discarded and named, not counted.
-- **It leaves an existing plan alone.** Some projects already keep a `ROADMAP.jsonl` or a `.foreman/` directory. There, collet writes no ledger of its own and enforces the files that plan declares.
+- **It stays out of a project that plans its work elsewhere.** A repository that already keeps a `ROADMAP.jsonl` or a `.foreman/` directory is left untouched: the mount refuses and writes nothing. That tool owns the plan, and the files its entries name are a forecast it rewrites, not a boundary to refuse a write against.
 
 ## What you can do
 
@@ -142,7 +142,7 @@ Every check ships with planted mistakes and the lookalikes written to fool it.
 | --- | --- |
 | Planted violations the scope check catches | **5 of 5** |
 | Lookalikes it leaves alone | **6 of 6** |
-| Behaviour tests across the plugin | **68 of 68** |
+| Behaviour tests across the plugin | **59 of 59** |
 
 Reproduce them with `node --test collet/tests/*.test.js` and `node .collet/checks/run.mjs`, which reads the same fixtures it uses for admission.
 
@@ -160,9 +160,9 @@ Reproduce them with `node --test collet/tests/*.test.js` and `node .collet/check
 node --test collet/tests/*.test.js
 ```
 
-68 tests across six suites. The hooks are driven the way a host drives them, with the event on stdin.
+59 tests across five suites. The hooks are driven the way a host drives them, with the event on stdin.
 
-Why each mechanism exists, and the defect behind it, is in [the design notes](../docs/collet-design.md).
+Why each mechanism exists, and the defect behind it, is in [the design notes](../docs/knowledge/collet-design.md).
 
 Two things are not proven. No session has loaded the plugin and reported `Loading hooks from plugin: collet`. The Codex wiring has unit coverage, but has never run on that host.
 
