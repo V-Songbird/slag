@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { foremanProject, openTask } from '../templates/state.mjs';
-import { clean, CONFIG, hook, hookOutput, mount, project, task, TREE } from './helpers.js';
+import { clean, CONFIG, hook, hookOutput, mount, project, task, TREE } from './temp-project.js';
 
 const ENTRY = {
   id: '002',

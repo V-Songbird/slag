@@ -39,29 +39,37 @@ Ask for an audit. It reads the repository and writes nothing.
 
 On Codex and Antigravity, type `$anneal audit` instead.
 
-anneal answers by running its scan script and reporting what came back. Here is that script run against this repository:
+anneal answers by running its scan script and reporting what came back. Below is that script, run against a small demo repository. The demo has a generic file name, two files sharing a name, no map file and an unignored `dist` folder.
 
 ```bash
-node anneal/scripts/audit.js --root .
+node anneal/scripts/audit.js --root <your-repository>
 ```
 
 Expected output:
 
 ```text
-anneal audit: D:\Projects\Songbird\Slag
-59 files (19 code) | git: yes | ecosystems: none detected
+anneal audit: /path/to/demo
+5 files (3 code) | git: yes | ecosystems: node
 
 high
   map-file-missing (1): No map file, so every session starts by exploring
     CLAUDE.md, .claude/CLAUDE.md, AGENTS.md, .agents/AGENTS.md, GEMINI.md, .gemini/GEMINI.md
-  check-command-missing (1): No test or check command found
-    no package script, make target or test runner config
+  build-output-not-ignored (1): Build or dependency folders not ignored by git, so they show up in search
+    dist/ (1 file)
 medium
+  toolchain-version-missing (1): No declared toolchain version to run the project with
+    node (.nvmrc or .node-version)
+  duplicate-names (1): File names used more than once, so a search by name is ambiguous
+    format: src/cart/format.js, src/orders/format.js
   generic-names (1): Generic file or folder names that say nothing about what is inside
-    collet/tests/helpers.js
+    src/utils.js
+low
+  check-command-split (2): Checks run as separate commands; no single one runs them all
+    npm test
+    npm run lint
 
 map files: none
-checks: none found
+checks: npm test | npm run lint (no single command runs them all)
 ```
 
 Nothing on disk has changed. Add `--json` for the full evidence behind each count.
@@ -147,6 +155,12 @@ Expected output:
 ```
 
 `npm run check` from the repository root runs anneal's 49 alongside collet's 68.
+
+Two eval cases live in `evals/`. They check what a unit test cannot: that the skill fires, that `audit` creates no file, and that a migration stops on a dirty tree. Each run drives a real session, so it is slow.
+
+```bash
+claude plugin eval ./anneal --no-publish
+```
 
 ## Support
 

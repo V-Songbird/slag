@@ -10,11 +10,18 @@ No dependencies to install, no build step. Node 20, as `.nvmrc` declares and `pa
 requires. That is the oldest version the suite has been run on, not the oldest it might work on.
 
 ```bash
-npm run check                          # node --test, 117 tests: 49 in anneal, 68 in collet
-node anneal/scripts/audit.js --root .  # anneal's own audit, run against this repo
+npm run check                            # node --test, 117 tests: 49 in anneal, 68 in collet
+node anneal/scripts/audit.js --root .    # anneal's own audit, run against this repo
+claude plugin eval ./anneal --no-publish # 2 eval cases; slow, drives real sessions
 ```
 
-There is no CI. That and the rest of the open work are in
+Once after cloning, to arm the commit gate:
+
+```bash
+git config core.hooksPath scripts/git-hooks
+```
+
+There is no CI. Any open work is in
 [docs/documentation-cleanup.md](docs/documentation-cleanup.md).
 
 ## Where things live
@@ -26,12 +33,13 @@ slag/
 ├── .claude/settings.json              committed; no hooks, deny-reads only
 ├── anneal/                            repository layout auditor and migrator
 ├── collet/                            session task harness
-└── docs/                              two documents, see below
+├── docs/                              two documents, see below
+└── scripts/git-hooks/                 the commit gate, armed by hand after a clone
 ```
 
 Inside a plugin: `skills/<name>/SKILL.md` for what the host loads, `scripts/` for standalone CLIs,
-`hooks/` for event wiring, `tests/` for a `node:test` suite, plus `README.md`, `LICENSE` and
-`CHANGELOG.md`.
+`hooks/` for event wiring, `tests/` for a `node:test` suite, `evals/` for cases
+`claude plugin eval` runs, plus `README.md`, `LICENSE` and `CHANGELOG.md`.
 
 | Document | Read it when |
 | --- | --- |
@@ -74,6 +82,7 @@ manifest and the code it points at move in the same commit. A retired plugin's e
 
 **A plugin carries only `README.md`, `CHANGELOG.md` and `LICENSE`.** No `CONTRIBUTING.md`, no
 `SECURITY.md`, no `.github/`, no `.gitignore` of its own — the root file covers every plugin.
+`collet/package.json` is the one exception, and it exists only to declare the module type.
 
 **No logos, no images, no badges.** These are experiments. A README earns its place on text alone,
 and artwork is one more thing to keep in step with a manifest.
@@ -109,9 +118,10 @@ this repository. Nothing is copied back except a number or a line a document cit
 - **What a project receives from collet is all `.mjs`.** No `.js` file is ever written into a
   mounted project, so that project's own `package.json` and its `type` never come into it. Keep new
   templates on `.mjs`.
-- **`core.hooksPath` points at `scripts/git-hooks`, which does not exist.** It was deleted in
-  `5278887`. Commits work, because git finds no hooks there. Unset it or restore the directory
-  before relying on a commit gate.
+- **The commit gate is silent until a blocklist exists.** `scripts/git-hooks/` scans the staged
+  change and the commit message for names in `docs/research/reference-names.txt`, which is
+  gitignored and not in your clone. With no blocklist it passes everything, on purpose, so a
+  standalone clone can still commit. A green commit is not proof the gate ran.
 - **`anneal/plugin.json` carries a `version` and `anneal/.claude-plugin/plugin.json` does not.**
   That is the rule above working, not drift. Do not "fix" it by deleting one. The two do differ on
   one keyword, and nothing checks them: the validator was deleted in `5278887`.

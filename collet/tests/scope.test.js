@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { check, matchScope, targetsOf } from '../templates/checks/scope.mjs';
-import { clean, project, TREE } from './helpers.js';
+import { clean, project, TREE } from './temp-project.js';
 
 const TASK = {
   id: 't1',

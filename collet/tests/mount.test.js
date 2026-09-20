@@ -5,7 +5,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { clean, mount, project, TREE } from './helpers.js';
+import { clean, mount, project, TREE } from './temp-project.js';
 
 test('the rules block reaches every surface an agent reads', () => {
   const root = project({ ...TREE, '.cursor/rules/.keep': '' });

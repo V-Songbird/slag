@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { clean, CONFIG, hook, hookOutput, mount, project, task, TREE } from './helpers.js';
+import { clean, CONFIG, hook, hookOutput, mount, project, task, TREE } from './temp-project.js';
 
 function ready(extra = {}) {
   const root = project({ ...TREE, ...extra });

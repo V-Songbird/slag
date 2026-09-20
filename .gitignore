@@ -56,6 +56,10 @@ scratchpad.*.md
 agent_context/
 *.prompt.tmp
 
+# Private notes. scripts/git-hooks/check-reference-names.js reads the blocklist
+# from here at commit time; the names must never reach a public record.
+docs/research/
+
 # ==============================================================================
 # 4. Editors & IDEs
 # ==============================================================================

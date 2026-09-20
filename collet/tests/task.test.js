@@ -6,7 +6,7 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { clean, CONFIG, mount, project, repo, task, TREE } from './helpers.js';
+import { clean, CONFIG, mount, project, repo, task, TREE } from './temp-project.js';
 
 function ready(extra = {}) {
   const root = project({ ...TREE, ...extra });
