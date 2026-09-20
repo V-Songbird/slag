@@ -29,9 +29,6 @@
     "developerName": "Victor Villegas",
     "category": "Productivity",
     "capabilities": ["Interactive", "Read", "Write"],
-    "websiteURL": "https://github.com/V-Songbird/slag/tree/main/collet",
-    "composerIcon": "./assets/logo.svg",
-    "logo": "./assets/logo.svg",
-    "logoDark": "./assets/logo-dark.svg"
+    "websiteURL": "https://github.com/V-Songbird/slag/tree/main/collet"
   }
 }

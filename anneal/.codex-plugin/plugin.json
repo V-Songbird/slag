@@ -30,9 +30,6 @@
     "category": "Productivity",
     "capabilities": ["Interactive", "Read", "Write"],
     "websiteURL": "https://github.com/V-Songbird/slag/tree/main/anneal",
-    "composerIcon": "./assets/logo.svg",
-    "logo": "./assets/logo.svg",
-    "logoDark": "./assets/logo-dark.svg",
     "defaultPrompt": ["Audit this repository for what makes it hard to navigate."]
   }
 }
