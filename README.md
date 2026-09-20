@@ -59,6 +59,8 @@ They compose: anneal gets the layout into shape, and collet keeps a session from
 slag/
 ├── .agents/plugins/marketplace.json   Codex marketplace index
 ├── .claude-plugin/marketplace.json    Claude Code marketplace index
+├── AGENTS.md                          the map an agent reads first
+├── CLAUDE.md                          a pointer to AGENTS.md
 ├── anneal/
 ├── collet/
 └── docs/
