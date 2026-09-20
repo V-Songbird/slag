@@ -117,4 +117,4 @@ Run the audit again, then report:
 - steps skipped or set aside, and why;
 - conflicts with the project's own rules.
 
-To keep the result from drifting, suggest the project's existing checks, or jig when it is installed.
+To keep the result from drifting, suggest the project's existing checks, or collet when it is installed.
