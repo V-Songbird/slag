@@ -5,6 +5,8 @@ argument-hint: "[plugin]"
 disable-model-invocation: true
 ---
 
+# cut-release
+
 Cuts a release for one plugin in this repository. Plugins here live in-tree, so a release is a
 single commit: the plugin's code, its `CHANGELOG.md` entry, and its version in every manifest that a
 host reads, all moving together.
