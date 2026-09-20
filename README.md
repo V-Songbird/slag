@@ -62,6 +62,8 @@ slag/
 ├── anneal/
 ├── collet/
 └── docs/
+    ├── collet-design.md            Why each mechanism in collet exists
+    └── documentation-cleanup.md    What this repository still owes its own docs
 ```
 
 Plugins live in-tree as plain directories, with one history and no submodules. Each ships its metadata three times, once per host: `.claude-plugin/plugin.json` for Claude Code, `.codex-plugin/plugin.json` for Codex, and `plugin.json` at the plugin root for Antigravity.

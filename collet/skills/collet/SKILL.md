@@ -8,7 +8,7 @@ description: Mounts the collet harness into a project — the task ledger, the r
 The whole design is one sentence: **prose is read, a hook is executed, and a check that has never
 been shown to fire is not a check.** Everything below follows from that.
 
-Read `README.md` next to this file for what ends up in the project. This file is how to mount it,
+Read the plugin's `README.md` — two directories up — for what ends up in the project. This file is how to mount it,
 and the mounting itself is a command — `scripts/mount.mjs` — because the part that must be
 identical every time has no business being a list of instructions someone follows by hand.
 

@@ -160,7 +160,9 @@ Reproduce them with `node --test collet/tests/*.test.js` and `node .collet/check
 node --test collet/tests/*.test.js
 ```
 
-68 tests across five suites. The hooks are driven the way a host drives them, with the event on stdin.
+68 tests across six suites. The hooks are driven the way a host drives them, with the event on stdin.
+
+Why each mechanism exists, and the defect behind it, is in [the design notes](../docs/collet-design.md).
 
 Two things are not proven. No session has loaded the plugin and reported `Loading hooks from plugin: collet`. The Codex wiring has unit coverage, but has never run on that host.
 
