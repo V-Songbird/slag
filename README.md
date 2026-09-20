@@ -53,38 +53,17 @@ Read the [collet README](./collet/README.md).
 
 They compose: anneal gets the layout into shape, and collet keeps a session from wandering out of it.
 
-## Repository layout
-
-```text
-slag/
-├── .agents/plugins/marketplace.json   Codex marketplace index
-├── .claude-plugin/marketplace.json    Claude Code marketplace index
-├── AGENTS.md                          the map an agent reads first
-├── CLAUDE.md                          a pointer to AGENTS.md
-├── anneal/
-├── collet/
-└── docs/
-    ├── collet-design.md            Why each mechanism in collet exists
-    └── documentation-cleanup.md    What this repository still owes its own docs
-```
-
-Plugins live in-tree as plain directories, with one history and no submodules. Each ships its metadata three times, once per host: `.claude-plugin/plugin.json` for Claude Code, `.codex-plugin/plugin.json` for Codex, and `plugin.json` at the plugin root for Antigravity.
-
-Both marketplace indexes own every plugin's version number. A `plugin.json` for Claude Code carries no `version` field.
-
 ## Development
 
 ```bash
 npm run check
 ```
 
-That runs `node --test`: 117 tests, 49 in anneal and 68 in collet.
+That runs `node --test`: 117 tests, 49 in anneal and 68 in collet. There is no CI.
 
-There is no CI. Reproduce what anneal's own audit says about this repository:
-
-```bash
-node anneal/scripts/audit.js --root .
-```
+Plugins live in-tree as plain directories, with one history and no submodules.
+[AGENTS.md](AGENTS.md) is the map: the layout, the three manifests each plugin ships, and the
+conventions a change has to respect.
 
 ## Support
 
