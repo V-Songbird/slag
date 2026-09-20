@@ -55,10 +55,18 @@ Antigravity.
 
 ## Conventions that constrain a change
 
-**The marketplace owns every version.** Claude Code resolves a version from `plugin.json` first and
-the marketplace entry second, so a `version` in a Claude `plugin.json` would silently mask the
-marketplace entry and installers would never see the bump. Keep versions in
-`.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json`.
+**A version lives in exactly one file per host, and the same number in all of them.** Claude Code
+resolves a version from `plugin.json` first and the marketplace entry second, so a `version` in a
+Claude `plugin.json` would silently mask the marketplace entry and installers would never see the
+bump. Every other host has no marketplace entry carrying one, so its manifest keeps its own.
+
+| Host | The version lives in |
+| --- | --- |
+| Claude Code | `.claude-plugin/marketplace.json`, never `<plugin>/.claude-plugin/plugin.json` |
+| Codex | `<plugin>/.codex-plugin/plugin.json` — `.agents/plugins/marketplace.json` carries none |
+| Antigravity | `<plugin>/plugin.json`, the only manifest that host reads |
+
+A bump touches every row. They are hand-maintained and nothing checks them.
 
 **A marketplace entry's source is a relative path**, `"./plugin-name"`. Plugins are in-tree, so the
 manifest and the code it points at move in the same commit. A retired plugin's entry becomes
@@ -104,8 +112,9 @@ this repository. Nothing is copied back except a number or a line a document cit
 - **`core.hooksPath` points at `scripts/git-hooks`, which does not exist.** It was deleted in
   `5278887`. Commits work, because git finds no hooks there. Unset it or restore the directory
   before relying on a commit gate.
-- **`anneal/plugin.json` and `anneal/.claude-plugin/plugin.json` already disagree** on `version` and
-  on one keyword. Nothing checks them; the validator that used to was deleted in `5278887`.
+- **`anneal/plugin.json` carries a `version` and `anneal/.claude-plugin/plugin.json` does not.**
+  That is the rule above working, not drift. Do not "fix" it by deleting one. The two do differ on
+  one keyword, and nothing checks them: the validator was deleted in `5278887`.
 - **The scope of a collet task is derived by reading the code, not from the task title.** A scope
   one file too narrow does not block work — it pushes the change into the wrong file.
 - **anneal's audit is a heuristic.** A flagged `index` file may be exactly what a framework expects,
