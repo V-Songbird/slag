@@ -132,7 +132,21 @@ node anneal/scripts/audit.js --root <directory> [--json]
 node anneal/scripts/update-imports.js --from <old-path> --to <new-path> [--root <directory>]
 ```
 
-anneal currently ships no test suite in this repository; its earlier suite was removed and has not been restored. Its three scripts pass `node --check`. See the [repository README](../README.md) for the test command that does exist.
+The suite covers all three of them:
+
+```bash
+node --test anneal/tests/*.test.js
+```
+
+Expected output:
+
+```text
+# tests 49
+# pass 49
+# fail 0
+```
+
+`npm run check` from the repository root runs anneal's 49 alongside collet's 68.
 
 ## Support
 

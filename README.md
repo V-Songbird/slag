@@ -78,7 +78,7 @@ Both marketplace indexes own every plugin's version number. A `plugin.json` for 
 npm run check
 ```
 
-That runs `node --test`: 68 tests, all in collet. anneal ships no test suite in this repository.
+That runs `node --test`: 117 tests, 49 in anneal and 68 in collet.
 
 There is no CI. Reproduce what anneal's own audit says about this repository:
 

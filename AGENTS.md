@@ -10,7 +10,7 @@ No dependencies to install, no build step. Node 20, as `.nvmrc` declares and `pa
 requires. That is the oldest version the suite has been run on, not the oldest it might work on.
 
 ```bash
-npm run check                          # node --test, 68 tests, the only suite in the repo
+npm run check                          # node --test, 117 tests: 49 in anneal, 68 in collet
 node anneal/scripts/audit.js --root .  # anneal's own audit, run against this repo
 ```
 
@@ -79,8 +79,8 @@ check is worse than no number.
 **Every claim in a README is one that was run.** Output blocks come from real runs. Where a fact is
 missing, say it is missing rather than filling it in.
 
-**A plugin with scripted behaviour carries a `node:test` suite** under `tests/`. anneal currently
-does not, and that is a debt, not a precedent.
+**A plugin with scripted behaviour carries a `node:test` suite** under `tests/`. Both do: 49 in
+anneal, 68 in collet.
 
 **Documents under `docs/` follow the documentation schema**: YAML frontmatter with `type`, `summary`
 and `related_files`, plus `status` for a `task_summary`. One current document per topic, updated in
@@ -109,5 +109,7 @@ this repository. Nothing is copied back except a number or a line a document cit
 - **The scope of a collet task is derived by reading the code, not from the task title.** A scope
   one file too narrow does not block work — it pushes the change into the wrong file.
 - **anneal's audit is a heuristic.** A flagged `index` file may be exactly what a framework expects,
-  which is why it moves nothing without approval.
+  which is why it moves nothing without approval. Run against this repository it reports
+  `runtime-names` three times in `anneal/tests/audit.test.js`. Those are the fixture strings that
+  prove the rule fires. Leave them.
 - **`.idea/` is gitignored and present.** Leave it alone.
