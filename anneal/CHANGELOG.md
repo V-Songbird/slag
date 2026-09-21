@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.3.0-alpha] — 2026-09-21
+
 ### Added
 
 - `learn-from-session` reads one Claude Code or Codex session and proposes map file changes for the detours it shows. You start it yourself and approve each change before it is written. A fact about your machine is reported and never written.
