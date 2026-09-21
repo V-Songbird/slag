@@ -1,0 +1,123 @@
+{
+  "id": "go",
+  "detect": {
+    "files": [
+      "go.mod",
+      "go.sum",
+      "go.work"
+    ]
+  },
+  "commentSyntax": {
+    ".go": "slash",
+    ".mod": "slash",
+    ".sum": "none",
+    ".work": "slash"
+  },
+  "classes": [
+    {
+      "id": "skipped-test",
+      "title": "Test skipped instead of fixed",
+      "paths": [
+        "**/*_test.go"
+      ],
+      "patterns": [
+        "\\bt\\.Skip(Now|f)?\\s*\\("
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "package payments\n\nimport \"testing\"\n\nfunc TestChargeRetriesOnTimeout(t *testing.T) {\n\tt.Skip(\"flaky against the sandbox gateway, revisit\")\n\n\tgw := newFakeGateway(gatewayTimeout)\n\tgot, err := Charge(gw, 1500)\n\tif err != nil {\n\t\tt.Fatalf(\"Charge returned %v\", err)\n\t}\n\tif got.Attempts != 3 {\n\t\tt.Fatalf(\"Attempts = %d, want 3\", got.Attempts)\n\t}\n}\n",
+        "nearMiss": "package payments\n\nimport \"testing\"\n\nfunc TestChargeRecordsOutcome(t *testing.T) {\n\tt.Cleanup(func() {\n\t\tif t.Skipped() {\n\t\t\treturn\n\t\t}\n\t\tresetLedger()\n\t})\n\n\tgw := newFakeGateway(gatewayOK)\n\tgot, err := Charge(gw, 1500)\n\tif err != nil {\n\t\tt.Fatalf(\"Charge returned %v\", err)\n\t}\n\tif got.Attempts != 1 {\n\t\tt.Fatalf(\"Attempts = %d, want 1\", got.Attempts)\n\t}\n}\n"
+      },
+      "gapNotes": "A legitimate testing.Short or platform gate uses the same skip call as an abandoned test and is also refused. Deleting a test leaves no source token and is not covered.",
+      "example": "t.Skip(\"flaky against the sandbox gateway, revisit\")"
+    },
+    {
+      "id": "emptied-test-body",
+      "title": "Test body removed but the function kept",
+      "paths": [
+        "**/*_test.go"
+      ],
+      "patterns": [
+        "func\\s+Test\\w*\\s*\\(\\s*\\w+\\s+\\*testing\\.[TB]\\s*\\)\\s*\\{\\s*(return\\s*)?\\}"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "package invoice\n\nimport \"testing\"\n\nfunc TestTotalIncludesTax(t *testing.T) {}\n\nfunc TestTotalRejectsNegativeQuantity(t *testing.T) {\n\treturn\n}\n",
+        "nearMiss": "package invoice\n\nimport \"testing\"\n\n// testFixtureNoop satisfies the reporter interface and deliberately does nothing.\nfunc testFixtureNoop(t *testing.T) {}\n\nfunc TestTotalIncludesTax(t *testing.T) {\n\tinv := Invoice{Lines: []Line{{Cents: 1000, Qty: 2}}, TaxRate: 0.2}\n\ttestFixtureNoop(t)\n\tif got := inv.Total(); got != 2400 {\n\t\tt.Fatalf(\"Total() = %d, want 2400\", got)\n\t}\n}\n"
+      },
+      "gapNotes": "Only a fully empty body or bare return is covered. Logging, unused assignments, setup without assertions and deletion of the entire test are not covered.",
+      "example": "func TestTotalIncludesTax(t *testing.T) {}"
+    },
+    {
+      "id": "blanket-lint-suppression",
+      "title": "Blanket nolint directive with no linter and no reason",
+      "paths": [
+        "**/*.go"
+      ],
+      "patterns": [
+        "//\\s*nolint(?::all\\b|\\s*$)"
+      ],
+      "stripComments": false,
+      "stripStrings": true,
+      "perLine": true,
+      "fixtures": {
+        "violation": "package auth\n\nimport \"crypto/md5\" //nolint\n\nfunc Fingerprint(b []byte) string {\n\t//nolint:all\n\tsum := md5.Sum(b)\n\treturn string(sum[:])\n}\n",
+        "nearMiss": "package auth\n\nimport (\n\t\"crypto/sha256\"\n\t\"encoding/hex\"\n)\n\n//nolint:gosec // the digest is a cache key, never a credential check\nfunc Fingerprint(b []byte) string {\n\tsum := sha256.Sum256(b)\n\treturn hex.EncodeToString(sum[:])\n}\n\n//lint:ignore SA1019 the replacement API lands in v2, tracked in #412\nvar _ = legacyHash\n"
+      },
+      "gapNotes": "Only bare nolint and nolint:all are covered. Specific directives without a useful explanation, invented reasons and configuration-based exclusions remain outside these patterns.",
+      "example": "//nolint:all"
+    },
+    {
+      "id": "toothless-test-command",
+      "title": "Test command narrowed or its failure suppressed",
+      "paths": [
+        "**/*.yml",
+        "**/*.yaml",
+        "Makefile",
+        "**/Makefile",
+        "**/*.sh"
+      ],
+      "patterns": [
+        "go\\s+test\\b[^\\n]*(\\|\\|\\s*true|-run[= ][\\w^$/.]+|-short\\b|-count=0|2>\\s*/dev/null)"
+      ],
+      "stripComments": true,
+      "stripStrings": false,
+      "perLine": true,
+      "fixtures": {
+        "violation": "name: ci\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v5\n      - uses: actions/setup-go@v6\n        with:\n          go-version: '1.25'\n      - name: unit tests\n        run: go test -short -run TestSmoke ./... || true\n",
+        "nearMiss": "name: ci\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v5\n      - uses: actions/setup-go@v6\n        with:\n          go-version: '1.25'\n      - name: unit tests\n        run: go test -race -shuffle=on -count=1 -coverprofile=coverage.out ./...\n      - name: vet\n        run: go vet ./...\n"
+      },
+      "gapNotes": "Only literal go test commands in the listed committed files are read. Shell-only commands, wrapper functions, Make variables, quoted narrowing arguments and build tags can hide the same weakening. The presence of race detection is not required.",
+      "example": "run: go test -short -run TestSmoke ./... || true"
+    },
+    {
+      "id": "test-config-loosened",
+      "title": "Lint and test harness config relaxed instead of the failure fixed",
+      "paths": [
+        ".golangci.yml",
+        ".golangci.yaml",
+        "**/.golangci.yml",
+        "**/.golangci.yaml"
+      ],
+      "patterns": [
+        "\\btests\\s*:\\s*false\\b",
+        "\\ballow-unused\\s*:\\s*true\\b",
+        "\\brequire-explanation\\s*:\\s*false\\b",
+        "\\brequire-specific\\s*:\\s*false\\b"
+      ],
+      "stripComments": true,
+      "stripStrings": false,
+      "perLine": false,
+      "fixtures": {
+        "violation": "version: \"2\"\nrun:\n  timeout: 5m\n  tests: false\nlinters:\n  default: none\n  enable:\n    - govet\n  settings:\n    nolintlint:\n      require-explanation: false\n      require-specific: false\n      allow-unused: true\n",
+        "nearMiss": "version: \"2\"\nrun:\n  timeout: 5m\n  tests: true\nlinters:\n  default: none\n  enable:\n    - errcheck\n    - govet\n    - nolintlint\n    - staticcheck\n    - unused\n  settings:\n    nolintlint:\n      require-explanation: true\n      require-specific: true\n      allow-unused: false\n"
+      },
+      "gapNotes": "Only the listed literal YAML settings are read, without evaluating nesting or aliases. Deleted enabled linters, empty lists and command-line overrides are missed. Changes to test commands belong to separate source paths.",
+      "example": "tests: false"
+    }
+  ]
+}

@@ -3,23 +3,46 @@
 // the judgement about what a task's scope should be belong to the skill, and everything that has
 // to be identical every time belongs here, where it is executed rather than followed.
 //
-//   node scripts/mount.mjs <project-directory> [--accept "npm test"]
+//   node scripts/mount.mjs <project-directory> [--accept "npm test"] [--checks [--edition <id>]...]
 //
 // collet's own scripts are refreshed on every run; the project's config.json, unverified.md and
 // .gitignore are kept. The rules block is written between its markers, so re-running replaces the
 // block and leaves everything around it exactly as it was.
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { cataloguesFor, prepareCatalogue } from './catalogue.mjs';
 
 const HERE = dirname(dirname(fileURLToPath(import.meta.url)));
 const TEMPLATES = join(HERE, 'templates');
 const target = resolve(process.argv[2] ?? '');
-const acceptFlag = process.argv.indexOf('--accept');
-const accept = acceptFlag === -1 ? null : process.argv[acceptFlag + 1];
+let accept = null;
+let withChecks = false;
+const editions = [];
 
-if (!process.argv[2] || !existsSync(target)) {
-  console.error('usage: node scripts/mount.mjs <project-directory> [--accept "npm test"]');
+if (!process.argv[2] || !existsSync(target) || !statSync(target).isDirectory()) {
+  console.error('usage: node scripts/mount.mjs <project-directory> [--accept "npm test"] [--checks [--edition <id>]...]');
+  process.exit(2);
+}
+
+try {
+  for (let index = 3; index < process.argv.length; index++) {
+    const flag = process.argv[index];
+    if (flag === '--checks') withChecks = true;
+    else if (flag === '--accept' || flag === '--edition') {
+      const value = process.argv[++index];
+      if (!value || value.startsWith('--')) {
+        throw new Error('--accept needs a command; --edition needs a language id and --checks.');
+      }
+      if (flag === '--accept') accept = value;
+      else editions.push(value);
+    } else throw new Error(`Unknown mount option: ${flag}.`);
+  }
+  if (editions.length && !withChecks) throw new Error('--edition needs a language id and --checks.');
+} catch (error) {
+  console.error(`${error.message} Nothing was written.`);
   process.exit(2);
 }
 
@@ -66,6 +89,24 @@ if (plannedElsewhere(target)) {
   process.exit(2);
 }
 
+let bundle;
+if (withChecks) {
+  try {
+    const selected = cataloguesFor(target, editions);
+    bundle = { files: [], kept: [], editions: selected.map((item) => item.id) };
+    // Preflight every selected language before changing the project. A failure in the last
+    // edition must not leave the first edition installed as a misleading partial success.
+    for (const catalogue of selected) {
+      const prepared = await prepareCatalogue(target, catalogue);
+      bundle.files.push(...prepared.files);
+      bundle.kept.push(...prepared.kept);
+    }
+  } catch (error) {
+    console.error(`${error.message}\nNothing was written.`);
+    process.exit(2);
+  }
+}
+
 const wrote = [];
 const skipped = [];
 
@@ -80,6 +121,20 @@ for (const name of ['task.mjs', 'state.mjs']) {
 for (const name of readdirSync(join(TEMPLATES, 'checks'))) {
   cpSync(join(TEMPLATES, 'checks', name), join(state, 'checks', name));
   wrote.push(`.collet/checks/${name}`);
+}
+
+if (bundle) {
+  if (!existsSync(join(state, 'source.mjs'))) {
+    cpSync(join(TEMPLATES, 'source.mjs'), join(state, 'source.mjs'));
+    wrote.push('.collet/source.mjs');
+  } else {
+    skipped.push('.collet/source.mjs (already there)');
+  }
+  for (const [name, content] of bundle.files) {
+    writeFileSync(join(state, 'checks', name), content, 'utf8');
+    wrote.push(`.collet/checks/${name}`);
+  }
+  for (const line of bundle.kept) skipped.push(`.collet/checks/${line}`);
 }
 
 // Derived, machine-local or regenerated on demand. Committing them would make every session's
@@ -154,6 +209,16 @@ for (const surface of surfaces) {
 console.log(`collet mounted into ${target}\n`);
 for (const line of wrote) console.log(`  wrote    ${line}`);
 for (const line of skipped) console.log(`  kept     ${line}`);
+
+if (bundle) {
+  console.log(`\nSelected check editions: ${bundle.editions.join(', ')}`);
+  console.log('\nProving the mounted checks against their examples:');
+  const proof = spawnSync(process.execPath, [join(state, 'checks', 'run.mjs')], { cwd: target, stdio: 'inherit' });
+  if (proof.error || proof.status !== 0) {
+    console.error('Mounted check verification failed. Existing checks were preserved; a reported check is not automatically disabled. Review the failures before trusting the harness.');
+    process.exit(1);
+  }
+}
 
 console.log(`
 next:

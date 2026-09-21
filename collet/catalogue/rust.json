@@ -1,0 +1,163 @@
+{
+  "id": "rust",
+  "detect": {
+    "files": [
+      "Cargo.toml",
+      "Cargo.lock",
+      "rust-toolchain.toml"
+    ]
+  },
+  "commentSyntax": {
+    ".rs": "slash",
+    ".toml": "hash"
+  },
+  "classes": [
+    {
+      "id": "softened-assertion",
+      "title": "assertion weakened to make a failing test pass",
+      "paths": [
+        "**/*.rs"
+      ],
+      "patterns": [
+        "assert!\\s*\\(\\s*(?:true|1\\s*==\\s*1)\\s*[,)]"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "pub fn parse_port(raw: &str) -> Result<u16, std::num::ParseIntError> {\n    raw.trim().parse::<u16>()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn parses_a_port() {\n        let parsed = parse_port(\"8080\");\n        assert!(parsed.is_ok());\n    }\n\n    #[test]\n    fn rejects_garbage() {\n        assert!(true);\n    }\n}\n",
+        "nearMiss": "pub fn parse_port(raw: &str) -> Result<u16, std::num::ParseIntError> {\n    raw.trim().parse::<u16>()\n}\n\nfn is_okay_range(port: u16) -> bool {\n    (1024..=65535).contains(&port)\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn parses_a_port() {\n        let parsed = parse_port(\"8080\").expect(\"8080 must parse\");\n        assert_eq!(parsed, 8080);\n        assert!(is_okay_range(parsed), \"port {parsed} outside the allowed range\");\n    }\n\n    #[test]\n    fn rejects_garbage() {\n        assert!(parse_port(\"not-a-port\").is_err());\n    }\n}\n",
+        "additional": [
+          {
+            "id": "result-invariant",
+            "path": "src/lib.rs",
+            "violation": "fn clear_cache() -> Result<(), ()> { Ok(()) }\n\n#[test]\nfn test_clears_cache() {\n    let result = clear_cache();\n    assert!(true);\n}\n",
+            "nearMiss": "fn clear_cache() -> Result<(), ()> { Ok(()) }\n\n#[test]\nfn test_clears_cache() {\n    let result = clear_cache();\n    assert!(result.is_ok());\n}\n\nfn advance_tail() {\n    let advanced: Result<(), ()> = Ok(());\n    assert!(advanced.is_ok(), \"cursor advancement must succeed\");\n}\n"
+          }
+        ]
+      },
+      "gapNotes": "Catches literal assert!(true) and assert!(1 == 1) tautologies. Assertions that a Result is Ok are valid for unit-returning operations and runtime invariants, so they are deliberately permitted. Whether an assertion should also inspect a successful payload needs semantic review. Relaxed constants, wider floating-point tolerances and catch-all expected errors are outside this check.",
+      "example": "assert!(true);"
+    },
+    {
+      "id": "skipped-test",
+      "title": "#[ignore] left on a test instead of fixing it",
+      "paths": [
+        "**/*.rs"
+      ],
+      "patterns": [
+        "#\\s*\\[\\s*ignore\\s*[\\]=]"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "pub fn checksum(bytes: &[u8]) -> u32 {\n    bytes.iter().fold(0u32, |acc, b| acc.rotate_left(3) ^ u32::from(*b))\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    #[ignore]\n    fn matches_reference_vector() {\n        assert_eq!(checksum(b\"abc\"), 263_046);\n    }\n\n    #[test]\n    #[ignore = \"flaky on CI\"]\n    fn stable_across_runs() {\n        assert_eq!(checksum(b\"abc\"), checksum(b\"abc\"));\n    }\n}\n",
+        "nearMiss": "pub struct Matcher {\n    pub ignore_case: bool,\n}\n\nimpl Matcher {\n    pub fn matches(&self, haystack: &str, needle: &str) -> bool {\n        if self.ignore_case {\n            haystack.to_lowercase().contains(&needle.to_lowercase())\n        } else {\n            haystack.contains(needle)\n        }\n    }\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    #[cfg_attr(miri, ignore)]\n    fn honours_case_flag() {\n        let m = Matcher { ignore_case: true };\n        assert!(m.matches(\"Hello\", \"hello\"));\n    }\n}\n"
+      },
+      "gapNotes": "Direct ignore attributes are covered, including deliberate quarantines. cfg_attr predicates can hide the same permanent skip and are not covered.",
+      "example": "#[ignore]"
+    },
+    {
+      "id": "emptied-test-body",
+      "title": "test kept as a name with an empty or trivially-passing body",
+      "paths": [
+        "**/*.rs"
+      ],
+      "patterns": [
+        "#\\s*\\[\\s*test\\s*\\]\\s*(?:async\\s+)?fn\\s+[A-Za-z_][A-Za-z_0-9]*\\s*\\(\\s*\\)\\s*\\{\\s*\\}",
+        "#\\s*\\[\\s*test\\s*\\]\\s*(?:async\\s+)?fn\\s+[A-Za-z_][A-Za-z_0-9]*\\s*\\(\\s*\\)\\s*->\\s*[A-Za-z_0-9:<>,() ]+\\{\\s*Ok\\(\\(\\)\\)\\s*\\}"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "pub fn normalize(input: &str) -> String {\n    input.trim().to_lowercase()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn trims_and_lowers() {}\n\n    #[test]\n    fn round_trips() -> Result<(), std::fmt::Error> {\n        Ok(())\n    }\n}\n",
+        "nearMiss": "pub fn normalize(input: &str) -> String {\n    input.trim().to_lowercase()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    fn fixture() {}\n\n    #[test]\n    fn trims_and_lowers() {\n        fixture();\n        assert_eq!(normalize(\"  MiXeD  \"), \"mixed\");\n    }\n\n    #[test]\n    fn round_trips() -> Result<(), std::num::ParseIntError> {\n        let n: i32 = normalize(\" 42 \").parse()?;\n        assert_eq!(n, 42);\n        Ok(())\n    }\n}\n"
+      },
+      "gapNotes": "Only the listed degenerate bodies under the standard test attribute are covered. Setup or printing without assertions and custom attributes such as tokio::test are missed.",
+      "example": "#[test]\n    fn trims_and_lowers() {}"
+    },
+    {
+      "id": "bare-should-panic",
+      "title": "#[should_panic] without an expected message",
+      "paths": [
+        "**/*.rs"
+      ],
+      "patterns": [
+        "#\\s*\\[\\s*should_panic\\s*\\]"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "pub fn divide(numerator: i64, denominator: i64) -> i64 {\n    numerator / denominator\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    #[should_panic]\n    fn rejects_zero_denominator() {\n        divide(10, 0);\n    }\n}\n",
+        "nearMiss": "pub fn divide(numerator: i64, denominator: i64) -> i64 {\n    if denominator == 0 {\n        panic!(\"denominator must be non-zero\");\n    }\n    numerator / denominator\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    #[should_panic(expected = \"denominator must be non-zero\")]\n    fn rejects_zero_denominator() {\n        divide(10, 0);\n    }\n}\n"
+      },
+      "gapNotes": "Any expected substring passes this check, even when it is too generic to identify the intended panic. The origin of the panic, including failures in setup, is not analyzed.",
+      "example": "#[should_panic]"
+    },
+    {
+      "id": "blanket-lint-suppression",
+      "title": "blanket #[allow] used to silence a diagnostic",
+      "paths": [
+        "**/*.rs"
+      ],
+      "patterns": [
+        "#!?\\s*\\[\\s*allow\\s*\\(\\s*(?:dead_code|unused|unused_variables|unused_imports|unused_mut|warnings)\\s*\\)\\s*\\]",
+        "#!?\\s*\\[\\s*allow\\s*\\(\\s*clippy::[a-z_]+\\s*\\)\\s*\\]"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "#![allow(dead_code)]\n\nuse std::collections::HashMap;\n\n#[allow(clippy::unwrap_used)]\npub fn index_of(map: &HashMap<String, usize>, key: &str) -> usize {\n    *map.get(key).unwrap()\n}\n\nstruct Unused {\n    field: u8,\n}\n",
+        "nearMiss": "use std::collections::HashMap;\n\n#[expect(dead_code, reason = \"only constructed on windows\")]\nstruct WindowsOnly {\n    handle: usize,\n}\n\n#[cfg_attr(test, allow(dead_code))]\npub fn index_of(map: &HashMap<String, usize>, key: &str) -> Option<usize> {\n    map.get(key).copied()\n}\n\n#[allow(clippy::needless_return, reason = \"keeps the early exit obvious\")]\npub fn first_word(text: &str) -> &str {\n    return text.split_whitespace().next().unwrap_or(\"\");\n}\n"
+      },
+      "gapNotes": "Only the enumerated lint names and listed single clippy lint forms are covered. Other lint names, multi-lint allow lists and meaningless reason strings can avoid the patterns.",
+      "example": "#![allow(dead_code)]"
+    },
+    {
+      "id": "type-widened-to-any",
+      "title": "type erased to dyn Any to silence a type error",
+      "paths": [
+        "**/*.rs"
+      ],
+      "patterns": [
+        "Box\\s*<\\s*dyn\\s+(?:std::any::)?Any\\b",
+        "\\.downcast(?:_ref|_mut)?\\s*::\\s*<"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "use std::any::Any;\nuse std::collections::HashMap;\n\npub struct Bag {\n    slots: HashMap<String, Box<dyn Any + Send>>,\n}\n\nimpl Bag {\n    pub fn put(&mut self, key: &str, value: Box<dyn Any + Send>) {\n        self.slots.insert(key.to_string(), value);\n    }\n\n    pub fn get_u32(&self, key: &str) -> Option<u32> {\n        self.slots.get(key)?.downcast_ref::<u32>().copied()\n    }\n}\n",
+        "nearMiss": "use std::collections::HashMap;\nuse std::error::Error;\n\n#[derive(Debug, Clone, PartialEq)]\npub enum Slot {\n    Count(u32),\n    Label(String),\n}\n\npub struct Bag {\n    slots: HashMap<String, Slot>,\n}\n\nimpl Bag {\n    pub fn put(&mut self, key: &str, value: Slot) {\n        self.slots.insert(key.to_string(), value);\n    }\n\n    pub fn get_u32(&self, key: &str) -> Option<u32> {\n        match self.slots.get(key) {\n            Some(Slot::Count(n)) => Some(*n),\n            _ => None,\n        }\n    }\n\n    pub fn describe(&self) -> Result<String, Box<dyn Error + Send + Sync>> {\n        Ok(format!(\"{} slots\", self.slots.len()))\n    }\n}\n"
+      },
+      "gapNotes": "dyn Any can be intentional in registries and panic payload inspection; this check also refuses those introductions. Widening to a generic JSON value, string or untyped map is not covered.",
+      "example": "slots: HashMap<String, Box<dyn Any + Send>>,"
+    },
+    {
+      "id": "test-config-loosened",
+      "title": "Test harness config relaxed instead of the failure fixed",
+      "paths": [
+        "**/nextest.toml"
+      ],
+      "patterns": [
+        "\\bretries\\s*=\\s*(?:[1-9]|\\{)",
+        "\\bfailure-output\\s*=\\s*\"never\"",
+        "\\bdefault-filter\\s*=",
+        "\\bstatus-level\\s*=\\s*\"none\""
+      ],
+      "stripComments": true,
+      "stripStrings": false,
+      "perLine": false,
+      "fixtures": {
+        "violation": "[profile.default]\nretries = 3\nfail-fast = true\nstatus-level = \"none\"\ndefault-filter = \"not test(/slow_/)\"\nfailure-output = \"never\"\nslow-timeout = \"30s\"\n",
+        "nearMiss": "[profile.default]\nretries = 0\nfail-fast = true\nstatus-level = \"fail\"\nfinal-status-level = \"slow\"\nslow-timeout = \"30s\"\n\n[profile.ci]\nretries = 0\nfail-fast = false\nstatus-level = \"skip\"\nfinal-status-level = \"slow\"\nfailure-output = \"immediate-final\"\nslow-timeout = \"60s\"\n"
+      },
+      "gapNotes": "Only the listed literal nextest settings are covered. fail-fast = false is deliberately permitted. Command-line overrides, deleted flags and values inherited by a new profile without matching keys are not covered.",
+      "example": "retries = 3"
+    }
+  ]
+}

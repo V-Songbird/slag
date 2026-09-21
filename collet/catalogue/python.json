@@ -1,0 +1,192 @@
+{
+  "id": "python",
+  "detect": {
+    "files": [
+      "pyproject.toml",
+      "requirements.txt",
+      "setup.cfg",
+      "uv.lock",
+      "poetry.lock",
+      "pdm.lock",
+      "tox.ini"
+    ]
+  },
+  "commentSyntax": {
+    ".py": "hash",
+    ".pyi": "hash",
+    ".ini": "ini",
+    ".cfg": "ini"
+  },
+  "classes": [
+    {
+      "id": "softened-assertion",
+      "title": "Assertion softened into a tautology",
+      "paths": [
+        "**/*.py"
+      ],
+      "patterns": [
+        "\\bassert\\s+(\\w+)\\s*==\\s*\\1\\b",
+        "\\bassert\\s+True\\b"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "from decimal import Decimal\n\nfrom billing import invoice_total\n\n\ndef test_invoice_total_applies_discount() -> None:\n    total = invoice_total(subtotal=Decimal(\"100.00\"), discount_pct=10)\n    assert total == total\n    assert True\n\n\ndef test_invoice_total_rejects_negative_discount() -> None:\n    total = invoice_total(subtotal=Decimal(\"50.00\"), discount_pct=0)\n    assert total == total\n",
+        "nearMiss": "from decimal import Decimal\n\nfrom billing import invoice_total\n\n\ndef test_invoice_total_applies_discount() -> None:\n    expected_total = Decimal(\"90.00\")\n    total = invoice_total(subtotal=Decimal(\"100.00\"), discount_pct=10)\n    assert total == expected_total\n\n\ndef test_invoice_total_is_idempotent() -> None:\n    first = invoice_total(subtotal=Decimal(\"50.00\"), discount_pct=0)\n    second = invoice_total(subtotal=Decimal(\"50.00\"), discount_pct=0)\n    assert first == second\n"
+      },
+      "gapNotes": "Only catches self-comparison of a simple name and literal assert True. Weaker predicates such as assert result is not None, widened tolerances and relaxed expected constants are not covered.",
+      "example": "assert total == total"
+    },
+    {
+      "id": "skipped-test",
+      "title": "Test skipped or xfailed instead of fixed",
+      "paths": [
+        "**/*.py"
+      ],
+      "patterns": [
+        "@pytest\\.mark\\.(?:skip|skipif|xfail)\\b",
+        "\\bpytest\\.skip\\s*\\("
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "import pytest\n\nfrom ingest import load_manifest\n\n\n@pytest.mark.skip(reason=\"flaky on CI\")\ndef test_load_manifest_validates_checksum() -> None:\n    manifest = load_manifest(\"fixtures/manifest.json\")\n    assert manifest.checksum_ok\n\n\ndef test_load_manifest_handles_empty_file() -> None:\n    pytest.skip(\"revisit after the refactor\")\n    assert load_manifest(\"fixtures/empty.json\") is None\n",
+        "nearMiss": "import pytest\n\nfrom ingest import load_manifest\n\nyaml = pytest.importorskip(\"yaml\")\n\n\n@pytest.mark.slow\ndef test_load_manifest_large_file() -> None:\n    manifest = load_manifest(\"fixtures/large.yaml\")\n    assert manifest.entry_count > 1000\n\n\n@pytest.mark.parametrize(\"skip_header\", [True, False])\ndef test_load_manifest_header_toggle(skip_header: bool) -> None:\n    manifest = load_manifest(\"fixtures/manifest.json\", skip_header=skip_header)\n    assert manifest.entry_count >= 0\n"
+      },
+      "gapNotes": "Legitimate platform gates and optional-feature skips use the same tokens as abandoned tests, so this check also refuses those introductions. unittest.skip, unittest.expectedFailure and runner filters are not covered; the check cannot determine whether a quarantine is justified.",
+      "example": "@pytest.mark.skip(reason=\"flaky on CI\")"
+    },
+    {
+      "id": "emptied-test-body",
+      "title": "Test body emptied to pass",
+      "paths": [
+        "**/*.py"
+      ],
+      "patterns": [
+        "def\\s+test_\\w+\\s*\\([^)]*\\)[^:\\n]*:\\s*(?:pass|\\.\\.\\.)\\s*(?:\\n|$)"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "from reporting import monthly_summary\n\n\ndef test_monthly_summary_totals_by_category() -> None:\n    pass\n\n\ndef test_monthly_summary_excludes_refunds() -> None:\n    ...\n\n\ndef test_monthly_summary_handles_empty_month() -> None:\n    summary = monthly_summary([])\n    assert summary.total == 0\n",
+        "nearMiss": "from typing import Protocol\n\nfrom reporting import monthly_summary\n\n\nclass SummarySink(Protocol):\n    def write(self, row: str) -> None: ...\n\n\ndef helper_no_op() -> None:\n    pass\n\n\ndef test_monthly_summary_totals_by_category() -> None:\n    \"\"\"Regression cover for the 2026-03 rounding bug.\"\"\"\n    summary = monthly_summary([(\"food\", 12), (\"food\", 8)])\n    assert summary.by_category[\"food\"] == 20\n"
+      },
+      "gapNotes": "Only literal pass and ellipsis bodies are covered. Assertions replaced by setup, printing or a tautology, deleted tests, unittest runTest methods, and a docstring before pass are outside these patterns.",
+      "example": "def test_monthly_summary_totals_by_category() -> None:\n    pass"
+    },
+    {
+      "id": "test-returns-before-asserting",
+      "title": "Early return short-circuits a test",
+      "paths": [
+        "**/*.py"
+      ],
+      "patterns": [
+        "def\\s+test_\\w+\\s*\\([^)]*\\)[^:\\n]*:\\s*return\\b"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "from auth import verify_token\n\n\ndef test_verify_token_rejects_expired() -> None:\n    return\n    assert verify_token(\"expired\") is False\n\n\ndef test_verify_token_accepts_fresh() -> None:\n    return None\n    assert verify_token(\"fresh\") is True\n",
+        "nearMiss": "from collections.abc import Iterator\n\nimport pytest\n\nfrom auth import verify_token\n\n\n@pytest.fixture\ndef token() -> Iterator[str]:\n    return iter([\"fresh\"])\n\n\ndef _skip_reason() -> str | None:\n    return None\n\n\ndef test_verify_token_accepts_fresh(token: Iterator[str]) -> None:\n    assert verify_token(next(token)) is True\n"
+      },
+      "gapNotes": "Only a return as the first statement is covered. A return after setup, a conditional early return and unreachable assertions are not analyzed.",
+      "example": "def test_verify_token_rejects_expired() -> None:\n    return"
+    },
+    {
+      "id": "over-broad-raises-assertion",
+      "title": "Exception test that accepts any failure",
+      "paths": [
+        "**/*.py"
+      ],
+      "patterns": [
+        "pytest\\.raises\\s*\\(\\s*(?:Exception|BaseException)\\s*\\)",
+        "assertRaises\\s*\\(\\s*Exception\\b"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "import unittest\n\nimport pytest\n\nfrom durations import parse_duration\n\n\ndef test_parse_duration_rejects_garbage() -> None:\n    with pytest.raises(Exception):\n        parse_duration(\"not-a-duration\")\n\n\nclass ParseDurationLegacyTests(unittest.TestCase):\n    def test_rejects_empty(self) -> None:\n        self.assertRaises(Exception, parse_duration, \"\")\n",
+        "nearMiss": "import unittest\n\nimport pytest\n\nfrom durations import ParseError, parse_duration\n\n\ndef test_parse_duration_rejects_garbage() -> None:\n    with pytest.raises(ParseError, match=\"unrecognised unit\"):\n        parse_duration(\"12 furlongs\")\n\n\nclass ParseDurationLegacyTests(unittest.TestCase):\n    def test_rejects_empty(self) -> None:\n        self.assertRaises(ParseError, parse_duration, \"\")\n"
+      },
+      "gapNotes": "Only literal Exception and BaseException in the listed pytest.raises forms are covered. Broad exception aliases and multiline forms outside those shapes are missed; this check does not evaluate whether an exception type is appropriate.",
+      "example": "with pytest.raises(Exception):"
+    },
+    {
+      "id": "blanket-type-suppression",
+      "title": "Blanket type: ignore silences the checker",
+      "paths": [
+        "**/*.py"
+      ],
+      "patterns": [
+        "#\\s*type:\\s*ignore(?!\\[)",
+        "#\\s*mypy:\\s*ignore-errors"
+      ],
+      "stripComments": false,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "# mypy: ignore-errors\nfrom external_sdk import Client\n\n\ndef fetch_user(client: Client, user_id: str) -> dict:\n    raw = client.users.get(user_id)  # type: ignore\n    return raw.to_dict()  # type: ignore\n",
+        "nearMiss": "from external_sdk import Client\n\n\ndef fetch_user(client: Client, user_id: str) -> dict:\n    raw = client.users.get(user_id)  # type: ignore[attr-defined]\n    return raw.to_dict()  # type: ignore[no-any-return]\n"
+      },
+      "gapNotes": "Comments remain visible, so prose discussing a bare ignore can also match. Coded ignores such as type: ignore[misc] and suppression through configuration are outside these patterns.",
+      "example": "raw = client.users.get(user_id)  # type: ignore"
+    },
+    {
+      "id": "blanket-lint-suppression",
+      "title": "Blanket noqa disables the linter on a line",
+      "paths": [
+        "**/*.py"
+      ],
+      "patterns": [
+        "#\\s*noqa\\s*(?![:\\w])"
+      ],
+      "stripComments": false,
+      "stripStrings": true,
+      "perLine": true,
+      "fixtures": {
+        "violation": "import os  # noqa\nimport sys  # noqa\nfrom legacy.util import *  # noqa\n\n\ndef env_or(name: str, default: str) -> str:\n    return os.environ.get(name, default)  # noqa\n",
+        "nearMiss": "import os  # noqa: F401\nimport sys  # noqa: F401, E402\nfrom legacy.util import parse  # noqa: F401\n\n\ndef env_or(name: str, default: str) -> str:\n    value = os.environ.get(name, default)\n    return parse(value)\n"
+      },
+      "gapNotes": "Comments remain visible, so prose mentioning noqa can also match. Specific suppression codes, per-file configuration and top-level ignore lists are not judged.",
+      "example": "import os  # noqa"
+    },
+    {
+      "id": "test-config-loosened",
+      "title": "Test harness config relaxed instead of the failure fixed",
+      "paths": [
+        "**/pyproject.toml",
+        "**/pytest.ini",
+        "**/tox.ini",
+        "**/setup.cfg"
+      ],
+      "patterns": [
+        "--cov-fail-under\\s*=\\s*(?:\\d|[1-4]\\d)(?!\\d)",
+        "\\bxfail_strict\\s*=\\s*false\\b",
+        "--no-cov\\b",
+        "\\bfail_under\\s*=\\s*(?:\\d|[1-4]\\d)(?!\\d)"
+      ],
+      "stripComments": true,
+      "stripStrings": false,
+      "perLine": false,
+      "fixtures": {
+        "violation": "[tool.pytest.ini_options]\nminversion = \"8.0\"\ntestpaths = [\"tests\"]\naddopts = \"--strict-markers --import-mode=importlib -ra --cov=src --cov-fail-under=0 --no-cov\"\nxfail_strict = false\nfilterwarnings = [\"default\"]\n\n[tool.coverage.report]\nfail_under = 25\n",
+        "nearMiss": "[tool.pytest.ini_options]\nminversion = \"8.0\"\ntestpaths = [\"tests\"]\npythonpath = [\"src\"]\naddopts = \"--strict-markers --strict-config --import-mode=importlib -ra --cov=src --cov-report=term-missing --cov-fail-under=85\"\nxfail_strict = true\nfilterwarnings = [\"error\"]\nmarkers = [\n  \"slow: takes longer than a second\",\n]\n",
+        "additional": [
+          {
+            "id": "ini-comments",
+            "path": "pytest.ini",
+            "violation": "[pytest]\naddopts = --no-cov\nxfail_strict = false\n",
+            "nearMiss": "[pytest]\n# addopts = --no-cov\n  ; xfail_strict = false\naddopts = --cov=src --cov-fail-under=85\nxfail_strict = true\n"
+          }
+        ]
+      },
+      "gapNotes": "Only the listed literal settings and thresholds are covered. A reduction that remains above the pattern threshold, deleted flags or tables, and command-line or workflow overrides are missed. Quoted text remains visible because TOML addopts carries settings in a string. INI and CFG full-line # and ; comments are blanked; inline markers remain value text. Custom parser comment rules are not inferred.",
+      "example": "addopts = \"--strict-markers --import-mode=importlib -ra --cov=src --cov-fail-under=0 --no-cov\""
+    }
+  ]
+}

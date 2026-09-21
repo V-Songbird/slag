@@ -13,7 +13,7 @@ description: >-
 license: MIT
 compatibility: Requires Node 22 or later and git.
 metadata:
-  version: "1.0"
+  version: "1.2"
 ---
 
 # collet
@@ -33,13 +33,26 @@ docs, its git log — so the questions you ask are only the ones the repository 
 1. What is this project, in one line, and what does it run on?
 2. What is the first task, and what command proves it works?
 3. What must never happen here without asking? (deploy, spend, publish, delete, install)
+4. Do you want checks that stop tests being switched off or checks being weakened during a task?
+
+For question four, offer the bundle for the languages the project uses: JavaScript/TypeScript,
+Python, Go, Rust, JVM or .NET. From the corresponding `catalogue/<id>.json`, extract only `title`,
+`example` and `gapNotes` for this conversation; the fixture bodies belong to the runner.
+Show one short example per mistake and one plain limit drawn from its `gapNotes`. Keep
+the internal ids out of the conversation. The choices are the whole bundle or none for now;
+another mistake can be added later with `collet-check`.
+
+The bundle is optional. Include it when the person asks for it or accepts that choice; do not
+ask again when their request already covers it. These are source-pattern checks; they do not
+install compilers, linters or language runtimes. Do not offer coverage for languages outside that list.
 
 Then **derive the task's scope by reading the code the task touches.** Not from the task's title.
 This is the one mistake worth spending time on: a scope one file too narrow does not merely block
 work, it pushes the session to work *around* the constraint, and a scope one file too wide never
 fires at all. Open the modules the task names, follow what they import, and list what genuinely
-has to change. `task.mjs add` will close your list over the files those files import and print what
-it added, so name the modules that own the behaviour and let it pull in the rest.
+has to change. For JavaScript/TypeScript, `task.mjs add` follows relative imports and prints what
+it added. Other languages need that scope derived and
+listed explicitly; a language bundle does not add import analysis for its language.
 
 **The accept command is a decision, not a formality.** If you cannot name a command that can tell
 you the task worked, the task is not defined yet — say so instead of inventing one. `echo ok` is
@@ -66,11 +79,22 @@ node "<plugin root>/scripts/mount.mjs" <project-directory> --accept "<the comman
 `<plugin root>` is `${CLAUDE_PLUGIN_ROOT}` on Claude Code. On Codex and Antigravity, resolve
 `../../` from this `SKILL.md`.
 
+When the person chose the checks, append `--checks`. Root marker files select every matching
+language, including project/solution filename patterns for .NET. Read those markers and the
+source so the selected set is part of the person's choice. For packages below the root or a
+deliberate subset, repeat `--edition <id>` for each requested language; this replaces automatic
+selection. The ids are `javascript-typescript`, `python`, `go`, `rust`, `jvm` and `dotnet`.
+`--edition` requires `--checks`. With no supported bundle detected, `--checks` refuses before
+writing anything; explain that result and do not silently fall back to mounting without checks.
+
 It prints every path it wrote and every path it kept. A re-run refreshes collet's own scripts —
-`task.mjs`, `state.mjs` and the shipped checks — and keeps the project's `config.json` and
-`unverified.md`. The rules block goes between its own markers, so a re-run replaces the block and
-leaves everything around it exactly as it was, and an existing `AGENTS.md` or `CLAUDE.md` keeps
-its text.
+`task.mjs`, `state.mjs` and the built-in scope checks — and keeps the project's `config.json`,
+`unverified.md`, generated bundle checks, their examples and `source.mjs`. Preserved checks keep
+their own revision; newly shipped patterns and examples are not automatically applied to them.
+A missing module or missing kind of example refuses the mount before writes; valid older pairs
+and custom fixture suffixes are preserved and rechecked. The rules block goes
+between its own markers, so a re-run replaces the block and leaves everything around it exactly
+as it was. An existing `AGENTS.md` or `CLAUDE.md` keeps its text.
 
 The block always goes into `AGENTS.md`. It goes into `CLAUDE.md` only when the project already has
 one, and into `.cursor/rules/collet.md` only when `.cursor/` exists. **Do not create a `CLAUDE.md`
@@ -94,9 +118,32 @@ node .collet/task.mjs status
 node .collet/checks/run.mjs
 ```
 
-The second one runs each check against its own violation and near-miss fixtures. A check that fails
-its pair is discarded and reported, never counted. If the directory ships with no checks for this
-project yet, say that plainly rather than showing an empty pass.
+The second one runs each check against its own violation and near-miss fixtures. Mounting with
+`--checks` also runs this proof before reporting success. Report the actual number of bundle
+checks that caught their planted mistake and left their look-alike alone, separately from scope.
+If any fail, name them in plain words and say that setup did not pass. A failed check already in
+the mounted project is recorded in `.collet/checks/discarded.json`; that file does not disable
+the check, so never claim a failing check has stopped running. A fresh mount without the bundle
+adds only scope; report any existing checks separately on a rerun.
+
+Explain the bundle's limits before stopping:
+
+- `Write`, `Edit` and `MultiEdit` can be checked while a task is open. Shell writes, Codex patch
+  text, Antigravity file text and unsupported notebook edits are checked only by the later
+  working-tree check, when their resulting files match the bundle's paths.
+- JavaScript skip and focus checks recognize Jest/Vitest calls and simple native `node:test`
+  inline options such as `{ skip: true }` and `{ only: true }`. Dynamic/aliased calls, quoted
+  option keys and complex option objects are not covered. A tiny Edit without the test call's
+  surrounding context can escape the editor check and is caught by the later full-file check.
+- Closing compares each detector's match count in changed files with `HEAD` and refuses an
+  increase. It does not locate each newly added mistake; replacing one existing match with
+  another can leave the count unchanged. Untracked files have no prior matches.
+- Closing runs `--live --strict`: unavailable baselines, missing working-tree checks and checks
+  reported as skipped leave the task open and prevent the accept command from running. Restore
+  the real prerequisite instead of weakening the check or substituting a quiet pass.
+- Passing the planted examples does not measure false alarms on the person's real code. A
+  refusal of an honest line belongs in the summary; do not remove a check to finish the task.
+- The mount installs no commit or push hook. Those need a separate request.
 
 **Then stop.** Do not start executing the task you just created. Show what you wrote, name the
 first task, and let the person decide.

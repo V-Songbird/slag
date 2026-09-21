@@ -1,0 +1,196 @@
+{
+  "id": "jvm",
+  "detect": {
+    "files": [
+      "build.gradle.kts",
+      "build.gradle",
+      "settings.gradle.kts",
+      "settings.gradle",
+      "pom.xml",
+      "gradlew"
+    ]
+  },
+  "commentSyntax": {
+    ".java": "slash",
+    ".kt": "slash",
+    ".kts": "slash",
+    ".gradle": "slash"
+  },
+  "classes": [
+    {
+      "id": "softened-assertion",
+      "title": "Assertion weakened until the test passes",
+      "paths": [
+        "**/src/test/**/*.java",
+        "**/src/test/**/*.kt"
+      ],
+      "patterns": [
+        "assert(?:True|False)\\s*\\(\\s*(?:true|false)\\s*[,)]",
+        "assertEquals\\s*\\(\\s*([A-Za-z_$][\\w$]*)\\s*,\\s*\\1\\s*[,)]"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "package com.example.billing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertTrue;\n\nimport org.junit.jupiter.api.Test;\n\nclass InvoiceTotalTest {\n\n    private final InvoiceCalculator calculator = new InvoiceCalculator();\n\n    @Test\n    void appliesVatToNetTotal() {\n        Invoice invoice = Invoice.of(\"ACME\", 100_00L);\n        long total = calculator.grossTotal(invoice);\n        assertTrue(true);\n        assertEquals(total, total);\n    }\n\n    @Test\n    void roundsHalfUp() {\n        Invoice invoice = Invoice.of(\"ACME\", 3_33L);\n        long total = calculator.grossTotal(invoice);\n        assertTrue(total > 0);\n    }\n}\n",
+        "nearMiss": "package com.example.billing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertTrue;\n\nimport org.junit.jupiter.api.Test;\n\nclass InvoiceTotalTest {\n\n    private final InvoiceCalculator calculator = new InvoiceCalculator();\n\n    @Test\n    void appliesVatToNetTotal() {\n        Invoice invoice = Invoice.of(\"ACME\", 100_00L);\n        long expected = 120_00L;\n        long actual = calculator.grossTotal(invoice);\n        assertEquals(expected, actual, \"20% VAT on a 100.00 net line\");\n        assertTrue(actual > invoice.netMinorUnits());\n    }\n\n    @Test\n    void rejectsNegativeLines() {\n        assertTrue(calculator.isRejected(Invoice.of(\"ACME\", -1L)));\n    }\n}\n"
+      },
+      "gapNotes": "Only the listed literal tautologies and simple-identifier self-comparisons are covered. Comparing the same method call twice, weakening a constant or copying the observed result into an expected value is not analyzed.",
+      "example": "assertTrue(true);"
+    },
+    {
+      "id": "skipped-test",
+      "title": "Test disabled or ignored and left that way",
+      "paths": [
+        "**/src/test/**/*.java",
+        "**/src/test/**/*.kt"
+      ],
+      "patterns": [
+        "@(?:Disabled|Ignore)(?:OnOs|OnJre|IfSystemProperty|IfEnvironmentVariable|If)?\\s*(?:\\(|\\s*$|\\s*\\n)"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "package com.example.pricing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport org.junit.jupiter.api.Disabled;\nimport org.junit.jupiter.api.Test;\n\nclass DiscountLadderTest {\n\n    private final DiscountLadder ladder = new DiscountLadder();\n\n    @Disabled(\"flaky since the rounding change, revisit\")\n    @Test\n    void appliesTierThreeAtTenThousand() {\n        assertEquals(15, ladder.percentFor(10_000L));\n    }\n\n    @Test\n    void appliesNoDiscountBelowThreshold() {\n        assertEquals(0, ladder.percentFor(10L));\n    }\n}\n",
+        "nearMiss": "package com.example.pricing;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport org.junit.jupiter.api.Test;\n\nclass DiscountLadderTest {\n\n    private final DiscountLadder ladder = new DiscountLadder();\n\n    /**\n     * Was @Disabled while the rounding change landed; re-enabled 2026-08-01.\n     * Do not annotate this with @Ignore again — see ADR-014.\n     */\n    @Test\n    void appliesTierThreeAtTenThousand() {\n        assertEquals(15, ladder.percentFor(10_000L));\n    }\n\n    @Test\n    void disabledAccountsGetNoDiscount() {\n        Account account = Account.disabled(\"ACME\");\n        assertEquals(0, ladder.percentFor(account));\n    }\n}\n",
+        "additional": [
+          {
+            "id": "text-block-annotation",
+            "path": "src/test/Example.java",
+            "violation": "import org.junit.jupiter.api.Disabled;\n@Disabled\nclass Example {}\n",
+            "nearMiss": "class Example {\n    String example = \"\"\"\n        @Disabled\n        void omitted() {}\n        \"\"\";\n}\n"
+          }
+        ]
+      },
+      "gapNotes": "Disabled annotations can be intentional quarantines and are still refused. Tag-based exclusions and tests renamed outside discovery conventions are missed. Annotation-like prose should be ignored by comment blanking.",
+      "example": "@Disabled(\"flaky since the rounding change, revisit\")"
+    },
+    {
+      "id": "blanket-lint-suppression",
+      "title": "Broad @SuppressWarnings or @Suppress added to silence a checker",
+      "paths": [
+        "**/*.java",
+        "**/*.kt"
+      ],
+      "patterns": [
+        "@Suppress(?:Warnings)?\\s*\\(\\s*(?:value\\s*=\\s*)?(?:\\{\\s*|\\[\\s*)?\"(?:all|unchecked|rawtypes|deprecation|ALL|UNCHECKED_CAST|UNUSED_PARAMETER|UNUSED_VARIABLE)\""
+      ],
+      "stripComments": true,
+      "stripStrings": false,
+      "perLine": false,
+      "fixtures": {
+        "violation": "package com.example.registry;\n\nimport java.util.HashMap;\nimport java.util.Map;\n\npublic final class TypedRegistry {\n\n    private final Map<Class<?>, Object> instances = new HashMap<>();\n\n    public <T> void register(Class<T> type, T instance) {\n        instances.put(type, instance);\n    }\n\n    @SuppressWarnings(\"unchecked\")\n    public <T> T lookup(Class<T> type) {\n        return (T) instances.get(type);\n    }\n\n    @SuppressWarnings({\"rawtypes\", \"unchecked\"})\n    public Map asRawMap() {\n        return instances;\n    }\n\n    //noinspection unchecked\n    public <T> T lookupUnsafe(Class<T> type) {\n        return (T) instances.get(type);\n    }\n}\n",
+        "nearMiss": "package com.example.registry;\n\nimport java.io.Serial;\nimport java.io.Serializable;\nimport java.util.HashMap;\nimport java.util.Map;\n\npublic final class TypedRegistry implements Serializable {\n\n    @Serial\n    private static final long serialVersionUID = 1L;\n\n    private final Map<Class<?>, Object> instances = new HashMap<>();\n\n    public <T> void register(Class<T> type, T instance) {\n        instances.put(type, type.cast(instance));\n    }\n\n    @SuppressWarnings(\"this-escape\")\n    public TypedRegistry() {\n        register(Map.class, instances);\n    }\n\n    public <T> T lookup(Class<T> type) {\n        return type.cast(instances.get(type));\n    }\n}\n",
+        "additional": [
+          {
+            "id": "comment-suppression",
+            "path": "src/Registry.java",
+            "violation": "class Registry {\n    //noinspection unchecked\n    Object value;\n}\n",
+            "nearMiss": "class Registry {\n    final String hint = \"//noinspection unchecked\";\n}\n"
+          }
+        ]
+      },
+      "gapNotes": "Annotation keys require string bodies to remain visible, so matching annotation text inside other strings can also fire. A separate comment detector reads noinspection, NOPMD and CHECKSTYLE:OFF without deciding whether the suppression is justified or configured. External filter files and open-ended checker-specific annotation keys remain uncovered.",
+      "example": "@SuppressWarnings(\"unchecked\")",
+      "detectors": [
+        {
+          "patterns": [
+            "@Suppress(?:Warnings)?\\s*\\(\\s*(?:value\\s*=\\s*)?(?:\\{\\s*|\\[\\s*)?\"(?:all|unchecked|rawtypes|deprecation|ALL|UNCHECKED_CAST|UNUSED_PARAMETER|UNUSED_VARIABLE)\""
+          ],
+          "paths": [
+            "**/*.java",
+            "**/*.kt"
+          ],
+          "stripComments": true,
+          "stripStrings": false,
+          "perLine": false
+        },
+        {
+          "patterns": [
+            "//\\s*(?:noinspection\\b|NOPMD\\b|CHECKSTYLE(?::|\\.)OFF)"
+          ],
+          "paths": [
+            "**/*.java",
+            "**/*.kt"
+          ],
+          "stripComments": false,
+          "stripStrings": true,
+          "perLine": false
+        }
+      ]
+    },
+    {
+      "id": "non-null-assertion",
+      "title": "Kotlin !! used to get past the null checker",
+      "paths": [
+        "**/*.kt",
+        "**/*.kts"
+      ],
+      "patterns": [
+        "[\\w)\\]]!!"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "package com.example.profile\n\nclass ProfileAssembler(private val repo: ProfileRepository) {\n\n    private val cache = mutableMapOf<String, Profile>()\n\n    fun displayName(userId: String): String {\n        val profile = repo.findById(userId)\n        return profile!!.displayName\n    }\n\n    fun cached(userId: String): Profile = cache[userId]!!\n\n    fun avatarUrl(userId: String): String {\n        val profile = cache[userId]\n        return profile!!.avatar!!.url\n    }\n}\n",
+        "nearMiss": "package com.example.profile\n\nclass ProfileAssembler(private val repo: ProfileRepository) {\n\n    private val cache = mutableMapOf<String, Profile>()\n\n    fun displayName(userId: String): String {\n        val profile = repo.findById(userId) ?: error(\"no profile for $userId\")\n        return profile.displayName\n    }\n\n    fun cached(userId: String): Profile = cache.getValue(userId)\n\n    fun isMissing(userId: String): Boolean {\n        val known = cache.containsKey(userId)\n        return !!known == known && repo.findById(userId) != null\n    }\n\n    fun avatarUrl(userId: String): String? = cache[userId]?.avatar?.url\n}\n",
+        "additional": [
+          {
+            "id": "raw-string-assertion",
+            "path": "src/Example.kt",
+            "violation": "fun required(value: String?): String = value!!\n",
+            "nearMiss": "val example = \"\"\"\nval required = value!!\n\"\"\"\n"
+          }
+        ]
+      },
+      "gapNotes": "The postfix operator is checked without evaluating intent: an assertion guarded by an earlier null check still fires. Elvis expressions, checkNotNull, requireNotNull and nullability hidden by Java platform types are not covered; prefix double boolean negation is deliberately permitted.",
+      "example": "return profile!!.displayName"
+    },
+    {
+      "id": "build-check-disabled",
+      "title": "Build script edited so a verification task can no longer fail",
+      "paths": [
+        "**/build.gradle.kts",
+        "**/build.gradle",
+        "**/*.gradle.kts"
+      ],
+      "patterns": [
+        "ignoreFailures\\s*=\\s*true",
+        "failOnNoDiscoveredTests\\s*=\\s*false"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "plugins {\n    java\n    checkstyle\n    pmd\n}\n\nrepositories { mavenCentral() }\n\ndependencies {\n    testImplementation(platform(\"org.junit:junit-bom:5.13.4\"))\n    testImplementation(\"org.junit.jupiter:junit-jupiter\")\n    testRuntimeOnly(\"org.junit.platform:junit-platform-launcher\")\n}\n\ncheckstyle {\n    ignoreFailures = true\n}\n\npmd {\n    isIgnoreFailures = true\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform()\n    failOnNoDiscoveredTests = false\n}\n",
+        "nearMiss": "plugins {\n    java\n    checkstyle\n    pmd\n}\n\nrepositories { mavenCentral() }\n\ndependencies {\n    testImplementation(platform(\"org.junit:junit-bom:5.13.4\"))\n    testImplementation(\"org.junit.jupiter:junit-jupiter\")\n    testRuntimeOnly(\"org.junit.platform:junit-platform-launcher\")\n}\n\nval ignoreFailuresInDocsTask = true\n\ncheckstyle {\n    ignoreFailures = false\n    maxWarnings = 0\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform()\n    failOnNoDiscoveredTests = true\n    ignoreFailures = false\n}\n\ntasks.named(\"check\") {\n    dependsOn(\"test\", \"checkstyleMain\", \"checkstyleTest\", \"pmdMain\", \"pmdTest\")\n}\n"
+      },
+      "gapNotes": "Only the listed literal Gradle Kotlin/Groovy DSL settings are covered. Maven XML, deleted dependency edges, narrowed include/exclude lists, filter files and reduced report levels are not covered.",
+      "example": "ignoreFailures = true"
+    },
+    {
+      "id": "test-config-loosened",
+      "title": "Test harness config relaxed instead of the failure fixed",
+      "paths": [
+        "**/build.gradle.kts",
+        "**/build.gradle"
+      ],
+      "patterns": [
+        "\\bfailOnNoDiscoveredTests\\s*=\\s*false\\b",
+        "\\bignoreFailures\\s*=\\s*true\\b",
+        "\\bexcludeTags\\s*\\("
+      ],
+      "stripComments": true,
+      "stripStrings": false,
+      "perLine": false,
+      "fixtures": {
+        "violation": "plugins {\n    java\n    checkstyle\n    pmd\n}\n\nrepositories { mavenCentral() }\n\ntasks.withType<JavaCompile>().configureEach {\n    options.compilerArgs.addAll(listOf(\"-Xlint:all\"))\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform {\n        excludeTags(\"slow\", \"integration\")\n    }\n    failOnNoDiscoveredTests = false\n    ignoreFailures = true\n    testLogging { events(\"failed\", \"skipped\") }\n}\n",
+        "nearMiss": "plugins {\n    java\n}\n\nrepositories { mavenCentral() }\n\ndependencies {\n    testImplementation(platform(\"org.junit:junit-bom:5.13.4\"))\n    testImplementation(\"org.junit.jupiter:junit-jupiter\")\n    testRuntimeOnly(\"org.junit.platform:junit-platform-launcher\")\n}\n\ntasks.withType<JavaCompile>().configureEach {\n    options.compilerArgs.addAll(listOf(\"-Xlint:all\", \"-Werror\"))\n}\n\ntasks.withType<Test>().configureEach {\n    useJUnitPlatform()\n    failOnNoDiscoveredTests = true\n    ignoreFailures = false\n    testLogging { events(\"failed\", \"skipped\") }\n}\n"
+      },
+      "gapNotes": "Only the listed literal Gradle settings are read. Variables, convention plugins, init scripts, deleted task wiring, command-line exclusions and Maven XML are outside these patterns. Tag exclusion can be intentional and is still refused.",
+      "example": "failOnNoDiscoveredTests = false"
+    }
+  ]
+}

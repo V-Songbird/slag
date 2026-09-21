@@ -333,17 +333,23 @@ switch (command) {
       process.exit(2);
     }
 
-    // The scope first, and cheaply: a green command says the tests passed, never that the work
-    // stayed where it said it would.
+    // The live checks first: a green accept command does not prove the scope held or that no
+    // other admitted check found a mistake in the working tree. Every check must have run:
+    // an unavailable Git baseline or a skipped custom check cannot support a successful close.
+    // An empty check directory otherwise reports zero failures, even in strict mode.
+    if (!existsSync(join(STATE, 'checks', 'scope.mjs'))) {
+      console.error(`The required scope check is missing. Task ${task.id} stays open.`);
+      console.error('Restore .collet/checks/scope.mjs before closing; the accept command was not run.');
+      process.exit(1);
+    }
     console.log('checking the working tree against the task:');
-    const scoped = spawnSync(process.execPath, [join(STATE, 'checks', 'run.mjs'), '--live'], {
+    const checked = spawnSync(process.execPath, [join(STATE, 'checks', 'run.mjs'), '--live', '--strict'], {
       cwd: ROOT,
       stdio: 'inherit',
     });
-    if (scoped.status !== 0) {
-      console.error(`\nchanges landed outside ${task.id}. Task stays open.`);
-      console.error('Widen the list with a reason, or put the change back:');
-      console.error('  node .collet/task.mjs widen --add <path> --why "<reason>"');
+    if (checked.status !== 0) {
+      console.error(`\nLive checks failed. Task ${task.id} stays open.`);
+      console.error('Resolve failed or unavailable checks reported above before closing; the accept command was not run.');
       process.exit(1);
     }
 

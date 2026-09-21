@@ -64,9 +64,17 @@ if (live) {
       failed += 1;
       continue;
     }
+    // A missing return or an unawaited Promise is no verdict. The live contract is synchronous;
+    // invalid results fail even outside strict mode rather than being mistaken for a clean tree.
+    if (!result || typeof result !== 'object' || typeof result.then === 'function' ||
+        (result.skipped !== true && typeof result.fires !== 'boolean')) {
+      console.log(`fail ${id} — live() must return a synchronous result with fires: boolean or skipped: true`);
+      failed += 1;
+      continue;
+    }
     // "could not run" is never printed as ok. A green for an absent tool is the false comfort
     // this whole design refuses, and it lands where nobody is watching.
-    if (result?.skipped) {
+    if (result.skipped === true) {
       console.log(`skip ${id} — ${result.reason}`);
       skipped += 1;
       continue;

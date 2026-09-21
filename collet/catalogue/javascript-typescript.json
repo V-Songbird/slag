@@ -1,0 +1,297 @@
+{
+  "id": "javascript-typescript",
+  "detect": {
+    "files": [
+      "package.json",
+      "tsconfig.json",
+      "pnpm-lock.yaml",
+      "yarn.lock",
+      "package-lock.json",
+      "bun.lock"
+    ]
+  },
+  "commentSyntax": {
+    ".js": "slash",
+    ".mjs": "slash",
+    ".cjs": "slash",
+    ".jsx": "slash",
+    ".ts": "slash",
+    ".mts": "slash",
+    ".cts": "slash",
+    ".tsx": "slash"
+  },
+  "classes": [
+    {
+      "id": "emptied-test-body",
+      "title": "Test body emptied instead of fixed",
+      "paths": [
+        "**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+      ],
+      "patterns": [
+        "\\b(?:it|test)\\s*\\([\\s\\S]{0,120}?(?:async\\s*)?\\([^)]*\\)\\s*=>\\s*\\{\\s*\\}\\s*\\)",
+        "\\b(?:it|test)\\s*\\([\\s\\S]{0,120}?(?:async\\s*)?function\\s*\\([^)]*\\)\\s*\\{\\s*\\}\\s*\\)"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "import { describe, it, expect } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\ndescribe('parseCron', () => {\n  it('rejects a six-field expression with a bad day-of-week', () => {});\n\n  it('normalises @daily to the five-field form', function () {});\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *').minute).toBe('*/5');\n  });\n});\n",
+        "nearMiss": "import { describe, it, expect, beforeEach } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\nconst test = () => ({ minute: '0' });\n\ndescribe('parseCron', () => {\n  beforeEach(() => {});\n\n  it('rejects a six-field expression with a bad day-of-week', () => {\n    expect(() => parseCron('0 0 0 0 0 9')).toThrow(/day-of-week/);\n  });\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *')).toStrictEqual(test());\n  });\n});\n"
+      },
+      "gapNotes": "Only catches an empty test shell. A test deleted outright leaves no source to match, and a body reduced to a trivially true assertion such as expect(true).toBe(true) remains nonempty. Empty beforeEach/afterEach hooks are deliberately not matched, so a suite gutted by moving its work into an empty hook slips through. These deletion and assertion cases are outside this bundle.",
+      "example": "it('rejects a six-field expression with a bad day-of-week', () => {});"
+    },
+    {
+      "id": "focused-test",
+      "title": "Focused test left in the suite",
+      "paths": [
+        "**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+      ],
+      "patterns": [
+        "\\b(?:describe|it|test|suite|bench)\\s*\\.\\s*only\\s*[\\(`]",
+        "\\b(?:describe|it|test)\\s*\\.\\s*(?:concurrent|sequential|each)\\s*\\.\\s*only\\b",
+        "(?<![\\w$.])(?<!\\.\\s*)(?:test|it|describe|suite)\\s*\\(\\s*(?:(?:\"\\s*\"|'\\s*'|`\\s*`)\\s*,\\s*)?\\{\\s*(?:(?!only\\s*:)[A-Za-z_$][\\w$]*\\s*:\\s*(?:(?:\"\\s*\"|'\\s*'|`\\s*`)|-?\\d+(?:_\\d+)*(?:\\.\\d+)?|[A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[A-Za-z_$][\\w$]*)*)\\s*,\\s*)*only\\s*:\\s*true\\s*(?:,\\s*(?!only\\s*:)[A-Za-z_$][\\w$]*\\s*:\\s*(?:(?:\"\\s*\"|'\\s*'|`\\s*`)|-?\\d+(?:_\\d+)*(?:\\.\\d+)?|[A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[A-Za-z_$][\\w$]*)*)\\s*)*,?\\s*\\}\\s*(?=[,)])"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "import { describe, it, expect } from 'vitest';\nimport { normalise } from '../src/text.js';\n\ndescribe('normalise', () => {\n  it.only('collapses runs of whitespace', () => {\n    expect(normalise('a   b')).toBe('a b');\n  });\n\n  it.concurrent.only('trims the ends', () => {\n    expect(normalise('  a  ')).toBe('a');\n  });\n\n  it('strips zero-width joiners', () => {\n    expect(normalise('a\\u200db')).toBe('ab');\n  });\n});\n",
+        "nearMiss": "import { describe, it, expect } from 'vitest';\nimport { normalise } from '../src/text.js';\n\nconst only = (xs) => xs.filter(Boolean);\nconst matcher = { only: true };\n\ndescribe('normalise', () => {\n  it('collapses runs of whitespace', () => {\n    expect(normalise('a   b')).toBe('a b');\n    expect(only([null, 'a'])).toStrictEqual(['a']);\n    expect(matcher.only).toBe(true);\n  });\n});\n",
+        "additional": [
+          {
+            "id": "native-options",
+            "path": "native.test.mjs",
+            "violation": "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\n\n// With --test-only, the unfocused regression is omitted.\ntest('unfocused regression', () => {\n  throw new Error('the regression must fail when the full suite runs');\n});\n\ntest('selected passing case', { only: true }, () => {\n  assert.equal(1 + 1, 2);\n});\n",
+            "nearMiss": "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\n\nconst optionsForOrdinaryData = { only: true };\n\ntest('checks option-shaped data', { only: false }, () => {\n  const payload = { only: true };\n  assert.equal(payload.only, optionsForOrdinaryData.only);\n});\n\ntest('checks another payload', () => {\n  const payload = { only: true };\n  assert.equal(payload.only, true);\n});\n"
+          }
+        ]
+      },
+      "gapNotes": "Covers the existing Vitest/Jest call spellings and bare test/it/describe/suite calls with a literal name or no name, a shallow inline options object, and literal only: true. Other properties must use unquoted keys and scalar values or simple member references. Quoted keys, spreads, nested values, duplicate only keys, renamed imports, qualified calls, dynamic names/options and the Jasmine-era fit/fdescribe spellings are outside the added options pattern. Calls are recognized by spelling, without resolving their imports. Node only flags select tests only when the runner or context enables that behavior, such as --test-only; this check does not inspect that configuration. A focus selected dynamically or by a runner flag can remain invisible.",
+      "example": "it.only('collapses runs of whitespace', () => {"
+    },
+    {
+      "id": "skipped-test",
+      "title": "Test skipped and left that way",
+      "paths": [
+        "**/*.{test,spec}.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+      ],
+      "patterns": [
+        "\\b(?:describe|it|test|suite|bench)\\s*\\.\\s*(?:skip|todo|failing)\\s*[\\(`]",
+        "\\b(?:describe|it|test)\\s*\\.\\s*skipIf\\s*\\(",
+        "(?<![\\w$.])(?<!\\.\\s*)(?:test|it|describe|suite)\\s*\\(\\s*(?:(?:\"\\s*\"|'\\s*'|`\\s*`)\\s*,\\s*)?\\{\\s*(?:(?!skip\\s*:)[A-Za-z_$][\\w$]*\\s*:\\s*(?:(?:\"\\s*\"|'\\s*'|`\\s*`)|-?\\d+(?:_\\d+)*(?:\\.\\d+)?|[A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[A-Za-z_$][\\w$]*)*)\\s*,\\s*)*skip\\s*:\\s*true\\s*(?:,\\s*(?!skip\\s*:)[A-Za-z_$][\\w$]*\\s*:\\s*(?:(?:\"\\s*\"|'\\s*'|`\\s*`)|-?\\d+(?:_\\d+)*(?:\\.\\d+)?|[A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[A-Za-z_$][\\w$]*)*)\\s*)*,?\\s*\\}\\s*(?=[,)])"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "import { describe, it, expect } from 'vitest';\nimport { retry } from '../src/retry.js';\n\ndescribe('retry', () => {\n  it.skip('gives up after the configured attempt budget', async () => {\n    await expect(retry(() => Promise.reject(new Error('nope')), 3)).rejects.toThrow();\n  });\n\n  it.todo('applies jitter to the backoff window');\n\n  it.skipIf(process.env.CI)('honours the abort signal', async () => {\n    await expect(retry(async () => 1, 1, AbortSignal.timeout(1))).rejects.toThrow();\n  });\n\n  it('resolves on the first success', async () => {\n    await expect(retry(async () => 7, 3)).resolves.toBe(7);\n  });\n});\n",
+        "nearMiss": "import { describe, it, expect } from 'vitest';\nimport { paginate } from '../src/paginate.js';\n\ndescribe('paginate', () => {\n  it('honours the skip and take arguments', () => {\n    const page = paginate({ skip: 20, take: 10 });\n    expect(page.skip).toBe(20);\n    expect(page.cursor.skip).toBe(20);\n  });\n\n  it('treats a todo list as ordinary data', () => {\n    expect(paginate({ skip: 0, take: 1 }).items).toHaveLength(1);\n  });\n});\n",
+        "additional": [
+          {
+            "id": "native-options",
+            "path": "native.test.mjs",
+            "violation": "import { test } from 'node:test';\n\ntest('regression remains hidden', { skip: true }, () => {\n  throw new Error('the regression must fail when this test runs');\n});\n",
+            "nearMiss": "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\n\nconst optionsForOrdinaryData = { skip: true };\n\ntest('checks option-shaped data', { skip: false }, () => {\n  const payload = { skip: true };\n  assert.equal(payload.skip, optionsForOrdinaryData.skip);\n});\n\ntest('checks another payload', () => {\n  const payload = { skip: true };\n  assert.equal(payload.skip, true);\n});\n"
+          }
+        ]
+      },
+      "gapNotes": "Covers the existing Vitest/Jest call spellings and bare test/it/describe/suite calls with a literal name or no name, a shallow inline options object, and literal skip: true. Other properties must use unquoted keys and scalar values or simple member references. Quoted keys, string skip reasons, spreads, nested values, duplicate skip keys, renamed imports, qualified calls, dynamic names/options and the xit/xtest/xdescribe spellings are outside the added options pattern. Calls are recognized by spelling, without resolving their imports. A documented quarantine has the same token as an abandoned skip. Narrowing the runner include paths or adding an exclude can suppress a file without any matched source token.",
+      "example": "it.skip('gives up after the configured attempt budget', async () => {"
+    },
+    {
+      "id": "type-widened-to-any",
+      "title": "Type widened to any to silence the checker",
+      "paths": [
+        "**/*.{ts,mts,cts,tsx}"
+      ],
+      "patterns": [
+        ":\\s*any\\b",
+        "\\bas\\s+any\\b",
+        "[<,]\\s*any\\s*[,>]",
+        "\\bany\\s*\\[\\s*\\]"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "export interface Envelope {\n  id: string;\n  payload: any;\n}\n\nexport function decode(raw: any): Envelope {\n  const parsed = JSON.parse(raw) as any;\n  const headers: Record<string, any> = parsed.headers ?? {};\n  const items: any[] = parsed.items ?? [];\n  return { id: String(headers.id), payload: items };\n}\n",
+        "nearMiss": "export interface Envelope {\n  id: string;\n  payload: unknown;\n}\n\ntype AnyOf<T> = T[keyof T];\nconst anyMatch = (xs: readonly string[]): boolean => xs.some(Boolean);\n\nexport function decode(raw: string): Envelope {\n  const parsed: unknown = JSON.parse(raw);\n  if (typeof parsed !== 'object' || parsed === null) throw new TypeError('not an envelope');\n  const headers: Record<string, unknown> = 'headers' in parsed ? (parsed.headers as Record<string, unknown>) : {};\n  const id: AnyOf<{ id: string }> = String(headers['id']);\n  return anyMatch([id]) ? { id, payload: parsed } : { id: '', payload: null };\n}\n"
+      },
+      "gapNotes": "Only sees the word `any`. A session that widens to `unknown` and then casts, uses `object`, `Function`, `{}` or an index signature of `Record<string, unknown>` gets the same escape with none of these tokens. The regex also fires on legitimate `any` in ambient declaration files and in third-party type shims, so .d.ts should usually be excluded from the paths glob, and on a call to a function actually named `any` written in value position (`{ check: any(p, xs) }`), which is the one shape that keeps this from being literally exact. It says nothing about implicit any. tsc reports nothing here at any strictness — `strict` and `noImplicitAny` govern inferred any only, so an explicit `any` compiles clean and the linter is the only tool that objects.",
+      "example": "payload: any;"
+    },
+    {
+      "id": "double-cast-through-unknown",
+      "title": "Type laundered through a double cast",
+      "paths": [
+        "**/*.{ts,mts,cts,tsx}"
+      ],
+      "patterns": [
+        "\\bas\\s+unknown\\s+as\\b"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "import type { Account, LedgerEntry } from './domain.js';\n\nexport function fixtureAccount(overrides: Partial<Account>): Account {\n  return { id: 'acc_1', ...overrides } as unknown as Account;\n}\n\nexport function coerceEntry(row: Record<string, string>): LedgerEntry {\n  const entry = row as unknown as LedgerEntry;\n  return entry;\n}\n",
+        "nearMiss": "import type { Account, LedgerEntry } from './domain.js';\n\nconst DEFAULTS = { id: 'acc_1', balance: 0, currency: 'EUR' } as const;\n\nexport function fixtureAccount(overrides: Partial<Account>): Account {\n  return { ...DEFAULTS, ...overrides } satisfies Account;\n}\n\nexport function coerceEntry(row: Record<string, string>): LedgerEntry {\n  const amount = Number(row['amount']);\n  if (Number.isNaN(amount)) throw new TypeError('amount is not numeric');\n  const unknownSource: unknown = row;\n  void unknownSource;\n  return { id: String(row['id']), amount };\n}\n"
+      },
+      "gapNotes": "Matches adjacent `as unknown as` only. Laundering across two statements, such as `const tmp: unknown = x; const y = tmp as T`, and through helpers such as cast<T>(x), has none of those adjacent tokens and is missed.",
+      "example": "return { id: 'acc_1', ...overrides } as unknown as Account;"
+    },
+    {
+      "id": "blanket-type-suppression",
+      "title": "Type error suppressed by comment",
+      "paths": [
+        "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+      ],
+      "patterns": [
+        "@ts-nocheck\\b",
+        "@ts-ignore\\b"
+      ],
+      "stripComments": false,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "// @ts-nocheck\nimport { createClient } from './client.js';\n\nexport async function push(events) {\n  const client = createClient({ retries: 'three' });\n  // @ts-ignore the SDK types are wrong here\n  return client.sendBatch(events, { compress: 1 });\n}\n",
+        "nearMiss": "import { createClient } from './client.js';\n\nexport async function push(events: readonly unknown[]) {\n  const client = createClient({ retries: 3 });\n  // @ts-expect-error upstream types omit the compress option; tracked in vendor#412\n  return client.sendBatch(events, { compress: true });\n}\n"
+      },
+      "gapNotes": "Comments must remain visible, so an @ts-ignore mentioned in explanatory prose can fire just like a directive. @ts-expect-error is deliberately not matched; this check does not validate its description. Excluding a file from tsconfig or deleting a compiler option leaves no directive to match. Explicit strictness values are covered separately by relaxed-tsconfig-strictness.",
+      "example": "// @ts-nocheck"
+    },
+    {
+      "id": "blanket-lint-suppression",
+      "title": "Lint suppressed for a whole file or line without a reason",
+      "paths": [
+        "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"
+      ],
+      "patterns": [
+        "/\\*\\s*eslint-disable\\s*(?![^*\\n]*--)[^*\\n]*\\*/",
+        "//\\s*eslint-disable-(?:next-)?line(?![^\\n]*--)"
+      ],
+      "stripComments": false,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "/* eslint-disable */\nimport { spawnSync } from 'node:child_process';\n\nexport function build(target) {\n  // eslint-disable-next-line n/no-sync\n  const out = spawnSync('npm', ['run', target], { encoding: 'utf8' });\n  console.log(out.stdout);\n  return out.status;\n}\n",
+        "nearMiss": "import { spawn } from 'node:child_process';\n\nexport function build(target: string): Promise<number> {\n  // eslint-disable-next-line security/detect-child-process -- target is validated against a fixed allowlist above\n  const child = spawn('npm', ['run', target], { stdio: 'inherit' });\n  return new Promise((resolve) => child.on('close', (code) => resolve(code ?? 1)));\n}\n"
+      },
+      "gapNotes": "Matches /* eslint-disable */ and eslint-disable-line or eslint-disable-next-line without a -- reason. Any reason passes, even if false or stale. Other directive spellings, including biome-ignore, are outside these patterns. This check cannot establish whether a disabled rule would have fired, and it does not install or configure a linter. Disabling a rule in the lint configuration instead of the source is outside this bundle.",
+      "example": "/* eslint-disable */"
+    },
+    {
+      "id": "relaxed-tsconfig-strictness",
+      "title": "Type-checker strictness turned down to make the build pass",
+      "paths": [
+        "**/tsconfig*.json",
+        "**/jsconfig.json"
+      ],
+      "patterns": [
+        "\"(?:strict|strictNullChecks|strictFunctionTypes|strictBindCallApply|strictPropertyInitialization|noImplicitAny|noImplicitThis|alwaysStrict|useUnknownInCatchVariables)\"\\s*:\\s*false",
+        "\"(?:noUncheckedIndexedAccess|exactOptionalPropertyTypes|noImplicitOverride|noImplicitReturns|noFallthroughCasesInSwitch|noUnusedLocals|noUnusedParameters)\"\\s*:\\s*false",
+        "\"suppressImplicitAnyIndexErrors\"\\s*:\\s*true",
+        "\"allowJs\"\\s*:\\s*true[\\s\\S]{0,400}?\"checkJs\"\\s*:\\s*false"
+      ],
+      "stripComments": true,
+      "stripStrings": false,
+      "perLine": false,
+      "fixtures": {
+        "violation": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2023\",\n    \"module\": \"nodenext\",\n    \"moduleResolution\": \"nodenext\",\n    \"strict\": false,\n    \"noImplicitAny\": false,\n    \"noUncheckedIndexedAccess\": false,\n    \"suppressImplicitAnyIndexErrors\": true,\n    \"allowJs\": true,\n    \"checkJs\": false,\n    \"skipLibCheck\": true,\n    \"noEmit\": true\n  },\n  \"include\": [\"src\"],\n  \"exclude\": [\"src/legacy/importer.ts\"]\n}\n",
+        "nearMiss": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2023\",\n    \"module\": \"nodenext\",\n    \"moduleResolution\": \"nodenext\",\n    \"strict\": true,\n    \"noUncheckedIndexedAccess\": true,\n    \"exactOptionalPropertyTypes\": true,\n    \"allowJs\": true,\n    \"checkJs\": true,\n    \"declaration\": false,\n    \"sourceMap\": false,\n    \"skipLibCheck\": true,\n    \"noEmit\": true\n  },\n  \"include\": [\"src\", \"tests\"]\n}\n"
+      },
+      "gapNotes": "It sees a flag written as false but not a flag quietly deleted — removing \"noUncheckedIndexedAccess\" entirely has the same effect and leaves no token, which is the most common way this actually happens. It also cannot judge the exclude list: a new path in \"exclude\" may be a legitimate build split or may be the file that would not compile. Detection is per-file, so a strict base config softened in an extending tsconfig.build.json is only caught if that file is in the paths glob, and strictness inherited from an \"extends\" package is never read at all. tsc contributes nothing: a tsconfig whose strictness has been turned down is exactly the state in which the type checker reports nothing, so it cannot detect its own relaxation.",
+      "example": "\"strict\": false,"
+    },
+    {
+      "id": "toothless-test-command",
+      "title": "Test or CI step that cannot fail",
+      "paths": [
+        "**/package.json"
+      ],
+      "patterns": [
+        "\"(?:test|lint|typecheck|check|ci)[^\"]*\"\\s*:\\s*\"[^\"]*(?:\\|\\|\\s*true|\\bexit\\s+0|;\\s*true\\b)",
+        "\"[^\"]*\"\\s*:\\s*\"[^\"]*--passWithNoTests"
+      ],
+      "stripComments": false,
+      "stripStrings": false,
+      "perLine": false,
+      "fixtures": {
+        "violation": "{\n  \"name\": \"ingest\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"vitest run --passWithNoTests || true\",\n    \"lint\": \"eslint . ; true\",\n    \"typecheck\": \"tsc --noEmit || exit 0\"\n  },\n  \"devDependencies\": {\n    \"vitest\": \"^3.2.4\"\n  }\n}\n",
+        "nearMiss": "{\n  \"name\": \"ingest\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"vitest run --coverage --allowOnly=false\",\n    \"lint\": \"eslint . --max-warnings 0 --report-unused-disable-directives\",\n    \"typecheck\": \"tsc --noEmit\",\n    \"clean\": \"rm -rf dist coverage\",\n    \"verify\": \"npm run lint && npm run typecheck && npm test\"\n  },\n  \"devDependencies\": {\n    \"vitest\": \"^3.2.4\"\n  }\n}\n"
+      },
+      "gapNotes": "--passWithNoTests may be intentional where packages ship no tests; the generated project check must be adjusted for that policy. Only package.json scripts are read, including nested package files; commands inside a Makefile, task configuration or wrapper script are outside its paths. Piping into true, swallowing an exit code in a helper, and running under set +e can neutralize failures without these tokens. No source match proves the suite actually ran or passed.",
+      "example": "\"test\": \"vitest run --passWithNoTests || true\","
+    },
+    {
+      "id": "ci-step-allowed-to-fail",
+      "title": "CI step neutered so the job stays green",
+      "paths": [
+        ".github/workflows/*.yml",
+        ".github/workflows/*.yaml",
+        ".gitlab-ci.yml"
+      ],
+      "patterns": [
+        "continue-on-error\\s*:\\s*true",
+        "\\|\\|\\s*true\\s*$",
+        "if\\s*:\\s*false\\b"
+      ],
+      "stripComments": false,
+      "stripStrings": false,
+      "perLine": true,
+      "fixtures": {
+        "violation": "name: verify\non: [push, pull_request]\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n      - run: npm ci\n      - run: npm run lint\n        continue-on-error: true\n      - run: npm run typecheck || true\n      - run: npm test\n        if: false\n",
+        "nearMiss": "name: verify\non: [push, pull_request]\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n          cache: npm\n      - run: npm ci\n      - run: npm run lint\n      - run: npm run typecheck\n      - run: npm test\n      - run: npm run audit\n        if: github.event_name == 'push'\n      - uses: actions/upload-artifact@v4\n        if: always()\n        with:\n          name: coverage\n          path: coverage/\n"
+      },
+      "gapNotes": "A regex over YAML, not a parser: `continue-on-error: ${{ inputs.soft }}` and a step disabled through a reusable-workflow input evaluate to the same thing at run time and match nothing. It also cannot see the most effective neutering of all — deleting the step, or removing the workflow's required-check status in branch protection, neither of which leaves a token in the file. The `|| true` pattern is anchored per line, so a continuation written with a YAML block scalar over two lines escapes it.",
+      "example": "continue-on-error: true"
+    },
+    {
+      "id": "test-config-loosened",
+      "title": "Test harness config relaxed instead of the failure fixed",
+      "paths": [
+        "**/vitest.config.{js,mjs,ts,mts}",
+        "**/vite.config.{js,mjs,ts,mts}"
+      ],
+      "patterns": [
+        "\\ballowOnly\\s*:\\s*true\\b",
+        "\\bpassWithNoTests\\s*:\\s*true\\b",
+        "\\b(?:lines|statements|functions|branches)\\s*:\\s*(?:0|[1-9])\\s*[,}]",
+        "\\bcoverage\\s*:\\s*\\{[^}]*\\benabled\\s*:\\s*false\\b"
+      ],
+      "stripComments": true,
+      "stripStrings": false,
+      "perLine": false,
+      "fixtures": {
+        "violation": "import { defineConfig } from 'vitest/config';\n\nexport default defineConfig({\n  test: {\n    include: ['**/*.{test,spec}.{js,mjs,ts,mts,tsx}'],\n    allowOnly: true,\n    passWithNoTests: true,\n    coverage: {\n      enabled: false,\n      provider: 'v8',\n      thresholds: { lines: 0, statements: 0, functions: 0, branches: 0 },\n    },\n  },\n});\n",
+        "nearMiss": "import { defineConfig } from 'vitest/config';\n\nexport default defineConfig({\n  test: {\n    include: ['**/*.{test,spec}.{js,mjs,ts,mts,tsx}'],\n    allowOnly: false,\n    passWithNoTests: false,\n    coverage: {\n      provider: 'v8',\n      reporter: ['text', 'json-summary'],\n      thresholds: { lines: 80, statements: 80, functions: 80, branches: 70 },\n    },\n  },\n});\n"
+      },
+      "gapNotes": "Counts the listed source values against the baseline; it does not compare the meaning of numeric thresholds. Lowering a threshold from 80 to 55 matches nothing because only single-digit thresholds are covered. Deleting a thresholds block or coverage provider also leaves no value to match. Only vitest and vite config files are read, so settings in package.json or command-line arguments such as --coverage.thresholds.lines=0 are outside these paths.",
+      "example": "allowOnly: true,"
+    },
+    {
+      "id": "snapshot-updated-wholesale",
+      "title": "Snapshots regenerated by a committed command instead of reviewed",
+      "paths": [
+        ".github/workflows/*.yml",
+        ".github/workflows/*.yaml",
+        ".gitlab-ci.yml",
+        "**/package.json",
+        "**/Makefile",
+        "**/*.sh"
+      ],
+      "patterns": [
+        "\\b(?:vitest|jest)\\b[^\\n]{0,120}?(?:\\s-u|\\s--update(?:-snapshots?|Snapshot)?)(?!\\w)"
+      ],
+      "stripComments": true,
+      "stripStrings": false,
+      "perLine": false,
+      "fixtures": {
+        "violation": "name: verify\non: [push, pull_request]\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n      - run: npm ci\n      - run: npx vitest run -u\n",
+        "nearMiss": "name: verify\non: [push, pull_request]\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n          cache: npm\n      - run: npm ci\n      - run: npx vitest run --coverage\n      - run: npm test -- --reporter=github-actions\n"
+      },
+      "gapNotes": "Reads commands stored in matching files. Running npx vitest -u directly in a terminal leaves no source for this check, and terminal text is not parsed. Only the named runner spellings are covered; wrapper commands and environment-variable behavior such as CI=false are missed. A deliberate regeneration and a blind one carry the same update flag, so the source pattern alone cannot establish whether snapshots were reviewed.",
+      "example": "- run: npx vitest run -u"
+    }
+  ]
+}

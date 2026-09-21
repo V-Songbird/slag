@@ -96,6 +96,64 @@ test('--strict makes a check that could not run a failure', () => {
   clean(root);
 });
 
+for (const [name, body] of [
+  ['a missing return', ''],
+  ['null', 'return null;'],
+  ['an empty object', 'return {};'],
+  ['a non-boolean verdict', 'return { fires: "false" };'],
+  ['a Promise resolving to a violation', 'return Promise.resolve({ fires: true, reason: "violation" });'],
+]) {
+  test(`live refuses ${name} instead of accepting an unevaluated result`, (t) => {
+    const root = ready({
+      'accept.mjs': "import { writeFileSync } from 'node:fs';\nwriteFileSync('accept-ran', 'yes');\n",
+    });
+    t.after(() => clean(root));
+    writeFileSync(join(root, '.collet', 'checks', 'invalid-result.mjs'), [
+      "export const id = 'invalid-result';",
+      'export function check() { return { fires: false }; }',
+      `export function live() { ${body} }`,
+    ].join('\n'), 'utf8');
+    repo(root);
+    const opened = task(root, [
+      'add', '--title', 'Check the verdict', '--why', 'No missing result may pass',
+      '--scope', 'src/cli.mjs', '--accept', 'node accept.mjs',
+    ]);
+    assert.equal(opened.status, 0, opened.stderr);
+    for (const args of [['--live'], ['--live', '--strict']]) {
+      const out = checks(root, args);
+      assert.equal(out.status, 1, out.stdout + out.stderr);
+      assert.match(out.stdout, /fail invalid-result — live\(\) must return a synchronous result/);
+      assert.doesNotMatch(out.stdout, /ok\s+invalid-result|skip invalid-result/);
+      assert.match(out.stdout, /ok\s+scope — everything changed is inside the task/);
+    }
+    const ledger = readFileSync(join(root, '.collet', 'ledger.jsonl'), 'utf8');
+    const close = task(root, ['close', '--left-out', 'none', '--unverified', 'none']);
+    assert.equal(close.status, 1, close.stdout + close.stderr);
+    assert.equal(existsSync(join(root, 'accept-ran')), false);
+    assert.equal(readFileSync(join(root, '.collet', 'ledger.jsonl'), 'utf8'), ledger);
+  });
+}
+
+test('an explicit skipped result without a verdict keeps standalone and strict policy distinct', (t) => {
+  const root = ready();
+  t.after(() => clean(root));
+  writeFileSync(join(root, '.collet', 'checks', 'unavailable.mjs'), [
+    "export const id = 'unavailable';",
+    'export function check() { return { fires: false }; }',
+    'export function live() { return { skipped: true, reason: "input unavailable" }; }',
+  ].join('\n'), 'utf8');
+  repo(root);
+  assert.equal(task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']).status, 0);
+  const ordinary = checks(root, ['--live']);
+  assert.equal(ordinary.status, 0, ordinary.stdout + ordinary.stderr);
+  assert.match(ordinary.stdout, /skip unavailable — input unavailable/);
+  assert.doesNotMatch(ordinary.stdout, /ok\s+unavailable|fail unavailable/);
+  const strict = checks(root, ['--live', '--strict']);
+  assert.equal(strict.status, 1, strict.stdout + strict.stderr);
+  assert.match(strict.stdout, /skip unavailable — input unavailable/);
+  assert.match(strict.stdout, /1 check\(s\) could not run, and --strict counts that as a failure/);
+});
+
 test('live reports the files that landed outside the task', () => {
   const root = ready();
   repo(root);

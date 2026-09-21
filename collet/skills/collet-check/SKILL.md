@@ -11,7 +11,7 @@ description: >-
 license: MIT
 compatibility: Requires Node 22 or later and a project with collet already mounted.
 metadata:
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Adding a check
@@ -43,19 +43,27 @@ export function check({ root, task, call }) {   // one call, at the moment it is
   return { fires: false, reason: '' };          // fires: true means the mistake is present
 }
 
-export function live({ root, task }) {          // optional: the same question about the tree
+export function live({ root, task }) {          // the same question about the tree; required to close
   return { fires: false, reason: '' };          // skipped: true means it could not look
 }
 ```
 
-Pure function, no network, no writes, no dependencies beyond Node's standard library. It runs three
-places — at write time inside a session that has the plugin, at commit time, and in CI — so it must
-be fast and it must never throw on odd input. Any input it cannot read, it reports as `fires: false`
-and says so in `reason`; a check that crashes is not a check that passed.
+Pure function, no network, no writes, no dependencies beyond Node's standard library. The editor
+hook calls `check`; closing a task calls `live`. Commit and CI checks run only when the project
+separately wires the runner there. A check must be fast and never throw on odd input.
+Any input it cannot read, it reports as `fires: false` and says so in `reason`; a check that crashes
+is not a check that passed.
 
 **A `live` check that could not look reports `skipped: true`, never a quiet pass.** The runner
 prints `skip` for it and `--strict` turns that into a failure. A green for a tool that was not there
 is the exact false comfort this whole design exists to refuse.
+
+`task.mjs close` uses that strict mode. A call-only check can be admitted and run by the editor
+hook, but it blocks closure until it has a real working-tree check. If the mistake cannot be
+checked from the tree, explain that limitation before installing it; never add an always-passing
+`live` function to make the task close. A missing Git baseline is also an unavailable check.
+Return an explicit synchronous result with boolean `fires` or `skipped: true`; missing results
+and Promises fail verification. This interface does not support async checks.
 
 ## 3. Write its pair
 

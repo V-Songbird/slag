@@ -6,9 +6,41 @@ All notable changes to collet are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0-alpha] — 2026-09-21
+
+### Added
+
+- Optional language bundles for patterns that weaken tests, type checks, lint checks or
+  verification settings in JavaScript/TypeScript, Python, Go, Rust, JVM and .NET. Mount with
+  `--checks` to detect root marker files, or repeat `--edition <id>` for nested packages or a
+  deliberate subset. The mount proves each generated check
+  against its planted mistake and lookalike, and preserves existing generated files on a rerun.
+- The bundle reads `Write`, `Edit` and `MultiEdit` text during a task. Its working-tree checks
+  compare match counts per detector with `HEAD`, so an unchanged legacy match does not fail a
+  task. Shell writes and file tools whose text is not read are checked at close time.
+- JavaScript test checks also recognize simple native `node:test` inline skip and focus options.
+  Each added syntax has its own planted mistake and lookalike in the mounted project.
+
 ### Changed
 
 - The requirement is Node 22 or later. It was Node 20.
+
+### Fixed
+
+- Closing a task reports a failed live check without assuming the change was outside the task's
+  scope or suggesting a scope change. The task stays open and its accept command does not run.
+- Closing also refuses checks that could not run, including an unavailable Git baseline or a
+  custom check with no working-tree implementation. A skipped verification no longer permits
+  the accept command or a claim that the task passed.
+- Live checks with a missing, invalid or asynchronous result fail verification instead of
+  reporting a pass without a result.
+- A remount keeps a valid older check revision even when the catalogue now includes more example
+  pairs. Custom fixture suffixes are preserved instead of mistaken for missing files.
+- Rust success assertions such as `assert!(result.is_ok())` are permitted; they can enforce a
+  real operation or invariant. Literal tautologies are still refused.
+- Python configuration comments and ordinary multiline strings in C#, Java and Kotlin no longer
+  expose their example text as executable violations. Dedicated fixture pairs check these forms
+  before a preserved runtime is trusted with new catalogue checks.
 
 ## [0.2.0-alpha] — 2026-09-21
 

@@ -1,0 +1,219 @@
+{
+  "id": "dotnet",
+  "detect": {
+    "files": [
+      "*.csproj",
+      "*.sln",
+      "*.slnx",
+      "Directory.Build.props",
+      "Directory.Packages.props",
+      "global.json",
+      "nuget.config"
+    ]
+  },
+  "commentSyntax": {
+    ".cs": "slash",
+    ".csproj": "none",
+    ".props": "none",
+    ".targets": "none",
+    ".runsettings": "none",
+    ".sln": "hash"
+  },
+  "classes": [
+    {
+      "id": "skipped-test",
+      "title": "Test skipped instead of fixed",
+      "paths": [
+        "**/*.cs"
+      ],
+      "patterns": [
+        "\\[\\s*(?:Fact|Theory)\\s*\\([^)]*\\bSkip\\s*="
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "using Xunit;\n\nnamespace Billing.Tests;\n\npublic class InvoiceTotalTests\n{\n    [Fact(Skip = \"flaky on CI, revisit later\")]\n    public void Total_IncludesTaxForEuCustomers()\n    {\n        var invoice = new Invoice(netAmount: 100m, country: \"DE\");\n\n        Assert.Equal(119m, invoice.Total);\n    }\n\n    [Fact]\n    public void Total_HasNoTaxForExemptCustomers()\n    {\n        var invoice = new Invoice(netAmount: 100m, country: \"DE\", taxExempt: true);\n\n        Assert.Equal(100m, invoice.Total);\n    }\n}\n",
+        "nearMiss": "using Xunit;\n\nnamespace Billing.Tests;\n\npublic class InvoiceTotalTests\n{\n    public static bool RunsOnLinux => !OperatingSystem.IsWindows();\n\n    [Fact(SkipUnless = nameof(RunsOnLinux), SkipType = typeof(InvoiceTotalTests))]\n    public void Total_UsesPosixLocaleFormatting()\n    {\n        var invoice = new Invoice(netAmount: 100m, country: \"DE\");\n\n        Assert.Equal(\"119,00\", invoice.FormatTotal());\n    }\n\n    [Fact]\n    public void Total_IncludesTaxForEuCustomers()\n    {\n        var skip = 0;\n        var invoice = new Invoice(netAmount: 100m, country: \"DE\");\n\n        Assert.Equal(119m, invoice.Total);\n        Assert.Equal(0, skip);\n    }\n}\n"
+      },
+      "gapNotes": "Only xUnit Skip attributes are covered. NUnit and MSTest ignore forms and environment-gated early returns are missed; legitimate platform-specific skips use the same token and are also refused.",
+      "example": "[Fact(Skip = \"flaky on CI, revisit later\")]"
+    },
+    {
+      "id": "softened-assertion",
+      "title": "Assertion softened to a tautology",
+      "paths": [
+        "**/*.cs"
+      ],
+      "patterns": [
+        "\\bAssert\\s*\\.\\s*(?:True|False)\\s*\\(\\s*(?:true|false)\\s*[,)]"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "using Xunit;\n\nnamespace Payments.Tests;\n\npublic class RefundPolicyTests\n{\n    [Fact]\n    public void Refund_AfterWindowClosed_IsRejected()\n    {\n        var policy = new RefundPolicy(windowDays: 30);\n        var decision = policy.Evaluate(purchasedDaysAgo: 45);\n\n        // was: Assert.Equal(RefundOutcome.Rejected, decision.Outcome)\n        Assert.True(true);\n    }\n\n    [Fact]\n    public void Refund_InsideWindow_IsAccepted()\n    {\n        var policy = new RefundPolicy(windowDays: 30);\n        var decision = policy.Evaluate(purchasedDaysAgo: 5);\n\n        Assert.Equal(RefundOutcome.Accepted, decision.Outcome);\n    }\n}\n",
+        "nearMiss": "using Xunit;\n\nnamespace Payments.Tests;\n\npublic class RefundPolicyTests\n{\n    [Fact]\n    public void Refund_AfterWindowClosed_IsRejected()\n    {\n        var policy = new RefundPolicy(windowDays: 30);\n        var decision = policy.Evaluate(purchasedDaysAgo: 45);\n\n        Assert.False(decision.IsAccepted);\n        Assert.True(decision.HasReason);\n        Assert.Equal(RefundOutcome.Rejected, decision.Outcome);\n    }\n\n    [Theory]\n    [InlineData(true)]\n    [InlineData(false)]\n    public void Refund_RespectsGoodwillFlag(bool goodwill)\n    {\n        var policy = new RefundPolicy(windowDays: 30, goodwill);\n        var decision = policy.Evaluate(purchasedDaysAgo: 45);\n\n        Assert.Equal(goodwill, decision.IsAccepted);\n    }\n}\n"
+      },
+      "gapNotes": "Only the listed literal tautologies are covered. Replacing equality with a null check, widening a numeric tolerance or copying the observed value into an expected value is not analyzed.",
+      "example": "Assert.True(true);"
+    },
+    {
+      "id": "emptied-test-body",
+      "title": "Test body emptied instead of fixed",
+      "paths": [
+        "**/*.cs"
+      ],
+      "patterns": [
+        "\\[\\s*(?:Fact|Theory)\\b[^\\]]*\\]\\s*(?:\\[[^\\]]*\\]\\s*)*public\\s+(?:async\\s+)?[\\w<>\\[\\].?]+\\s+\\w+\\s*\\([^)]*\\)\\s*\\{\\s*\\}"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": false,
+      "fixtures": {
+        "violation": "using System.Threading.Tasks;\nusing Xunit;\n\nnamespace Catalog.Tests;\n\npublic class ProductImporterTests\n{\n    [Fact]\n    public void Import_ParsesTheFeed()\n    {\n    }\n\n    [Theory]\n    [InlineData(\"empty.xml\")]\n    public async Task ImportAsync_OnEmptyFeed_ImportsNothing(string feed)\n    {\n    }\n}\n",
+        "nearMiss": "using System.Threading.Tasks;\nusing Xunit;\n\nnamespace Catalog.Tests;\n\npublic class ProductImporterTests\n{\n    private sealed class NullSink\n    {\n        public void Record(string line)\n        {\n        }\n    }\n\n    [Fact]\n    public void Import_ParsesTheFeed()\n    {\n        var importer = new ProductImporter(new FakeFeedReader());\n\n        var result = importer.Import(\"feed-2026-08.xml\");\n\n        Assert.Equal(42, result.ImportedCount);\n    }\n\n    [Theory]\n    [InlineData(\"empty.xml\")]\n    public async Task ImportAsync_OnEmptyFeed_ImportsNothing(string feed)\n    {\n        var importer = new ProductImporter(new FakeFeedReader());\n\n        var result = await importer.ImportAsync(feed);\n\n        Assert.Equal(0, result.ImportedCount);\n    }\n}\n"
+      },
+      "gapNotes": "Only an empty block under an xUnit attribute is covered. Deleted tests, NUnit or MSTest attributes, expression-bodied tests and setup without assertions are missed. Empty methods without a test attribute are deliberately permitted.",
+      "example": "[Fact]\n    public void Import_ParsesTheFeed()\n    {\n    }"
+    },
+    {
+      "id": "nullable-context-disabled",
+      "title": "Nullable context switched off in a file",
+      "paths": [
+        "**/*.cs"
+      ],
+      "patterns": [
+        "#nullable\\s+disable\\b"
+      ],
+      "stripComments": true,
+      "stripStrings": true,
+      "perLine": true,
+      "fixtures": {
+        "violation": "#nullable disable\n\nusing System.Collections.Generic;\n\nnamespace Identity;\n\npublic sealed class UserProfile\n{\n    public string DisplayName { get; set; }\n\n    public string AvatarUrl { get; set; }\n\n    public IReadOnlyList<string> Roles { get; set; }\n\n    public string Describe() => $\"{DisplayName} ({Roles.Count} roles)\";\n}\n",
+        "nearMiss": "#nullable enable\n\nusing System.Collections.Generic;\n\nnamespace Identity;\n\npublic sealed class UserProfile\n{\n    public required string DisplayName { get; init; }\n\n    public string? AvatarUrl { get; init; }\n\n    public IReadOnlyList<string> Roles { get; init; } = [];\n\n#nullable restore\n    public string Describe() => $\"{DisplayName} ({Roles.Count} roles)\";\n}\n",
+        "additional": [
+          {
+            "id": "raw-string-directive",
+            "path": "src/Example.cs",
+            "violation": "#nullable disable\nclass Example {}\n",
+            "nearMiss": "var example = \"\"\"\"\n\"\"\"\n#nullable disable\n\"\"\"\";\n"
+          },
+          {
+            "id": "verbatim-string-directive",
+            "path": "src/Example.cs",
+            "violation": "#nullable disable\nclass Example {}\n",
+            "nearMiss": "var example = @\"\nquoted \"\"directive\"\"\n#nullable disable\n\";\n"
+          }
+        ]
+      },
+      "gapNotes": "Only the source directive is covered, including deliberate disables in maintained generated files. Project-wide Nullable properties and a project that never enabled nullable checks are outside these source paths.",
+      "example": "#nullable disable"
+    },
+    {
+      "id": "lint-rule-turned-off",
+      "title": "NoWarn widened to bury a real diagnostic",
+      "paths": [
+        "**/*.csproj",
+        "**/*.props",
+        "**/*.targets"
+      ],
+      "patterns": [
+        "<\\s*NoWarn\\s*>[^<]*\\b(?:CS8\\d{3}|CA\\d{4}|IDE\\d{4}|xUnit\\d{4}|S\\d{3,4}|nullable)\\b"
+      ],
+      "stripComments": true,
+      "stripStrings": false,
+      "perLine": false,
+      "fixtures": {
+        "violation": "<Project>\n\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>\n    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>\n    <NoWarn>$(NoWarn);CS8602;CA1031</NoWarn>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"SonarAnalyzer.CSharp\" PrivateAssets=\"all\" />\n  </ItemGroup>\n\n</Project>\n",
+        "nearMiss": "<Project>\n\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>\n    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>\n    <GenerateDocumentationFile>true</GenerateDocumentationFile>\n    <NoWarn>$(NoWarn);CS1591;NU5104</NoWarn>\n    <WarningsNotAsErrors>NU1701</WarningsNotAsErrors>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"SonarAnalyzer.CSharp\" PrivateAssets=\"all\" />\n  </ItemGroup>\n\n</Project>\n"
+      },
+      "gapNotes": "Only the listed diagnostic-id spellings inside NoWarn are covered. Numeric-only ids, WarningsNotAsErrors and other suppression forms are missed. XML comments are not blanked, so a matching commented-out property can also fire.",
+      "example": "<NoWarn>$(NoWarn);CS8602;CA1031</NoWarn>"
+    },
+    {
+      "id": "build-check-disabled",
+      "title": "TreatWarningsAsErrors turned off",
+      "paths": [
+        "**/*.csproj",
+        "**/*.props",
+        "**/*.targets"
+      ],
+      "patterns": [
+        "<\\s*(?:TreatWarningsAsErrors|CodeAnalysisTreatWarningsAsErrors|EnforceCodeStyleInBuild|NuGetAudit)\\s*>\\s*false\\s*<"
+      ],
+      "stripComments": true,
+      "stripStrings": false,
+      "perLine": false,
+      "fixtures": {
+        "violation": "<Project>\n\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>\n    <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>\n    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>\n    <NuGetAudit>false</NuGetAudit>\n  </PropertyGroup>\n\n</Project>\n",
+        "nearMiss": "<Project>\n\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>\n    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>\n    <NuGetAudit>true</NuGetAudit>\n    <NuGetAuditMode>all</NuGetAuditMode>\n    <GenerateDocumentationFile>false</GenerateDocumentationFile>\n    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n</Project>\n"
+      },
+      "gapNotes": "Only unconditioned elements in the listed form are covered. Properties with attributes, deletion of a property and command-line changes are missed. XML comments are not blanked, so commented-out matching settings can also fire.",
+      "example": "<TreatWarningsAsErrors>false</TreatWarningsAsErrors>"
+    },
+    {
+      "id": "test-run-narrowed",
+      "title": "Test run narrowed by a filter",
+      "paths": [
+        "**/*.runsettings",
+        "**/*.csproj",
+        "**/*.props"
+      ],
+      "patterns": [
+        "<\\s*TestCaseFilter\\s*>[^<]*(?:!=|!~)"
+      ],
+      "stripComments": true,
+      "stripStrings": false,
+      "perLine": false,
+      "fixtures": {
+        "violation": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TestCaseFilter>(TestCategory != Flaky) &amp; (TestCategory != Integration)</TestCaseFilter>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\" />\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n",
+        "nearMiss": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TestSessionTimeout>600000</TestSessionTimeout>\n    <MaxCpuCount>0</MaxCpuCount>\n  </RunConfiguration>\n  <TestRunParameters>\n    <Parameter name=\"webAppUrl\" value=\"http://localhost:5001\" />\n  </TestRunParameters>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\">\n        <Configuration>\n          <LogFileName>results.trx</LogFileName>\n        </Configuration>\n      </Logger>\n      <Logger friendlyName=\"blame\" enabled=\"True\" />\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n"
+      },
+      "gapNotes": "Only exclusionary filters in the listed project and runsettings files are covered. Inclusive filters and command-line or workflow filters are missed. XML comments are not blanked, so a commented-out matching filter can also fire.",
+      "example": "<TestCaseFilter>(TestCategory != Flaky) &amp; (TestCategory != Integration)</TestCaseFilter>"
+    },
+    {
+      "id": "zero-tests-treated-as-pass",
+      "title": "A run that discovers no tests still exits zero",
+      "paths": [
+        "**/*.runsettings",
+        "**/*.csproj",
+        "**/*.props"
+      ],
+      "patterns": [
+        "<\\s*TreatNoTestsAsError\\s*>\\s*false\\s*<"
+      ],
+      "stripComments": true,
+      "stripStrings": false,
+      "perLine": false,
+      "fixtures": {
+        "violation": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>false</TreatNoTestsAsError>\n    <TreatTestAdapterErrorsAsWarnings>true</TreatTestAdapterErrorsAsWarnings>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\" />\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n",
+        "nearMiss": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TreatTestAdapterErrorsAsWarnings>false</TreatTestAdapterErrorsAsWarnings>\n    <TestSessionTimeout>600000</TestSessionTimeout>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\">\n        <Configuration>\n          <LogFileName>results.trx</LogFileName>\n        </Configuration>\n      </Logger>\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n"
+      },
+      "gapNotes": "Only an explicit false setting is covered. A missing runsettings file, a deleted true setting and a test project omitted from its solution are missed. XML comments are not blanked, so commented-out matching settings can also fire.",
+      "example": "<TreatNoTestsAsError>false</TreatNoTestsAsError>"
+    },
+    {
+      "id": "test-config-loosened",
+      "title": "Test harness config relaxed instead of the failure fixed",
+      "paths": [
+        "**/*.runsettings"
+      ],
+      "patterns": [
+        "<\\s*CollectCoverage\\s*>\\s*[Ff]alse\\s*<",
+        "<\\s*Threshold\\s*>\\s*(?:\\d|[1-4]\\d)\\s*<",
+        "friendlyName\\s*=\\s*\"trx\"\\s+enabled\\s*=\\s*\"[Ff]alse\""
+      ],
+      "stripComments": false,
+      "stripStrings": false,
+      "perLine": false,
+      "fixtures": {
+        "violation": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TestSessionTimeout>600000</TestSessionTimeout>\n  </RunConfiguration>\n  <DataCollectionRunSettings>\n    <DataCollectors>\n      <DataCollector friendlyName=\"XPlat code coverage\">\n        <Configuration>\n          <CollectCoverage>false</CollectCoverage>\n          <Threshold>10</Threshold>\n        </Configuration>\n      </DataCollector>\n    </DataCollectors>\n  </DataCollectionRunSettings>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"False\" />\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n",
+        "nearMiss": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<RunSettings>\n  <RunConfiguration>\n    <ResultsDirectory>./TestResults</ResultsDirectory>\n    <TreatNoTestsAsError>true</TreatNoTestsAsError>\n    <TestSessionTimeout>600000</TestSessionTimeout>\n  </RunConfiguration>\n  <LoggerRunSettings>\n    <Loggers>\n      <Logger friendlyName=\"trx\" enabled=\"True\">\n        <Configuration>\n          <LogFileName>results.trx</LogFileName>\n        </Configuration>\n      </Logger>\n    </Loggers>\n  </LoggerRunSettings>\n</RunSettings>\n"
+      },
+      "gapNotes": "Only the listed runsettings values are covered. Threshold reductions that stay above the pattern limit, deleted settings, project properties and command-line overrides are missed. The separate zero-tests check handles TreatNoTestsAsError.",
+      "example": "<CollectCoverage>false</CollectCoverage>"
+    }
+  ]
+}
