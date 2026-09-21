@@ -18,19 +18,19 @@ Two plugins are installable from here. Both work on their own and stay out of th
 /plugin install <plugin-name>@slag
 ```
 
-The first command registers this collection once. The second installs one plugin, and takes effect next session. To confirm it loaded, start a new session and type `/anneal:improve-agent-navigation audit` or `/collet:collet`.
+The first command registers this collection once. The second installs one plugin, and takes effect next session. To confirm it loaded, start a new session and type `/anneal:repo-layout audit` or `/collet:task-harness`.
 
 The marketplace itself has no settings. Each plugin's README says whether that plugin has any. Uninstall with `/plugin uninstall <plugin-name>@slag`.
 
 On Codex, add this repository as a marketplace and install from `Slag`.
 
-Antigravity has no marketplace to add. Clone this repository, then either run `agy plugin install <path-to-clone>/<plugin-name>` or copy the plugin directory to `.agents/plugins/<plugin-name>/` in a workspace, or to `~/.gemini/config/plugins/<plugin-name>/` for every workspace.
+For Antigravity CLI, clone this repository and run `agy plugin install <path-to-clone>/<plugin-name>`. Confirm the plugin appears in `agy plugin list`; each plugin README states its tested host behavior.
 
 ## The plugins
 
 ### [anneal](./anneal) — improve navigation, documentation and session instructions
 
-`improve-agent-navigation` audits a repository's layout and migrates approved steps, running the project's checks before and after each change. `learn-from-session` turns one session's detours into instruction changes you approve. `reconcile-project-docs` checks documentation and non-code development files against the project, then applies authorized corrections or reports findings in audit mode.
+`repo-layout` audits a repository's layout and migrates approved steps, running the project's checks before and after each change. `session-review` turns one session's detours into instruction changes you approve. `docs-align` checks documentation and non-code development files against the project, then applies authorized corrections or reports findings in audit mode.
 
 ```text
 /plugin install anneal@slag
