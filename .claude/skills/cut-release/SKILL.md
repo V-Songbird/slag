@@ -37,7 +37,7 @@ Two files never carry a version, and a bump must not add one:
 - `.agents/plugins/marketplace.json` — the Codex index; that host reads its version from
   `.codex-plugin/plugin.json`.
 
-Nothing checks any of this. See `AGENTS.md` → "Conventions that constrain a change".
+Nothing checks any of this. See `AGENTS.md` → "Rules that outrank everything".
 
 ## Step 0 — which plugin, its manifests, and is it ready
 

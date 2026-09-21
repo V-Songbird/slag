@@ -114,6 +114,10 @@ Each rule removes steps an agent repeats every session. The reason behind each o
 
 anneal stops before step 4 when `git status --porcelain` prints anything. The branch you were on is left exactly as it was.
 
+### The map file it writes
+
+A map file anneal writes carries the same sections in the same order: `Start here`, `Rules that outrank everything`, `Commands`, `Where things live`, `Conventions`, `Pitfalls`. A section with nothing true to say is left out. What goes in each one, and what stays out of the file, is in [the map file skeleton](skills/anneal/references/map-file.md). When your repository already has a map file off that order, anneal offers the reshape as a step of its own. It moves sentences without rewriting them, and lists anything that would leave the file before you approve.
+
 ### The safety hook
 
 While a branch named `anneal/<YYYY-MM-DD>` is checked out, a hook refuses five git commands: `reset --hard`, `clean -f`, `checkout --force`, `push --force` and `branch -D`. Each one would throw away the commits the migration had already made. `push --force-with-lease` is allowed, because it refuses on its own when the remote moved. Undo a step with `git revert`, or leave the branch to abandon the migration. On every other branch the hook allows everything.

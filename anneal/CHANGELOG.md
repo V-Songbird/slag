@@ -6,6 +6,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- A map file the migration writes follows one fixed sequence of sections, so every repository it touches reads the same way. A map file that is already there can be moved onto that sequence as a step you approve on its own.
+
 ### Changed
 
 - The closing report suggests a harness you can install to keep the result from drifting, instead of one that is no longer here.

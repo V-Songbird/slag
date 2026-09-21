@@ -82,7 +82,7 @@ When the audit reported `generic-names`, `duplicate-names`, `large-files`, `deep
 
 Build the plan from these steps, in this order, keeping only the ones with something to do:
 
-1. **Map file.** A map file under 200 lines for the host the owner works in: the commands, where things live, known pitfalls. The audit's `map files` line lists the ones already there — when one of them holds that content, make the new file a short pointer to it instead of a copy.
+1. **Map file.** A map file under 200 lines for the host the owner works in, on the section sequence in [references/map-file.md](references/map-file.md). Read that file before writing one. The audit's `map files` line lists the ones already there — when one of them holds that content, make the new file a short pointer to it instead of a copy. When an existing map file is off the sequence, offer the reshape as a step of its own.
 2. **Toolchain version.** The file the ecosystem's version manager reads, set to the version the project already requires in its manifest, CI or docs. Never guess a version; leave the step out when none is stated.
 3. **Ignore build output.** `.gitignore` entries for the untracked build or dependency folders the audit found, plus anything the checks created. Tracked generated files are listed for the owner, never deleted.
 4. **One check command.** A single entry, added the project's way (a `check` script, a make target), that runs the existing checks in order. Compose only commands that already exist.

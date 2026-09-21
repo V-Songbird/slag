@@ -4,7 +4,7 @@ Each rule removes steps an agent repeats every session: searches, file reads and
 
 ## Orientation
 
-- **A short map file at the root.** `CLAUDE.md`, `AGENTS.md` or `GEMINI.md`, whichever the host reads, loads into every session: what the project is, the commands, where things live, known pitfalls. Keep it under 200 lines and link to longer docs instead of copying them. A project that serves more than one host writes the content once and points the other names at it.
+- **A short map file at the root.** `CLAUDE.md`, `AGENTS.md` or `GEMINI.md`, whichever the host reads, loads into every session: what the project is, the commands, where things live, known pitfalls. Keep it under 200 lines and link to longer docs instead of copying them. Its sections follow one fixed sequence, in [map-file.md](map-file.md). A project that serves more than one host writes the content once and points the other names at it.
 - **A declared toolchain version.** `.nvmrc` or `.node-version`, `.python-version`, `rust-toolchain.toml`, `global.json`, `.ruby-version`, `.java-version`. Without one, the agent has to find and verify a version before it can run anything.
 - **One check command.** Types, lint and tests behind one entry, runnable for a single file and quiet when it passes. Every line of passing output lands in the agent's context and tells it nothing.
 - **A template for the environment.** `.env.example` with the variable names and empty values. The names live in the file the agent must never read, so without a template the only way to learn one is to run the project and read the crash.

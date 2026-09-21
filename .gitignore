@@ -37,7 +37,7 @@ credentials.json
 # Corrupted configuration dumps
 .claude.json.corrupted.*
 
-# Personal instruction files. CLAUDE.local.md would also stop Claude Code reading AGENTS.md.
+# Personal instruction files.
 CLAUDE.local.md
 AGENTS.override.md
 

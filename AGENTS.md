@@ -4,22 +4,55 @@ A marketplace of experimental agent plugins, in-tree. Two are shipped: `anneal/`
 Plain directories, one git history, no submodules. Experiments here get rewritten and deleted
 freely; that is the point of the repository.
 
-## Commands
-
 No dependencies to install, no build step. Node 20, as `.nvmrc` declares and `package.json`
 requires. That is the oldest version the suite has been run on, not the oldest it might work on.
 
-```bash
-npm run check                            # node --test over every suite: anneal, collet, the edit hook
-node anneal/scripts/audit.js --root .    # anneal's own audit, run against this repo
-claude plugin eval ./anneal --no-publish # 2 eval cases; slow, drives real sessions
-```
+## Start here
 
-Once after cloning, to arm the commit gate:
+- Before touching a manifest, a hooks file or a host adapter:
+  [docs/knowledge/host-plugin-formats.md](docs/knowledge/host-plugin-formats.md).
+- Before writing or restructuring a plugin README:
+  [docs/knowledge/plugin-readme-template.md](docs/knowledge/plugin-readme-template.md).
+- Before changing collet's guard, scope check or task CLI:
+  [docs/knowledge/collet-design.md](docs/knowledge/collet-design.md).
+- Before restoring a deleted file or adding a document:
+  [docs/knowledge/plugin-trim.md](docs/knowledge/plugin-trim.md).
+- A release happens only when the owner asks for one, and follows
+  [.claude/skills/cut-release/SKILL.md](.claude/skills/cut-release/SKILL.md) on every host. Claude
+  Code loads it as `/cut-release`. Codex and Antigravity do not load `.claude/`, so a session there
+  reads that file and follows it.
 
-```bash
-git config core.hooksPath scripts/git-hooks
-```
+Each document under `docs/` opens with a `summary` line that says when to read it. There is no
+index to keep in step.
+
+## Rules that outrank everything
+
+**Author fields read `Victor Villegas` and `victor.villegas@tuta.com`,** in every manifest, both
+marketplace entries that carry one, and each `LICENSE`. No other address, and no path from a
+developer's machine, goes into a tracked file.
+
+**A version lives in exactly one file per host, and the same number in all of them.** Claude Code
+resolves a version from `plugin.json` first and the marketplace entry second, so a `version` in a
+Claude `plugin.json` would silently mask the marketplace entry and installers would never see the
+bump. Every other host has no marketplace entry carrying one, so its manifest keeps its own.
+
+| Host | The version lives in |
+| --- | --- |
+| Claude Code | `.claude-plugin/marketplace.json`, never `<plugin>/.claude-plugin/plugin.json` |
+| Codex | `<plugin>/.codex-plugin/plugin.json` — `.agents/plugins/marketplace.json` carries none |
+| Antigravity | `<plugin>/plugin.json`, the only manifest that host reads |
+
+A bump touches every row. They are hand-maintained and nothing checks them.
+
+## Commands
+
+| Command | What it does | Cost |
+| --- | --- | --- |
+| `npm run check` | `node --test` over every suite: anneal, collet, the edit hook | seconds |
+| `node --test <plugin>/tests/<name>.test.js` | one test file, named in full | seconds |
+| `node anneal/scripts/audit.js --root .` | anneal's own audit, run against this repo | instant |
+| `claude plugin eval ./anneal --no-publish` | 2 eval cases | slow, drives real sessions |
+| `git config core.hooksPath scripts/git-hooks` | arms the commit gate | once after cloning |
 
 There is no CI. The one gap the seven-plugin trim left open is in
 [docs/knowledge/plugin-trim.md](docs/knowledge/plugin-trim.md).
@@ -43,15 +76,7 @@ Inside a plugin: `skills/<name>/SKILL.md` for what the host loads, `scripts/` fo
 `hooks/` for event wiring, `agents/` for a subagent a skill delegates to, `tests/` for a
 `node:test` suite, `evals/` for cases `claude plugin eval` runs, plus `README.md`, `LICENSE` and `CHANGELOG.md`.
 
-Each document under `docs/` opens with a `summary` line that says when to read it. There is no
-index to keep in step.
-
-A release happens only when the owner asks for one, and follows
-[.claude/skills/cut-release/SKILL.md](.claude/skills/cut-release/SKILL.md) on every host. Claude
-Code loads it as `/cut-release`. Codex and Antigravity do not load `.claude/`, so a session there
-reads that file and follows it.
-
-## Each plugin ships three manifests, one per host
+### Each plugin ships three manifests, one per host
 
 | Host | File | Notes |
 | --- | --- | --- |
@@ -72,20 +97,7 @@ Hooks split the same way: `<plugin>/hooks/hooks.json` for Claude Code,
 Antigravity. One script serves all three; the host is an argument, and it decides how the call is
 read off the event and what a denial looks like on the wire.
 
-## Conventions that constrain a change
-
-**A version lives in exactly one file per host, and the same number in all of them.** Claude Code
-resolves a version from `plugin.json` first and the marketplace entry second, so a `version` in a
-Claude `plugin.json` would silently mask the marketplace entry and installers would never see the
-bump. Every other host has no marketplace entry carrying one, so its manifest keeps its own.
-
-| Host | The version lives in |
-| --- | --- |
-| Claude Code | `.claude-plugin/marketplace.json`, never `<plugin>/.claude-plugin/plugin.json` |
-| Codex | `<plugin>/.codex-plugin/plugin.json` — `.agents/plugins/marketplace.json` carries none |
-| Antigravity | `<plugin>/plugin.json`, the only manifest that host reads |
-
-A bump touches every row. They are hand-maintained and nothing checks them.
+## Conventions
 
 **A marketplace entry's source is a relative path**, `"./plugin-name"`. Plugins are in-tree, so the
 manifest and the code it points at move in the same commit. A retired plugin's entry becomes
@@ -94,10 +106,6 @@ manifest and the code it points at move in the same commit. A retired plugin's e
 **A plugin carries only `README.md`, `CHANGELOG.md` and `LICENSE`.** No `CONTRIBUTING.md`, no
 `SECURITY.md`, no `.github/`, no `.gitignore` of its own — the root file covers every plugin.
 `collet/package.json` is the one exception, and it exists only to declare the module type.
-
-**Author fields read `Victor Villegas` and `victor.villegas@tuta.com`,** in every manifest, both
-marketplace entries that carry one, and each `LICENSE`. No other address, and no path from a
-developer's machine, goes into a tracked file.
 
 **No logos, no images, no badges.** These are experiments. A README earns its place on text alone,
 and artwork is one more thing to keep in step with a manifest.
@@ -136,11 +144,12 @@ this repository. Nothing is copied back except a number or a line a document cit
 loads is not copied in here. Two sources of truth for one rule drift, and the copy is the one that
 goes stale.
 
-## Known pitfalls
+## Pitfalls
 
-- **There is no `CLAUDE.md`, on purpose.** All three hosts read this file. Claude Code reads it only
-  while no `CLAUDE.md` exists here or in a directory above, so adding one, even a pointer, hides
-  this file from that host. The rule is in
+- **`CLAUDE.md` is one line, `@AGENTS.md`, and never gains content.** All three hosts read this
+  file; Claude Code reaches it through that import, because some of its sessions cannot read
+  `AGENTS.md` on their own. The import is what makes it safe: a `CLAUDE.md` without it, even one
+  that points here in words, hides this file from that host. The rule is in
   [docs/knowledge/host-plugin-formats.md](docs/knowledge/host-plugin-formats.md).
 - **collet is ESM, anneal is CommonJS.** Every `.js` under `collet/` uses `import`, and
   `collet/package.json` declares `"type": "module"` so it does not depend on Node's syntax
