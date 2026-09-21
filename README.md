@@ -8,7 +8,7 @@ Two plugins are installable from here. Both work on their own and stay out of th
 
 ## Requirements
 
-- Node, for the scripts both plugins run. anneal needs 18 or later. collet and the test suite need 20.
+- Node 22 or later, for both plugins and the test suite.
 - Claude Code, Codex or Antigravity.
 
 ## Install
@@ -18,7 +18,7 @@ Two plugins are installable from here. Both work on their own and stay out of th
 /plugin install <plugin-name>@slag
 ```
 
-The first command registers this collection once. The second installs one plugin, and takes effect next session. To confirm it loaded, start a new session and type the plugin's own command: `/anneal:anneal` or `/collet:collet`.
+The first command registers this collection once. The second installs one plugin, and takes effect next session. To confirm it loaded, start a new session and type `/anneal:improve-agent-navigation audit` or `/collet:collet`.
 
 The marketplace itself has no settings. Each plugin's README says whether that plugin has any. Uninstall with `/plugin uninstall <plugin-name>@slag`.
 
@@ -28,9 +28,9 @@ Antigravity has no marketplace to add. Clone this repository, then either run `a
 
 ## The plugins
 
-### [anneal](./anneal) — lay a repository out so an agent stops searching for it
+### [anneal](./anneal) — improve navigation, documentation and session instructions
 
-Every session, an agent learns your project by searching it. A folder called `helpers`, a stack of files all named `index`, and a test command nobody wrote down turn that into a scavenger hunt. anneal scans for those snags without touching anything, proposes a layout you approve, and migrates one step at a time. Your project's own checks run before the first change and after every step, and each step is its own commit.
+`improve-agent-navigation` audits a repository's layout and migrates approved steps, running the project's checks before and after each change. `learn-from-session` turns one session's detours into instruction changes you approve. `reconcile-project-docs` checks documentation and non-code development files against the project, then applies authorized corrections or reports findings in audit mode.
 
 ```text
 /plugin install anneal@slag
@@ -53,6 +53,7 @@ Read the [collet README](./collet/README.md).
 | You want to… | Install |
 | --- | --- |
 | Make a repository easier for an agent to find its way around | **anneal** |
+| Reconcile documentation or learn from one session's detours | **anneal** |
 | Stop a session drifting past its task, or calling work done | **collet** |
 
 They compose: anneal gets the layout into shape, and collet keeps a session from wandering out of it.
@@ -63,7 +64,7 @@ They compose: anneal gets the layout into shape, and collet keeps a session from
 npm run check
 ```
 
-That runs `node --test`: 149 tests, 72 in anneal, 65 in collet and 12 for the hook. There is no CI.
+That runs every suite with `node --test --test-reporter=spec`. There is no CI.
 
 Plugins live in-tree as plain directories, with one history and no submodules.
 [AGENTS.md](AGENTS.md) is the map: the layout, the three manifests each plugin ships, and the

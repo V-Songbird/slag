@@ -1,5 +1,5 @@
 ---
-name: anneal
+name: improve-agent-navigation
 description: >-
   Audits an existing repository for what makes an AI agent search, read or
   guess more than it needs to — no map file or toolchain version, duplicate
@@ -9,17 +9,17 @@ description: >-
   the user asks how easy a repository is to navigate or find things in, what
   slows an agent down, to make a codebase easier for an agent, or to apply
   AI-friendly conventions. Use it even for a read-only list of problems,
-  since its script measures what a quick look misses. Also /anneal:anneal,
-  $anneal or /anneal. Pass "audit" to report only. Do NOT use for a single
+  since its script measures what a quick look misses. Pass "audit" to report
+  only. Do NOT use for a single
   rename, a refactor with another goal, or scaffolding a new project.
 argument-hint: "[audit]"
 license: MIT
 compatibility: Requires Node 22 or later. A migration also requires git.
 metadata:
-  version: "1.1"
+  version: "1.2"
 ---
 
-# anneal
+# Improve agent navigation
 
 Make an existing repository cheaper for an agent to work in: fewer searches to find a file, fewer reads to understand it, one command to check a change. The target conventions and the reason for each are in [references/conventions.md](references/conventions.md). Read that file before building a plan.
 

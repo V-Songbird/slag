@@ -1,7 +1,7 @@
 {
   "name": "anneal",
   "version": "0.2.0-alpha",
-  "description": "Audits how easy an existing repository is for an AI agent to find its way around — map file, toolchain version, names, layout, build output, check commands — then proposes a layout you approve and migrates in small commits, each checked against the project's own tests. A second skill turns one session's detours into map file changes you approve.",
+  "description": "Improves agent navigation through a repository, turns session detours into approved map-file changes, and reconciles documentation and non-code development files with current behavior. Includes audit-only review, an approved layout migration, README review, host consistency and repository hygiene.",
   "author": {
     "name": "Victor Villegas",
     "email": "victor.villegas@tuta.com"

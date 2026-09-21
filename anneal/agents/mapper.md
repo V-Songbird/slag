@@ -1,6 +1,6 @@
 ---
 name: mapper
-description: Read-only layout surveyor for the anneal skill. Given a repository root and anneal's audit JSON, proposes which files belong together, which generic or duplicate names to change, and what to leave alone. Use only when the anneal skill's plan step asks for a layout proposal. Do NOT use to move, rename or edit files.
+description: Read-only layout surveyor for the improve-agent-navigation skill. Given a repository root and anneal's audit JSON, proposes which files belong together, which generic or duplicate names to change, and what to leave alone. Use only when that skill's plan step asks for a layout proposal. Do NOT use to move, rename or edit files.
 tools: Read, Grep, Glob
 ---
 
