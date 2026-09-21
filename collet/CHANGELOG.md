@@ -30,6 +30,14 @@ All notable changes to collet are documented here. The format follows
   pushed sessions into editing that prediction mid-task. `ROADMAP.jsonl` and `.foreman/` remain on
   the scope check's never-refuse list, for a project that adopts one after collet is installed.
 
+### Fixed
+
+- The guard runs every check the project has, not only the scope check. A check added with
+  `/collet-check` was admitted, and ran at commit time and in CI, but stayed silent while a
+  session was editing, which is the one place it was meant to catch the mistake first.
+- A refusal now names the check that fired and carries the remedy that fits it. Widening the
+  task is the answer to a write outside its files and to nothing else.
+
 ## [0.1.0-alpha] — 2026-09-19
 
 First release.

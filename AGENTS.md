@@ -10,7 +10,7 @@ No dependencies to install, no build step. Node 20, as `.nvmrc` declares and `pa
 requires. That is the oldest version the suite has been run on, not the oldest it might work on.
 
 ```bash
-npm run check                            # node --test, 123 tests: 49 anneal, 62 collet, 12 the hook
+npm run check                            # node --test, 125 tests: 49 anneal, 64 collet, 12 the hook
 node anneal/scripts/audit.js --root .    # anneal's own audit, run against this repo
 claude plugin eval ./anneal --no-publish # 2 eval cases; slow, drives real sessions
 ```
@@ -33,7 +33,7 @@ slag/
 ├── .claude/                           committed; settings, one scoped rule, cut-release
 ├── anneal/                            repository layout auditor and migrator
 ├── collet/                            session task harness
-├── docs/knowledge/                    three documents, see below
+├── docs/knowledge/                    four documents, see below
 ├── docs/decisions/                    one decision record, see below
 ├── scripts/claude-hooks/              reruns a plugin's suite after an edit inside it
 └── scripts/git-hooks/                 the commit gate, armed by hand after a clone
@@ -48,6 +48,7 @@ Inside a plugin: `skills/<name>/SKILL.md` for what the host loads, `scripts/` fo
 | [docs/knowledge/collet-design.md](docs/knowledge/collet-design.md) | changing collet's guard, scope check or task CLI |
 | [docs/knowledge/plugin-trim.md](docs/knowledge/plugin-trim.md) | restoring a file the trim deleted, or adding a document |
 | [docs/knowledge/host-plugin-formats.md](docs/knowledge/host-plugin-formats.md) | touching a manifest, a hooks file, or how a hook reads a host's event |
+| [docs/knowledge/collet-catalogue-merge.md](docs/knowledge/collet-catalogue-merge.md) | bringing jig's error catalogue into collet, or changing what the guard runs |
 | [docs/decisions/roadmap-ownership.md](docs/decisions/roadmap-ownership.md) | changing how collet behaves on a project that keeps a `ROADMAP.jsonl` |
 
 ## Each plugin ships three manifests, one per host
@@ -107,7 +108,7 @@ check is worse than no number.
 missing, say it is missing rather than filling it in.
 
 **A plugin with scripted behaviour carries a `node:test` suite** under `tests/`. Both do: 49 in
-anneal, 62 in collet.
+anneal, 64 in collet.
 
 **Documents under `docs/` follow the documentation schema**: YAML frontmatter with `type`, `summary`
 and `related_files`, plus `status` for a `task_summary`. One current document per topic, updated in

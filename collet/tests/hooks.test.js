@@ -111,6 +111,52 @@ test("a missing project check falls back to the plugin's own copy rather than di
   clean(root);
 });
 
+// A project check other than scope. The guard ran only `scope.mjs` until 2026-09-20, so a check
+// written by `/collet-check` was admitted and ran at commit time while staying silent in session.
+const TODO_CHECK = `export const id = 'no-todo';
+export const what = 'a TODO left in a write';
+export function check({ call }) {
+  const text = call?.input?.content ?? '';
+  return text.includes('TODO')
+    ? { fires: true, reason: 'a TODO was left in the file.' }
+    : { fires: false, reason: '' };
+}
+`;
+
+const THROWS = `export const id = 'throws';
+export const what = 'a check with a bug in it';
+export function check() {
+  throw new Error('boom');
+}
+`;
+
+test('every check the project owns runs at write time, not just scope', () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  writeFileSync(join(root, '.collet', 'checks', 'no-todo.mjs'), TODO_CHECK, 'utf8');
+  const out = hookOutput(
+    hook('guard.js', root, { tool_name: 'Write', tool_input: { file_path: 'src/cli.mjs', content: 'TODO: later\n' } })
+  );
+  assert.equal(out.permissionDecision, 'deny');
+  assert.match(out.permissionDecisionReason, /a TODO was left/);
+  // Widening the task is scope's remedy. Here the mistake is inside a file the task already owns.
+  assert.doesNotMatch(out.permissionDecisionReason, /widen/);
+  assert.match(readFileSync(join(root, '.collet', 'guard-log.jsonl'), 'utf8'), /"check":"no-todo"/);
+  clean(root);
+});
+
+test('a check that throws does not stop the checks after it', () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  writeFileSync(join(root, '.collet', 'checks', 'a-throws.mjs'), THROWS, 'utf8');
+  writeFileSync(join(root, '.collet', 'checks', 'b-todo.mjs'), TODO_CHECK, 'utf8');
+  const out = hookOutput(
+    hook('guard.js', root, { tool_name: 'Write', tool_input: { file_path: 'src/cli.mjs', content: 'TODO: later\n' } })
+  );
+  assert.equal(out.permissionDecision, 'deny');
+  clean(root);
+});
+
 test('with no task open the guard allows everything, and says nothing', () => {
   const root = ready();
   const out = hook('guard.js', root, { tool_name: 'Write', tool_input: { file_path: 'anything.txt' } });

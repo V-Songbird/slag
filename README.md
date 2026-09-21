@@ -61,7 +61,7 @@ They compose: anneal gets the layout into shape, and collet keeps a session from
 npm run check
 ```
 
-That runs `node --test`: 123 tests, 49 in anneal, 62 in collet and 12 for the hook. There is no CI.
+That runs `node --test`: 125 tests, 49 in anneal, 64 in collet and 12 for the hook. There is no CI.
 
 Plugins live in-tree as plain directories, with one history and no submodules.
 [AGENTS.md](AGENTS.md) is the map: the layout, the three manifests each plugin ships, and the
