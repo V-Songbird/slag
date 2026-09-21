@@ -125,7 +125,7 @@ Either half failing leaves the task open.
 - **Drift gets refused, not reported.** The guard reads write tools, patches, and the shell forms it can read with certainty. It also reads `rm -rf` on a directory, which is the one command worth catching before it lands.
 - **The list corrects itself.** Name the module that owns the behaviour, and collet pulls in what that module imports. It prints the reason for each addition. A list one file too narrow does not block work. It quietly pushes the change into the wrong file.
 - **"Covered" means caught.** Every check ships with a planted mistake and a lookalike. One that cannot catch its own violation is discarded and named, not counted.
-- **It stays out of a project that plans its work elsewhere.** The mount refuses and writes nothing there. A repository that keeps a `ROADMAP.jsonl` or a `.foreman/` directory owns its own plan, and [the decision record](../docs/decisions/roadmap-ownership.md) says why.
+- **It stays out of a project that plans its work elsewhere.** The mount refuses and writes nothing there. A repository that keeps a `ROADMAP.jsonl` or a `.foreman/` directory owns its own plan.
 
 ## Configuration
 
@@ -185,9 +185,7 @@ Expected output:
 
 The suite drives the hooks the way each host does, with that host's event on stdin.
 
-Why each mechanism exists, and the defect behind it, is in [the design notes](../docs/knowledge/collet-design.md).
-
-Two things are not proven. On Claude Code the plugin has loaded and refused a write in two short headless sessions, and in nothing longer or interactive. On Codex, the first runs found three defects that kept the guard from running at all, and with them fixed the guard has refused one file edit outside the task on codex-cli 0.155.1, in a headless session that bypassed hook trust. It has not been seen with its hooks trusted from `/hooks`, which is how you would run it; until you trust them there, that host skips them without saying so. On Antigravity the guard has not been seen to fire or to fail.
+Two things are not proven. On Claude Code the plugin has loaded and refused a write in two short headless sessions, and in nothing longer or interactive. On Codex, the first runs found three defects that kept the guard from running at all, and with them fixed the installed plugin, its hooks trusted from `/hooks`, has refused a file edit outside the task in two short headless sessions on codex-cli 0.155.1, one of them opened below the project root, and in nothing longer or interactive. Until you trust the hooks from `/hooks`, that host skips them without saying so. On Antigravity the guard has not been seen to fire or to fail.
 
 ## Support
 
