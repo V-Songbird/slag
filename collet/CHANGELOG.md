@@ -22,6 +22,11 @@ All notable changes to collet are documented here. The format follows
   entirely. `mount.mjs` writes nothing there and exits 2, instead of writing the harness in a
   second shape that read that roadmap and enforced the files its open entry named.
 
+- The mount writes the rules block into `CLAUDE.md` only when the project already has one, and no
+  longer creates that file. `AGENTS.md` still always gets the block. Claude Code reads `AGENTS.md`
+  only while no `CLAUDE.md` exists, so on a project that kept `AGENTS.md` alone the created file
+  held nothing but the block and hid the project's own instructions from that host.
+
 ### Removed
 
 - The roadmap-backed mode: no roadmap is parsed, no entry is read as the open task, and no write is
@@ -32,8 +37,10 @@ All notable changes to collet are documented here. The format follows
 
 ### Fixed
 
-- The guard runs every check the project has, not only the scope check. A check added with
-  `/collet-check` was admitted, and ran at commit time and in CI, but stayed silent while a
+- The `collet` skill's frontmatter is valid YAML now, so a host that parses it strictly can load
+  the skill.
+- The guard runs every check the project has, not only the scope check. A check added with the
+  `collet-check` skill was admitted, and ran at commit time and in CI, but stayed silent while a
   session was editing, which is the one place it was meant to catch the mistake first.
 - A refusal now names the check that fired and carries the remedy that fits it. Widening the
   task is the answer to a write outside its files and to nothing else.

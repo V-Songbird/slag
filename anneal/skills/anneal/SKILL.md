@@ -13,13 +13,17 @@ description: >-
   to report without changing anything. Do NOT use for a single rename, a
   refactor with another goal, or scaffolding a new project.
 argument-hint: "[audit]"
+license: MIT
+compatibility: Requires Node 18 or later. A migration also requires git.
+metadata:
+  version: "1.0"
 ---
 
 # anneal
 
 Make an existing repository cheaper for an agent to work in: fewer searches to find a file, fewer reads to understand it, one command to check a change. The target conventions and the reason for each are in [references/conventions.md](references/conventions.md). Read that file before building a plan.
 
-Argument: `$ARGUMENTS`. When it is `audit`, run steps 1 and 2 only, then stop without changing any file.
+Argument: `$ARGUMENTS`. A host that does not fill that in leaves it as written; read the argument from the request instead. When it is `audit`, run steps 1 and 2 only, then stop without changing any file.
 
 ## What differs by host
 
@@ -105,7 +109,7 @@ Create the branch `anneal/<YYYY-MM-DD>` from the current `HEAD` before the first
 4. When a check that passed in step 4 now fails, fix it only if this step caused it: a missed import, a stale path, or a doc the project requires alongside the change. If the cause is elsewhere, or the fix doesn't restore the baseline, set the step aside by committing it on a branch named `anneal/<YYYY-MM-DD>-set-aside-<n>` and switching back to the migration branch. Tell the owner and move on.
 5. When the checks match the baseline, commit with the subject `anneal: <step>` and a body listing what moved or changed.
 
-While the migration branch is checked out, anneal's guard refuses destructive git commands — `reset --hard`, `clean -f`, `push --force`, `branch -D`. Undo a step with `git revert`; leave the branch to abandon the migration.
+While the migration branch is checked out, anneal's guard refuses destructive git commands — `reset --hard`, `clean -f`, `checkout --force`, `push --force`, `branch -D`. Undo a step with `git revert`; leave the branch to abandon the migration.
 
 ## 7. Report
 

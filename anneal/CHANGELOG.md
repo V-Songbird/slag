@@ -21,7 +21,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - The audit reports two more things: code buried six or more folders deep, and environment files with no `.env.example` naming the variables they set.
 - Renames and moves re-point relative `import`, `export … from`, `import()` and `require()` themselves in JavaScript and TypeScript projects, instead of one search-and-edit per file.
 - The migration plan can add a `.env.example`, built from the variable names the project's own code and docs read.
-- While an `anneal/<date>` branch is checked out, `git reset --hard`, `git clean -f`, `git push --force` and `git branch -D` are refused. Every other branch is untouched.
+- While an `anneal/<date>` branch is checked out, `git reset --hard`, `git clean -f`, `git checkout --force`, `git push --force` and `git branch -D` are refused. Every other branch is untouched.
 
 ### Changed
 

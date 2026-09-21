@@ -31,17 +31,6 @@
         "AGENTS.md",
         "layout"
       ],
-      "tags": [
-        "conventions",
-        "codebase",
-        "navigation",
-        "audit",
-        "migration",
-        "refactoring",
-        "CLAUDE.md",
-        "AGENTS.md",
-        "layout"
-      ],
       "strict": true
     },
     {

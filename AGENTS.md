@@ -10,7 +10,7 @@ No dependencies to install, no build step. Node 20, as `.nvmrc` declares and `pa
 requires. That is the oldest version the suite has been run on, not the oldest it might work on.
 
 ```bash
-npm run check                            # node --test, 125 tests: 49 anneal, 64 collet, 12 the hook
+npm run check                            # node --test over every suite: anneal, collet, the edit hook
 node anneal/scripts/audit.js --root .    # anneal's own audit, run against this repo
 claude plugin eval ./anneal --no-publish # 2 eval cases; slow, drives real sessions
 ```
@@ -30,26 +30,26 @@ There is no CI. The one gap the seven-plugin trim left open is in
 slag/
 ├── .agents/plugins/marketplace.json   Codex marketplace index
 ├── .claude-plugin/marketplace.json    Claude Code marketplace index
-├── .claude/                           committed; settings, one scoped rule, cut-release
+├── .claude/                           committed; settings, one scoped rule, the cut-release skill
 ├── anneal/                            repository layout auditor and migrator
 ├── collet/                            session task harness
-├── docs/knowledge/                    four documents, see below
-├── docs/decisions/                    one decision record, see below
+├── docs/knowledge/                    why things are built the way they are
+├── docs/decisions/                    decision records
 ├── scripts/claude-hooks/              reruns a plugin's suite after an edit inside it
 └── scripts/git-hooks/                 the commit gate, armed by hand after a clone
 ```
 
 Inside a plugin: `skills/<name>/SKILL.md` for what the host loads, `scripts/` for standalone CLIs,
-`hooks/` for event wiring, `tests/` for a `node:test` suite, `evals/` for cases
-`claude plugin eval` runs, plus `README.md`, `LICENSE` and `CHANGELOG.md`.
+`hooks/` for event wiring, `agents/` for a subagent a skill delegates to, `tests/` for a
+`node:test` suite, `evals/` for cases `claude plugin eval` runs, plus `README.md`, `LICENSE` and `CHANGELOG.md`.
 
-| Document | Read it when |
-| --- | --- |
-| [docs/knowledge/collet-design.md](docs/knowledge/collet-design.md) | changing collet's guard, scope check or task CLI |
-| [docs/knowledge/plugin-trim.md](docs/knowledge/plugin-trim.md) | restoring a file the trim deleted, or adding a document |
-| [docs/knowledge/host-plugin-formats.md](docs/knowledge/host-plugin-formats.md) | touching a manifest, a hooks file, or how a hook reads a host's event |
-| [docs/knowledge/collet-catalogue-merge.md](docs/knowledge/collet-catalogue-merge.md) | bringing jig's error catalogue into collet, or changing what the guard runs |
-| [docs/decisions/roadmap-ownership.md](docs/decisions/roadmap-ownership.md) | changing how collet behaves on a project that keeps a `ROADMAP.jsonl` |
+Each document under `docs/` opens with a `summary` line that says when to read it. There is no
+index to keep in step.
+
+A release happens only when the owner asks for one, and follows
+[.claude/skills/cut-release/SKILL.md](.claude/skills/cut-release/SKILL.md) on every host. Claude
+Code loads it as `/cut-release`. Codex and Antigravity do not load `.claude/`, so a session there
+reads that file and follows it.
 
 ## Each plugin ships three manifests, one per host
 
@@ -98,6 +98,10 @@ manifest and the code it points at move in the same commit. A retired plugin's e
 **No logos, no images, no badges.** These are experiments. A README earns its place on text alone,
 and artwork is one more thing to keep in step with a manifest.
 
+**Both plugin READMEs follow one skeleton:** the same H2 headings in the same order, recorded in
+[docs/knowledge/plugin-readme-template.md](docs/knowledge/plugin-readme-template.md). A section a
+plugin needs and the skeleton lacks goes under `How it works`, not beside it.
+
 **A README describes current behaviour, for a user.** No benchmark methodology, no investigation
 narrative, no history of what the plugin used to do. A plugin states once, near the top, that it is
 experimental with no support promise, then gets on with describing itself. Counts a reader can
@@ -107,24 +111,33 @@ check is worse than no number.
 **Every claim in a README is one that was run.** Output blocks come from real runs. Where a fact is
 missing, say it is missing rather than filling it in.
 
-**A plugin with scripted behaviour carries a `node:test` suite** under `tests/`. Both do: 49 in
-anneal, 64 in collet.
+**A skill's frontmatter carries `name`, `description`, `license`, `compatibility` and
+`metadata.version`.** The description is a `>-` block with no colon followed by a space in it.
+`metadata.version` is the skill's own revision, not the plugin's version: a release leaves it
+alone, and a change to the skill's scope or mode moves it. Why is in
+[docs/knowledge/host-plugin-formats.md](docs/knowledge/host-plugin-formats.md).
 
-**Documents under `docs/` follow the documentation schema**: YAML frontmatter with `type`, `summary`
-and `related_files`, plus `status` for a `task_summary`. One current document per topic, updated in
-place, with a stable kebab-case name and no date in the filename. Git holds history, not archive
-copies. Keep useful rejected approaches in a `Rejected Alternatives` section.
-A document sits in the folder for its `type`: `docs/knowledge/` and `docs/decisions/` today, with
-`docs/tasks/` or `docs/apis/` added only when one is needed. `docs/research/` is gitignored,
-holds the commit gate's blocklist, and is not a place for documents.
+**A plugin with scripted behaviour carries a `node:test` suite** under `tests/`. Both do.
+
+**`docs/` has one folder per document `type`:** `docs/knowledge/` and `docs/decisions/` today. A new
+document copies its frontmatter from a sibling. `docs/research/` is gitignored, holds the commit
+gate's blocklist, and is not a place for documents.
 
 **Disposable work goes in the session scratchpad.** Benchmark arms, throwaway fixtures, headless
 probe workspaces and scratch git repositories are created under the scratchpad path given at
 session start — use it verbatim, never `/tmp`, never `os.tmpdir()`, and never a directory inside
 this repository. Nothing is copied back except a number or a line a document cites.
 
+**This file carries only what is specific to Slag.** A rule the host's own instruction file already
+loads is not copied in here. Two sources of truth for one rule drift, and the copy is the one that
+goes stale.
+
 ## Known pitfalls
 
+- **There is no `CLAUDE.md`, on purpose.** All three hosts read this file. Claude Code reads it only
+  while no `CLAUDE.md` exists here or in a directory above, so adding one, even a pointer, hides
+  this file from that host. The rule is in
+  [docs/knowledge/host-plugin-formats.md](docs/knowledge/host-plugin-formats.md).
 - **collet is ESM, anneal is CommonJS.** Every `.js` under `collet/` uses `import`, and
   `collet/package.json` declares `"type": "module"` so it does not depend on Node's syntax
   detection. Every `.js` under `anneal/` uses `require` and relies on the root `package.json`

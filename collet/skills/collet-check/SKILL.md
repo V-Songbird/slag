@@ -1,6 +1,17 @@
 ---
 name: collet-check
-description: Writes a new check for a project that uses collet — the mistake it catches, the check itself, and the two fixtures that prove it. Use when asked to guard a mistake that keeps happening, to add a check or guardrail, to stop an agent repeating a specific error, or when a mistake in this repository has a shape that could be caught by a machine. ONLY when the project already has a `.collet/` directory.
+description: >-
+  Writes a new check for a project that uses collet — the mistake it catches,
+  the check itself, and the two fixtures that prove it. Use when asked to
+  guard a mistake that keeps happening, to add a check or guardrail, to stop
+  an agent repeating a specific error, or when a mistake in this repository
+  has a shape that could be caught by a machine. ONLY when the project already
+  has a `.collet/` directory. Not for mounting the harness, which the collet
+  skill does.
+license: MIT
+compatibility: Requires Node 20 or later and a project with collet already mounted.
+metadata:
+  version: "1.0"
 ---
 
 # Adding a check

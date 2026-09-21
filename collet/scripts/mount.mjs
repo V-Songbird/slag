@@ -5,8 +5,9 @@
 //
 //   node scripts/mount.mjs <project-directory> [--accept "npm test"]
 //
-// Nothing already there is overwritten. The rules block is written between its markers, so
-// re-running replaces the block and leaves everything around it exactly as it was.
+// collet's own scripts are refreshed on every run; the project's config.json, unverified.md and
+// .gitignore are kept. The rules block is written between its markers, so re-running replaces the
+// block and leaves everything around it exactly as it was.
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -115,7 +116,9 @@ if (!existsSync(unverified)) {
 
 // The same block in every surface a different agent reads. A session loads exactly one of them, so
 // the repetition costs nothing at run time and the alternative is a project that is only guarded
-// for whichever tool happened to be configured first.
+// for whichever tool happened to be configured first. `CLAUDE.md` is only ever joined, never
+// created: one host reads `AGENTS.md` only while no `CLAUDE.md` exists, so creating it here would
+// hide the project's own instructions behind a file holding nothing but this block.
 const block = readFileSync(join(TEMPLATES, 'rules.md'), 'utf8')
   .trim()
   .replace('{{WIDEN}}', '`node .collet/task.mjs widen --add <path> --why "<reason>"`.')
@@ -124,7 +127,8 @@ const block = readFileSync(join(TEMPLATES, 'rules.md'), 'utf8')
     '`node .collet/task.mjs close` checks the working tree against the task, then runs the accept command.'
   );
 
-const surfaces = ['AGENTS.md', 'CLAUDE.md'];
+const surfaces = ['AGENTS.md'];
+if (existsSync(join(target, 'CLAUDE.md'))) surfaces.push('CLAUDE.md');
 if (existsSync(join(target, '.cursor'))) surfaces.push('.cursor/rules/collet.md');
 
 for (const surface of surfaces) {

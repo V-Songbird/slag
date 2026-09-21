@@ -18,7 +18,9 @@ Two plugins are installable from here. Both work on their own and stay out of th
 /plugin install <plugin-name>@slag
 ```
 
-The first command registers this collection once. The second installs one plugin, and takes effect next session. Uninstall with `/plugin uninstall <plugin-name>@slag`.
+The first command registers this collection once. The second installs one plugin, and takes effect next session. To confirm it loaded, start a new session and type the plugin's own command: `/anneal:anneal` or `/collet:collet`.
+
+The marketplace itself has no settings. Each plugin's README says whether that plugin has any. Uninstall with `/plugin uninstall <plugin-name>@slag`.
 
 On Codex, add this repository as a marketplace and install from `Slag · Codex`.
 
@@ -61,7 +63,7 @@ They compose: anneal gets the layout into shape, and collet keeps a session from
 npm run check
 ```
 
-That runs `node --test`: 125 tests, 49 in anneal, 64 in collet and 12 for the hook. There is no CI.
+That runs `node --test`: 126 tests, 49 in anneal, 65 in collet and 12 for the hook. There is no CI.
 
 Plugins live in-tree as plain directories, with one history and no submodules.
 [AGENTS.md](AGENTS.md) is the map: the layout, the three manifests each plugin ships, and the
@@ -70,6 +72,7 @@ conventions a change has to respect.
 ## Support
 
 - Bugs and questions: the [issue tracker](https://github.com/V-Songbird/slag/issues) for this repository. It is the only channel.
+- Security reports: the same issue tracker. There is no `SECURITY.md` and no private address, so anything you file is public.
 - What changed: each plugin's own `CHANGELOG.md` — [anneal](./anneal/CHANGELOG.md), [collet](./collet/CHANGELOG.md).
 - This repository accepts no outside contributions and carries no `CONTRIBUTING.md`.
 

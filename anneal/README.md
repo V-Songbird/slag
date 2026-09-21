@@ -25,19 +25,13 @@ Takes effect next session.
 
 **Codex** — add this repository as a marketplace, then install `anneal` from `Slag · Codex`.
 
-**Antigravity** — there is no marketplace. Clone the repository and run `agy plugin install <path-to-clone>/anneal`, or copy the `anneal/` directory to `~/.gemini/config/plugins/anneal/` for every project, or to `.agents/plugins/anneal/` for one workspace.
+**Antigravity** — there is no marketplace. Clone the repository and run `agy plugin install <path-to-clone>/anneal`, or copy the `anneal/` directory to `.agents/plugins/anneal/` for one workspace or `~/.gemini/config/plugins/anneal/` for every workspace.
 
-Nothing runs until you ask for it.
+anneal acts only when you ask. Its one hook reads each shell command and stays silent outside a migration branch.
 
 ## Quick start
 
-Ask for an audit. It reads the repository and writes nothing.
-
-```text
-/anneal:anneal audit
-```
-
-On Codex, type `$anneal audit` instead; on Antigravity, `/anneal audit`.
+Ask for an audit. It reads the repository and writes nothing. On Claude Code, type `/anneal:anneal audit`. On Codex, type `$anneal audit`. On Antigravity, type `/anneal audit`.
 
 anneal answers by running its scan script and reporting what came back. Below is that script, run against a small demo repository. The demo has a generic file name, two files sharing a name, no map file and an unignored `dist` folder.
 
@@ -76,12 +70,16 @@ Nothing on disk has changed. Add `--json` for the full evidence behind each coun
 
 ## What you can do
 
-| You want to… | Ask for |
+| You want to… | Command |
 | --- | --- |
-| See what slows an agent down here, changing nothing | `/anneal:anneal audit`, `$anneal audit` or `/anneal audit` |
-| Audit, plan and migrate, approving each step | `/anneal:anneal`, `$anneal` or `/anneal` |
+| See what slows an agent down here, changing nothing | `/anneal:anneal audit` |
+| Audit, plan and migrate, approving each step | `/anneal:anneal` |
+| Run the scan with no host at all | `node anneal/scripts/audit.js --root <directory> [--json]` |
+| Re-point imports after a move, with no host at all | `node anneal/scripts/update-imports.js --from <old-path> --to <new-path> [--root <directory>]` |
 
-## What the audit looks for
+## How it works
+
+### What the audit looks for
 
 Each rule removes steps an agent repeats every session. The reason behind each one is in [the target conventions](skills/anneal/references/conventions.md).
 
@@ -105,7 +103,7 @@ Each rule removes steps an agent repeats every session. The reason behind each o
 | low | `re-export-files` | Index files that only re-export, adding a hop to every lookup |
 | low | `check-command-split` | Checks exist, but no single command runs them all |
 
-## How a migration runs
+### How a migration runs
 
 1. The audit runs and you read the findings.
 2. Your project's own checks run once, so a failure that was already there is never blamed on a later step.
@@ -116,13 +114,13 @@ Each rule removes steps an agent repeats every session. The reason behind each o
 
 anneal stops before step 4 when `git status --porcelain` prints anything. The branch you were on is left exactly as it was.
 
+### The safety hook
+
+While a branch named `anneal/<YYYY-MM-DD>` is checked out, a hook refuses five git commands: `reset --hard`, `clean -f`, `checkout --force`, `push --force` and `branch -D`. Each one would throw away the commits the migration had already made. `push --force-with-lease` is allowed, because it refuses on its own when the remote moved. Undo a step with `git revert`, or leave the branch to abandon the migration. On every other branch the hook allows everything.
+
 ## Configuration
 
 anneal has no settings. What it does is decided by the steps you approve during the run.
-
-## Safety
-
-While a branch named `anneal/<YYYY-MM-DD>` is checked out, a hook refuses four git commands: `reset --hard`, `clean -f`, `push --force` and `branch -D`. Each one would throw away the commits the migration had already made. Undo a step with `git revert`, or leave the branch to abandon the migration. On every other branch the hook allows everything.
 
 ## Limits
 
@@ -133,17 +131,11 @@ While a branch named `anneal/<YYYY-MM-DD>` is checked out, a hook refuses four g
 
 ## Development
 
-The two scripts run on their own, outside any host:
+The suite covers both scripts and the hook. Run it from a clone of this repository:
 
 ```bash
-node anneal/scripts/audit.js --root <directory> [--json]
-node anneal/scripts/update-imports.js --from <old-path> --to <new-path> [--root <directory>]
-```
-
-The suite covers all three of them:
-
-```bash
-node --test anneal/tests/*.test.js
+cd anneal
+node --test
 ```
 
 Expected output:
@@ -154,18 +146,20 @@ Expected output:
 # fail 0
 ```
 
-`npm run check` from the repository root runs anneal's 49 alongside collet's 62.
+`npm run check` from the repository root runs every suite in the repository.
 
-Two eval cases live in `evals/`. They check what a unit test cannot: that the skill fires, that `audit` creates no file, and that a migration stops on a dirty tree. Each run drives a real session, so it is slow.
+Two eval cases live in `evals/`. They check what a unit test cannot: that the skill fires, that `audit` creates no file, and that a migration stops on a dirty tree. Each run drives a real session, so it is slow. Run them from the repository root:
 
 ```bash
 claude plugin eval ./anneal --no-publish
 ```
 
+One thing is not proven. The Codex and Antigravity wiring follows each host's documentation and has unit coverage, but has never run on either host.
+
 ## Support
 
-- Bugs and questions: the [issue tracker](https://github.com/V-Songbird/slag/issues) for this repository.
-- What changed: [CHANGELOG.md](./CHANGELOG.md), which follows Keep a Changelog. The version lives in the marketplace entry, [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json).
+- Bugs, questions and security reports: the [issue tracker](https://github.com/V-Songbird/slag/issues) for this repository. It is the only channel, so anything you file is public.
+- What changed: [CHANGELOG.md](./CHANGELOG.md), which follows Keep a Changelog.
 
 ## License
 

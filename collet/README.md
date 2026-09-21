@@ -9,8 +9,8 @@ Use it on a repository where an agent drifts past the task, or calls work finish
 ## Requirements
 
 - Node 20 or later, with no other dependencies.
-- A git repository. The scope check reads `git diff` and `git ls-files` to see what changed.
 - Claude Code, Codex or Antigravity for the session hooks. The checks themselves run on plain `node`, with no plugin installed.
+- A git repository. The scope check reads `git diff` and `git ls-files` to see what changed.
 
 ## Install
 
@@ -25,11 +25,13 @@ Takes effect next session.
 
 **Codex** — add this repository as a marketplace, then install `collet` from `Slag · Codex`.
 
-**Antigravity** — there is no marketplace. Clone the repository and run `agy plugin install <path-to-clone>/collet`, or copy the `collet/` directory to `.agents/plugins/collet/` for one workspace or `~/.gemini/config/plugins/collet/` for every workspace. Only the guard is wired there: Antigravity has no session start or compaction event, so the open task is stated by the rules block and by `node .collet/task.mjs status`.
+**Antigravity** — there is no marketplace. Clone the repository and run `agy plugin install <path-to-clone>/collet`, or copy the `collet/` directory to `.agents/plugins/collet/` for one workspace or `~/.gemini/config/plugins/collet/` for every workspace.
+
+Once installed, collet runs three hooks. It states the open task at session start, guards each write, and writes a handoff before compaction. Only the guard is wired on Antigravity, which has no session start or compaction event. There, the rules block and `node .collet/task.mjs status` state the open task.
 
 ## Quick start
 
-Ask the session to set the harness up, with `/collet`. That runs the mount command below, which you can also run yourself:
+Ask the session to set the harness up. On Claude Code, type `/collet:collet`. On Codex, type `$collet`. On Antigravity, type `/collet`. That runs the mount command below, which you can also run yourself from a clone of this repository:
 
 ```bash
 node collet/scripts/mount.mjs <project-directory> --accept "<the command that proves a task worked>"
@@ -45,19 +47,20 @@ collet mounted into /path/to/project
   wrote    .collet/checks/run.mjs
   wrote    .collet/checks/scope.mjs
   …
+  wrote    .collet/.gitignore
   wrote    .collet/config.json — fill in the project line, the conventions and the accept command
   wrote    .collet/unverified.md
   wrote    AGENTS.md
-  wrote    CLAUDE.md
 
 next:
   1. Fill in .collet/config.json — the project line and the conventions a change must respect.
      A task cannot be opened while those placeholders are still there.
   2. Open the first task, with the scope derived from reading the code it touches:
        node .collet/task.mjs add --title "..." --why "..." --scope "src/**,test/**"
+  …
 ```
 
-Mounting never overwrites a file that is already there. The rules block goes between its own markers, so a second run replaces the block and leaves your own text untouched.
+A second run refreshes collet's own scripts: `task.mjs`, `state.mjs` and the shipped checks. Keep your own checks in their own files. Your `config.json` and `unverified.md` are kept. The rules block sits between its own markers, so a second run replaces it and leaves your text untouched.
 
 Fill in `.collet/config.json`, then open a task:
 
@@ -103,26 +106,26 @@ task t1 closed. Nothing changed outside its files, and the accept command exited
 
 Either half failing leaves the task open.
 
-## Why you would want it
-
-- **"Finished" stops being an opinion.** Closing runs the accept command itself. A non-zero exit leaves the task open, and no amount of confidence changes that.
-- **Drift gets refused, not reported.** The guard reads write tools, patches, and the shell forms it can read with certainty. It also reads `rm -rf` on a directory, which is the one command worth catching before it lands.
-- **The list corrects itself.** Name the module that owns the behaviour, and collet pulls in what that module imports. It prints the reason for each addition. A list one file too narrow does not block work. It quietly pushes the change into the wrong file.
-- **"Covered" means caught.** Every check ships with a planted mistake and a lookalike. One that cannot catch its own violation is discarded and named, not counted.
-- **It stays out of a project that plans its work elsewhere.** A repository that already keeps a `ROADMAP.jsonl` or a `.foreman/` directory is left untouched: the mount refuses and writes nothing. That tool owns the plan, and the files its entries name are a forecast it rewrites, not a boundary to refuse a write against.
-
 ## What you can do
 
 | You want to… | Command |
 | --- | --- |
-| Set the harness up in a repository | `/collet` |
-| See the open task and what it may touch | `/collet what's the task?`, or `node .collet/task.mjs status` |
+| Set the harness up in a repository | `/collet:collet` |
+| See the open task and what it may touch | `/collet:collet what's the task?`, or `node .collet/task.mjs status` |
 | Open a task | `node .collet/task.mjs add --title "..." --why "..." --scope "src/cart.mjs,test/**"` |
 | Add a file the task genuinely needs | `node .collet/task.mjs widen --add <path> --why "<reason>"` |
 | Finish one | `node .collet/task.mjs close --left-out "..." --unverified "..."` |
 | Prove the checks still catch what they claim | `node .collet/checks/run.mjs` |
 | Check the working tree against the open task | `node .collet/checks/run.mjs --live` |
-| Guard a mistake that keeps happening | `/collet-check help me catch skipped tests` |
+| Guard a mistake that keeps happening | `/collet:collet-check help me catch skipped tests` |
+
+## How it works
+
+- **"Finished" stops being an opinion.** Closing runs the accept command itself. A non-zero exit leaves the task open.
+- **Drift gets refused, not reported.** The guard reads write tools, patches, and the shell forms it can read with certainty. It also reads `rm -rf` on a directory, which is the one command worth catching before it lands.
+- **The list corrects itself.** Name the module that owns the behaviour, and collet pulls in what that module imports. It prints the reason for each addition. A list one file too narrow does not block work. It quietly pushes the change into the wrong file.
+- **"Covered" means caught.** Every check ships with a planted mistake and a lookalike. One that cannot catch its own violation is discarded and named, not counted.
+- **It stays out of a project that plans its work elsewhere.** The mount refuses and writes nothing there. A repository that keeps a `ROADMAP.jsonl` or a `.foreman/` directory owns its own plan, and [the decision record](../docs/decisions/roadmap-ownership.md) says why.
 
 ## Configuration
 
@@ -134,35 +137,53 @@ Either half failing leaves the task open.
 | `conventions` | no | two `REPLACE ME` entries | Decisions that constrain what a change here may look like |
 | `accept` | yes | `REPLACE ME: …` | The command a task closes with, unless the task names its own |
 
-The rules block is written into `AGENTS.md` and `CLAUDE.md`, and into `.cursor/rules/collet.md` when the project already has a `.cursor/` directory. There are no environment variables and no secrets.
+The rules block always goes into `AGENTS.md`. It also goes into `CLAUDE.md` when that file exists, and into `.cursor/rules/collet.md` when `.cursor/` exists. The mount never creates a `CLAUDE.md`, which would hide `AGENTS.md` from Claude Code. There are no environment variables and no secrets.
+
+Commit what lands in `.collet/`. The `.collet/.gitignore` it writes already leaves out what is derived or belongs to your machine.
+
+Kill switch: create `.collet/off` and every session guard goes silent. The committed checks never read it.
 
 ## Benchmarks
-
-Every check ships with planted mistakes and the lookalikes written to fool it.
 
 | What | Score |
 | --- | --- |
 | Planted violations the scope check catches | **5 of 5** |
 | Lookalikes it leaves alone | **6 of 6** |
-| Behaviour tests across the plugin | **62 of 62** |
 
-Reproduce them with `node --test collet/tests/*.test.js` and `node .collet/checks/run.mjs`, which reads the same fixtures it uses for admission.
+How we tested: `node .collet/checks/run.mjs` in a mounted project, on the fixtures the scope check is admitted on.
 
-## Good to know
+Expected output:
 
-- Commit what lands in `.collet/`. The `.collet/.gitignore` it writes already leaves out what is derived or belongs to your machine.
-- Kill switch: create `.collet/off` and every session guard goes silent. The committed checks never read it and go on running.
-- With no task open, nothing is enforced. That hole is deliberate and written down rather than hidden.
-- The scope check reads the shell forms it can read with certainty: redirects, `cp`, `mv`, `rm`, `tee`, `sed -i`, and the common PowerShell cmdlets. A path built from a variable, or a file written by a program it invoked, goes through. This narrows the hole that guarding write tools alone leaves; it does not close it.
-- A green accept command means one command exited zero and the writes stayed inside a list someone drew. It does not mean the work is correct, and it is not a reason to review less.
+```text
+ok   scope — 5 violation(s) caught, 6 near miss(es) left alone
+```
+
+## Limits
+
+- With no task open, nothing is enforced. That is deliberate.
+- The scope check reads the shell forms it can read with certainty: redirects, `cp`, `mv`, `rm`, `tee`, `sed -i`, and the common PowerShell cmdlets. A path built from a variable, or a file written by a program it invoked, goes through. It narrows the hole, and does not close it.
+- A green accept command means one command exited zero and the writes stayed inside a list someone drew. It does not mean the work is correct.
 
 ## Development
 
+Run the suite from a clone of this repository:
+
 ```bash
-node --test collet/tests/*.test.js
+cd collet
+node --test
 ```
 
-62 tests across five suites. The hooks are driven the way each host drives them, with the event on stdin: Claude Code's shape, Codex's shape with the project in the event, and Antigravity's nested `toolCall` run from the plugin directory.
+Expected output:
+
+```text
+# tests 65
+# pass 65
+# fail 0
+```
+
+`npm run check` from the repository root runs every suite in the repository.
+
+The suite drives the hooks the way each host does, with that host's event on stdin.
 
 Why each mechanism exists, and the defect behind it, is in [the design notes](../docs/knowledge/collet-design.md).
 
@@ -170,8 +191,8 @@ Two things are not proven. No session has loaded the plugin and reported `Loadin
 
 ## Support
 
-- Bugs and questions: the [issue tracker](https://github.com/V-Songbird/slag/issues) for this repository.
-- What changed: [CHANGELOG.md](./CHANGELOG.md), which follows Keep a Changelog. Versions live in the marketplace entry, [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json).
+- Bugs, questions and security reports: the [issue tracker](https://github.com/V-Songbird/slag/issues) for this repository. It is the only channel, so anything you file is public.
+- What changed: [CHANGELOG.md](./CHANGELOG.md), which follows Keep a Changelog.
 
 ## License
 

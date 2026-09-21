@@ -1,6 +1,19 @@
 ---
 name: collet
-description: Mounts the collet harness into a project — the task ledger, the rules block in AGENTS.md/CLAUDE.md/.cursor/rules, and the checks directory — or reports on a project that already has one. Use when asked to set up a harness, guardrails, scope enforcement or session continuity for a repository, to adopt collet, or to see what the current task is, what it may touch, and what a session is not allowed to touch. ONLY on an explicit request: never from ordinary project work, from a new or empty repository, or from "set up this project".
+description: >-
+  Mounts the collet harness into a project — the task ledger, the rules block
+  in AGENTS.md/CLAUDE.md/.cursor/rules, and the checks directory — or reports
+  on a project that already has one. Use when asked to set up a harness,
+  guardrails, scope enforcement or session continuity for a repository, to
+  adopt collet, or to see what the current task is, what it may touch, and
+  what a session is not allowed to touch. ONLY on an explicit request, never
+  from ordinary project work, from a new or empty repository, or from "set up
+  this project". Not for writing a new check, which the collet-check skill
+  does.
+license: MIT
+compatibility: Requires Node 20 or later and git.
+metadata:
+  version: "1.0"
 ---
 
 # collet
@@ -47,18 +60,28 @@ rule that tool never made.
 ## Mount
 
 ```bash
-node scripts/mount.mjs <project-directory> --accept "<the command that proves a task worked>"
+node "<plugin root>/scripts/mount.mjs" <project-directory> --accept "<the command that proves a task worked>"
 ```
 
-It prints every path it wrote and every path it kept. It never overwrites a file that is already
-there: the rules block goes between its own markers, so a re-run replaces the block and leaves
-everything around it exactly as it was, and an existing `AGENTS.md` or `CLAUDE.md` keeps its text.
+`<plugin root>` is `${CLAUDE_PLUGIN_ROOT}` on Claude Code. On Codex and Antigravity, resolve
+`../../` from this `SKILL.md`.
+
+It prints every path it wrote and every path it kept. A re-run refreshes collet's own scripts —
+`task.mjs`, `state.mjs` and the shipped checks — and keeps the project's `config.json` and
+`unverified.md`. The rules block goes between its own markers, so a re-run replaces the block and
+leaves everything around it exactly as it was, and an existing `AGENTS.md` or `CLAUDE.md` keeps
+its text.
+
+The block always goes into `AGENTS.md`. It goes into `CLAUDE.md` only when the project already has
+one, and into `.cursor/rules/collet.md` only when `.cursor/` exists. **Do not create a `CLAUDE.md`
+to receive it.** Claude Code reads `AGENTS.md` only while no `CLAUDE.md` exists, so a new one
+holding just the block would hide the project's own instructions from that host.
 
 Then fill in `.collet/config.json` — the one-line description of the project and the conventions a
 change here has to respect. **A task cannot be opened while those placeholders are still in the
 file**, because a session is told that file before it reads anything and `REPLACE ME` is not a fact.
 
-Then, on a project that owns its own ledger, open the first task:
+Then open the first task:
 
 ```bash
 node .collet/task.mjs add --title "..." --why "..." --scope "src/cli.mjs,test/**"

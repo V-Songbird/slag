@@ -3,6 +3,10 @@ name: cut-release
 description: Bump a plugin's version, date its CHANGELOG, then commit and push the release.
 argument-hint: "[plugin]"
 disable-model-invocation: true
+license: MIT
+compatibility: Claude Code only. Requires git and Node 20 or later.
+metadata:
+  version: "1.0"
 ---
 
 # cut-release

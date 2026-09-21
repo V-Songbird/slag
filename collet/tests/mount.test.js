@@ -8,11 +8,24 @@ import test from 'node:test';
 import { clean, mount, project, TREE } from './temp-project.js';
 
 test('the rules block reaches every surface an agent reads', () => {
-  const root = project({ ...TREE, '.cursor/rules/.keep': '' });
+  const root = project({ ...TREE, 'CLAUDE.md': '# House rules\n', '.cursor/rules/.keep': '' });
   mount(root);
   for (const surface of ['AGENTS.md', 'CLAUDE.md', '.cursor/rules/collet.md']) {
     assert.match(readFileSync(join(root, surface), 'utf8'), /collet:begin/, surface);
   }
+  assert.match(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), /# House rules/);
+  clean(root);
+});
+
+// One host reads `AGENTS.md` only while no `CLAUDE.md` exists. A `CLAUDE.md` created here would
+// hold nothing but the block, and would hide everything the project wrote in `AGENTS.md`.
+test('a project that keeps only AGENTS.md is not given a CLAUDE.md', () => {
+  const root = project({ ...TREE, 'AGENTS.md': '# House rules\n' });
+  const out = mount(root);
+  assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /collet:begin/);
+  assert.equal(existsSync(join(root, 'CLAUDE.md')), false);
+  assert.equal(existsSync(join(root, '.cursor')), false);
+  assert.doesNotMatch(out.stdout, /CLAUDE\.md/);
   clean(root);
 });
 
