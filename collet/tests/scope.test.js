@@ -94,6 +94,30 @@ test('a patch is read for every file it names', () => {
   clean(root);
 });
 
+test('a patch is found under the key the host sends it in, command included', () => {
+  const root = withTree();
+  const outside = '*** Begin Patch\n*** Update File: src/theme.mjs\n@@\n-a\n+b\n*** End Patch';
+  const inside = '*** Begin Patch\n*** Update File: src/digest.mjs\n@@\n-a\n+b\n*** End Patch';
+  for (const key of ['patch', 'input', 'command', 'content']) {
+    assert.equal(fires(root, { tool: 'apply_patch', input: { [key]: outside } }), true, key);
+    assert.equal(fires(root, { tool: 'apply_patch', input: { [key]: inside } }), false, key);
+  }
+  clean(root);
+});
+
+// A session opened in `src/` writes `../notes.txt` and `digest.mjs`. Read against the root, the
+// first is outside the repository and waved through, and the second is a file that does not exist.
+test('a relative path is read from the directory the call ran in', () => {
+  const root = withTree();
+  const cwd = join(root, 'src');
+  const patch = (file) => `*** Begin Patch\n*** Update File: ${file}\n@@\n-a\n+b\n*** End Patch`;
+  assert.equal(fires(root, { tool: 'apply_patch', input: { command: patch('../notes.txt') }, cwd }), true);
+  assert.equal(fires(root, { tool: 'apply_patch', input: { command: patch('digest.mjs') }, cwd }), false);
+  assert.equal(fires(root, { tool: 'Bash', input: { command: 'rm ../notes.txt' }, cwd }), true);
+  assert.equal(fires(root, { tool: 'Bash', input: { command: 'rm digest.mjs' }, cwd }), false);
+  clean(root);
+});
+
 test('the roadmap another tool owns is never refused here', () => {
   const root = withTree({ 'ROADMAP.jsonl': '{"id":"001"}\n' });
   assert.equal(fires(root, { tool: 'Write', input: { file_path: 'ROADMAP.jsonl' } }), false);

@@ -7,7 +7,6 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/hooks/safety-guard.js\" claude",
-            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"where.exe /q '$PATH:fnm'; if ($LASTEXITCODE -eq 0) { fnm env --use-on-cd | Out-String | Invoke-Expression }; & node ($env:PLUGIN_ROOT + '/hooks/safety-guard.js') claude; exit $LASTEXITCODE\"",
             "timeout": 5
           }
         ]

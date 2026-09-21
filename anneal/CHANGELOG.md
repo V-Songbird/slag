@@ -17,8 +17,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - The skill now starts on a plain question about how easy a repository is to navigate, even when you ask for a list of problems and no changes. Before, such a question was often answered without it.
 - The closing report suggests a harness you can install to keep the result from drifting, instead of one that is no longer here.
 - On Codex, the plugin no longer carries an icon.
-- The root manifest declares the Agent Plugins schema, so a host that reads the portable plugin format loads it as one.
 - On Antigravity the skill is invoked as `/anneal`; the README said `$anneal`, which is Codex's form.
+
+### Fixed
+
+- Codex discovers the migration guard for review by using its compatibility manifest instead of the portable loader.
+- On Codex on Windows the migration guard runs. It named a Windows-only command that broke under
+  the shell that host uses, so the hook failed and the call went ahead. The override is gone and
+  the plain command is the only one; `node` has to be on the path the host gives a hook.
 
 ## [0.2.0-alpha] — 2026-09-19
 

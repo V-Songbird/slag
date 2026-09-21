@@ -16,10 +16,17 @@ const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
  * Where the project is. Claude Code sets CLAUDE_PROJECT_DIR; Codex sends the directory as `cwd`
  * in the event; Antigravity sends `workspacePaths` and runs the hook from the plugin's own
  * directory, which is why process.cwd() is the last resort and never the first.
+ *
+ * All of them name where the session was opened, which may be below the project. The nearest
+ * directory upwards that holds the harness is the root; with none, the answer is the start.
  */
 export function root(event = {}) {
   const workspace = Array.isArray(event.workspacePaths) ? event.workspacePaths[0] : null;
-  return process.env.CLAUDE_PROJECT_DIR ?? event.cwd ?? workspace ?? process.cwd();
+  const start = process.env.CLAUDE_PROJECT_DIR ?? event.cwd ?? workspace ?? process.cwd();
+  for (let dir = start; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, COLLET, 'config.json'))) return dir;
+    if (dirname(dir) === dir) return start;
+  }
 }
 
 /** A project that has collet mounted and has not switched it off, or null. */
@@ -87,7 +94,7 @@ export function emit(event, context) {
 // check stays one function that runs the same way in a session, at commit time and in CI.
 const file = (args) => ({ file_path: args.AbsolutePath ?? args.TargetFile ?? null });
 const ANTIGRAVITY_TOOLS = {
-  run_command: (args) => ({ tool: 'Bash', input: { command: args.CommandLine ?? '' } }),
+  run_command: (args) => ({ tool: 'Bash', input: { command: args.CommandLine ?? '' }, cwd: args.Cwd }),
   write_to_file: (args) => ({ tool: 'Write', input: file(args) }),
   replace_file_content: (args) => ({ tool: 'Edit', input: file(args) }),
   multi_replace_file_content: (args) => ({ tool: 'Edit', input: file(args) }),
@@ -98,7 +105,8 @@ const ANTIGRAVITY_TOOLS = {
 // answers with a bare decision, and is told the allow out loud.
 const HOSTS = {
   claude: {
-    call: (event) => ({ tool: event.tool_name ?? '', input: event.tool_input ?? {} }),
+    // `cwd` is where the call runs, which is what a relative path in it is relative to.
+    call: (event) => ({ tool: event.tool_name ?? '', input: event.tool_input ?? {}, cwd: event.cwd }),
     deny: (reason) => ({
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
     }),

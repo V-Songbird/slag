@@ -175,6 +175,37 @@ test('a host that names the project in the event needs no environment variable',
   clean(root);
 });
 
+// Codex on Windows hands a hook's command to PowerShell. A `commandWindows` that wrapped its script
+// in double quotes had `$env:` and `$LASTEXITCODE` expanded by that outer shell, failed, and the
+// host carried on with the call: a guard wired, listed and never run. Seen in a live session. The
+// plain command ran there as it is, so it is the only one.
+test('the Codex hooks name one command per hook, with no Windows override to break', () => {
+  const { hooks } = JSON.parse(readFileSync(join(PLUGIN, 'hooks', 'codex-hooks.json'), 'utf8'));
+  for (const groups of Object.values(hooks))
+    for (const { hooks: handlers } of groups)
+      for (const handler of handlers) {
+        assert.equal(handler.commandWindows, undefined);
+        assert.match(handler.command, /^node "\$\{PLUGIN_ROOT\}\/hooks\/[a-z-]+\.js"$/);
+      }
+});
+
+// A session opened in `src/` names `src/` as its directory, on every host. The harness is one
+// level up, and a guard that looked only where it was told found none and stood down.
+test('a session opened below the project root is still held to the task', () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const below = join(root, 'src');
+  const call = { tool_name: 'Write', tool_input: { file_path: join(root, 'src', 'theme.mjs') } };
+  const named = hook('guard.js', root, { ...call, cwd: below }, { cwd: PLUGIN, project: null });
+  assert.equal(hookOutput(named).permissionDecision, 'deny', 'the directory arrives in the event');
+  const inEnv = hook('guard.js', root, call, { cwd: PLUGIN, project: below });
+  assert.equal(hookOutput(inEnv).permissionDecision, 'deny', 'the directory arrives in the environment');
+  // A relative path is relative to that directory: `cli.mjs` from `src/` is the task's own file.
+  const relative = { tool_name: 'Write', tool_input: { file_path: 'cli.mjs' }, cwd: below };
+  assert.equal(hook('guard.js', root, relative, { cwd: PLUGIN, project: null }).stdout, '');
+  clean(root);
+});
+
 // Antigravity runs the hook from the plugin directory, nests the call under toolCall with
 // PascalCase arguments, and reads a bare decision back — including the allow.
 test('on Antigravity the guard reads toolCall and answers with a bare decision', () => {

@@ -187,7 +187,7 @@ The suite drives the hooks the way each host does, with that host's event on std
 
 Why each mechanism exists, and the defect behind it, is in [the design notes](../docs/knowledge/collet-design.md).
 
-Two things are not proven. On Claude Code the plugin has loaded and refused a write in two short headless sessions, and in nothing longer or interactive. The Codex and Antigravity wiring has unit coverage, but has never run on either host.
+Two things are not proven. On Claude Code the plugin has loaded and refused a write in two short headless sessions, and in nothing longer or interactive. On Codex, the first runs found three defects that kept the guard from running at all, and with them fixed the guard has refused one file edit outside the task on codex-cli 0.155.1, in a headless session that bypassed hook trust. It has not been seen with its hooks trusted from `/hooks`, which is how you would run it; until you trust them there, that host skips them without saying so. On Antigravity the guard has not been seen to fire or to fail.
 
 ## Support
 

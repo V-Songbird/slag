@@ -37,6 +37,18 @@ All notable changes to collet are documented here. The format follows
 
 ### Fixed
 
+- Codex discovers the session, guard and handoff hooks for review by using its compatibility manifest instead of the portable loader.
+- On Codex on Windows the three hooks run. Each named a Windows-only command that broke under the
+  shell that host uses, so the hook failed and the call went ahead. The override is gone and the
+  plain command is the only one; `node` has to be on the path the host gives a hook.
+- A session opened in a subdirectory of the project is held to the open task. The hooks took the
+  directory the session started in as the project, found no harness there, and stood down.
+- A relative path is read from the directory the call ran in. From a subdirectory, an edit to
+  `../README.md` was allowed and one to the task's own file was refused. A project mounted before
+  this fix gets it by mounting again.
+- A file edit made with a patch on Codex is checked against the open task. That host hands the
+  patch over under a key the scope check did not read, so every such edit was allowed. A project
+  mounted before this fix gets it by mounting again.
 - The `collet` skill's frontmatter is valid YAML now, so a host that parses it strictly can load
   the skill.
 - The guard runs every check the project has, not only the scope check. A check added with the

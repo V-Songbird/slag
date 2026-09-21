@@ -33,14 +33,16 @@ const OWNED_ELSEWHERE = ['ROADMAP.jsonl', '.foreman/'];
  * `relative()` between two different roots returns the target's own absolute path, which starts
  * with a letter rather than `..` and would read as a repository path that matches no scope.
  */
-function repoRelative(target, root) {
+function repoRelative(target, root, from = root) {
   if (typeof target !== 'string' || !target.trim()) return null;
   const clean = target.trim().replace(/^["']|["']$/g, '');
   if (!clean || clean === '-') return null;
   // Both sides go through resolve() first: a root spelled with forward slashes and a target
   // resolved with native ones have different-looking drive prefixes for the same drive.
   const base = resolve(root);
-  const abs = isAbsolute(clean) ? resolve(clean) : resolve(base, clean);
+  // A relative path means what it meant to the session: relative to the directory the call ran
+  // in, which is below the root once a session is opened in `src/` or a shell has changed directory.
+  const abs = isAbsolute(clean) ? resolve(clean) : resolve(from, clean);
   if (parse(abs).root.toLowerCase() !== parse(base).root.toLowerCase()) return null;
   const rel = relative(base, abs).split('\\').join('/');
   if (!rel || rel === '.' || rel.startsWith('..')) return null;
@@ -157,7 +159,9 @@ export function targetsOf(call, root) {
   if (WRITE_TOOLS.has(tool)) return [input.file_path ?? input.notebook_path ?? null];
 
   if (PATCH_TOOLS.has(tool)) {
-    const text = String(input.patch ?? input.input ?? input.content ?? '');
+    // Codex hands the patch over as `command`. Missing that key read every patch as empty and
+    // allowed every file edit on that host.
+    const text = String(input.patch ?? input.input ?? input.command ?? input.content ?? '');
     return [...text.matchAll(PATCH_FILE)].map((match) => match[1]);
   }
 
@@ -166,7 +170,7 @@ export function targetsOf(call, root) {
     // scratch output and temp files happen, and flagging that is how a guard loses its audience.
     // A directory counts: `rm -rf <dir>` is the most destructive thing this can see.
     return shellTargets(input.command ?? '').filter((target) => {
-      const rel = repoRelative(target, root);
+      const rel = repoRelative(target, root, call.cwd ?? root);
       if (!rel) return false;
       try {
         const stat = statSync(join(resolve(root), rel));
@@ -189,7 +193,7 @@ export function check({ root, task, call }) {
   const scope = task.scope ?? [];
 
   for (const target of targets) {
-    const rel = repoRelative(target, root);
+    const rel = repoRelative(target, root, call.cwd ?? root);
     if (!rel) continue;
     if (OWNED_ELSEWHERE.some((owned) => matchScope(owned, rel))) continue;
     if (ALWAYS_WRITABLE.includes(rel)) continue;

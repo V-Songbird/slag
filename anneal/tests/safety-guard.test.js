@@ -157,4 +157,19 @@ describe("wire", () => {
       assert.strictEqual(denied(run.stdout ? JSON.parse(run.stdout) : null), false);
     }
   });
+
+  // Codex on Windows hands a hook's command to PowerShell. A `commandWindows` that wrapped the
+  // script in a double-quoted `-Command` had `$env:` and `$LASTEXITCODE` expanded by that outer
+  // shell, failed, and the host carried on with the call. Seen in a live session on the sibling
+  // plugin, where the plain command ran as it is.
+  test("the Codex hook names one command, with no Windows override to break", () => {
+    const file = path.join(__dirname, "..", "hooks", "codex-hooks.json");
+    const { hooks } = JSON.parse(fs.readFileSync(file, "utf8"));
+    for (const groups of Object.values(hooks))
+      for (const { hooks: handlers } of groups)
+        for (const handler of handlers) {
+          assert.strictEqual(handler.commandWindows, undefined);
+          assert.match(handler.command, /^node "\$\{PLUGIN_ROOT\}\/hooks\/[a-z-]+\.js" claude$/);
+        }
+  });
 });

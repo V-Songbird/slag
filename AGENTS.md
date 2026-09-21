@@ -82,15 +82,17 @@ Inside a plugin: `skills/<name>/SKILL.md` for what the host loads, `scripts/` fo
 | --- | --- | --- |
 | Claude Code | `<plugin>/.claude-plugin/plugin.json` | carries **no** `version` field |
 | Codex | `<plugin>/.codex-plugin/plugin.json` | carries the `interface` block and the `hooks` path |
-| Antigravity | `<plugin>/plugin.json` | also the portable Agent Plugins manifest, hence its `$schema` |
+| Antigravity | `<plugin>/plugin.json` | deliberately omits the portable Agent Plugins `$schema` |
 
 They are hand-maintained copies of the same description and drift easily. Change one, check the
 others.
 
-The root `plugin.json` is read by two things: Antigravity, which wants only `name`, and Codex's
-portable loader, which requires the Agent Plugins `$schema` and then applies
-`.codex-plugin/plugin.json` on top. Never add `extensions.com.openai` to it — that would make
-Codex ignore the `.codex-plugin` file, including the path to its hooks.
+The root `plugin.json` serves Antigravity. Keep the Agent Plugins `$schema` out of it:
+Codex CLI 0.155.1 and desktop runtime 0.155.0-alpha.9.2 omit hooks when that schema
+selects their portable loader. Without it, Codex reads `.codex-plugin/plugin.json`
+and discovers the hooks. Do not add `extensions.com.openai` or restore portable
+recognition without repeating the host discovery and execution checks in
+[host-plugin-formats.md](docs/knowledge/host-plugin-formats.md).
 
 Hooks split the same way: `<plugin>/hooks/hooks.json` for Claude Code,
 `<plugin>/hooks/codex-hooks.json` for Codex, and `<plugin>/hooks.json` at the plugin root for
