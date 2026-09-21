@@ -95,6 +95,10 @@ manifest and the code it points at move in the same commit. A retired plugin's e
 `SECURITY.md`, no `.github/`, no `.gitignore` of its own — the root file covers every plugin.
 `collet/package.json` is the one exception, and it exists only to declare the module type.
 
+**Author fields read `Victor Villegas` and `victor.villegas@tuta.com`,** in every manifest, both
+marketplace entries that carry one, and each `LICENSE`. No other address, and no path from a
+developer's machine, goes into a tracked file.
+
 **No logos, no images, no badges.** These are experiments. A README earns its place on text alone,
 and artwork is one more thing to keep in step with a manifest.
 

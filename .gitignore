@@ -7,8 +7,15 @@
 !.env.example
 *.pem
 *.key
+*.p12
+*.pfx
 *.token
+id_rsa*
+id_ed25519*
 credentials.json
+
+# npm writes registry auth tokens here
+.npmrc
 
 # ==============================================================================
 # 2. Anthropic Claude & Claude Code
@@ -29,6 +36,10 @@ credentials.json
 
 # Corrupted configuration dumps
 .claude.json.corrupted.*
+
+# Personal instruction files. CLAUDE.local.md would also stop Claude Code reading AGENTS.md.
+CLAUDE.local.md
+AGENTS.override.md
 
 # ==============================================================================
 # 3. Agent Workspace & Execution Artifacts
@@ -57,6 +68,9 @@ docs/research/
 # ==============================================================================
 # JetBrains
 .idea/
+
+# VS Code
+.vscode/
 
 # ==============================================================================
 # 5. Operating System Junk
