@@ -6,8 +6,8 @@
 // scripts/, hooks/ or templates/ dir, so a regression surfaces immediately
 // instead of sitting silent until someone runs the suite by hand. There is no
 // CI here, so this is the only thing that reruns a suite unasked. Registered
-// in .claude/settings.json, not any plugin's hooks.json -- CLAUDE_PLUGIN_ROOT
-// isn't set at this level, only CLAUDE_PROJECT_DIR (this repo's root).
+// in .claude/settings.json and .codex/hooks.json, not shipped with a plugin.
+// Patch events can touch multiple plugins; each affected suite runs once.
 //
 // It lives under scripts/ rather than .claude/ so that `npm run check` finds
 // its test file. Node 22's default discovery skips dot-directories, and every
@@ -19,7 +19,7 @@ const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
 
-const WATCHED_TOOLS = new Set(["Edit", "Write"]);
+const WATCHED_TOOLS = new Set(["Edit", "Write", "apply_patch"]);
 // templates/ is collet's: the .mjs files it mounts into a project, held by
 // collet/tests/scope.test.js and mount.test.js. Editing one is a code change
 // like any other, so it belongs here beside scripts/ and hooks/.
@@ -46,8 +46,28 @@ function readInput() {
   }
 }
 
-function repoRoot() {
+function repoRoot(data = {}) {
+  if (data.tool_name === "apply_patch") {
+    const cwd = path.resolve(data.cwd || process.cwd());
+    let dir = cwd;
+    while (!fs.existsSync(path.join(dir, ".git"))) {
+      const parent = path.dirname(dir);
+      if (parent === dir) return cwd;
+      dir = parent;
+    }
+    return dir; // .git can be a directory or a worktree pointer file.
+  }
   return path.resolve(process.env.CLAUDE_PROJECT_DIR || process.cwd());
+}
+
+function editedPaths(data) {
+  if (data.tool_name !== "apply_patch") return [data.tool_input?.file_path].filter(Boolean);
+  const patch = data.tool_input?.command;
+  if (typeof patch !== "string") return [];
+  return [...patch.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)\r?$/gm)]
+    .map((match) => match[1].trimEnd())
+    .filter(Boolean)
+    .map((file) => path.resolve(data.cwd || process.cwd(), file));
 }
 
 // The edited file's first path segment (relative to repo root) is the
@@ -92,9 +112,10 @@ function cleanEnv() {
   return env;
 }
 
-function runTests(pluginRoot) {
+function runTests(pluginRoot, timeout = TEST_TIMEOUT_MS) {
+  if (timeout <= 0) return { passed: false, output: "Hook test budget exhausted before this suite started." };
   try {
-    execSync("node --test", { cwd: pluginRoot, stdio: "pipe", timeout: TEST_TIMEOUT_MS, env: cleanEnv() });
+    execSync("node --test", { cwd: pluginRoot, stdio: "pipe", timeout, env: cleanEnv() });
     return { passed: true };
   } catch (err) {
     const output = `${err.stdout || ""}${err.stderr || ""}` || err.message || "";
@@ -106,17 +127,35 @@ function main() {
   const data = readInput();
   if (!WATCHED_TOOLS.has(data.tool_name)) return;
 
-  const root = repoRoot();
-  const pluginRoot = findPluginRoot(root, data.tool_input?.file_path);
-  if (!pluginRoot) return;
-  if (!fs.existsSync(path.join(pluginRoot, "tests"))) return;
+  const root = repoRoot(data);
+  const plugins = new Map();
+  for (const file of editedPaths(data)) {
+    const pluginRoot = findPluginRoot(root, file);
+    if (pluginRoot && fs.existsSync(path.join(pluginRoot, "tests"))) {
+      if (!plugins.has(pluginRoot)) plugins.set(pluginRoot, new Set());
+      plugins.get(pluginRoot).add(path.basename(file));
+    }
+  }
+  const deadline = Date.now() + TEST_TIMEOUT_MS;
+  const feedback = [];
+  for (const [pluginRoot, files] of plugins) {
+    const result = runTests(pluginRoot, deadline - Date.now());
+    if (result.passed) continue; // silent on green
+    feedback.push(failureContext(pluginRoot, [...files].join(", "), result));
+  }
+  if (!feedback.length) return;
+  const payload = {
+    hookSpecificOutput: {
+      hookEventName: "PostToolUse",
+      additionalContext: feedback.join("\n"),
+    },
+  };
+  process.stdout.write(Buffer.from(JSON.stringify(payload), "utf-8"));
+}
 
-  const result = runTests(pluginRoot);
-  if (result.passed) return; // silent on green, same as every Foreman hook
-
+function failureContext(pluginRoot, edited, result) {
   const stats = (result.output.match(/^# (?:tests|pass|fail) .+$/gm) || []).join("; ");
   const pluginName = path.basename(pluginRoot);
-  const edited = path.basename(String(data.tool_input.file_path));
 
   // No TAP summary means the run never reached a verdict -- killed by the
   // timeout, or node bailed before the first test. Say so rather than blame a
@@ -124,19 +163,8 @@ function main() {
   const verdict = stats ? "failed" : "did not complete";
   const detail = stats || result.output.trim().split(/\r?\n/).slice(-3).join(" ").slice(0, 300);
 
-  const payload = {
-    hookSpecificOutput: {
-      hookEventName: "PostToolUse",
-      additionalContext:
-        `[slag] node --test ${pluginName}/ ${verdict} after this edit to ${edited}. ` +
-        `${detail} Run \`node --test\` from ${pluginName}/ for the full trace before moving on.`,
-    },
-  };
-  try {
-    process.stdout.write(Buffer.from(JSON.stringify(payload), "utf-8"));
-  } catch {
-    // ignore
-  }
+  return `[slag] node --test ${pluginName}/ ${verdict} after this edit to ${edited}. ` +
+    `${detail} Run \`node --test\` from ${pluginName}/ for the full trace before moving on.`;
 }
 
 if (require.main === module) {
@@ -147,4 +175,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, findPluginRoot, runTests, repoRoot };
+module.exports = { main, findPluginRoot, runTests, repoRoot, editedPaths };

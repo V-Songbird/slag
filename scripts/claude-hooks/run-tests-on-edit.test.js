@@ -21,7 +21,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const HOOK_PATH = path.join(__dirname, 'run-tests-on-edit.js');
-const { findPluginRoot, runTests } = require('./run-tests-on-edit');
+const { findPluginRoot, runTests, editedPaths, repoRoot } = require('./run-tests-on-edit');
 
 function runHook(payload, env) {
   return spawnSync('node', [HOOK_PATH], {
@@ -35,6 +35,7 @@ function runHook(payload, env) {
 /** Build a throwaway repo root with one fake plugin folder (marked via .claude-plugin/plugin.json). */
 function makeFakeRepo() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slag-hook-'));
+  fs.mkdirSync(path.join(root, '.git'));
   const pluginRoot = path.join(root, 'demo-plugin');
   fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
   fs.writeFileSync(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), '{"name":"demo-plugin"}', 'utf-8');
@@ -182,5 +183,112 @@ describe('main (end-to-end against a real plugin)', () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('patch events', () => {
+  test('extracts all operation paths without reading diff contents', () => {
+    const cwd = path.resolve('nested');
+    const paths = editedPaths({ tool_name: 'apply_patch', cwd, tool_input: { command: [
+      '*** Begin Patch',
+      '*** Add File: ../demo-plugin/scripts/new file.js',
+      '+*** Delete File: ignored.js',
+      '*** Update File: ../demo-plugin/scripts/old.js',
+      '*** Move to: ../demo-plugin/templates/new.mjs',
+      '*** Delete File: ../demo-plugin/hooks/gone.js',
+      '*** End Patch',
+    ].join('\r\n') } });
+    assert.deepEqual(paths, [
+      '../demo-plugin/scripts/new file.js', '../demo-plugin/scripts/old.js',
+      '../demo-plugin/templates/new.mjs', '../demo-plugin/hooks/gone.js',
+    ].map(file => path.resolve(cwd, file)));
+    assert.deepEqual(editedPaths({ tool_name: 'apply_patch', tool_input: { command: null } }), []);
+  });
+
+  test('finds the root from a nested cwd and a worktree pointer', () => {
+    const { root, pluginRoot } = makeFakeRepo();
+    try {
+      fs.rmdirSync(path.join(root, '.git'));
+      fs.writeFileSync(path.join(root, '.git'), 'gitdir: unused');
+      assert.equal(repoRoot({ tool_name: 'apply_patch', cwd: path.join(pluginRoot, 'scripts') }), root);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('runs both sides of a cross-plugin move once and combines failures', () => {
+    const { root, pluginRoot } = makeFakeRepo();
+    try {
+      const second = path.join(root, 'other-plugin');
+      fs.mkdirSync(path.join(second, '.claude-plugin'), { recursive: true });
+      fs.writeFileSync(path.join(second, '.claude-plugin', 'plugin.json'), '{}');
+      fs.mkdirSync(path.join(second, 'tests'));
+      for (const dir of [pluginRoot, second]) {
+        fs.writeFileSync(path.join(dir, 'tests', 'broken.test.js'),
+          "const fs = require('fs'); require('node:test')('fails', () => { fs.appendFileSync('runs.txt', 'run\\n'); throw new Error('intentional'); });");
+      }
+      const cwd = path.join(pluginRoot, 'scripts');
+      const result = runHook({ tool_name: 'apply_patch', cwd, tool_input: { command: [
+        '*** Begin Patch',
+        '*** Update File: old.js',
+        '*** Move to: ../../other-plugin/templates/moved.mjs',
+        '*** Add File: another.js',
+        '*** Delete File: gone.js',
+        '*** End Patch',
+      ].join('\n') } }, { CLAUDE_PROJECT_DIR: path.join(root, 'wrong-root') });
+      assert.equal(result.status, 0, result.stderr);
+      const output = JSON.parse(result.stdout).hookSpecificOutput;
+      assert.equal(output.hookEventName, 'PostToolUse');
+      assert.match(output.additionalContext, /demo-plugin\/ failed/);
+      assert.match(output.additionalContext, /other-plugin\/ failed/);
+      for (const dir of [pluginRoot, second]) {
+        assert.equal(fs.readFileSync(path.join(dir, 'runs.txt'), 'utf8'), 'run\n');
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('stays silent on green and ignores unwatched or outside paths', () => {
+    const { root, pluginRoot } = makeFakeRepo();
+    try {
+      const marker = path.join(pluginRoot, 'runs.txt');
+      fs.writeFileSync(path.join(pluginRoot, 'tests', 'ok.test.js'),
+        "require('node:test')('passes', () => require('fs').appendFileSync('runs.txt', 'run\\n'));");
+      const invoke = (file) => runHook({ tool_name: 'apply_patch', cwd: root,
+        tool_input: { command: `*** Begin Patch\n*** Update File: ${file}\n*** End Patch` } });
+      for (const file of ['demo-plugin/tests/ok.test.js', 'demo-plugin/scripts/notes.md', '../outside/scripts/x.js']) {
+        assert.equal(invoke(file).stdout, '');
+      }
+      assert.equal(fs.existsSync(marker), false);
+      const result = invoke(path.join(pluginRoot, 'scripts', 'absolute.js'));
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout, '');
+      assert.equal(fs.readFileSync(marker, 'utf8'), 'run\n');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('reports an exhausted shared timeout without launching another suite', () => {
+    const result = runTests(__dirname, 0);
+    assert.equal(result.passed, false);
+    assert.match(result.output, /budget exhausted/);
+  });
+
+  test('registered command runs from a repository subdirectory', () => {
+    const config = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../.codex/hooks.json'), 'utf8'));
+    const group = config.hooks.PostToolUse[0];
+    assert.equal(new RegExp(group.matcher).test('apply_patch'), true);
+    const command = group.hooks[0];
+    assert.equal(command.timeout, 120);
+    const shell = process.platform === 'win32' ? 'powershell.exe' : '/bin/sh';
+    const args = process.platform === 'win32'
+      ? ['-NoProfile', '-Command', command.command] : ['-c', command.command];
+    const result = spawnSync(shell, args, {
+      cwd: __dirname, input: '{}', encoding: 'utf8', timeout: 10000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, '');
   });
 });
