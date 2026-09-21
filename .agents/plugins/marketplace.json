@@ -1,7 +1,7 @@
 {
-  "name": "slag-codex",
+  "name": "slag",
   "interface": {
-    "displayName": "Slag · Codex"
+    "displayName": "Slag"
   },
   "plugins": [
     {

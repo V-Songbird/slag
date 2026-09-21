@@ -22,7 +22,7 @@ The first command registers this collection once. The second installs one plugin
 
 The marketplace itself has no settings. Each plugin's README says whether that plugin has any. Uninstall with `/plugin uninstall <plugin-name>@slag`.
 
-On Codex, add this repository as a marketplace and install from `Slag · Codex`.
+On Codex, add this repository as a marketplace and install from `Slag`.
 
 Antigravity has no marketplace to add. Clone this repository, then either run `agy plugin install <path-to-clone>/<plugin-name>` or copy the plugin directory to `.agents/plugins/<plugin-name>/` in a workspace, or to `~/.gemini/config/plugins/<plugin-name>/` for every workspace.
 

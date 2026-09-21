@@ -23,7 +23,7 @@ Use it on an existing project with a git history. It is not a scaffolder for a n
 
 Takes effect next session.
 
-**Codex** — add this repository as a marketplace, then install `anneal` from `Slag · Codex`.
+**Codex** — add this repository as a marketplace, then install `anneal` from `Slag`.
 
 **Antigravity** — there is no marketplace. Clone the repository and run `agy plugin install <path-to-clone>/anneal`, or copy the `anneal/` directory to `.agents/plugins/anneal/` for one workspace or `~/.gemini/config/plugins/anneal/` for every workspace.
 

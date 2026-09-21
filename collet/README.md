@@ -23,7 +23,7 @@ Use it on a repository where an agent drifts past the task, or calls work finish
 
 Takes effect next session.
 
-**Codex** — add this repository as a marketplace, then install `collet` from `Slag · Codex`.
+**Codex** — add this repository as a marketplace, then install `collet` from `Slag`.
 
 **Antigravity** — there is no marketplace. Clone the repository and run `agy plugin install <path-to-clone>/collet`, or copy the `collet/` directory to `.agents/plugins/collet/` for one workspace or `~/.gemini/config/plugins/collet/` for every workspace.
 
