@@ -7,6 +7,6 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "node --test"
+    "check": "node --test --test-reporter=spec"
   }
 }
