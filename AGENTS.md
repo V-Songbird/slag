@@ -51,7 +51,7 @@ A bump touches every row. They are hand-maintained and nothing checks them.
 | `npm run check` | `node --test` over every suite: anneal, collet, the edit hook | seconds |
 | `node --test <plugin>/tests/<name>.test.js` | one test file, named in full | seconds |
 | `node anneal/scripts/audit.js --root .` | anneal's own audit, run against this repo | instant |
-| `claude plugin eval ./anneal --no-publish` | 2 eval cases | slow, drives real sessions |
+| `claude plugin eval ./anneal --scaffold --no-publish --allow-tools Bash Edit Write` | 3 eval cases; each builds a fixture and needs a shell grant | slow, drives real sessions; refused on native Windows, run it under WSL2 |
 | `git config core.hooksPath scripts/git-hooks` | arms the commit gate | once after cloning |
 
 There is no CI. The one gap the seven-plugin trim left open is in

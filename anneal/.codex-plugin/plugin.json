@@ -1,7 +1,7 @@
 {
   "name": "anneal",
   "version": "0.2.0-alpha",
-  "description": "Audits how easy an existing repository is for an agent to find its way around — map file, toolchain version, names, layout, build output, check commands — then proposes a layout you approve and migrates in small commits, each checked against the project's own tests.",
+  "description": "Audits how easy an existing repository is for an agent to find its way around — map file, toolchain version, names, layout, build output, check commands — then proposes a layout you approve and migrates in small commits, each checked against the project's own tests. A second skill turns one session's detours into map file changes you approve.",
   "license": "MIT",
   "author": {
     "name": "Victor Villegas",
@@ -25,7 +25,7 @@
   "interface": {
     "displayName": "anneal",
     "shortDescription": "Lay a repository out so an agent stops searching for it",
-    "longDescription": "Audits what makes an agent search, read or guess more than it needs to in a repository — no map file, no declared toolchain version, duplicate or generic names, build output in search results — then proposes a layout you approve and migrates it in small commits, each checked against the project's own tests.",
+    "longDescription": "Audits what makes an agent search, read or guess more than it needs to in a repository — no map file, no declared toolchain version, duplicate or generic names, build output in search results — then proposes a layout you approve and migrates it in small commits, each checked against the project's own tests. A second skill turns one session's detours into map file changes you approve.",
     "developerName": "Victor Villegas",
     "category": "Productivity",
     "capabilities": ["Interactive", "Read", "Write"],

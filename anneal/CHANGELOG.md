@@ -8,10 +8,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
+- A second skill, `anneal-session`, reads one Claude Code or Codex session and proposes map file changes for the detours it shows. You start it yourself and approve each change before it is written. A fact about your machine is reported and never written.
+- `scripts/session-evidence.js` lists where a transcript shows a tool call failing, and runs with no host at all.
 - A map file the migration writes follows one fixed sequence of sections, so every repository it touches reads the same way. A map file that is already there can be moved onto that sequence as a step you approve on its own.
 
 ### Changed
 
+- The skill now starts on a plain question about how easy a repository is to navigate, even when you ask for a list of problems and no changes. Before, such a question was often answered without it.
 - The closing report suggests a harness you can install to keep the result from drifting, instead of one that is no longer here.
 - On Codex, the plugin no longer carries an icon.
 - The root manifest declares the Agent Plugins schema, so a host that reads the portable plugin format loads it as one.

@@ -47,9 +47,9 @@ AGENTS.override.md
 *.log
 
 # Evaluation outputs and run telemetry (keep fixtures and scenarios)
-evals/results/
-evals/runs/
-evals/logs/
+**/evals/results/
+**/evals/runs/
+**/evals/logs/
 benchmarks/results/
 benchmarks/runs/
 

@@ -16,7 +16,7 @@ argument-hint: "[audit]"
 license: MIT
 compatibility: Requires Node 18 or later. A migration also requires git.
 metadata:
-  version: "1.0"
+  version: "1.1"
 ---
 
 # anneal

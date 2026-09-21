@@ -1,6 +1,6 @@
 {
   "name": "anneal",
-  "description": "Audits how easy an existing repository is for an AI agent to find its way around — map file, toolchain version, names, layout, build output, check commands — then proposes a layout you approve and migrates in small commits, each checked against the project's own tests.",
+  "description": "Audits how easy an existing repository is for an AI agent to find its way around — map file, toolchain version, names, layout, build output, check commands — then proposes a layout you approve and migrates in small commits, each checked against the project's own tests. A second skill turns one session's detours into map file changes you approve.",
   "license": "MIT",
   "author": {
     "name": "Victor Villegas",

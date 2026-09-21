@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: session-audit-proposes-without-writing
+description: A small repository whose map file names a test command that does not exist, and a synthetic transcript of a session that failed on it twice before finding the one that works. The user invokes the session audit on that transcript and approves nothing.
+tags: [smoke]
+context:
+  scaffold_script: session-fixture.sh
