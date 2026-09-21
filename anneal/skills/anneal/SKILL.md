@@ -2,16 +2,16 @@
 name: anneal
 description: >-
   Audits an existing repository for what makes an AI agent search, read or
-  guess more than it needs to — no map file, no declared toolchain version,
-  duplicate or generic file names, oversized files, code buried deep in
-  folders, build output in search results, environment files with no
-  template, names built at runtime — then, with the owner's approval at each
-  step, migrates it in small commits that keep the project's own checks
-  passing. Use when the user asks to make a codebase easier for an agent to
-  navigate, to apply AI-friendly conventions to an existing project, to audit
-  how findable its code is, or invokes /anneal:anneal, $anneal or /anneal. Pass "audit"
-  to report without changing anything. Do NOT use for a single rename, a
-  refactor with another goal, or scaffolding a new project.
+  guess more than it needs to — no map file or toolchain version, duplicate
+  or generic names, oversized or buried files, build output in search
+  results, names built at runtime — then, with the owner's approval at each
+  step, migrates it in small commits that keep its checks passing. Use when
+  the user asks how easy a repository is to navigate or find things in, what
+  slows an agent down, to make a codebase easier for an agent, or to apply
+  AI-friendly conventions. Use it even for a read-only list of problems,
+  since its script measures what a quick look misses. Also /anneal:anneal,
+  $anneal or /anneal. Pass "audit" to report only. Do NOT use for a single
+  rename, a refactor with another goal, or scaffolding a new project.
 argument-hint: "[audit]"
 license: MIT
 compatibility: Requires Node 18 or later. A migration also requires git.
