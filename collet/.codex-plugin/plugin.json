@@ -1,6 +1,6 @@
 {
   "name": "collet",
-  "version": "0.1.0-alpha",
+  "version": "0.2.0-alpha",
   "description": "Holds a session inside the task it was given: one open task with the files it may touch and the command that ends it, a guard that refuses writes outside that list, and checks that each ship with a violation and a near miss so none of them counts as coverage before it has been shown to work.",
   "license": "MIT",
   "author": {
