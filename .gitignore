@@ -99,4 +99,9 @@ Thumbs.db
 node_modules/
 out/
 dist/
-docs/
+
+# Private working material and documentation
+.private/
+docs/tasks/
+docs/decisions/
+docs/knowledge/
