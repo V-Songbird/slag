@@ -6,6 +6,10 @@ All notable changes to collet are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The requirement is Node 22 or later. It was Node 20.
+
 ## [0.2.0-alpha] — 2026-09-21
 
 ### Added

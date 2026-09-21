@@ -4,7 +4,7 @@ description: Bump a plugin's version, date its CHANGELOG, then commit and push t
 argument-hint: "[plugin]"
 disable-model-invocation: true
 license: MIT
-compatibility: Claude Code only. Requires git and Node 20 or later.
+compatibility: Claude Code only. Requires git and Node 22 or later.
 metadata:
   version: "1.0"
 ---
@@ -67,8 +67,7 @@ uncommitted plugin source is fine — say what is coming along rather than sweep
 
 `npm run check` is `node --test` from the root, covering every plugin's suite plus the repository's
 own. If it fails, stop and report. Do not release over a red suite without the user's explicit
-go-ahead. To run one plugin alone, `cd <plugin>` and run `node --test` there — passing
-`<plugin>/tests/*.test.js` as an argument fails on node 20, which is this repository's floor.
+go-ahead. To run one plugin alone, `cd <plugin>` and run `node --test` there.
 
 ## Step 1 — pick the new version
 

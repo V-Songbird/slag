@@ -11,7 +11,7 @@ description: >-
   this project". Not for writing a new check, which the collet-check skill
   does.
 license: MIT
-compatibility: Requires Node 20 or later and git.
+compatibility: Requires Node 22 or later and git.
 metadata:
   version: "1.0"
 ---

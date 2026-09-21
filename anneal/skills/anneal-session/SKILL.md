@@ -13,7 +13,7 @@ description: >-
 disable-model-invocation: true
 argument-hint: "[transcript file]"
 license: MIT
-compatibility: Requires Node 18 or later. Finds the session's transcript on Claude Code and Codex. On Antigravity, and on any other host, it works only on a transcript file you hand it.
+compatibility: Requires Node 22 or later. Finds the session's transcript on Claude Code and Codex. On Antigravity, and on any other host, it works only on a transcript file you hand it.
 metadata:
   version: "1.0"
 ---
@@ -48,7 +48,7 @@ Argument: `$ARGUMENTS`. A host that does not fill that in leaves it as written; 
 node "<plugin root>/scripts/session-evidence.js"
 ```
 
-The script reads one transcript and prints JSON. It writes nothing. It needs Node 18 or later; without Node, say so and stop.
+The script reads one transcript and prints JSON. It writes nothing. It needs Node 22 or later; without Node, say so and stop.
 
 - **With no argument**, it finds this session from the host's own session variable and leaves out this audit's turn: everything from the latest prompt the owner typed, or the latest task start on Codex.
 - **With a transcript path**, add `--session-file "<path>"`. When that session is finished, its latest prompt is part of the work, so also add `--before "<the present time, ISO 8601 with a timezone>"`.

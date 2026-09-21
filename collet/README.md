@@ -8,7 +8,7 @@ Use it on a repository where an agent drifts past the task, or calls work finish
 
 ## Requirements
 
-- Node 20 or later, with no other dependencies.
+- Node 22 or later, with no other dependencies.
 - Claude Code, Codex or Antigravity for the session hooks. The checks themselves run on plain `node`, with no plugin installed.
 - A git repository. The scope check reads `git diff` and `git ls-files` to see what changed.
 

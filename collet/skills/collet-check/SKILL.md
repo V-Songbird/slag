@@ -9,7 +9,7 @@ description: >-
   has a `.collet/` directory. Not for mounting the harness, which the collet
   skill does.
 license: MIT
-compatibility: Requires Node 20 or later and a project with collet already mounted.
+compatibility: Requires Node 22 or later and a project with collet already mounted.
 metadata:
   version: "1.0"
 ---

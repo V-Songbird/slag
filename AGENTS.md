@@ -4,8 +4,8 @@ A marketplace of experimental agent plugins, in-tree. Two are shipped: `anneal/`
 Plain directories, one git history, no submodules. Experiments here get rewritten and deleted
 freely; that is the point of the repository.
 
-No dependencies to install, no build step. Node 20, as `.nvmrc` declares and `package.json`
-requires. That is the oldest version the suite has been run on, not the oldest it might work on.
+No dependencies to install, no build step. Node 22, as `.nvmrc` declares and `package.json`
+requires. The suite last passed on 20.11.1 on 2026-09-21, the day the floor moved from 20.
 
 ## Start here
 
@@ -166,11 +166,11 @@ goes stale.
   standalone clone can still commit. A green commit is not proof the gate ran. The rule it was
   built to enforce holds regardless, and commit messages are in scope:
   [.claude/rules/reference-names.md](.claude/rules/reference-names.md).
-- **`node --test` takes different arguments on 20 and 22.** A glob argument, `<plugin>/tests/*.test.js`,
-  only expands on 22; on 20 it exits `Could not find`. A bare directory argument only recurses on 20;
-  on 22 it is read as a test file and fails. What works on both is naming a file, or running
-  `node --test` with no argument from the directory you want walked. Node 22 also skips
-  dot-directories when it walks, which is why the hook that reruns suites lives under `scripts/`.
+- **`node --test` does not take a directory.** On 22 a bare directory argument is read as a test
+  file and fails with `Cannot find module`. Name a file, pass a glob such as
+  `<plugin>/tests/*.test.js`, or run `node --test` with no argument from the directory you want
+  walked. The hook and the release skill use the last form, kept from the Node 20 floor. Node 22 also
+  skips dot-directories when it walks, which is why the hook that reruns suites lives under `scripts/`.
 - **`<plugin>/plugin.json` carries a `version` and `<plugin>/.claude-plugin/plugin.json` does not.**
   That is the rule above working, not drift. Do not "fix" it by deleting one. anneal's two differ on
   one keyword, and nothing checks them: the validator was deleted in `5278887`.

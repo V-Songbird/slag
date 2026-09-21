@@ -14,7 +14,7 @@ description: >-
   rename, a refactor with another goal, or scaffolding a new project.
 argument-hint: "[audit]"
 license: MIT
-compatibility: Requires Node 18 or later. A migration also requires git.
+compatibility: Requires Node 22 or later. A migration also requires git.
 metadata:
   version: "1.1"
 ---
@@ -52,7 +52,7 @@ Where a host has no subagent to delegate to, do the survey inline and keep it sh
 node "<plugin root>/scripts/audit.js" --root "<repository root>"
 ```
 
-The script prints a summary and writes nothing. Run it again with `--json` when the layout survey needs the full evidence. It needs Node 18 or later; without Node, say so and stop.
+The script prints a summary and writes nothing. Run it again with `--json` when the layout survey needs the full evidence. It needs Node 22 or later; without Node, say so and stop.
 
 ## 2. Report the findings
 

@@ -11,7 +11,8 @@
 //
 // It lives under scripts/ rather than .claude/ so that `npm run check` finds
 // its test file. Node 22's default discovery skips dot-directories, and every
-// portable way of naming one back in double-counted or failed on node 20 --
+// portable way of naming one back in double-counted or failed on node 20, the
+// floor at the time --
 // a suite nobody runs is the false comfort this repo refuses.
 
 const fs = require("fs");
@@ -74,9 +75,9 @@ function findPluginRoot(root, filePath) {
 }
 
 // Discovery runs from inside the plugin, never from a path argument.
-// `node --test <glob>` only expands on node 22+; on node 20, which .nvmrc and
-// package.json pin as this repo's floor, it exits with "Could not find" and
-// this hook would report a failed suite after every single edit. A bare
+// `node --test <glob>` only expands on node 22+; on node 20, this repo's floor
+// until 2026-09-21, it exits with "Could not find" and this hook would report
+// a failed suite after every single edit. A bare
 // `node --test` recurses from cwd and finds all 49 in anneal and 59 in collet
 // on both v20.11.1 and v22.22.2.
 

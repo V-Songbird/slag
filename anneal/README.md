@@ -8,7 +8,7 @@ Use it on an existing project with a git history. It is not a scaffolder for a n
 
 ## Requirements
 
-- Node 18 or later.
+- Node 22 or later.
 - Claude Code, Codex or Antigravity.
 - For a migration: a git repository with at least one commit, a clean working tree, and `git config user.email` set. The audit alone needs none of these.
 
@@ -161,8 +161,8 @@ node --test
 Expected output:
 
 ```text
-# tests 72
-# pass 72
+# tests 73
+# pass 73
 # fail 0
 ```
 

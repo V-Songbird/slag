@@ -4,7 +4,7 @@
   "description": "Experimental agent plugins, in-tree. Each host's manifest owns a plugin's version, so this file carries none.",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "check": "node --test"

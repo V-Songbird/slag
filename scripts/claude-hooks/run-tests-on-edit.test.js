@@ -119,11 +119,11 @@ describe('findPluginRoot', () => {
 });
 
 describe('runTests', () => {
-  // The regression that matters on this repo's floor version: passing
+  // The regression that mattered while node 20 was this repo's floor: passing
   // <plugin>/tests/*.test.js as an argument exits "Could not find" on node 20,
   // and the hook reads that as a suite that did not complete. Discovery has to
   // come from cwd. This test fails on node 20 the moment a glob argument
-  // comes back.
+  // comes back; on 22 a glob expands, so there it only proves discovery works.
   test('discovers a suite without relying on node --test glob expansion', () => {
     const { root, pluginRoot } = makeFakeRepo();
     try {
