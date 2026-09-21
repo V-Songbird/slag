@@ -21,7 +21,7 @@ const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 const PATCH_TOOLS = new Set(['apply_patch']);
 // Every file a patch names, whichever verb it uses on it.
-const PATCH_FILE = /^\s*\*\*\*\s+(?:Add|Update|Delete|Move to)\s+File:\s*(.+?)\s*$/gm;
+const PATCH_FILE = /^\s*\*\*\*\s+(?:(?:Add|Update|Delete)\s+File|Move to):\s*(.+?)\s*$/gm;
 const NEVER_WRITABLE = ['.collet/'];
 const ALWAYS_WRITABLE = ['.collet/unverified.md'];
 const OWNED_ELSEWHERE = ['ROADMAP.jsonl', '.foreman/'];
@@ -78,21 +78,15 @@ export function matchScope(pattern, path) {
   return path === glob || path.startsWith(`${glob}/`);
 }
 
-const LITERAL = /^[A-Za-z0-9._/\\:-]+$/;
-const TOKEN = '("[^"]+"|\'[^\']+\'|[^\\s;&|]+)';
-
-// Cmdlets whose target is their first positional argument, and commands whose target is the last.
-const FIRST_ARG = ['Add-Content', 'Set-Content', 'Clear-Content', 'Out-File', 'Remove-Item', 'New-Item'];
-const LAST_ARG = ['tee', 'cp', 'mv', 'rm', 'Copy-Item', 'Move-Item'];
-// PowerShell parameters that name the file directly. Checked before any positional guess.
-const PATH_PARAM_SOURCE =
-  "-(?:Literal)?Path\\s+(\"[^\"]+\"|'[^']+'|[^\\s;&|]+)|-(?:Destination|FilePath)\\s+(\"[^\"]+\"|'[^']+'|[^\\s;&|]+)";
-const PATH_PARAM = new RegExp(PATH_PARAM_SOURCE, 'gi');
-const HAS_PATH_PARAM = new RegExp(PATH_PARAM_SOURCE, 'i');
-// PowerShell parameters that consume the token after them. Without this list the value of
-// `-ItemType File` reads as the path, and the real path is never seen.
+const LITERAL = /^[A-Za-z0-9._/\\: -]+$/;
+// Keep literal quoted arguments together. This deliberately does not evaluate variables,
+// substitutions or nested shell syntax; it only separates simple commands and their operands.
+const SHELL_TOKEN = /"[^"]*"|'[^']*'|[;&|\r\n]+|[0-9]*>{1,2}|,|[^\s"';&|>,]+/g;
+const FIRST_ARG = new Set(['add-content', 'set-content', 'clear-content', 'out-file', 'new-item']);
+const PATH_FLAGS = new Set(['-path', '-literalpath', '-destination', '-filepath']);
+// A flag value is not a positional path: `-ItemType File` must not turn File into a target.
 const VALUE_FLAGS = new Set(
-  ['itemtype', 'encoding', 'value', 'name', 'newname', 'filter', 'include', 'exclude', 'delimiter', 'stream'].map(
+  ['itemtype', 'encoding', 'value', 'name', 'newname', 'filter', 'include', 'exclude', 'delimiter', 'stream', 'inputobject', 'variable'].map(
     (flag) => `-${flag}`
   )
 );
@@ -101,54 +95,88 @@ function unquote(token) {
   return String(token ?? '').replace(/^["']|["']$/g, '');
 }
 
-/** Positional arguments, with flags and the values those flags consume removed. */
-function positional(args) {
-  const raw = String(args).split(/\s+/).filter(Boolean);
-  const out = [];
-  for (let i = 0; i < raw.length; i += 1) {
-    const token = raw[i];
-    if (token.startsWith('-')) {
-      if (VALUE_FLAGS.has(token.toLowerCase())) i += 1;
-      continue;
-    }
-    out.push(unquote(token));
+function shellCommands(command) {
+  const commands = [[]];
+  for (const token of String(command).match(SHELL_TOKEN) ?? []) {
+    if (/^[;&|\r\n]+$/.test(token)) commands.push([]);
+    else commands.at(-1).push(token);
   }
-  return out.filter(Boolean);
+  return commands.filter((tokens) => tokens.length);
 }
 
-/** `sed` edits in place only with -i; every other form reads. */
-function sedTargets(text) {
-  const found = [];
-  for (const match of text.matchAll(/\bsed\b([^;&|]*)/g)) {
-    const raw = String(match[1]).split(/\s+/).filter(Boolean);
-    if (!raw.some((token) => /^-[a-zA-Z]*i/.test(token))) continue;
-    const last = positional(match[1]).at(-1);
-    if (last) found.push(last);
+/** Named path values and positional groups; PowerShell comma lists stay one argument. */
+function argumentsOf(tokens) {
+  const named = new Map();
+  const positional = [];
+  let options = true;
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (options && token === '--') { options = false; continue; }
+    const flag = token.toLowerCase();
+    if (options && token.startsWith('-')) {
+      if (PATH_FLAGS.has(flag)) {
+        const values = [];
+        if (tokens[i + 1] !== undefined && !tokens[i + 1].startsWith('-')) {
+          values.push(tokens[++i]);
+          while (tokens[i + 1] === ',' && tokens[i + 2] !== undefined) {
+            i += 2;
+            values.push(tokens[i]);
+          }
+        }
+        named.set(flag, [...(named.get(flag) ?? []), ...values]);
+      } else if (VALUE_FLAGS.has(flag)) {
+        i += 1;
+      }
+      continue;
+    }
+    if (token === ',') continue;
+    const values = [token];
+    while (tokens[i + 1] === ',' && tokens[i + 2] !== undefined) {
+      i += 2;
+      values.push(tokens[i]);
+    }
+    positional.push(values);
   }
-  return found;
+  return { named, positional };
 }
 
 function shellTargets(command) {
-  const text = String(command);
   const found = [];
-  for (const match of text.matchAll(new RegExp(`(?:^|[^0-9])>{1,2}\\s*${TOKEN}`, 'g'))) found.push(match[1]);
-  for (const match of text.matchAll(PATH_PARAM)) found.push(match[1] ?? match[2]);
-  for (const name of FIRST_ARG) {
-    for (const match of text.matchAll(new RegExp(`\\b${name}\\b([^;&|]*)`, 'g'))) {
-      // Already taken by name above; a positional guess on the same call would only add noise.
-      if (HAS_PATH_PARAM.test(match[1])) continue;
-      const first = positional(match[1])[0];
-      if (first) found.push(first);
+  for (const tokens of shellCommands(command)) {
+    const args = [];
+    // Redirection writes regardless of which command produced its input. Quoted text containing
+    // `>` remains one token and never enters this branch.
+    for (let i = 0; i < tokens.length; i += 1) {
+      if (/^[0-9]*>{1,2}$/.test(tokens[i])) {
+        if (tokens[i + 1] !== undefined) found.push(tokens[++i]);
+      } else args.push(tokens[i]);
+    }
+    const name = unquote(args.shift()).toLowerCase();
+    const { named, positional } = argumentsOf(args);
+    const paths = [...(named.get('-path') ?? []), ...(named.get('-literalpath') ?? [])];
+    const destination = named.get('-destination');
+    if (FIRST_ARG.has(name)) {
+      found.push(...(paths.length ? paths : named.get('-filepath') ?? positional[0] ?? []));
+    } else if (name === 'remove-item' || name === 'rm') {
+      found.push(...paths, ...positional.flat());
+    } else if (name === 'copy-item' || (name === 'cp' && (paths.length || destination))) {
+      // A copy reads its sources. With a named source the first positional group is the
+      // destination; with positional sources it is the second group.
+      found.push(...(destination ?? positional[paths.length ? 0 : 1] ?? []));
+    } else if (name === 'move-item' || name === 'mv') {
+      // Moving also removes every source, so checking only its destination would allow a
+      // removal outside the task to happen before the working-tree check could report it.
+      found.push(...paths, ...positional.flat(), ...(destination ?? []));
+    } else if (name === 'tee' || name === 'tee-object') {
+      found.push(...(named.get('-filepath') ?? positional.flat()));
+    } else if (name === 'cp') {
+      found.push(...(positional.at(-1) ?? []));
+    } else if (name === 'sed' && args.some((token) => /^-[a-zA-Z]*i/.test(token))) {
+      // `sed` edits in place only with -i; every other form reads.
+      found.push(...(positional.at(-1) ?? []));
     }
   }
-  for (const name of LAST_ARG) {
-    for (const match of text.matchAll(new RegExp(`\\b${name}\\b([^;&|]*)(?=\\s*(?:[;&|]|$))`, 'g'))) {
-      const last = positional(match[1]).at(-1);
-      if (last) found.push(last);
-    }
-  }
-  found.push(...sedTargets(text));
-  return found.map(unquote).filter((token) => LITERAL.test(token));
+  return [...new Set(found.map(unquote).filter((token) => LITERAL.test(token)))];
 }
 
 /** Every path this call would write, or null when the tool is not a write at all. */

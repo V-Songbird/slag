@@ -1,0 +1,4 @@
+interface:
+  display_name: "Task harness"
+  short_description: "Set up a task harness or inspect its scope"
+  default_prompt: "Use $task-harness to report the current task, its writable scope and the harness status in this project."

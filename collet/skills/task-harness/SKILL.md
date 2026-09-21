@@ -1,5 +1,5 @@
 ---
-name: collet
+name: task-harness
 description: >-
   Mounts the collet harness into a project — the task ledger, the rules block
   in AGENTS.md/CLAUDE.md/.cursor/rules, and the checks directory — or reports
@@ -8,7 +8,7 @@ description: >-
   adopt collet, or to see what the current task is, what it may touch, and
   what a session is not allowed to touch. ONLY on an explicit request, never
   from ordinary project work, from a new or empty repository, or from "set up
-  this project". Not for writing a new check, which the collet-check skill
+  this project". Not for writing a new check, which the check-writer skill
   does.
 license: MIT
 compatibility: Requires Node 22 or later and git.
@@ -16,7 +16,7 @@ metadata:
   version: "1.2"
 ---
 
-# collet
+# Task harness
 
 The whole design is one sentence: **prose is read, a hook is executed, and a check that has never
 been shown to fire is not a check.** Everything below follows from that.
@@ -40,7 +40,7 @@ Python, Go, Rust, JVM or .NET. From the corresponding `catalogue/<id>.json`, ext
 `example` and `gapNotes` for this conversation; the fixture bodies belong to the runner.
 Show one short example per mistake and one plain limit drawn from its `gapNotes`. Keep
 the internal ids out of the conversation. The choices are the whole bundle or none for now;
-another mistake can be added later with `collet-check`.
+another mistake can be added later with `check-writer`.
 
 The bundle is optional. Include it when the person asks for it or accepts that choice; do not
 ask again when their request already covers it. These are source-pattern checks; they do not

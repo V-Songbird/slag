@@ -1,6 +1,6 @@
 {
   "name": "collet",
-  "version": "0.3.0-alpha",
+  "version": "0.4.0-alpha",
   "description": "Holds a session inside the task it was given: one open task with the files it may touch and the command that ends it, a guard that refuses writes outside that list, and checks that each ship with a violation and a near miss so none of them counts as coverage before it has been shown to work. A project that already plans its work in a roadmap it does not own is left alone: the mount writes nothing there.",
   "author": {
     "name": "Victor Villegas",

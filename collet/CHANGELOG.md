@@ -6,6 +6,21 @@ All notable changes to collet are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0-alpha] — 2026-09-21
+
+### Fixed
+
+- Check every literal deletion operand and both sides of a move against the open task, including patch move destinations.
+- Keep PowerShell reads and copy sources outside write checks while checking the actual write destinations.
+- Explain Codex hook trust and its activation check before the first guarded workflow.
+- Resolve the Antigravity project from absolute tool paths when its event omits workspace context, so the guard reaches the mounted task.
+
+### Changed
+
+- Rename the `collet` skill to `task-harness` and `collet-check` to
+  `check-writer`, with descriptive display names and updated invocation examples.
+  The plugin remains named `collet`; both workflows keep their existing behavior.
+
 ## [0.3.0-alpha] — 2026-09-21
 
 ### Added

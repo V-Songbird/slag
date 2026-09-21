@@ -25,13 +25,15 @@ Takes effect next session.
 
 **Codex** — add this repository as a marketplace, then install `collet` from `Slag`.
 
-**Antigravity** — there is no marketplace. Clone the repository and run `agy plugin install <path-to-clone>/collet`, or copy the `collet/` directory to `.agents/plugins/collet/` for one workspace or `~/.gemini/config/plugins/collet/` for every workspace.
+Before starting a guarded task, open `/hooks` in Codex CLI to review and trust this plugin's hooks. Confirm `SessionStart`, `PreToolUse` and `PreCompact` are enabled and trusted. New or changed hook definitions need another review; see [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
 
-Once installed, collet runs three hooks. It states the open task at session start, guards each write, and writes a handoff before compaction. Only the guard is wired on Antigravity, which has no session start or compaction event. There, the rules block and `node .collet/task.mjs status` state the open task.
+**Antigravity CLI** — clone this repository, run `agy plugin install <path-to-clone>/collet`, then confirm `agy plugin list` names it. This is the route exercised on CLI 1.2.5; that version did not discover a workspace copy alone.
+
+With hooks enabled and trusted where required, collet runs three hooks. It states the open task at session start, guards each write, and writes a handoff before compaction. Only the guard is wired on Antigravity, which has no session start or compaction event. There, the rules block and `node .collet/task.mjs status` state the open task.
 
 ## Quick start
 
-Ask the session to set the harness up. On Claude Code, type `/collet:collet`. On Codex, type `$collet`. On Antigravity, type `/collet`. That runs the mount command below, which you can also run yourself from a clone of this repository:
+Ask the session to set the harness up. On Claude Code, type `/collet:task-harness`. On Codex, type `$task-harness`. On Antigravity, type `/task-harness`. That runs the mount command below, which you can also run yourself from a clone of this repository:
 
 ```bash
 node collet/scripts/mount.mjs <project-directory> --accept "<the command that proves a task worked>"
@@ -112,15 +114,15 @@ Either half failing leaves the task open. Checks that cannot run also prevent cl
 
 | You want to… | Command |
 | --- | --- |
-| Set the harness up in a repository | `/collet:collet` |
-| Add the optional language checks | Ask `/collet:collet` to mount with the checks for tests and verification settings |
-| See the open task and what it may touch | `/collet:collet what's the task?`, or `node .collet/task.mjs status` |
+| Set the harness up in a repository | `/collet:task-harness` |
+| Add the optional language checks | Ask `/collet:task-harness` to mount with the checks for tests and verification settings |
+| See the open task and what it may touch | `/collet:task-harness what's the task?`, or `node .collet/task.mjs status` |
 | Open a task | `node .collet/task.mjs add --title "..." --why "..." --scope "src/cart.mjs,test/**"` |
 | Add a file the task genuinely needs | `node .collet/task.mjs widen --add <path> --why "<reason>"` |
 | Finish one | `node .collet/task.mjs close --left-out "..." --unverified "..."` |
 | Prove the checks still catch what they claim | `node .collet/checks/run.mjs` |
 | Check the working tree against the open task | `node .collet/checks/run.mjs --live` |
-| Guard a mistake that keeps happening | `/collet:collet-check help me catch skipped tests` |
+| Guard a mistake that keeps happening | `/collet:check-writer help me catch skipped tests` |
 
 ## How it works
 
@@ -190,6 +192,8 @@ ok   scope — 5 violation(s) caught, 6 near miss(es) left alone
 
 ## Limits
 
+- Antigravity calls that omit workspace context need an absolute tool path to locate the harness. Relative arguments cannot establish that context.
+
 - With no task open, nothing is enforced. That is deliberate.
 - The scope check reads the shell forms it can read with certainty: redirects, `cp`, `mv`, `rm`, `tee`, `sed -i`, and the common PowerShell cmdlets. A path built from a variable, or a file written by a program it invoked, goes through. It narrows the hole, and does not close it.
 - The optional bundle reads `Write`, `Edit` and `MultiEdit` text. Shell writes, Codex patches, Antigravity file text and unsupported notebook edits wait for `close` or `run.mjs --live`. Only files matching a check's paths are read.
@@ -211,8 +215,8 @@ node --test
 Expected output:
 
 ```text
-# tests 204
-# pass 204
+# tests 215
+# pass 215
 # fail 0
 ```
 
@@ -220,11 +224,13 @@ Expected output:
 
 The suite drives the hooks the way each host does, with that host's event on stdin.
 
-On Claude Code the plugin has loaded and refused a write in two short headless sessions. On Codex, the installed plugin with hooks trusted from `/hooks` refused an out-of-scope file edit in two short sessions on codex-cli 0.155.1. One began below the project root.
+On Claude Code the plugin has loaded and refused writes in short headless sessions. On Codex CLI 0.155.1, installed hooks with normal trust allowed an out-of-scope read and refused a multi-file deletion and patch move. The same session fixed the allowed source file, passed strict live checks and closed its task. Protected files and tests stayed unchanged.
 
 A generated JavaScript check also refused a skipped-test edit in a short Claude Code session. The session fixed the code and closed after all live checks and its acceptance test passed. This verifies that small flow; it does not cover every language or host.
 
-Neither host has been tested in a longer or interactive session. Codex skips hooks until you trust them from `/hooks`. On Antigravity the guard has not been seen to fire or to fail.
+On Antigravity CLI 1.2.5, the corrected plugin was installed through its CLI and allowed a scoped write while refusing a protected file. The guard reason reached the model and the protected file stayed unchanged. None of these hosts has been tested in a longer interactive session or through real compaction.
+
+Discovery under the renamed skills, `task-harness` and `check-writer`, has not yet been tested in installed clients.
 
 ## Support
 

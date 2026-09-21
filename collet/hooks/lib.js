@@ -5,24 +5,37 @@
 // it exists so that "disabled" is a state somebody chose rather than the accidental result of a
 // file going missing. The committed checks and anything wired to run them never read it.
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const COLLET = '.collet';
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
+// Some Antigravity calls omit both workspacePaths and cwd. The tool then provides the only
+// location evidence. Relative arguments cannot anchor a project from the plugin's own cwd.
+function antigravityDirectory(event) {
+  const name = event.toolCall?.name;
+  const args = event.toolCall?.args ?? {};
+  if (name === 'run_command') {
+    return typeof args.Cwd === 'string' && isAbsolute(args.Cwd) ? args.Cwd : null;
+  }
+  if (!['write_to_file', 'replace_file_content', 'multi_replace_file_content'].includes(name)) return null;
+  const target = args.AbsolutePath ?? args.TargetFile;
+  return typeof target === 'string' && isAbsolute(target) ? dirname(target) : null;
+}
+
 /**
- * Where the project is. Claude Code sets CLAUDE_PROJECT_DIR; Codex sends the directory as `cwd`
- * in the event; Antigravity sends `workspacePaths` and runs the hook from the plugin's own
- * directory, which is why process.cwd() is the last resort and never the first.
+ * Where the project is. Claude Code sets CLAUDE_PROJECT_DIR; Codex sends the directory as `cwd`.
+ * Antigravity may send workspacePaths, or only an absolute tool location, and runs the hook from
+ * the plugin's own directory. process.cwd() is therefore the last resort, never the first.
  *
- * All of them name where the session was opened, which may be below the project. The nearest
- * directory upwards that holds the harness is the root; with none, the answer is the start.
+ * A named directory may sit below the project. The nearest directory upwards that holds the
+ * harness is the root; with none, the answer is the start. Explicit host context always wins.
  */
 export function root(event = {}) {
   const workspace = Array.isArray(event.workspacePaths) ? event.workspacePaths[0] : null;
-  const start = process.env.CLAUDE_PROJECT_DIR ?? event.cwd ?? workspace ?? process.cwd();
+  const start = process.env.CLAUDE_PROJECT_DIR ?? event.cwd ?? workspace ?? antigravityDirectory(event) ?? process.cwd();
   for (let dir = start; ; dir = dirname(dir)) {
     if (existsSync(join(dir, COLLET, 'config.json'))) return dir;
     if (dirname(dir) === dir) return start;

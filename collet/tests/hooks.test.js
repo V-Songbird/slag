@@ -112,7 +112,7 @@ test("a missing project check falls back to the plugin's own copy rather than di
 });
 
 // A project check other than scope. The guard ran only `scope.mjs` until 2026-09-20, so a check
-// written by `/collet-check` was admitted and ran at commit time while staying silent in session.
+// written by check-writer (then `/collet-check`) was admitted and ran at commit time while staying silent in session.
 const TODO_CHECK = `export const id = 'no-todo';
 export const what = 'a TODO left in a write';
 export function check({ call }) {
@@ -233,6 +233,75 @@ test('on Antigravity the guard reads toolCall and answers with a bare decision',
     decision: 'allow',
   });
   clean(root);
+});
+
+test('Antigravity finds the harness from absolute file targets when workspace context is absent', (t) => {
+  const root = ready();
+  t.after(() => clean(root));
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  for (const name of ['write_to_file', 'replace_file_content', 'multi_replace_file_content']) {
+    for (const key of ['TargetFile', 'AbsolutePath']) {
+      const run = (file) => hook('guard.js', root, {
+        toolCall: { name, args: { [key]: join(root, 'src', file) } },
+        workspacePaths: [],
+      }, { args: ['antigravity'], cwd: PLUGIN, project: null });
+      const denied = run('theme.mjs');
+      assert.equal(denied.status, 0, `${name} ${key}`);
+      const answer = JSON.parse(denied.stdout);
+      assert.equal(answer.decision, 'deny', `${name} ${key}`);
+      assert.match(answer.reason, /src\/theme\.mjs is outside the open task/);
+      assert.deepEqual(JSON.parse(run('cli.mjs').stdout), { decision: 'allow' }, `${name} ${key}`);
+    }
+  }
+});
+
+test('Antigravity finds the harness from an absolute command Cwd when workspace context is absent', (t) => {
+  const root = ready();
+  t.after(() => clean(root));
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const run = (file) => hook('guard.js', root, {
+    toolCall: { name: 'run_command', args: { CommandLine: `echo x > ${file}`, Cwd: join(root, 'src') } },
+    workspacePaths: [],
+  }, { args: ['antigravity'], cwd: PLUGIN, project: null });
+  const denied = JSON.parse(run('theme.mjs').stdout);
+  assert.equal(denied.decision, 'deny');
+  assert.match(denied.reason, /src\/theme\.mjs is outside the open task/);
+  assert.deepEqual(JSON.parse(run('cli.mjs').stdout), { decision: 'allow' });
+});
+
+test('explicit project context keeps precedence over Antigravity target inference', (t) => {
+  const root = ready();
+  const other = project(TREE);
+  t.after(() => { clean(root); clean(other); });
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const toolCall = { name: 'write_to_file', args: { TargetFile: join(root, 'src', 'theme.mjs') } };
+  const cases = [
+    [{ toolCall, cwd: root, workspacePaths: [root] }, other],
+    [{ toolCall, cwd: other, workspacePaths: [root] }, null],
+    [{ toolCall, workspacePaths: [other] }, null],
+  ];
+  for (const [event, projectRoot] of cases) {
+    const result = hook('guard.js', root, event, { args: ['antigravity'], cwd: PLUGIN, project: projectRoot });
+    assert.deepEqual(JSON.parse(result.stdout), { decision: 'allow' });
+  }
+});
+
+test('Antigravity does not invent project context from relative tool arguments', (t) => {
+  const root = ready();
+  t.after(() => clean(root));
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const calls = [
+    { name: 'write_to_file', args: { TargetFile: 'src/theme.mjs' } },
+    { name: 'write_to_file', args: { AbsolutePath: 'src/theme.mjs' } },
+    { name: 'run_command', args: { CommandLine: 'echo x > theme.mjs', Cwd: 'src' } },
+    { name: 'write_to_file', args: {} },
+  ];
+  for (const toolCall of calls) {
+    const result = hook('guard.js', root, { toolCall, workspacePaths: [] }, {
+      args: ['antigravity'], cwd: PLUGIN, project: null,
+    });
+    assert.deepEqual(JSON.parse(result.stdout), { decision: 'allow' });
+  }
 });
 
 test('on Antigravity a project without collet is allowed out loud, not in silence', () => {

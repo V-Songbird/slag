@@ -1,0 +1,4 @@
+interface:
+  display_name: "Check writer"
+  short_description: "Create a project check and prove its fixtures"
+  default_prompt: "Use $check-writer to add a check for a recurring mistake in this project and prove it with violation and near-miss fixtures."

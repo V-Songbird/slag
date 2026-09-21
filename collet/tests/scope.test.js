@@ -61,6 +61,149 @@ test('a cmdlet path behind a value-taking flag is still found', () => {
   clean(root);
 });
 
+test('PowerShell reads and copy sources are not write targets', (t) => {
+  const root = withTree({ 'outside notes.txt': 'outside\n', 'test/inside notes.txt': 'inside\n' });
+  t.after(() => clean(root));
+  const commands = [
+    'Get-Content -LiteralPath notes.txt',
+    'Get-Item -Path notes.txt',
+    'Test-Path -Path notes.txt',
+    'Copy-Item -LiteralPath notes.txt -Destination src/cli.mjs',
+    'Copy-Item -Destination src/cli.mjs -Path notes.txt',
+    'Copy-Item notes.txt src/cli.mjs',
+    'Copy-Item -Path notes.txt src/cli.mjs',
+    'Copy-Item notes.txt -Destination src/cli.mjs',
+    'Copy-Item -LiteralPath "outside notes.txt" -Destination "test/inside notes.txt"',
+    'Get-Content -LiteralPath notes.txt | Set-Content -Path src/cli.mjs',
+    'Write-Output "Remove-Item notes.txt"',
+  ];
+  for (const command of commands) {
+    assert.equal(fires(root, { tool: 'PowerShell', input: { command } }), false, command);
+  }
+});
+
+test('PowerShell aliases keep their command-specific named paths', (t) => {
+  const root = withTree();
+  t.after(() => clean(root));
+  for (const command of [
+    'rm -LiteralPath notes.txt',
+    'mv -Path notes.txt -Destination src/cli.mjs',
+    'mv -Path src/cli.mjs -Destination notes.txt',
+    'cp -Path src/cli.mjs -Destination notes.txt',
+    'tee -FilePath notes.txt',
+    'Tee-Object -FilePath notes.txt',
+    'Tee-Object -InputObject x notes.txt',
+  ]) {
+    assert.equal(fires(root, { tool: 'PowerShell', input: { command } }), true, command);
+  }
+  for (const command of [
+    'rm -LiteralPath src/cli.mjs',
+    'mv -Path src/cli.mjs -Destination src/digest.mjs',
+    'cp -LiteralPath notes.txt -Destination src/cli.mjs',
+    'tee -FilePath src/cli.mjs',
+    'Tee-Object -FilePath src/cli.mjs',
+    'Tee-Object -Variable notes.txt',
+  ]) {
+    assert.equal(fires(root, { tool: 'PowerShell', input: { command } }), false, command);
+  }
+});
+
+test('quoted literal command names keep their write policy', (t) => {
+  const root = withTree();
+  t.after(() => clean(root));
+  const cases = [
+    ['PowerShell', "& 'Set-Content' -LiteralPath notes.txt -Value x", true],
+    ['PowerShell', "& 'Remove-Item' -LiteralPath notes.txt", true],
+    ['Bash', "'rm' notes.txt", true],
+    ['PowerShell', "& 'Get-Content' -LiteralPath notes.txt", false],
+    ['PowerShell', "& 'Copy-Item' -Path notes.txt -Destination src/cli.mjs", false],
+    ['PowerShell', "& 'Set-Content' -LiteralPath src/cli.mjs -Value x", false],
+    ['Bash', "'rm' src/cli.mjs", false],
+  ];
+  for (const [tool, command, expected] of cases) {
+    assert.equal(fires(root, { tool, input: { command } }), expected, command);
+  }
+});
+
+test('named and positional shell writes preserve quoted paths', (t) => {
+  const root = withTree({ 'outside notes.txt': 'outside\n', 'test/inside notes.txt': 'inside\n' });
+  t.after(() => clean(root));
+  const commands = [
+    'Set-Content -Encoding utf8 -LiteralPath "outside notes.txt" -Value x',
+    "Set-Content 'outside notes.txt' x",
+    'set-content -path "outside notes.txt" -value x',
+    'Out-File -FilePath "outside notes.txt" -Encoding utf8',
+    'Copy-Item -Path src/cli.mjs -Destination "outside notes.txt"',
+    "cp src/cli.mjs 'outside notes.txt'",
+    'echo x > "outside notes.txt"',
+    'Get-Content -LiteralPath src/cli.mjs | Set-Content -Path "outside notes.txt"',
+  ];
+  for (const command of commands) {
+    assert.equal(fires(root, { tool: 'PowerShell', input: { command } }), true, command);
+  }
+  assert.equal(fires(root, { tool: 'PowerShell', input: {
+    command: 'Set-Content -Path "test/inside notes.txt" -Value "Remove-Item notes.txt"',
+  } }), false);
+  assert.equal(fires(root, { tool: 'PowerShell', input: {
+    command: 'Set-Content -Path "new scratch.txt" -Value x',
+  } }), false);
+});
+
+test('every removal operand is checked, including named path lists', (t) => {
+  const root = withTree({ 'outside notes.txt': 'outside\n', 'test/inside notes.txt': 'inside\n' });
+  t.after(() => clean(root));
+  const commands = [
+    'rm -f notes.txt src/cli.mjs',
+    'rm -rf tools test',
+    'rm -- "outside notes.txt" "test/inside notes.txt"',
+    'Remove-Item -LiteralPath notes.txt,src/cli.mjs -Force',
+    'Remove-Item -Path "outside notes.txt", "test/inside notes.txt" -Force',
+    'Remove-Item "outside notes.txt", "test/inside notes.txt" -Force',
+  ];
+  for (const command of commands) {
+    assert.equal(fires(root, { tool: 'PowerShell', input: { command } }), true, command);
+  }
+  assert.equal(fires(root, { tool: 'Bash', input: { command: 'rm src/cli.mjs src/digest.mjs' } }), false);
+});
+
+test('moving checks the removed sources as well as the destination', (t) => {
+  const root = withTree({ 'outside notes.txt': 'outside\n', 'test/inside notes.txt': 'inside\n' });
+  t.after(() => clean(root));
+  const commands = [
+    'mv notes.txt src/cli.mjs',
+    'mv notes.txt src/cli.mjs test',
+    'mv src/cli.mjs notes.txt',
+    'mv "outside notes.txt" "test/inside notes.txt"',
+    'Move-Item notes.txt src/cli.mjs',
+    'Move-Item -LiteralPath notes.txt -Destination src/cli.mjs',
+    'Move-Item -Destination src/cli.mjs -Path notes.txt',
+    'Move-Item notes.txt -Destination src/cli.mjs',
+    'Move-Item -Path notes.txt src/cli.mjs',
+    'Move-Item -Path "outside notes.txt", src/cli.mjs -Destination test',
+    'Move-Item -Path src/cli.mjs -Destination "outside notes.txt"',
+  ];
+  for (const command of commands) {
+    assert.equal(fires(root, { tool: 'PowerShell', input: { command } }), true, command);
+  }
+  for (const command of ['mv src/cli.mjs src/digest.mjs', 'Move-Item -Path src/cli.mjs -Destination src/digest.mjs']) {
+    assert.equal(fires(root, { tool: 'PowerShell', input: { command } }), false, command);
+  }
+});
+
+test('a patch move checks both the source and its actual destination header', (t) => {
+  const root = withTree();
+  t.after(() => clean(root));
+  const patch = (from, to) => `*** Begin Patch\n*** Update File: ${from}\n*** Move to: ${to}\n@@\n-a\n+b\n*** End Patch`;
+  for (const key of ['patch', 'input', 'command', 'content']) {
+    const moved = patch('src/cli.mjs', 'new outside.mjs');
+    const call = { tool: 'apply_patch', input: { [key]: moved } };
+    assert.deepEqual(targetsOf(call, root), ['src/cli.mjs', 'new outside.mjs']);
+    assert.equal(fires(root, call), true, key);
+    assert.equal(fires(root, { tool: 'apply_patch', input: { [key]: patch('notes.txt', 'src/cli.mjs') } }), true, key);
+    assert.equal(fires(root, { tool: 'apply_patch', input: { [key]: patch('src/cli.mjs', 'test/new.mjs') } }), false, key);
+  }
+});
+
 test('a path on another drive is outside the repository, not a path inside it', () => {
   const root = withTree();
   // relative() between two roots returns the target's own absolute path, which starts with a
