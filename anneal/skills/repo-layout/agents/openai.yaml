@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo layout"
+  short_description: "Audit repository layout and plan easier agent navigation"
+  default_prompt: "Use $repo-layout audit to report what makes this repository harder for an agent to navigate."

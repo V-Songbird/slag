@@ -1,5 +1,5 @@
 ---
-name: reconcile-project-docs
+name: docs-align
 description: >-
   Reconciles a project's documentation and non-code development files with
   its current behavior and applicable instructions. Checks stale references,
@@ -8,7 +8,7 @@ description: >-
   complete documentation cleanup, repository housekeeping or consistency
   audit across Claude Code, Codex and Antigravity. Pass audit to report
   without edits. For a single README use readme; for code layout use
-  improve-agent-navigation; for a session transcript use learn-from-session.
+  repo-layout; for a session transcript use session-review.
 argument-hint: "[audit] [path or concern]"
 license: MIT
 compatibility: Portable instructions for Claude Code, Codex and Antigravity. The bundled layout audit requires Node 22 or later. Git enables tracked and ignored file checks. Uses the readme skill when available and reports missing dependencies.
@@ -16,13 +16,13 @@ metadata:
   version: "1.0"
 ---
 
-# Reconcile project docs
+# Docs align
 
 Make the maintained documentation agree with what the project actually does, and make its development instructions usable by each intended host. A complete pass accounts for every in-scope document; it does not require changing every file.
 
 Argument: `$ARGUMENTS`. If the host leaves it literal, read the request instead. `audit`, a review request or an explicit no-edit instruction means report only, including no saved report. Otherwise an explicit reconciliation or cleanup request authorizes ordinary in-scope documentation fixes. Resolve an ambiguous request as an audit. A path narrows the pass to that area plus its incoming references; state that boundary.
 
-On Claude Code invoke `/anneal:reconcile-project-docs`; on Codex use `$reconcile-project-docs`; on Antigravity use `/reconcile-project-docs`. Find the plugin files through `${CLAUDE_PLUGIN_ROOT}` on Claude Code, or resolve `../../` from this file on other hosts. Resolve target paths against the project root, never the installed plugin directory.
+On Claude Code invoke `/anneal:docs-align`; on Codex use `$docs-align`; on Antigravity use `/docs-align`. Find the plugin files through `${CLAUDE_PLUGIN_ROOT}` on Claude Code, or resolve `../../` from this file on other hosts. Resolve target paths against the project root, never the installed plugin directory.
 
 ## Scope and authority
 
@@ -44,13 +44,13 @@ Build a compact finding ledger as you go: location, claim or defect, source of t
 
 ## 2. Reuse the specialist passes
 
-**Repository navigation.** Read [improve-agent-navigation](../improve-agent-navigation/SKILL.md) and run its audit-only steps once, using this plugin's script:
+**Repository navigation.** Read [repo-layout](../repo-layout/SKILL.md) and run its audit-only steps once, using this plugin's script:
 
 ```text
 node "<plugin root>/scripts/audit.js" --root "<project root>" --json
 ```
 
-Use the findings as candidates, and read [the conventions](../improve-agent-navigation/references/conventions.md) for the ones that matter. Record legitimate framework paths and project-policy exceptions. This reconciliation never enters the migration, branching or commit steps; code moves and layout policy changes need their own authorization. If Node is unavailable, report the missed audit and continue independent checks.
+Use the findings as candidates, and read [the conventions](../repo-layout/references/conventions.md) for the ones that matter. Record legitimate framework paths and project-policy exceptions. This reconciliation never enters the migration, branching or commit steps; code moves and layout policy changes need their own authorization. If Node is unavailable, report the missed audit and continue independent checks.
 
 **Every maintained README.** Locate and read the available `readme` skill once, then use its Review mode on each in-scope README, including nested packages, examples and tools. In a cleanup, use its Edit or Improve mode only where findings justify it. Group shared corrections while retaining a coverage entry for each README. Keep detailed rubric results in the review ledger; synthesize the actionable findings in the final report unless the user requests full scores. If the skill is unavailable, disclose that gap and perform a bounded manual review of purpose, fit, prerequisites, first working result and next steps; never claim `/readme` ran or install it silently.
 

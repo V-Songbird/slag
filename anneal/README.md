@@ -25,13 +25,15 @@ Takes effect next session.
 
 **Codex** — add this repository as a marketplace, then install `anneal` from `Slag`.
 
+Before starting a guarded task, open `/hooks` in Codex CLI to review and trust this plugin's hooks. Confirm `PreToolUse` is enabled and trusted. New or changed hook definitions need another review; see [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
+
 **Antigravity** — there is no marketplace. Clone the repository and run `agy plugin install <path-to-clone>/anneal`, or copy the `anneal/` directory to `.agents/plugins/anneal/` for one workspace or `~/.gemini/config/plugins/anneal/` for every workspace.
 
-anneal acts only when you ask. Its one hook reads each shell command and stays silent outside a migration branch.
+anneal acts only when you ask. Its enabled hook reads each shell command and stays silent outside a migration branch.
 
 ## Quick start
 
-Ask for an audit. It reads the repository and writes nothing. On Claude Code, type `/anneal:improve-agent-navigation audit`. On Codex, type `$improve-agent-navigation audit`. On Antigravity, type `/improve-agent-navigation audit`.
+Ask for an audit. It reads the repository and writes nothing. On Claude Code, type `/anneal:repo-layout audit`. On Codex, type `$repo-layout audit`. On Antigravity, type `/repo-layout audit`.
 
 anneal answers by running its scan script and reporting what came back. Below is that script, run against a small demo repository. The demo has a generic file name, two files sharing a name, no map file and an unignored `dist` folder.
 
@@ -72,10 +74,10 @@ Nothing on disk has changed. Add `--json` for the full evidence behind each coun
 
 | You want to… | Command |
 | --- | --- |
-| See what slows an agent down here, changing nothing | `/anneal:improve-agent-navigation audit` |
-| Audit, plan and migrate, approving each step | `/anneal:improve-agent-navigation` |
-| Turn one session's detours into map file changes you approve | `/anneal:learn-from-session [transcript file]` |
-| Reconcile documentation and non-code development files | `/anneal:reconcile-project-docs [audit] [path or concern]` |
+| See what slows an agent down here, changing nothing | `/anneal:repo-layout audit` |
+| Audit, plan and migrate, approving each step | `/anneal:repo-layout` |
+| Turn one session's detours into map file changes you approve | `/anneal:session-review [transcript file]` |
+| Reconcile documentation and non-code development files | `/anneal:docs-align [audit] [path or concern]` |
 | Run the scan with no host at all | `node anneal/scripts/audit.js --root <directory> [--json]` |
 | Re-point imports after a move, with no host at all | `node anneal/scripts/update-imports.js --from <old-path> --to <new-path> [--root <directory>]` |
 | Read a transcript's evidence with no host at all | `node anneal/scripts/session-evidence.js --session-file <transcript> [--before <ISO time>]` |
@@ -84,7 +86,7 @@ Nothing on disk has changed. Add `--json` for the full evidence behind each coun
 
 ### What the audit looks for
 
-Each rule removes steps an agent repeats every session. The reason behind each one is in [the target conventions](skills/improve-agent-navigation/references/conventions.md).
+Each rule removes steps an agent repeats every session. The reason behind each one is in [the target conventions](skills/repo-layout/references/conventions.md).
 
 | Severity | Finding | What it means |
 | --- | --- | --- |
@@ -119,11 +121,11 @@ anneal stops before step 4 when `git status --porcelain` prints anything. The br
 
 ### The map file it writes
 
-A map file anneal writes carries the same sections in the same order: `Start here`, `Rules that outrank everything`, `Commands`, `Where things live`, `Conventions`, `Pitfalls`. A section with nothing true to say is left out. What goes in each one, and what stays out of the file, is in [the map file skeleton](skills/improve-agent-navigation/references/map-file.md). When your repository already has a map file off that order, anneal offers the reshape as a step of its own. It moves sentences without rewriting them, and lists anything that would leave the file before you approve.
+A map file anneal writes carries the same sections in the same order: `Start here`, `Rules that outrank everything`, `Commands`, `Where things live`, `Conventions`, `Pitfalls`. A section with nothing true to say is left out. What goes in each one, and what stays out of the file, is in [the map file skeleton](skills/repo-layout/references/map-file.md). When your repository already has a map file off that order, anneal offers the reshape as a step of its own. It moves sentences without rewriting them, and lists anything that would leave the file before you approve.
 
 ### How a session audit runs
 
-The layout audit predicts where an agent will lose time. A transcript shows where one did. `learn-from-session` reads one Claude Code transcript or one Codex rollout and proposes changes to the same map file. You start it yourself, with `/anneal:learn-from-session` on Claude Code, `$learn-from-session` on Codex or `/learn-from-session` on Antigravity. No hook starts it and the model cannot start it on its own.
+The layout audit predicts where an agent will lose time. A transcript shows where one did. `session-review` reads one Claude Code transcript or one Codex rollout and proposes changes to the same map file. You start it yourself, with `/anneal:session-review` on Claude Code, `$session-review` on Codex or `/session-review` on Antigravity. No hook starts it and the model cannot start it on its own.
 
 1. A script lists candidates: tool calls that reported an error, shell output that reads like one, and the three largest tool outputs. With no argument it finds the session you are in and leaves the audit's own turn out.
 2. The skill reads the lines each candidate names. It also looks for your corrections, repeated searches and commands tried in several forms.
@@ -134,7 +136,7 @@ A transcript carries web pages and tool output, and a rule lifted from it would 
 
 ### How documentation reconciliation runs
 
-Use `/anneal:reconcile-project-docs` on Claude Code, `$reconcile-project-docs` on Codex or `/reconcile-project-docs` on Antigravity. Add `audit` to receive findings without edits or a saved report.
+Use `/anneal:docs-align` on Claude Code, `$docs-align` on Codex or `/docs-align` on Antigravity. Add `audit` to receive findings without edits or a saved report.
 
 The skill inventories maintained documentation, reviews every in-scope README with `readme`, and runs the layout audit without entering its migration steps. It checks claims, references, host instructions, development setup and ignore rules against evidence. If `readme` is unavailable, it reports that gap and reviews the READMEs manually.
 
@@ -171,8 +173,8 @@ node --test
 Expected output:
 
 ```text
-# tests 73
-# pass 73
+# tests 76
+# pass 76
 # fail 0
 ```
 
@@ -188,7 +190,9 @@ The harness confines the granted shell in a sandbox, and native Windows has none
 
 Prior evals used Ubuntu 24.04 under WSL2 and Claude Code 2.1.278, with the skills' previous names. `audit-reports-without-changes` scored 1.00 on each of three runs. `migration-stops-on-uncommitted-work` and `session-audit-proposes-without-writing` each scored 1.00 on one run. Each used `--case <name> --ablation none`. Those results do not validate discovery under the renamed skills. The full command above, including its baseline arm, has not been run.
 
-Earlier isolated Codex checks discovered anneal's two existing skills and migration hook in CLI 0.155.1 and desktop runtime 0.155.0-alpha.9.2. Bounded audit and transcript-reader commands also passed. Live refusal by anneal's guard and a complete model-driven migration remain unverified. Antigravity execution remains unverified. The renamed skills and `reconcile-project-docs` have not run in installed clients.
+Claude Code has loaded `repo-layout`, `session-review` and `docs-align` from a local plugin directory. A bounded `repo-layout` migration updated imports, kept checks green and triggered the Git guard. That session worked around a native permission denial. A focused repeat respected a denial during baseline verification and left the fixture unchanged. A complete clean migration with interactive approvals remains unverified. The other two workflows have not been exercised under their new names.
+
+Earlier Codex checks verified discovery and bounded script execution. A model-driven migration and guard refusal remain unverified there. Antigravity execution and published installation of the renamed skills remain unverified.
 
 ## Support
 

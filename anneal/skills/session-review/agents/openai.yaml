@@ -1,0 +1,6 @@
+interface:
+  display_name: "Session review"
+  short_description: "Turn one session's detours into map file changes you approve"
+  default_prompt: "Use $session-review to audit this session and propose changes to this repository's map file."
+policy:
+  allow_implicit_invocation: false

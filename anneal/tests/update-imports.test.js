@@ -73,6 +73,60 @@ describe("references from other files", () => {
     assert.strictEqual(read(root, "src/without.js"), "import '../lib/new';\n");
   });
 
+  test("explicit extensions distinguish modules and assets with the same basename", () => {
+    const root = moved({
+      "src/app.ts": [
+        "import { value } from './old.js';",
+        "const settings = require('./old.json');",
+        "import './old.css';",
+        "export { Model } from './old.ts';",
+        "const module = import('./old.mjs');",
+        "",
+      ].join("\n"),
+      "src/old.js": "export const value = 1;\n",
+      "src/old.json": "{}\n",
+      "src/old.css": "body {}\n",
+      "src/old.ts": "export type Model = string;\n",
+      "src/old.mjs": "export const other = 2;\n",
+    }, "src/old.js", "lib/new.js");
+
+    const { updated } = updateImports({ root, from: "src/old.js", to: "lib/new.js" });
+    assert.strictEqual(read(root, "src/app.ts"), [
+      "import { value } from '../lib/new.js';",
+      "const settings = require('./old.json');",
+      "import './old.css';",
+      "export { Model } from './old.ts';",
+      "const module = import('./old.mjs');",
+      "",
+    ].join("\n"));
+    assert.deepStrictEqual(updated, [{ file: "src/app.ts", changed: 1 }]);
+  });
+
+  test("extensionless imports still follow every supported source extension", () => {
+    for (const extension of ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "vue", "svelte"]) {
+      const from = `src/old.${extension}`;
+      const to = `lib/new.${extension}`;
+      const root = moved({
+        "src/app.js": "import './old';\n",
+        [from]: "",
+      }, from, to);
+
+      updateImports({ root, from, to });
+      assert.strictEqual(read(root, "src/app.js"), "import '../lib/new';\n", extension);
+    }
+  });
+
+  test("an extensionless require still follows a moved JSON module", () => {
+    const root = moved({
+      "src/app.js": "const settings = require('./old');\n",
+      "src/old.json": "{}\n",
+    }, "src/old.json", "lib/settings.json");
+
+    const { updated } = updateImports({ root, from: "src/old.json", to: "lib/settings.json" });
+    assert.strictEqual(read(root, "src/app.js"), "const settings = require('../lib/settings');\n");
+    assert.deepStrictEqual(updated, [{ file: "src/app.js", changed: 1 }]);
+  });
+
   test("a path that only looks like the moved one is untouched", () => {
     const root = moved({
       "src/app.js": "import './format-date';\nimport './utils/formatter';\n",

@@ -1,5 +1,5 @@
 ---
-name: learn-from-session
+name: session-review
 description: >-
   Audits one Claude Code or Codex session for where it lost time — a command
   that failed before another worked, a file it had to search for, an output too
@@ -7,8 +7,8 @@ description: >-
   this repository's map file, each one approved before it is written. A fact
   about one machine is reported and never written. Use ONLY on an explicit
   request to audit a session or to learn from this session, or when the user
-  invokes learn-from-session. Do NOT use to audit the repository's layout,
-  which improve-agent-navigation does, to change code or settings, or to
+  invokes session-review. Do NOT use to audit the repository's layout,
+  which repo-layout does, to change code or settings, or to
   edit an instruction file outside this repository.
 disable-model-invocation: true
 argument-hint: "[transcript file]"
@@ -18,11 +18,11 @@ metadata:
   version: "1.1"
 ---
 
-# Learn from session
+# Session review
 
 Find where one session lost time, and make the smallest change to this repository's map file that stops the next session losing it again. Prefer a replacement to an addition. **No change is a valid result.**
 
-The map file is the instruction file the host loads into every session: `CLAUDE.md`, `AGENTS.md` or `GEMINI.md`. What belongs in each of its sections, and what stays out of it, is in [the map file skeleton](../improve-agent-navigation/references/map-file.md). Read that file before drafting a change.
+The map file is the instruction file the host loads into every session: `CLAUDE.md`, `AGENTS.md` or `GEMINI.md`. What belongs in each of its sections, and what stays out of it, is in [the map file skeleton](../repo-layout/references/map-file.md). Read that file before drafting a change.
 
 Argument: `$ARGUMENTS`. A host that does not fill that in leaves it as written; read the argument from the request instead. When it is a path, it is the transcript to audit. With no argument, the session to audit is this one.
 
@@ -81,7 +81,7 @@ Then look, inside the same interval, for what the script cannot see:
 | --- | --- |
 | A project fact: a command, a version, a path, a pitfall | the map file, after approval |
 | A machine fact: a shell, a local path, a version manager | reported for the owner's own global instruction file, never written |
-| A mistake a machine could catch | reported as a check to write: the `collet-check` skill when the project has `.collet/`, otherwise the project's own linter or tests |
+| A mistake a machine could catch | reported as a check to write: the `check-writer` skill when the project has `.collet/`, otherwise the project's own linter or tests |
 | An ordinary bug, or a failure that came and went | a fix, and no rule |
 | Steering that came from a hook, an output style, a skill or a plugin | reported against that source |
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Docs align"
+  short_description: "Verify docs, instructions and repository hygiene"
+  default_prompt: "Use $docs-align to reconcile this project's documentation and non-code development files with its current behavior."

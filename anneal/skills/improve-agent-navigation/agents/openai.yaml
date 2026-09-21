@@ -1,4 +1,0 @@
-interface:
-  display_name: "Improve agent navigation"
-  short_description: "Audit repository layout and plan easier agent navigation"
-  default_prompt: "Use $improve-agent-navigation audit to report what makes this repository harder for an agent to navigate."

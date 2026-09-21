@@ -1,5 +1,5 @@
 ---
-name: improve-agent-navigation
+name: repo-layout
 description: >-
   Audits an existing repository for what makes an AI agent search, read or
   guess more than it needs to — no map file or toolchain version, duplicate
@@ -19,7 +19,7 @@ metadata:
   version: "1.2"
 ---
 
-# Improve agent navigation
+# Repo layout
 
 Make an existing repository cheaper for an agent to work in: fewer searches to find a file, fewer reads to understand it, one command to check a change. The target conventions and the reason for each are in [references/conventions.md](references/conventions.md). Read that file before building a plan.
 

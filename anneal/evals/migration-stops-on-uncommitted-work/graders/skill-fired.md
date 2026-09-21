@@ -1,5 +1,5 @@
 ---
 type: tool_used
 tool: Skill
-input_match: '"skill"\s*:\s*"(?:[\w-]+:)?improve-agent-navigation"'
+input_match: '"skill"\s*:\s*"(?:[\w-]+:)?repo-layout"'
 ---

@@ -6,6 +6,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.4.0-alpha] — 2026-09-21
+
+### Changed
+
+- Rename `improve-agent-navigation` to `repo-layout`, `learn-from-session` to
+  `session-review`, and `reconcile-project-docs` to `docs-align`. Invocation examples,
+  UI names, references and eval selectors follow the new names; the workflows are unchanged.
+
+### Fixed
+
+- Preserve imports of other files with the same basename when moving a source file; explicit extensions retain their identity.
+- Explain Codex hook trust and its activation check before the first guarded workflow.
+
 ## [0.3.0-alpha] — 2026-09-21
 
 ### Added

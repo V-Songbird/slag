@@ -92,7 +92,13 @@ const updateReferences = (text, fileDir, oldFull, newFull) =>
   rewrite(text, {
     resolveFrom: fileDir,
     anchorTo: fileDir,
-    pick: (resolved) => (stripExtension(resolved) === stripExtension(oldFull) ? newFull : null),
+    pick: (resolved) => {
+      if (resolved === oldFull) return newFull;
+      // An explicit extension identifies a different file. Only extensionless
+      // imports may match the moved file without its suffix.
+      if (path.extname(resolved) !== "") return null;
+      return resolved === stripExtension(oldFull) ? newFull : null;
+    },
   });
 
 // The moved file itself: its specifiers were written against the old folder and
