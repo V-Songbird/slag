@@ -1,269 +1,13 @@
 "use strict";
 
-// The session evidence script on synthetic transcripts built in temp
-// directories: both hosts' record shapes, and the CLI through its real entry
-// point. No real transcript is a fixture; one holds machine paths and secrets.
+// The session evidence script's redaction, and its CLI through the real entry point, on synthetic transcripts.
 
-const { test, describe, after } = require("node:test");
+const { test, describe } = require("node:test");
 const assert = require("node:assert");
-const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { analyzeClaude, analyzeCodex, detectHost, redact } = require("../scripts/session-evidence.js");
-
-const CLI = path.join(__dirname, "..", "scripts", "session-evidence.js");
-const SESSION = "0a1b2c3d-0000-4000-8000-00000000abcd";
-
-const created = [];
-after(() => {
-  for (const dir of created) fs.rmSync(dir, { recursive: true, force: true });
-});
-
-function tempDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-session-"));
-  created.push(dir);
-  return dir;
-}
-
-// Rows become one JSON line each; `tail` is appended raw, for a half-written record.
-function transcript(rows, { tail = "", name = `${SESSION}.jsonl`, dir = tempDir() } = {}) {
-  const file = path.join(dir, name);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, rows.map((row) => `${JSON.stringify(row)}\n`).join("") + tail);
-  return file;
-}
-
-const at = (second) => `2026-01-01T00:00:${String(second).padStart(2, "0")}.000Z`;
-
-// Claude Code record shapes.
-const human = (text, second) => ({
-  type: "user", origin: { kind: "human" }, timestamp: at(second), sessionId: SESSION, cwd: "/work/shop", version: "2.1.0",
-  message: { role: "user", content: text },
-});
-const use = (id, name, input, second) => ({
-  type: "assistant", timestamp: at(second),
-  message: { id: `msg-${id}`, model: "model-x", content: [{ type: "tool_use", id, name, input }] },
-});
-const result = (id, text, second, error = false) => ({
-  type: "user", timestamp: at(second),
-  message: { content: [{ type: "tool_result", tool_use_id: id, is_error: error, content: [{ type: "text", text }] }] },
-});
-
-// Codex record shapes.
-const meta = { timestamp: at(0), type: "session_meta", payload: { id: "thread-1", cwd: "/work/shop" } };
-const started = (second) => ({ timestamp: at(second), type: "event_msg", payload: { type: "task_started" } });
-const turn = (second) => ({ timestamp: at(second), type: "turn_context", payload: { cwd: "/work/shop", model: "model-y", effort: "medium" } });
-const call = (id, input, second) => ({
-  timestamp: at(second), type: "response_item", payload: { type: "custom_tool_call", call_id: id, name: "exec", input },
-});
-const output = (id, texts, second) => ({
-  timestamp: at(second), type: "response_item",
-  payload: { type: "custom_tool_call_output", call_id: id, output: texts.map((text) => ({ type: "input_text", text })) },
-});
-
-describe("a Claude Code transcript", () => {
-  test("the latest human prompt is the cutoff, so the audit's own turn is left out", () => {
-    const report = analyzeClaude(transcript([
-      human("fix the cart total", 1),
-      use("t1", "Bash", { command: "npm test" }, 2),
-      result("t1", "Exit code 1\n1 failing", 3, true),
-      human("audit this session", 4),
-      use("t2", "Bash", { command: "npm test" }, 5),
-      result("t2", "Exit code 1\nstill failing", 6, true),
-    ]));
-    assert.strictEqual(report.boundary.mode, "before-latest-human-prompt");
-    assert.strictEqual(report.boundary.line, 4);
-    assert.strictEqual(report.recordsSelected, 3);
-    assert.deepStrictEqual(report.candidateCounts, { "nonzero-exit": 1 });
-    assert.strictEqual(report.sessionId, SESSION);
-    assert.deepStrictEqual(report.context, { cwd: "/work/shop", version: "2.1.0", model: "model-x" });
-  });
-
-  test("an older transcript has no origin tag, and the cutoff is the last prompt that is not injected", () => {
-    const old = (text, second, isMeta) => ({ type: "user", isMeta, timestamp: at(second), message: { content: text } });
-    const report = analyzeClaude(transcript([
-      old("fix the cart total", 1, false),
-      use("t1", "Bash", { command: "npm test" }, 2),
-      result("t1", "ok", 3),
-      old("audit this session", 4, false),
-      old("<injected reminder>", 5, true),
-    ]));
-    assert.strictEqual(report.boundary.line, 4);
-  });
-
-  test("a reported error carries its call, its exit code and the same tool's later success", () => {
-    const report = analyzeClaude(transcript([
-      human("run the suite", 1),
-      use("t1", "Bash", { command: "npm tset" }, 2),
-      result("t1", "Exit code 127\nbash: npm tset: command not found", 3, true),
-      use("t2", "Read", { file_path: "package.json" }, 4),
-      result("t2", "{}", 5),
-      use("t3", "Bash", { command: "npm test" }, 6),
-      result("t3", "# pass 4", 7),
-      human("audit", 8),
-    ]));
-    assert.strictEqual(report.candidates.length, 1);
-    const [failure] = report.candidates;
-    assert.strictEqual(failure.category, "command-not-found");
-    assert.strictEqual(failure.evidenceBasis, "reported-error");
-    assert.strictEqual(failure.exitCode, 127);
-    assert.strictEqual(failure.tool, "Bash");
-    assert.strictEqual(failure.callLine, 2);
-    assert.strictEqual(failure.commandOrArguments, "npm tset");
-    assert.deepStrictEqual(failure.laterSameToolSuccesses.map((s) => s.commandOrArguments), ["npm test"]);
-  });
-
-  test("error text inside a file that was read is not a candidate, and inside shell output it is", () => {
-    const report = analyzeClaude(transcript([
-      human("look around", 1),
-      use("t1", "Read", { file_path: "notes.md" }, 2),
-      result("t1", "yesterday: bash: foo: command not found", 3),
-      use("t2", "Bash", { command: "foo || true" }, 4),
-      result("t2", "bash: foo: command not found", 5),
-      human("audit", 6),
-    ]));
-    assert.deepStrictEqual(report.candidates.map((c) => [c.tool, c.evidenceBasis]), [["Bash", "diagnostic-text-match-only"]]);
-  });
-
-  test("a host's own error text names the category", () => {
-    const report = analyzeClaude(transcript([
-      human("edit it", 1),
-      use("t1", "Edit", { file_path: "a.js", old_string: "x", new_string: "y" }, 2),
-      result("t1", "<tool_use_error>String to replace not found in file.</tool_use_error>", 3, true),
-      use("t2", "Frob", {}, 4),
-      result("t2", "<tool_use_error>something else</tool_use_error>", 5, true),
-      human("audit", 6),
-    ]));
-    assert.deepStrictEqual(report.candidateCounts, { "edit-no-match": 1, "tool-use-error": 1 });
-  });
-
-  test("--before selects by time, and a record without a timestamp is skipped out loud", () => {
-    const untimed = { type: "assistant", message: { content: [{ type: "text", text: "thinking" }] } };
-    const report = analyzeClaude(transcript([
-      human("first", 1),
-      use("t1", "Bash", { command: "false" }, 2),
-      result("t1", "Exit code 1", 3, true),
-      untimed,
-      use("t2", "Bash", { command: "false" }, 8),
-      result("t2", "Exit code 1", 9, true),
-    ]), new Date(at(5)));
-    assert.strictEqual(report.boundary.mode, "explicit-time");
-    assert.strictEqual(report.boundary.line, null);
-    assert.strictEqual(report.recordsSelected, 3);
-    assert.deepStrictEqual(report.candidateCounts, { "nonzero-exit": 1 });
-    assert.match(report.warnings.join("\n"), /without a usable timestamp/);
-  });
-
-  test("the limit bounds what is shown, never what is counted", () => {
-    const rows = [human("loop", 1)];
-    for (let i = 0; i < 4; i++) {
-      rows.push(use(`t${i}`, "Bash", { command: `step ${i}` }, 2), result(`t${i}`, "Exit code 1", 3, true));
-    }
-    rows.push(human("audit", 4));
-    const report = analyzeClaude(transcript(rows), null, 2);
-    assert.deepStrictEqual(report.candidateCounts, { "nonzero-exit": 4 });
-    assert.deepStrictEqual(report.candidates.map((c) => c.commandOrArguments), ["step 2", "step 3"]);
-    assert.match(report.warnings.join("\n"), /Only the last 2 candidates/);
-  });
-
-  test("the three largest tool outputs are reported by size, not by content", () => {
-    const rows = [human("read", 1)];
-    [10, 4000, 300, 20000].forEach((size, i) => {
-      rows.push(use(`t${i}`, "Read", { file_path: `f${i}` }, 2), result(`t${i}`, "x".repeat(size), 3));
-    });
-    rows.push(human("audit", 4));
-    const report = analyzeClaude(transcript(rows));
-    assert.deepStrictEqual(report.largestToolTexts.map((entry) => entry.characters), [20000, 4000, 300]);
-    assert.ok(!JSON.stringify(report.largestToolTexts).includes("xxx"));
-  });
-
-  test("a half-written last record is dropped, and a broken one in the middle stops the audit", () => {
-    const rows = [human("go", 1), use("t1", "Bash", { command: "ls" }, 2), result("t1", "a.js", 3), human("audit", 4)];
-    const report = analyzeClaude(transcript(rows, { tail: '{"type":"assist' }));
-    assert.match(report.warnings.join("\n"), /incomplete trailing record/);
-    assert.strictEqual(report.recordsSelected, 3);
-
-    const broken = transcript(rows, { tail: "{not json}\n" });
-    assert.throws(() => analyzeClaude(broken), /Invalid JSON record at line 5/);
-  });
-
-  test("a transcript with no human prompt asks for --before instead of guessing", () => {
-    const file = transcript([use("t1", "Bash", { command: "ls" }, 1), result("t1", "a.js", 2)]);
-    assert.throws(() => analyzeClaude(file), /No human prompt boundary found\. Supply --before/);
-  });
-
-  test("subagent transcripts are listed beside the session and never read", () => {
-    const dir = tempDir();
-    const file = transcript([human("go", 1), human("audit", 2)], { dir });
-    const folder = path.join(dir, SESSION, "subagents");
-    fs.mkdirSync(folder, { recursive: true });
-    fs.writeFileSync(path.join(folder, "agent-1.jsonl"), "{not json, and never parsed}\n");
-    fs.writeFileSync(path.join(folder, "agent-1.meta.json"), JSON.stringify({ agentType: "Explore", description: "find the cart" }));
-    const report = analyzeClaude(file);
-    assert.deepStrictEqual(report.subagentTranscripts, [
-      { file: path.join(folder, "agent-1.jsonl"), agentType: "Explore", description: "find the cart" },
-    ]);
-  });
-});
-
-describe("a Codex rollout", () => {
-  test("the latest task start is the cutoff, and a code-mode result carries its own exit code", () => {
-    const report = analyzeCodex(transcript([
-      meta, started(1), turn(1),
-      call("c1", "npm test", 2),
-      output("c1", ["Script completed\nOutput:\n", '{"exit_code":1,"output":"1 failing\\n"}'], 3),
-      call("c2", "npm test", 4),
-      output("c2", ['{"exit_code":0,"output":"# pass 4\\n"}'], 5),
-      started(6),
-      call("c3", "npm test", 7),
-      output("c3", ['{"exit_code":1,"output":"after the cutoff"}'], 8),
-    ]));
-    assert.strictEqual(report.boundary.mode, "before-latest-task-start");
-    assert.strictEqual(report.boundary.line, 8);
-    assert.strictEqual(report.sessionId, "thread-1");
-    assert.deepStrictEqual(report.context, { cwd: "/work/shop", model: "model-y", effort: "medium" });
-    assert.deepStrictEqual(report.candidateCounts, { "nonzero-exit": 1 });
-    const [failure] = report.candidates;
-    assert.strictEqual(failure.evidenceBasis, "reported-nonzero-exit");
-    assert.strictEqual(failure.exitCode, 1);
-    assert.strictEqual(failure.tool, "exec");
-    assert.strictEqual(failure.diagnosticCandidate, "1 failing\n");
-    assert.deepStrictEqual(failure.nearbyReportedSuccesses.map((s) => s.line), [7]);
-  });
-
-  test("a result object is read where it starts, whatever is printed after it or however it is wrapped", () => {
-    const pretty = JSON.stringify({ exit_code: 2, output: "a brace } in a string" }, null, 2);
-    const report = analyzeCodex(transcript([
-      meta, started(1),
-      call("c1", "build", 2),
-      output("c1", [`${pretty} trailing text\n  {"exit_code":3,"output":"second"}`], 3),
-      started(4),
-    ]));
-    assert.deepStrictEqual(report.candidates.map((c) => [c.exitCode, c.diagnosticCandidate]), [
-      [2, "a brace } in a string"],
-      [3, "second"],
-    ]);
-  });
-
-  test("a failed script and a plain exit line are both read", () => {
-    const report = analyzeCodex(transcript([
-      meta, started(1),
-      call("c1", "write README.md", 2),
-      output("c1", ["Script failed\nWall time 0.3 seconds\nOutput:\n", "Script error:\nCommand blocked by a hook"], 3),
-      { timestamp: at(4), type: "response_item", payload: { type: "function_call", call_id: "c2", name: "shell", arguments: '{"command":"make"}' } },
-      { timestamp: at(5), type: "response_item", payload: { type: "function_call_output", call_id: "c2", output: "Process exited with code 2\nmake: *** no rule" } },
-      started(6),
-    ]));
-    assert.deepStrictEqual(report.candidateCounts, { "tool-script-failure": 2, "nonzero-exit": 1 });
-    assert.strictEqual(report.candidates[2].tool, "shell");
-    assert.strictEqual(report.candidates[2].commandOrArguments, '{"command":"make"}');
-  });
-
-  test("a rollout with no task start asks for --before instead of guessing", () => {
-    assert.throws(() => analyzeCodex(transcript([meta, call("c1", "ls", 1)])), /No task_started boundary found/);
-  });
-});
+const { analyzeClaude, detectHost, redact } = require("../scripts/session-evidence.js");
+const { CLI, SESSION, tempDir, transcript, at, human, use, result, meta, started, turn } = require("./session-transcripts.js");
 
 describe("redaction", () => {
   test("credentials in a command or an output never reach an excerpt", () => {
@@ -280,10 +24,106 @@ describe("redaction", () => {
     assert.match(shown, /\[REDACTED\]/);
   });
 
+  // The home directory is read once, when the script loads, so each home gets a process of its own.
+  const redactUnder = (home, texts) => {
+    const script = `require("node:os").homedir = () => ${JSON.stringify(home)};`
+      + `process.stdout.write(JSON.stringify(${JSON.stringify(texts)}.map(require(${JSON.stringify(CLI)}).redact)));`;
+    const done = spawnSync(process.execPath, ["-e", script], { encoding: "utf8" });
+    assert.strictEqual(done.status, 0, done.stderr);
+    return JSON.parse(done.stdout);
+  };
+
   test("the home directory is shortened however it is spelled", () => {
-    const home = os.homedir();
-    const spellings = [home, home.replace(/\\/g, "/"), JSON.stringify(home).slice(1, -1)];
-    for (const spelled of spellings) assert.strictEqual(redact(`cd ${spelled}/work`), "cd ~/work");
+    for (const home of [String.raw`C:\Users\Quillfen`, "/home/quillfen"]) {
+      const spellings = [home, home.replace(/\\/g, "/"), JSON.stringify(home).slice(1, -1)];
+      assert.deepStrictEqual(redactUnder(home, spellings.map((spelled) => `cd ${spelled}/work`)), spellings.map(() => "cd ~/work"));
+    }
+  });
+
+  test("a credential after Bearer or Basic is redacted, and a word after them is prose", () => {
+    const credentials = [
+      ["Authorization: Basic dXNlcjpwYXNz", "Authorization: Basic [REDACTED]"],
+      ["curl -H 'authorization: bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl'", "curl -H 'authorization: bearer [REDACTED]'"],
+      ["Bearer ghp_0123456789abcdefghijklmnopqrstuvwxyz", "Bearer [REDACTED]"],
+    ];
+    for (const [text, shown] of credentials) assert.strictEqual(redact(text), shown);
+    const prose = ["Basic usage: run npm test.", "Use Basic authentication.", "Bearer tokens expire.", "Basic PowerShell and Basic Self-Hosting"];
+    for (const text of prose) assert.strictEqual(redact(text), text);
+  });
+
+  test("a Windows home is found in any case and spelling, and a sibling directory is left alone", () => {
+    const texts = [
+      String.raw`cat c:\users\QUILLFEN\notes.md`, String.raw`{"file_path":"C:\\Users\\Quillfen\\notes.md"}`, "file:///C:/Users/Quillfen/notes.md",
+      String.raw`cat C:\Users\Quillfen2\notes.md`, String.raw`cd C:\Users\Quillfen.old`, String.raw`cd C:\Users\Quillfen_x`,
+    ];
+    assert.deepStrictEqual(redactUnder(String.raw`C:\Users\Quillfen`, texts), [
+      String.raw`cat ~\notes.md`, String.raw`{"file_path":"~\\notes.md"}`, "file:///~/notes.md", texts[3], texts[4], texts[5],
+    ]);
+  });
+
+  test("a Windows home is also found in MSYS, WSL and doubly escaped spellings, and a sibling there is left alone", () => {
+    const nested = (file) => JSON.stringify({ content: JSON.stringify({ path: file }) });
+    const texts = [
+      "cat /c/Users/Quillfen/notes.md", "cat /mnt/c/Users/quillfen/notes.md", nested(String.raw`C:\Users\Quillfen\notes.md`),
+      "cat /c/Users/Quillfen2/notes.md", "cat /mnt/c/Users/Quillfen.old/notes.md", nested(String.raw`C:\Users\Quillfen2\notes.md`),
+    ];
+    assert.deepStrictEqual(redactUnder(String.raw`C:\Users\Quillfen`, texts), [
+      "cat ~/notes.md", "cat ~/notes.md", nested(String.raw`~\notes.md`), texts[3], texts[4], texts[5],
+    ]);
+  });
+
+  test("a file name, path, date or short word after Basic or Bearer is prose, and a long token is a credential", () => {
+    for (const text of ["Basic README.md covers setup.", "Basic src/index.js and Basic JSON/YAML", "Bearer 2026-01-01 rotation"]) {
+      assert.strictEqual(redact(text), text);
+    }
+    assert.strictEqual(redact("Authorization: Bearer abcdefghijklmnopqrstuvwxyz"), "Authorization: Bearer [REDACTED]");
+  });
+
+  test("code that names a secret is left alone, and an assigned secret is still redacted", () => {
+    const code = [
+      "if (token === null) return;", "interface Login { password: string; }", "const secret = process.env.SECRET;", "const cb = (token) => token;",
+    ];
+    for (const text of code) assert.strictEqual(redact(text), text);
+    assert.strictEqual(redact("password: hunter22"), "password: [REDACTED]");
+    assert.strictEqual(redact('token := "abc123def"'), "token := [REDACTED]");
+  });
+
+  test("a POSIX home keeps its case, and a root home names nobody", () => {
+    const texts = ["cd /home/quillfen/work", "cd /home/quillfen2/work", "cd /HOME/QUILLFEN/work", String.raw`type C:\work\notes.md`];
+    assert.deepStrictEqual(redactUnder("/home/quillfen", texts), ["cd ~/work", ...texts.slice(1)]);
+    assert.deepStrictEqual(redactUnder("/", texts), texts);
+    assert.deepStrictEqual(redactUnder("C:\\", texts), texts);
+  });
+
+  test("context.cwd shortens the home directory to ~, and session-review's root check still matches after expanding it", () => {
+    const cwdUnder = (home, host, cwd) => {
+      const file = host === "claude"
+        ? transcript([{ ...human("fix it", 1), cwd }, human("audit", 2)])
+        : transcript([meta, started(1), { ...turn(1), payload: { cwd, model: "model-y", effort: "medium" } }, started(2)]);
+      const analyze = host === "claude" ? "analyzeClaude" : "analyzeCodex";
+      const script = `require("node:os").homedir = () => ${JSON.stringify(home)};`
+        + `process.stdout.write(JSON.stringify(require(${JSON.stringify(CLI)}).${analyze}(${JSON.stringify(file)}).context.cwd));`;
+      const done = spawnSync(process.execPath, ["-e", script], { encoding: "utf8" });
+      assert.strictEqual(done.status, 0, done.stderr);
+      return JSON.parse(done.stdout);
+    };
+    // session-review's check: expand a leading ~ to the home directory, then compare with the repository root as the
+    // platform spells paths, slashes either way and, for a drive path, in any case.
+    const sameRoot = (cwd, home, root) => {
+      const spell = (value) => value.replace(/\\/g, "/").replace(/\/+$/, "");
+      const expanded = spell(cwd.replace(/^~(?=$|[\\/])/, () => home));
+      return /^[A-Za-z]:/.test(expanded) ? expanded.toLowerCase() === spell(root).toLowerCase() : expanded === spell(root);
+    };
+    const windows = cwdUnder(String.raw`C:\Users\Dev`, "claude", String.raw`C:\Users\Dev\projects\shop`);
+    assert.strictEqual(windows, String.raw`~\projects\shop`);
+    assert.ok(sameRoot(windows, String.raw`C:\Users\Dev`, "C:/Users/Dev/projects/shop"));
+    const posix = cwdUnder("/home/dev", "codex", "/home/dev/shop");
+    assert.strictEqual(posix, "~/shop");
+    assert.ok(sameRoot(posix, "/home/dev", "/home/dev/shop"));
+    assert.ok(!sameRoot(posix, "/home/dev", "/work/shop"));
+    // A sibling of the home and a directory elsewhere keep their spelling; only the home prefix is shortened.
+    assert.strictEqual(cwdUnder("/home/dev", "claude", "/home/dev2/shop"), "/home/dev2/shop");
+    assert.strictEqual(cwdUnder("/home/dev", "codex", "/work/shop"), "/work/shop");
   });
 });
 
@@ -339,6 +179,94 @@ describe("the command line", () => {
     const naive = run(["--session-file", file, "--before", "2026-01-01T00:00:00"]);
     assert.strictEqual(naive.status, 1);
     assert.match(naive.stderr, /The cutoff must include a timezone/);
+  });
+
+  test("a line cutoff is a line number, goes alone, and reruns the first run's interval byte for byte but for its mode", () => {
+    const file = transcript([
+      human("fix the cart total", 1),
+      use("t1", "Bash", { command: "npm test" }, 2), result("t1", "Exit code 1\n1 failing", 3, true),
+      human("audit", 4),
+    ]);
+    for (const value of ["0", "x", "1.5", "-2"]) {
+      const refused = run(["--session-file", file, "--before-line", value]);
+      assert.strictEqual(refused.status, 2);
+      assert.match(refused.stderr, /--before-line must be a line number/);
+    }
+    const both = run(["--session-file", file, "--before-line", "4", "--before", at(30)]);
+    assert.strictEqual(both.status, 2);
+    assert.match(both.stderr, /give --before or --before-line, not both/);
+
+    const first = run(["--session-file", file]);
+    assert.strictEqual(first.status, 0, first.stderr);
+    const line = JSON.parse(first.stdout).boundary.line;
+    const rerun = run(["--session-file", file, "--before-line", String(line)]);
+    assert.strictEqual(rerun.status, 0, rerun.stderr);
+    assert.strictEqual(rerun.stdout.replace('"mode": "explicit-line"', '"mode": "before-latest-human-prompt"'), first.stdout);
+    // Past the last line, a line cutoff takes in the whole transcript.
+    assert.strictEqual(JSON.parse(run(["--session-file", file, "--before-line", "99"]).stdout).recordsSelected, 4);
+  });
+
+  test("the same bytes and cutoff give byte-identical evidence", () => {
+    const file = transcript([
+      human("fix the cart total", 1),
+      use("a", "Read", { file_path: "/work/shop/cart.js" }, 2),
+      use("b", "Bash", { command: "npm test" }, 2),
+      result("b", "Exit code 1\n1 failing", 3, true),
+      result("a", "export const cart = [];", 4),
+      use("c", "Bash", { command: "npm run build" }, 5),
+      human("audit", 6),
+    ]);
+    for (const args of [["--session-file", file], ["--session-file", file, "--before", at(30)]]) {
+      const first = run(args);
+      assert.strictEqual(first.status, 0, first.stderr);
+      assert.strictEqual(run(args).stdout, first.stdout);
+    }
+  });
+
+  test("the same bytes and cutoff give byte-identical navigation candidates", () => {
+    const file = transcript([
+      human("fix the cart total", 1),
+      use("a", "Read", { file_path: "/work/shop/src/cart.js" }, 2),
+      result("a", "<tool_use_error>File does not exist.</tool_use_error>", 3, true),
+      use("b", "Bash", { command: "git ls-files | grep cart" }, 4),
+      result("b", "lib/cart.js", 5),
+      use("c", "Read", { file_path: "/work/shop/lib/cart.js" }, 6),
+      result("c", "export const total = 1;", 7),
+      use("d", "Read", { file_path: "/work/shop/lib/cart.js" }, 8),
+      result("d", "export const total = 1;", 9),
+      human("audit", 10),
+    ]);
+    for (const args of [["--session-file", file], ["--session-file", file, "--before", at(30)]]) {
+      const first = run(args);
+      assert.strictEqual(first.status, 0, first.stderr);
+      assert.deepStrictEqual(JSON.parse(first.stdout).navigationCandidates.map((c) => c.kind), ["missing-path", "repeated-read"]);
+      assert.strictEqual(run(args).stdout, first.stdout);
+    }
+  });
+
+  test("without a home directory the script still prints evidence, redacts no home and finds no session by id", () => {
+    // The script reads the home directory once, at load, so each run replaces os.homedir in a process of its own.
+    const runWith = (homedir, args, env = {}) => spawnSync(process.execPath, ["-e", `require("node:os").homedir = ${homedir};`
+      + `process.exitCode = require(${JSON.stringify(CLI)}).main([process.execPath, ${JSON.stringify(CLI)}, ...${JSON.stringify(args)}]);`], {
+      encoding: "utf8", env: { ...process.env, CLAUDE_CODE_SESSION_ID: "", CODEX_THREAD_ID: "", CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", ...env },
+    });
+    const missing = `() => { throw new Error("no home directory"); }`;
+    const file = transcript([
+      human("fix it", 1),
+      use("t1", "Bash", { command: "cat /home/quillfen/notes.md" }, 2),
+      result("t1", "Exit code 1\ncat: no such file", 3, true),
+      human("audit", 4),
+    ]);
+    const shown = (homedir) => {
+      const done = runWith(homedir, ["--session-file", file]);
+      assert.strictEqual(done.status, 0, done.stderr);
+      return JSON.parse(done.stdout).candidates[0].commandOrArguments;
+    };
+    assert.strictEqual(shown(`() => "/home/quillfen"`), "cat ~/notes.md");
+    assert.strictEqual(shown(missing), "cat /home/quillfen/notes.md");
+    const lookup = runWith(missing, [], { CLAUDE_CODE_SESSION_ID: SESSION });
+    assert.strictEqual(lookup.status, 2);
+    assert.match(lookup.stderr, /found 0\. Supply --session-file/);
   });
 
   test("a transcript that does not parse exits 1 and prints no evidence", () => {
