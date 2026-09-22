@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: migration-applies-approved-step
+description: A clean repository whose one finding is the generic name src/utils.js. The user approves one step, renaming it to src/money.js. The run must migrate on its own branch, move the file, rewrite both imports, keep the checks passing and change nothing else. The fixture lists the entries the harness and its sandbox add to the workspace in .git/info/exclude, so git status starts clean.
+tags: [migration]
+context:
+  scaffold_script: approved-step-fixture.sh

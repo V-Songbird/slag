@@ -16,12 +16,12 @@ argument-hint: "[audit]"
 license: MIT
 compatibility: Requires Node 22 or later. A migration also requires git.
 metadata:
-  version: "1.2"
+  version: "1.4"
 ---
 
 # Repo layout
 
-Make an existing repository cheaper for an agent to work in: fewer searches to find a file, fewer reads to understand it, one command to check a change. The target conventions and the reason for each are in [references/conventions.md](references/conventions.md). Read that file before building a plan.
+Make an existing repository cheaper for an agent to work in: fewer searches to find a file, fewer reads to understand it, one command to check a change. The target conventions and the reason for each are in [references/conventions.md](references/conventions.md). Read that file before building a plan. **No change is a valid result.**
 
 Argument: `$ARGUMENTS`. A host that does not fill that in leaves it as written; read the argument from the request instead. When it is `audit`, run steps 1 and 2 only, then stop without changing any file.
 
@@ -56,7 +56,15 @@ The script prints a summary and writes nothing. Run it again with `--json` when 
 
 ## 2. Report the findings
 
-Show the findings by severity, each with its count and at most three example paths. Say once that the scan is heuristic: a flagged `index` file may be a framework entry point, a deep path may be what the framework's routing requires, and a runtime-name match may be deliberate.
+Show the findings by severity, each with its count and at most three example paths. Say once that the scan is heuristic: a flagged `index` file may be a framework entry point, a deep path may be what the framework's routing requires, and a runtime-name match may be deliberate. A duplicate name or a deep path is a candidate for a path hint in the map file before it is one for a rename or a move.
+
+Then read the observations the audit prints after the findings, from the `--json` report when the summary cuts a list. They carry no severity and ask for no change, and three of them explain a name or path before anyone proposes changing it:
+
+- `package-routes`: a package the map already names needs no path hint.
+- `package-local-names`: a duplicate name with one copy in each package keeps its name, since the package path tells the copies apart.
+- `framework-paths`: a path that a framework, language or manifest requires stays where it is.
+
+When an observation explains a name or path, no change is its default. Report it with that observation, not as a candidate.
 
 If the argument was `audit`, stop here.
 
@@ -78,17 +86,25 @@ Take the check commands from the audit's `checks` line, then from the map file a
 
 ## 5. Plan
 
-When the audit reported `generic-names`, `duplicate-names`, `large-files`, `deep-nesting` or `re-export-files`, hand the layout survey to a subagent with the repository root and the audit JSON, and base the rename and move steps on its proposal. The survey's instructions are in [../../agents/mapper.md](../../agents/mapper.md) — on a host without its own agent definition, pass that file's body as the subagent's prompt and ignore its frontmatter. Don't survey the tree yourself.
+When the audit reported `generic-names`, `duplicate-names`, `large-files`, `deep-nesting` or `re-export-files`, hand the layout survey to a subagent with the repository root and the audit JSON, observations included, and base the rename and move steps on its proposal. The survey's instructions are in [../../agents/mapper.md](../../agents/mapper.md) — on a host without its own agent definition, pass that file's body as the subagent's prompt and ignore its frontmatter. Don't survey the tree yourself.
+
+The plan holds structural work. A duplicate name, a deep path or a large file alone is no reason to rename, move or split, and these findings go elsewhere:
+
+- a file an agent looks for in the wrong place: a path hint in the map file's `Where things live`, written by the map file step when the plan has one and otherwise listed in the report. session-review proposes such hints from a transcript;
+- a long document read again, or cut, to reach one part: a heading or a section link, which docs-align handles;
+- text a host, hook, plugin or tool server added, temporary output and paths on one machine: reported to their owner, never changed here.
+
+Before any path hint, rename or move, read the observations from step 2: no hint for a package `package-routes` shows the map already names, no rename for a duplicate that `package-local-names` explains, and no rename or move for a path in `framework-paths`. Plan a change there only for an obstacle the observation leaves, such as importers that still cannot tell the files apart, and name that evidence in the step.
 
 Build the plan from these steps, in this order, keeping only the ones with something to do:
 
 1. **Map file.** A map file under 200 lines for the host the owner works in, on the section sequence in [references/map-file.md](references/map-file.md). Read that file before writing one. The audit's `map files` line lists the ones already there — when one of them holds that content, make the new file a short pointer to it instead of a copy. When an existing map file is off the sequence, offer the reshape as a step of its own.
 2. **Toolchain version.** The file the ecosystem's version manager reads, set to the version the project already requires in its manifest, CI or docs. Never guess a version; leave the step out when none is stated.
-3. **Ignore build output.** `.gitignore` entries for the untracked build or dependency folders the audit found, plus anything the checks created. Tracked generated files are listed for the owner, never deleted.
+3. **Ignore build output.** `.gitignore` entries for the untracked build or dependency folders the audit found, plus anything the checks created. Tracked generated files are listed for the owner, never deleted. A folder that `source-dist` or `required-inputs` explains, such as a `dist/` that nothing here builds or fixtures a test reads, is listed as kept, with that observation as the reason.
 4. **One check command.** A single entry, added the project's way (a `check` script, a make target), that runs the existing checks in order. Compose only commands that already exist.
 5. **Environment template.** A `.env.example` listing the variable names the project's own code and docs read, with empty values. Never read a `.env` to build it, and never copy a value into it.
-6. **Renames.** From the approved proposal.
-7. **Moves.** From the approved proposal.
+6. **Renames.** From the approved proposal, each for an ambiguity that a path hint in the map file would leave.
+7. **Moves.** From the approved proposal, each for an observed obstacle that a smaller step would leave.
 8. **Wiring notes.** Runtime-name spots go into the map file's pitfalls section as notes. The code stays as it is.
 
 Show the plan as a numbered list with the files each step touches, then ask the owner which steps to apply, noting that applying creates the branch `anneal/<YYYY-MM-DD>` from the current `HEAD`. For renames and moves touching more than 10 files, ask per group.
@@ -119,6 +135,8 @@ Run the audit again, then report:
 - each finding's count before and after;
 - the check results before and after;
 - steps skipped or set aside, and why;
+- path hints no step wrote, and findings left to docs-align or to their owner;
+- names and paths kept because an observation explains them;
 - conflicts with the project's own rules.
 
 To keep the result from drifting, suggest the project's existing checks, or collet when it is installed.

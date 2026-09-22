@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: navigation-explicit-path-original
+description: Control. The task names the file, so it needs no orientation. The agent adds Norway to the nordic shipping zone. Original snapshot.
+tags: [navigation]
+context:
+  scaffold_script: explicit-path-original.sh

@@ -30,3 +30,15 @@ Each rule removes steps an agent repeats every session: searches, file reads and
 - Names and locations a framework requires: entry points, routing folders, `__init__.py`, `mod.rs`, `page.tsx`.
 - Public package entry points and paths that other projects import.
 - What a test checks. Never skip, delete or weaken a test to finish a step.
+- A duplicate or generic name, a deep path or a long file on its own. Compare keeping it, adding a route to it and changing it: a path hint in the map file or a section link often removes the detour. Rename, move or split only for an ambiguity the route leaves.
+
+## The smallest fix for a detour
+
+A session that lost time points at the smallest change, and often at none:
+
+- A file looked for in the wrong place: a path hint in the map file, which session-review proposes.
+- A long document read again, or cut, to reach one part: a descriptive heading or a section link, which docs-align handles. Split only a separable topic.
+- A check that prints a lot when it passes: its quieter reporter, behind the one check command.
+- Search results full of generated or dependency files: ignore those folders.
+- Text a host, hook, plugin or tool server added, temporary output and paths on one machine: reported to their owner, never changed in the repository.
+- Reading by range after a cut read, a search that found nothing, an expected block and an ordinary second read: no change.

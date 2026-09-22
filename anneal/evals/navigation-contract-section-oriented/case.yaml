@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: navigation-contract-section-oriented
+description: A long partner API contract gives the shipments page sizes in the endpoint's own entry, far past a general pagination rule that says otherwise. The agent makes the client's limits match. Oriented snapshot, whose map file routes an endpoint's batch or page size to that endpoint's entry.
+tags: [navigation]
+context:
+  scaffold_script: contract-section-oriented.sh

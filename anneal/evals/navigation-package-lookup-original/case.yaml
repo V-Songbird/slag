@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: navigation-package-lookup-original
+description: Three packages compute a loyalty discount, and the storefront checkout imports the one in packages/price-engine. The agent names that function. Original snapshot, whose map file has no route to the package.
+tags: [navigation]
+context:
+  scaffold_script: package-lookup-original.sh

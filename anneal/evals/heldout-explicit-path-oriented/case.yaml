@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: heldout-explicit-path-oriented
+description: Held out. Control. The task names the file, so it needs no orientation. The agent adds Portugal to the EU fee region. Oriented snapshot, whose extra map file lines the task does not need.
+tags: [heldout]
+context:
+  scaffold_script: heldout-explicit-path-oriented.sh

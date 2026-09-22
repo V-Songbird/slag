@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: navigation-package-lookup-oriented
+description: Three packages compute a loyalty discount, and the storefront checkout imports the one in packages/price-engine. The agent names that function. Oriented snapshot, whose map file routes member discounts and tax to that package.
+tags: [navigation]
+context:
+  scaffold_script: package-lookup-oriented.sh

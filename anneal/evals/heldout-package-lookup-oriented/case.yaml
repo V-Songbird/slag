@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: heldout-package-lookup-oriented
+description: Held out. Three libraries compute a discount for customers who booked before, and the booking service's quote imports the one in lib/fare-rules. The agent names that function. Oriented snapshot, whose map file routes returning-customer discounts to that library.
+tags: [heldout]
+context:
+  scaffold_script: heldout-package-lookup-oriented.sh

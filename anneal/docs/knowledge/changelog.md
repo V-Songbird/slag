@@ -16,6 +16,35 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- The session evidence names each call: the agent that made it, the prompt it served, its operation and its path. A `coverage` summary counts the calls issued, answered and left unanswered, and says whether the session only read files.
+- The session evidence lists navigation candidates: a path that did not exist, a whole file read again, a read the host cut, a host notice in place of a file, and a large output. Each keeps what the transcript shows apart from a cause it might have, and names who would act, the smallest change and how to check it.
+- `--before-line <line>` reruns the session evidence over exactly the records of an earlier run, and session-review reruns that way. `--before` now warns about a skipped record only when it held conversation.
+- On Codex, a result without an exit code takes its outcome from its wrapper and its script: `ok` only when a completed script could not have hidden a failure, `unknown` when it could, and `pending` while the script runs. Neither of the last two counts as a success, and `coverage` counts the unknown results and the scripts still running when the interval ends.
+- On Codex, the host's own records of commands and server tool calls decide a result where they belong to it beyond doubt. A failed record adds a candidate that names the command, clean records can turn `unknown` into `ok`, a record never turns a failure into a success, and `coverage.recordedOutcomes` counts the results records settled.
+- The audit prints informational observations after its findings: what each map file routes to, which packages the map names, how long documents are reached, and which findings a package boundary, a framework path, a fixture or an unbuilt `dist/` explains. They have no severity and change no finding.
+- Eval cases: `migration-applies-approved-step` applies an approved migration step on a clean tree, and six navigation and six held-out cases compare a map without and with a `Start here` section on tasks whose answers are checked.
+
+### Changed
+
+- session-review checks the actor, prompt, path and operation before it calls a later call a recovery or a repeat, and weighs `unknown`, `pending` and host-record outcomes as evidence, not verdicts. Each finding goes to the map file, docs-align, repo-layout, your global instruction file or the source that printed it.
+- repo-layout and its layout survey propose a path hint before a rename or a move, and keep a name or path that an observation explains, including tracked folders that `source-dist` or `required-inputs` explains.
+- docs-align proposes routes that take each task to the one document holding its contract and to the check that proves it, and keeps a long reference whole when headings reach its parts.
+- The map file guidance accepts routes written in prose, tables, trees, links or `@path` imports, and offers reshaping an existing map as an option, not a fix.
+- The map file guidance and the docs-align checklist require each `Start here` line to name only what its destination holds, checked against that destination's imports, exports or headings, and never a decoy or a folder to avoid.
+- The eval graders catch a plain `mv`, a bare `git stash`, any new branch, tag, stash or file, and any edit to the session case's map file, and the session case passes only with the evidence script's report. The documented eval command runs the three original cases by tag and writes its results outside the repository.
+
+### Fixed
+
+- `check-command-missing` no longer fires when the checks live in a `scripts/` check script, a harness's check runner, a root Gradle or Maven build, or Node test files that `node --test` runs where there is no `package.json`.
+- `build-output-tracked` no longer lists committed files under the input folders that `required-inputs` reports, such as a minified file under `test/fixtures/`, so it no longer suggests untracking what a test reads.
+- Evidence redaction keeps prose after `Basic` or `Bearer`, finds the home directory in any case and in Git Bash, WSL and escaped JSON spellings, and shortens it in `context.cwd` too. Copied fields are cut to a fixed size, and a machine with no home directory no longer stops the script.
+- A call that ran beside a failure, including one from the same assistant message, is no longer its later success. A notification or a subagent's instructions no longer becomes the cutoff, and a successful read that quotes an error is no longer a candidate.
+- A failed read, search or edit of a missing file is `missing-path` for every wording the navigation candidates recognize, and a Read over its size limit is `output-too-large`.
+- On Codex, the exit code is read from the result's header, where `Exit code: N` now counts too, and an exit line that a read quotes further down is output. A hook block, an interrupt or a failed agent call is a failure, and a task another agent started is no longer the cutoff unless you also prompted in it.
+- On Codex, a result adds at most one nearby success, and none when its script printed fewer exit codes than the commands it runs. `sessionId` names the rollout's own thread, and a forked rollout's copy of its parent's history adds no calls.
+
 ## [0.4.0-alpha] — 2026-09-21
 
 ### Changed

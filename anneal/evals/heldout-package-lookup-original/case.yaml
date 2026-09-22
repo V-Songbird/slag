@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: heldout-package-lookup-original
+description: Held out. Three libraries compute a discount for customers who booked before, and the booking service's quote imports the one in lib/fare-rules. The agent names that function. Original snapshot, whose map file has no route to the library.
+tags: [heldout]
+context:
+  scaffold_script: heldout-package-lookup-original.sh
