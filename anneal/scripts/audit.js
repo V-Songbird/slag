@@ -9,6 +9,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
+const { observe } = require("./audit-observations.js");
 
 const MAP_FILE_MAX_LINES = 200;
 const LARGE_FILE_LINES = 800;
@@ -28,11 +29,11 @@ const CODE_EXTENSIONS = new Set([
 const JS_EXTENSIONS = new Set(["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"]);
 
 // File names a framework or language requires; repeating them is expected.
-const REQUIRED_NAMES = new Set([
-  "index", "__init__", "__main__", "mod", "lib", "main", "conftest", "setup", "program", "startup", "assemblyinfo",
+const ROUTE_NAMES = new Set([
   "page", "layout", "route", "loading", "error", "not-found", "template", "default", "middleware",
   "+page", "+layout", "+server", "+error", "+page.server", "+layout.server",
 ]);
+const REQUIRED_NAMES = new Set(["index", "__init__", "__main__", "mod", "lib", "main", "conftest", "setup", "program", "startup", "assemblyinfo", ...ROUTE_NAMES]);
 const GENERIC_NAMES = new Set(["utils", "util", "helpers", "helper", "common", "misc", "stuff", "general", "functions"]);
 
 // Folders that usually hold build output or installed dependencies.
@@ -48,6 +49,8 @@ const OUTPUT_DIRS = new Set([
   ".next", ".nuxt", ".svelte-kit", "__pycache__", ".venv", "venv", "Library", "Temp",
 ]);
 const COMPILED_EXTENSIONS = new Set(["class", "pyc", "o", "obj", "pdb"]);
+// Test inputs and data a project keeps on purpose, so no build output.
+const INPUT_DIRS = new Set(["fixtures", "__fixtures__", "testdata", "test-data", "__snapshots__", "snapshots", "golden", "data"]);
 
 // A computed lookup on a name, call or index. The keywords are ones an array
 // literal can follow, as in `for (const x of [...])`, which is not a lookup.
@@ -72,6 +75,12 @@ const RUNTIME_NAME_PATTERNS = [
 const CHECK_SCRIPT = /^(test|lint|typecheck|type-check|types|check|verify|validate|ci)(:[\w-]+)?$/;
 const COMBINED_CHECK = /^(check|verify|validate|ci)$/;
 const CHECK_TARGET = /^(check|test|lint|typecheck|verify|validate|ci)\b/;
+// Names Node's own runner treats as test files; it also runs any script under a
+// test/ folder, and skips node_modules and dot folders.
+const NODE_TEST_NAME = /^(?:[^/]*[.\-_]test|test-[^/]*|test)\.[cm]?js$/;
+const FIXTURE_DIRS = new Set(["fixtures", "__fixtures__"]);
+// Check runners a harness mounts: collet's, and jig's, the retired plugin collet replaced.
+const HARNESS_CHECKS = [".collet/checks/run.mjs", ".jig/checks/run.mjs"];
 
 function git(root, args) {
   return execFileSync("git", ["-C", root, ...args], {
@@ -132,6 +141,8 @@ function stemOf(file) {
 
 const dirsOf = (file) => file.split("/").slice(0, -1);
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const nameGroup = ([stem, group]) => `${stem}: ${group.slice(0, 5).join(", ")}${group.length > 5 ? `, +${group.length - 5} more` : ""}`;
+const sized = ({ file, lines }) => `${file} (${lines === null ? "over 2 MB" : `${lines} lines`})`;
 
 function readFile(root, file) {
   try {
@@ -253,7 +264,7 @@ function checkKind(name) {
   return "types";
 }
 
-function detectChecks(reader, ecosystems) {
+function detectChecks(reader, ecosystems, files) {
   const { has, text, json } = reader;
   const commands = [];
   const kinds = new Set();
@@ -285,8 +296,17 @@ function detectChecks(reader, ecosystems) {
       if (CHECK_TARGET.test(match[1])) found(`just ${match[1]}`, justfile, match[1]);
     }
   }
+  // A Node script in the root scripts/ folder with a check's name: scripts/check.js.
+  for (const file of files) {
+    const script = /^scripts\/([^/.]+)\.[cm]?js$/.exec(file);
+    if (script && CHECK_SCRIPT.test(script[1])) found(`node ${file}`, file, script[1]);
+  }
+  for (const runner of HARNESS_CHECKS) if (files.includes(runner)) commands.push({ command: `node ${runner}`, source: runner });
   if (has("Cargo.toml")) commands.push({ command: "cargo test", source: "Cargo.toml" });
   if (has("go.mod")) commands.push({ command: "go test ./...", source: "go.mod" });
+  const gradle = ["build.gradle", "build.gradle.kts"].find(has);
+  if (gradle) commands.push({ command: `${has("gradlew") ? "./gradlew" : "gradle"} check`, source: gradle });
+  if (has("pom.xml")) commands.push({ command: `${has("mvnw") ? "./mvnw" : "mvn"} verify`, source: "pom.xml" });
   if (ecosystems.includes("dotnet")) commands.push({ command: "dotnet test", source: "solution" });
   if (ecosystems.includes("python")) {
     if (has("tox.ini")) commands.push({ command: "tox", source: "tox.ini" });
@@ -294,6 +314,14 @@ function detectChecks(reader, ecosystems) {
     if (has("pytest.ini") || has("conftest.py") || text("pyproject.toml").includes("[tool.pytest")) {
       commands.push({ command: "pytest", source: "pytest config" });
     }
+  }
+  // With no manifest, `node --test` runs the test files Node finds, unless a bare
+  // run would also execute fixture tests or enter submodule checkouts.
+  if (!has("package.json") && !has(".gitmodules")) {
+    const tests = files.filter((file) => !inBuildDir(file) && !dirsOf(file).some((dir) => dir.startsWith("."))
+      && (NODE_TEST_NAME.test(path.posix.basename(file)) || (dirsOf(file).includes("test") && /\.[cm]?js$/.test(file))));
+    const fixtureTest = tests.some((file) => NODE_TEST_NAME.test(path.posix.basename(file)) && dirsOf(file).some((dir) => FIXTURE_DIRS.has(dir)));
+    if (tests.length && !fixtureTest) commands.push({ command: "node --test", source: tests[0] });
   }
   return { commands, combined, split: !combined && kinds.size > 1 };
 }
@@ -306,6 +334,11 @@ function isGeneratedPath(file) {
 }
 
 const inBuildDir = (file) => dirsOf(file).some((dir) => BUILD_DIRS.has(dir));
+// The first input folder a path sits under, as `test/fixtures/`, or null.
+const inputDir = (file) => {
+  const index = dirsOf(file).findIndex((dir) => INPUT_DIRS.has(dir));
+  return index === -1 ? null : `${dirsOf(file).slice(0, index + 1).join("/")}/`;
+};
 
 function groupByDir(files, dirSet) {
   const groups = new Map();
@@ -377,18 +410,20 @@ function audit(rootArg) {
   const { ecosystems, missing } = detectToolchain(root, reader);
   if (missing.length) add("toolchain-version-missing", "medium", "No declared toolchain version to run the project with", missing);
 
-  const checks = detectChecks(reader, ecosystems);
+  const checks = detectChecks(reader, ecosystems, files);
   if (!checks.commands.length && codeFiles.length) {
-    add("check-command-missing", "high", "No test or check command found", ["no package script, make target or test runner config"]);
+    add("check-command-missing", "high", "No test or check command found", ["no package script, make or just target, scripts/ check, harness runner, build tool, test runner config or Node test files"]);
   } else if (checks.split) {
     add("check-command-split", "low", "Checks run as separate commands; no single one runs them all", checks.commands.map((entry) => entry.command));
   }
 
+  const committed = listing.isGit ? listing.tracked.filter(isGeneratedPath) : [];
   if (listing.isGit) {
     const notIgnored = listing.untracked.filter(inBuildDir);
     if (notIgnored.length) add("build-output-not-ignored", "high", "Build or dependency folders not ignored by git, so they show up in search", groupByDir(notIgnored, BUILD_DIRS));
-    const committed = listing.tracked.filter(isGeneratedPath);
-    if (committed.length) add("build-output-tracked", "medium", "Generated files committed to git", groupByDir(committed, OUTPUT_DIRS));
+    // A generated-looking file under an input folder is kept on purpose; required-inputs names it.
+    const generated = committed.filter((file) => !inputDir(file));
+    if (generated.length) add("build-output-tracked", "medium", "Generated files committed to git", groupByDir(generated, OUTPUT_DIRS));
   }
 
   const byStem = new Map();
@@ -397,10 +432,7 @@ function audit(rootArg) {
     if (!REQUIRED_NAMES.has(stem)) byStem.set(stem, [...(byStem.get(stem) || []), file]);
   }
   const duplicates = [...byStem].filter(([, group]) => group.length > 1).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
-  if (duplicates.length) {
-    const evidence = duplicates.map(([stem, group]) => `${stem}: ${group.slice(0, 5).join(", ")}${group.length > 5 ? `, +${group.length - 5} more` : ""}`);
-    add("duplicate-names", "medium", "File names used more than once, so a search by name is ambiguous", evidence);
-  }
+  if (duplicates.length) add("duplicate-names", "medium", "File names used more than once, so a search by name is ambiguous", duplicates.map(nameGroup));
 
   const genericDirs = new Set();
   const genericFiles = [];
@@ -424,15 +456,14 @@ function audit(rootArg) {
   }
 
   const contents = scanContents(root, codeFiles);
-  if (contents.large.length) {
-    const evidence = contents.large.map(({ file, lines }) => `${file} (${lines === null ? "over 2 MB" : `${lines} lines`})`);
-    add("large-files", "medium", `Code files over ${LARGE_FILE_LINES} lines, expensive to read whole`, evidence);
-  }
+  if (contents.large.length) add("large-files", "medium", `Code files over ${LARGE_FILE_LINES} lines, expensive to read whole`, contents.large.map(sized));
   if (contents.runtimeNames.length) add("runtime-names", "low", "Names built at runtime, which search can't follow", contents.runtimeNames);
   if (contents.defaultExports.length) add("default-exports", "low", "Default exports, which can be imported under another name", contents.defaultExports);
   if (contents.reexportFiles.length) add("re-export-files", "low", "Index files that only re-export, adding a hop to every lookup", contents.reexportFiles);
 
   findings.sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity));
+  const facts = { mapFiles, checks, duplicates, deepFiles, committed, indexFiles: indexFiles.length >= INDEX_FILES_MIN ? indexFiles : [], large: contents.large };
+  const shared = { EVIDENCE_LIMIT, OUTPUT_DIRS, ROUTE_NAMES, countLines, dirsOf, extensionOf, inBuildDir, inputDir, isGeneratedPath, nameGroup, plural, sized, stemOf };
   return {
     tool: "anneal-audit",
     schemaVersion: 1,
@@ -443,8 +474,11 @@ function audit(rootArg) {
     mapFiles,
     checks,
     findings,
+    observations: observe(files, reader, facts, shared),
   };
 }
+
+const listed = (entry) => [`  ${entry.id} (${entry.count}): ${entry.title}`, ...entry.evidence.slice(0, 3).map((item) => `    ${item}`), ...(entry.count > 3 ? [`    +${entry.count - 3} more`] : [])];
 
 function formatSummary(report) {
   const lines = [
@@ -457,12 +491,11 @@ function formatSummary(report) {
     const group = report.findings.filter((finding) => finding.severity === severity);
     if (!group.length) continue;
     lines.push(severity);
-    for (const finding of group) {
-      lines.push(`  ${finding.id} (${finding.count}): ${finding.title}`);
-      const shown = finding.evidence.slice(0, 3);
-      for (const item of shown) lines.push(`    ${item}`);
-      if (finding.count > shown.length) lines.push(`    +${finding.count - shown.length} more`);
-    }
+    for (const finding of group) lines.push(...listed(finding));
+  }
+  if (report.observations.length) {
+    lines.push("", "observations (informational)");
+    for (const observation of report.observations) lines.push(...listed(observation), `    note: ${observation.note}`);
   }
   const commands = report.checks.commands.map((entry) => entry.command);
   const note = report.checks.split ? " (no single command runs them all)" : "";
