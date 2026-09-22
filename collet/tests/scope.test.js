@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { check, matchScope, targetsOf } from '../templates/checks/scope.mjs';
-import { clean, project, TREE } from './temp-project.js';
+import { project, TREE } from './temp-project.js';
 
 const TASK = {
   id: 't1',
@@ -26,7 +26,6 @@ test('a write tool outside the declared files is refused', () => {
   const root = withTree();
   assert.equal(fires(root, { tool: 'Write', input: { file_path: 'src/theme.mjs' } }), true);
   assert.equal(fires(root, { tool: 'Write', input: { file_path: 'src/digest.mjs' } }), false);
-  clean(root);
 });
 
 test('a read is never a write, whatever command it arrives in', () => {
@@ -37,14 +36,12 @@ test('a read is never a write, whatever command it arrives in', () => {
   assert.equal(fires(root, { tool: 'Bash', input: { command: "sed -i 's/a/b/' src/theme.mjs" } }), true);
   assert.equal(fires(root, { tool: 'Bash', input: { command: 'cat src/theme.mjs' } }), false);
   assert.equal(fires(root, { tool: 'Read', input: { file_path: 'src/theme.mjs' } }), false);
-  clean(root);
 });
 
 test('a whole directory removed from outside the task is refused', () => {
   const root = withTree();
   assert.equal(fires(root, { tool: 'Bash', input: { command: 'rm -rf tools' } }), true);
   assert.equal(fires(root, { tool: 'Bash', input: { command: 'rm tools/build.sh' } }), true);
-  clean(root);
 });
 
 test('a cmdlet path behind a value-taking flag is still found', () => {
@@ -58,12 +55,10 @@ test('a cmdlet path behind a value-taking flag is still found', () => {
   for (const command of cases) {
     assert.equal(fires(root, { tool: 'PowerShell', input: { command } }), true, command);
   }
-  clean(root);
 });
 
-test('PowerShell reads and copy sources are not write targets', (t) => {
+test('PowerShell reads and copy sources are not write targets', () => {
   const root = withTree({ 'outside notes.txt': 'outside\n', 'test/inside notes.txt': 'inside\n' });
-  t.after(() => clean(root));
   const commands = [
     'Get-Content -LiteralPath notes.txt',
     'Get-Item -Path notes.txt',
@@ -82,9 +77,8 @@ test('PowerShell reads and copy sources are not write targets', (t) => {
   }
 });
 
-test('PowerShell aliases keep their command-specific named paths', (t) => {
+test('PowerShell aliases keep their command-specific named paths', () => {
   const root = withTree();
-  t.after(() => clean(root));
   for (const command of [
     'rm -LiteralPath notes.txt',
     'mv -Path notes.txt -Destination src/cli.mjs',
@@ -108,9 +102,8 @@ test('PowerShell aliases keep their command-specific named paths', (t) => {
   }
 });
 
-test('quoted literal command names keep their write policy', (t) => {
+test('quoted literal command names keep their write policy', () => {
   const root = withTree();
-  t.after(() => clean(root));
   const cases = [
     ['PowerShell', "& 'Set-Content' -LiteralPath notes.txt -Value x", true],
     ['PowerShell', "& 'Remove-Item' -LiteralPath notes.txt", true],
@@ -125,9 +118,8 @@ test('quoted literal command names keep their write policy', (t) => {
   }
 });
 
-test('named and positional shell writes preserve quoted paths', (t) => {
+test('named and positional shell writes preserve quoted paths', () => {
   const root = withTree({ 'outside notes.txt': 'outside\n', 'test/inside notes.txt': 'inside\n' });
-  t.after(() => clean(root));
   const commands = [
     'Set-Content -Encoding utf8 -LiteralPath "outside notes.txt" -Value x',
     "Set-Content 'outside notes.txt' x",
@@ -149,9 +141,8 @@ test('named and positional shell writes preserve quoted paths', (t) => {
   } }), false);
 });
 
-test('every removal operand is checked, including named path lists', (t) => {
+test('every removal operand is checked, including named path lists', () => {
   const root = withTree({ 'outside notes.txt': 'outside\n', 'test/inside notes.txt': 'inside\n' });
-  t.after(() => clean(root));
   const commands = [
     'rm -f notes.txt src/cli.mjs',
     'rm -rf tools test',
@@ -166,9 +157,8 @@ test('every removal operand is checked, including named path lists', (t) => {
   assert.equal(fires(root, { tool: 'Bash', input: { command: 'rm src/cli.mjs src/digest.mjs' } }), false);
 });
 
-test('moving checks the removed sources as well as the destination', (t) => {
+test('moving checks the removed sources as well as the destination', () => {
   const root = withTree({ 'outside notes.txt': 'outside\n', 'test/inside notes.txt': 'inside\n' });
-  t.after(() => clean(root));
   const commands = [
     'mv notes.txt src/cli.mjs',
     'mv notes.txt src/cli.mjs test',
@@ -190,9 +180,8 @@ test('moving checks the removed sources as well as the destination', (t) => {
   }
 });
 
-test('a patch move checks both the source and its actual destination header', (t) => {
+test('a patch move checks both the source and its actual destination header', () => {
   const root = withTree();
-  t.after(() => clean(root));
   const patch = (from, to) => `*** Begin Patch\n*** Update File: ${from}\n*** Move to: ${to}\n@@\n-a\n+b\n*** End Patch`;
   for (const key of ['patch', 'input', 'command', 'content']) {
     const moved = patch('src/cli.mjs', 'new outside.mjs');
@@ -211,21 +200,18 @@ test('a path on another drive is outside the repository, not a path inside it', 
   for (const target of ['X:/Temp/scratch/out.txt', 'C:/Temp/out.txt', '../outside.txt']) {
     assert.equal(fires(root, { tool: 'Write', input: { file_path: target } }), false, target);
   }
-  clean(root);
 });
 
 test('a root spelled with forward slashes is the same drive as one resolved natively', () => {
   const root = withTree();
   const forward = root.split('\\').join('/');
   assert.equal(fires(forward, { tool: 'Write', input: { file_path: 'src/theme.mjs' } }), true);
-  clean(root);
 });
 
 test('creating a path that does not exist yet is scratch output, not a change', () => {
   const root = withTree();
   assert.equal(fires(root, { tool: 'Bash', input: { command: 'node src/cli.mjs > build/out.txt' } }), false);
   assert.equal(fires(root, { tool: 'Bash', input: { command: 'node src/cli.mjs > notes.txt' } }), true);
-  clean(root);
 });
 
 test('a patch is read for every file it names', () => {
@@ -234,7 +220,6 @@ test('a patch is read for every file it names', () => {
   assert.equal(fires(root, { tool: 'apply_patch', input: { patch } }), true);
   const inside = '*** Begin Patch\n*** Update File: src/digest.mjs\n@@\n-a\n+b\n*** End Patch';
   assert.equal(fires(root, { tool: 'apply_patch', input: { patch: inside } }), false);
-  clean(root);
 });
 
 test('a patch is found under the key the host sends it in, command included', () => {
@@ -245,7 +230,6 @@ test('a patch is found under the key the host sends it in, command included', ()
     assert.equal(fires(root, { tool: 'apply_patch', input: { [key]: outside } }), true, key);
     assert.equal(fires(root, { tool: 'apply_patch', input: { [key]: inside } }), false, key);
   }
-  clean(root);
 });
 
 // A session opened in `src/` writes `../notes.txt` and `digest.mjs`. Read against the root, the
@@ -258,27 +242,23 @@ test('a relative path is read from the directory the call ran in', () => {
   assert.equal(fires(root, { tool: 'apply_patch', input: { command: patch('digest.mjs') }, cwd }), false);
   assert.equal(fires(root, { tool: 'Bash', input: { command: 'rm ../notes.txt' }, cwd }), true);
   assert.equal(fires(root, { tool: 'Bash', input: { command: 'rm digest.mjs' }, cwd }), false);
-  clean(root);
 });
 
 test('the roadmap another tool owns is never refused here', () => {
   const root = withTree({ 'ROADMAP.jsonl': '{"id":"001"}\n' });
   assert.equal(fires(root, { tool: 'Write', input: { file_path: 'ROADMAP.jsonl' } }), false);
   assert.equal(fires(root, { tool: 'Write', input: { file_path: '.foreman/config.json' } }), false);
-  clean(root);
 });
 
 test("collet's own state is not a task file, but the unverified list is", () => {
   const root = withTree();
   assert.equal(fires(root, { tool: 'Write', input: { file_path: '.collet/ledger.jsonl' } }), true);
   assert.equal(fires(root, { tool: 'Write', input: { file_path: '.collet/unverified.md' } }), false);
-  clean(root);
 });
 
 test('with no task open nothing is enforced', () => {
   const root = withTree();
   assert.equal(check({ root, task: null, call: { tool: 'Write', input: { file_path: 'any.txt' } } }).fires, false);
-  clean(root);
 });
 
 test('a declared folder owns what sits beneath it', () => {
@@ -296,7 +276,6 @@ test('targetsOf says a non-write is a non-write rather than an empty list', () =
   assert.equal(targetsOf({ tool: 'Read', input: { file_path: 'src/cli.mjs' } }, root), null);
   assert.deepEqual(targetsOf({ tool: 'Write', input: { file_path: 'x.txt' } }, root), ['x.txt']);
   assert.deepEqual(targetsOf({ tool: 'Bash', input: { command: 'rm -rf tools' } }, root), ['tools']);
-  clean(root);
 });
 
 test('a target the check cannot read does not throw', () => {
@@ -305,5 +284,4 @@ test('a target the check cannot read does not throw', () => {
     assert.doesNotThrow(() => check({ root, task: TASK, call }));
   }
   assert.doesNotThrow(() => check({ root: join(root, 'missing'), task: TASK, call: { tool: 'Bash', input: { command: 'rm x' } } }));
-  clean(root);
 });

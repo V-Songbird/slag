@@ -14,7 +14,7 @@ import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-import { colletLedger, config, filled, openTask } from './state.mjs';
+import { COLLET, colletLedger, config, filled, openTask } from './state.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const STATE = join(ROOT, '.collet');
@@ -191,6 +191,18 @@ function list(values) {
     .filter(Boolean);
 }
 
+/**
+ * The entries naming the harness's own files. The guard refuses those whatever a task lists (the
+ * unverified list aside, which checks/scope.mjs keeps writable), so recording one in a scope would
+ * promise a write that never comes.
+ */
+function harnessEntries(paths) {
+  return paths.filter((path) => {
+    const entry = path.split('\\').join('/').replace(/^\.\//, '').replace(/\/+$/, '');
+    return (entry === COLLET || entry.startsWith(`${COLLET}/`)) && entry !== `${COLLET}/unverified.md`;
+  });
+}
+
 function describe(task) {
   return [
     `task ${task.id} — ${task.title} [${task.status}]`,
@@ -248,6 +260,13 @@ switch (command) {
       console.error(`task ${task.id} is still open. Close it before opening another.`);
       process.exit(2);
     }
+    const harness = harnessEntries(scope);
+    if (harness.length) {
+      console.error(`${harness.join(', ')}: the harness's own files cannot join a task, so no task was opened.`);
+      console.error('With no task open they are writable now: add the check or make the change first,');
+      console.error('then open the task without them.');
+      process.exit(2);
+    }
     const { scope: closed, added } = expandScope(ROOT, scope);
     const entry = {
       id: nextId(tasks),
@@ -296,6 +315,14 @@ switch (command) {
     const added = list(args.add);
     if (!added.length || !args.why) {
       console.error('widen needs --add <path> (repeatable) and --why "<reason>"');
+      process.exit(2);
+    }
+    const harness = harnessEntries(added);
+    if (harness.length) {
+      console.error(`${harness.join(', ')}: the harness's own files cannot join a task, so nothing was widened.`);
+      console.error('Change the harness between tasks: finish and close this one with');
+      console.error('node .collet/task.mjs close --left-out "..." --unverified "...", add the check or make');
+      console.error('the change with no task open, then open the next task.');
       process.exit(2);
     }
     const entry = tasks.filter((item) => item.status === 'in_progress').pop();

@@ -146,7 +146,10 @@ Explain the bundle's limits before stopping:
 - The mount installs no commit or push hook. Those need a separate request.
 
 **Then stop.** Do not start executing the task you just created. Show what you wrote, name the
-first task, and let the person decide.
+first task, and let the person decide. Say that the mount's files are left uncommitted and that
+committing them is the person's call. The first task can close before that commit: closing does not
+count `.collet/` or the rules block between its markers, while any other change outside the task,
+the project's own text in those files included, still keeps it open.
 
 ## Reporting the open task
 

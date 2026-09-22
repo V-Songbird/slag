@@ -80,6 +80,8 @@ The command checks the changed files against the task scope, runs the configured
 
 Either half failing leaves the task open. Checks that cannot run also prevent closure; the accept command waits until live checks pass.
 
+The mount's own writes are not task changes: `.collet/` and the rules block between its markers in `AGENTS.md`, `CLAUDE.md` or `.cursor/rules/collet.md`. The first task can therefore close before you commit the mount. Any other change outside the scope still keeps the task open, including your own text in those files.
+
 ## Commands
 
 
@@ -94,6 +96,8 @@ Either half failing leaves the task open. Checks that cannot run also prevent cl
 | Prove the checks still catch what they claim | `node .collet/checks/run.mjs` |
 | Check the working tree against the open task | `node .collet/checks/run.mjs --live` |
 | Guard a mistake that keeps happening | `/collet:check-writer help me catch skipped tests` |
+
+Add checks between tasks. While a task is open, the guard refuses writes under `.collet/` except `.collet/unverified.md`, because the harness's own files are not task files. Widening the task does not lift that refusal. Close the open task first, write and admit the check, then open the next task. The check then runs at write time and when that task closes.
 
 ## How it works
 
@@ -182,6 +186,7 @@ ok   scope — 5 violation(s) caught, 6 near miss(es) left alone
 - The optional bundle reads `Write`, `Edit` and `MultiEdit` text. Shell writes, Codex patches, Antigravity file text and unsupported notebook edits wait for `close` or `run.mjs --live`. Only files matching a check's paths are read.
 - JavaScript skip and focus checks recognize Jest/Vitest calls and simple native `node:test` inline options such as `{ skip: true }` and `{ only: true }`. Dynamic calls, quoted option keys and complex option objects remain outside that coverage. An Edit containing only an option change needs the later full-file check to see its call context.
 - Bundle checks compare each detector's match count in changed files against `HEAD`; untracked files start at zero. An increase fails. Replacing one existing match with another can leave that count unchanged.
+- Closing treats the text between the collet markers as the harness's own, so it does not report an edit made there. While a task is open, the session guard still refuses writes to a rules file the task does not list.
 - An unavailable `HEAD` or unreadable source is reported as skipped. Closing uses `--live --strict`, so skipped checks prevent completion. Custom checks need a working-tree check to allow closure.
 - Planted examples do not establish a false-alarm rate on your code. The mount installs no commit or push hook.
 - A green accept command means one command exited zero and the writes stayed inside a list someone drew. It does not mean the work is correct.

@@ -47,7 +47,10 @@ async function refusal(dir, call) {
     } catch {
       continue; // a check that throws must not stop the session, nor the checks after it
     }
-    if (result?.fires) return { task, file, id: check.id ?? file.replace(/\.mjs$/, ''), reason: result.reason };
+    if (result?.fires) {
+      const id = check.id ?? file.replace(/\.mjs$/, '');
+      return { task, file, id, reason: result.reason, harness: result.harness === true };
+    }
   }
   return null;
 }
@@ -59,10 +62,22 @@ const REMEDY = {
     ` If the file is genuinely part of the task, widen it first: ` +
     `node .collet/task.mjs widen --add <path> --why "<reason>". That is allowed and recorded. ` +
     `Otherwise leave it alone and say in your summary what you found instead.`,
+  // The harness's own files are refused whatever the task lists, so widening would send the
+  // session round in a circle.
+  harness:
+    ` Widening cannot make a harness file writable. Change the harness between tasks: finish and ` +
+    `close the open task with node .collet/task.mjs close --left-out "..." --unverified "...", add ` +
+    `the check or make the change with no task open, then open the next task. Until then, name ` +
+    `what the harness needs in your summary.`,
   other:
     ` Fix the edit rather than working around the check. If this is a false alarm, leave the check ` +
     `alone and say so in your summary.`,
 };
+// Scope marks a refusal of the harness's own files with `harness: true`; the wording is for people.
+function remedy({ file, harness }) {
+  if (file === SCOPE && harness) return REMEDY.harness;
+  return REMEDY[file] ?? REMEDY.other;
+}
 
 const event = readEvent();
 const adapter = host(process.argv[2]);
@@ -87,7 +102,5 @@ if (refused) {
   }
 }
 
-const answer = refused
-  ? adapter.deny(refused.reason + (REMEDY[refused.file] ?? REMEDY.other))
-  : adapter.allow();
+const answer = refused ? adapter.deny(refused.reason + remedy(refused)) : adapter.allow();
 if (answer) process.stdout.write(JSON.stringify(answer));

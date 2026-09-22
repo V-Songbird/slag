@@ -5,21 +5,20 @@ import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSyn
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { checks, clean, CONFIG, hook, hookOutput, mount, PLUGIN, project, task } from './temp-project.js';
+import { checks, CONFIG, hook, hookOutput, mount, PLUGIN, project, task } from './temp-project.js';
 
 const catalogue = JSON.parse(readFileSync(join(PLUGIN, 'catalogue', 'javascript-typescript.json'), 'utf8'));
 const marker = { 'package.json': '{"private":true}\n' };
 const checkId = `${catalogue.id}.${catalogue.classes[0].id}`;
 const triplet = [`${checkId}.mjs`, `${checkId}.violation.json`, `${checkId}.nearmiss.json`];
 
-function temporary(t, files = marker) {
+function temporary(files = marker) {
   const root = project(files);
-  t.after(() => clean(root));
   return root;
 }
 
-function mounted(t, files = marker) {
-  const root = temporary(t, files);
+function mounted(files = marker) {
+  const root = temporary(files);
   const out = mount(root, ['--checks']);
   assert.equal(out.status, 0, out.stdout + out.stderr);
   return root;
@@ -38,8 +37,8 @@ function snapshot(root) {
   return files;
 }
 
-test('the default mount keeps the catalogue opt-in even when a language marker is present', (t) => {
-  const root = temporary(t);
+test('the default mount keeps the catalogue opt-in even when a language marker is present', () => {
+  const root = temporary();
   const out = mount(root);
   assert.equal(out.status, 0, out.stderr);
   assert.equal(existsSync(join(root, '.collet', 'source.mjs')), false);
@@ -48,7 +47,7 @@ test('the default mount keeps the catalogue opt-in even when a language marker i
 });
 
 test('a detected bundle proves each original pair and the host guard applies it', async (t) => {
-  const root = mounted(t);
+  const root = mounted();
   writeFileSync(join(root, '.collet', 'config.json'), CONFIG, 'utf8');
   const opened = task(root, ['add', '--title', 'Preserve the checks', '--why', 'Exercise the guard', '--scope', '**']);
   assert.equal(opened.status, 0, opened.stderr);
@@ -86,13 +85,13 @@ test('a detected bundle proves each original pair and the host guard applies it'
   }
 });
 
-test('an explicit edition reaches a nested JavaScript project inside a polyglot root', (t) => {
+test('an explicit edition reaches a nested JavaScript project inside a polyglot root', () => {
   const files = {
     'services/web/package.json': '{"private":true}\n',
     'pyproject.toml': '[project]\nname = "service"\n',
     'go.mod': 'module service\n',
   };
-  const root = temporary(t, files);
+  const root = temporary(files);
   const out = mount(root, ['--checks', '--edition', 'javascript-typescript']);
   assert.equal(out.status, 0, out.stdout + out.stderr);
   assert.equal(checks(root).status, 0);
@@ -110,8 +109,8 @@ test('invalid catalogue requests fail before changing the project', async (t) =>
     ['unknown option', ['--checks', '--editions', 'python'], marker, /Unknown mount option/],
     ['no supported root marker', ['--checks'], { 'nested/package.json': '{}\n' }, /No supported language marker/],
   ]) {
-    await t.test(name, (sub) => {
-      const root = temporary(sub, { ...files, 'AGENTS.md': '# Existing project instructions\n' });
+    await t.test(name, () => {
+      const root = temporary({ ...files, 'AGENTS.md': '# Existing project instructions\n' });
       const before = snapshot(root);
       const out = mount(root, args);
       assert.equal(out.status, 2, out.stdout + out.stderr);
@@ -122,8 +121,8 @@ test('invalid catalogue requests fail before changing the project', async (t) =>
   }
 });
 
-test('requesting checks does not cross the foreign-roadmap boundary', (t) => {
-  const root = temporary(t, {
+test('requesting checks does not cross the foreign-roadmap boundary', () => {
+  const root = temporary({
     ...marker,
     'ROADMAP.jsonl': '{"id":"002","status":"in_progress","planned_touches":["src/"]}\n',
     'AGENTS.md': '# Existing instructions\n',
@@ -136,8 +135,8 @@ test('requesting checks does not cross the foreign-roadmap boundary', (t) => {
   assert.deepEqual(snapshot(root), before);
 });
 
-test('remount preserves customized shared source, check and fixture bytes', (t) => {
-  const root = mounted(t);
+test('remount preserves customized shared source, check and fixture bytes', () => {
+  const root = mounted();
   const paths = ['.collet/source.mjs', ...triplet.map((name) => `.collet/checks/${name}`)];
   const expected = new Map();
   for (const rel of paths) {
@@ -160,8 +159,8 @@ test('an incomplete check or orphaned fixture refuses remount before changing an
     ['check missing its near miss', [triplet[2]]],
     ['orphaned violation fixture', [triplet[0], triplet[2]]],
   ]) {
-    await t.test(name, (sub) => {
-      const root = mounted(sub);
+    await t.test(name, () => {
+      const root = mounted();
       const dir = join(root, '.collet', 'checks');
       for (const file of removed) rmSync(join(dir, file));
       const before = snapshot(root);
@@ -174,8 +173,8 @@ test('an incomplete check or orphaned fixture refuses remount before changing an
   }
 });
 
-test('a valid earlier check revision remains usable when the catalogue gains more examples', (t) => {
-  const root = mounted(t);
+test('a valid earlier check revision remains usable when the catalogue gains more examples', () => {
+  const root = mounted();
   const dir = join(root, '.collet/checks');
   const saved = new Map();
   for (const item of catalogue.classes.filter((entry) => ['focused-test', 'skipped-test'].includes(entry.id))) {
@@ -195,8 +194,8 @@ test('a valid earlier check revision remains usable when the catalogue gains mor
   assert.equal(checks(root).status, 0);
 });
 
-test('a project may rename fixture suffixes without making its admitted check incomplete', (t) => {
-  const root = mounted(t);
+test('a project may rename fixture suffixes without making its admitted check incomplete', () => {
+  const root = mounted();
   const dir = join(root, '.collet/checks');
   renameSync(join(dir, triplet[1]), join(dir, `${checkId}.violation-project.json`));
   renameSync(join(dir, triplet[2]), join(dir, `${checkId}.nearmiss-project.json`));
@@ -207,8 +206,8 @@ test('a project may rename fixture suffixes without making its admitted check in
   assert.equal(checks(root).status, 0);
 });
 
-test('a preserved runtime must prove the original pairs before any mount writes', (t) => {
-  const root = temporary(t, {
+test('a preserved runtime must prove the original pairs before any mount writes', () => {
+  const root = temporary({
     ...marker,
     'AGENTS.md': '# Existing instructions\n',
     '.collet/source.mjs': [
@@ -226,8 +225,8 @@ test('a preserved runtime must prove the original pairs before any mount writes'
   assert.equal(existsSync(join(root, '.collet', 'checks')), false);
 });
 
-test('a failing preserved check is reported without replacing its implementation or examples', (t) => {
-  const root = mounted(t);
+test('a failing preserved check is reported without replacing its implementation or examples', () => {
+  const root = mounted();
   const dir = join(root, '.collet', 'checks');
   writeFileSync(join(dir, triplet[0]), [
     `export const id = ${JSON.stringify(checkId)};`,

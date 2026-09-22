@@ -16,6 +16,30 @@ All notable changes to collet are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `check-writer` looks for an open task before it writes anything. The guard refuses writes under
+  `.collet/` while a task is open, so a check is added between tasks: close the open one, write
+  and admit the check, then open the next.
+- `task-harness` says the mount's files are left uncommitted and that the first task can close
+  before you commit them.
+
+### Fixed
+
+- The first task after a mount can close before the mount is committed. Closing no longer counts
+  `.collet/` or the rules block between the collet markers; your own text in those files still
+  keeps the task open.
+- Closing reads changes relative to the mounted directory, so a project mounted below the Git root
+  closes its in-scope work and no longer reads changes outside that directory. A file name Git
+  would quote is compared as written.
+- A staged move out of a file outside the task keeps the task open: closing checks both sides of
+  a move.
+- A refused write under `.collet/` advises closing the task instead of widening it, and
+  `task.mjs add` and `task.mjs widen` refuse `.collet/` paths other than `.collet/unverified.md`.
+- A project mounted before these fixes gets them by mounting again, because the mount copies
+  `task.mjs` and the scope check into `.collet/`. Until then, a refused write under `.collet/`
+  still advises widening the task.
+
 ## [0.4.0-alpha] — 2026-09-21
 
 ### Fixed

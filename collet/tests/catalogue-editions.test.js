@@ -8,7 +8,7 @@ import test from 'node:test';
 
 import { prepareCatalogue } from '../scripts/catalogue.mjs';
 import { checkSource } from '../templates/source.mjs';
-import { checks, clean, CONFIG, hook, hookOutput, mount, PLUGIN, project, task } from './temp-project.js';
+import { checks, CONFIG, hook, hookOutput, mount, PLUGIN, project, task } from './temp-project.js';
 
 const editions = ['python', 'go', 'rust', 'jvm', 'dotnet'];
 
@@ -16,7 +16,6 @@ for (const edition of editions) {
   test(`${edition} proves its original examples, host refusals and sibling near misses`, async (t) => {
     const catalogue = JSON.parse(readFileSync(join(PLUGIN, 'catalogue', `${edition}.json`), 'utf8'));
     const root = project();
-    t.after(() => clean(root));
     const prepared = await prepareCatalogue(root, catalogue);
     assert.equal(existsSync(join(root, '.collet')), false, 'preflight must not mount anything');
     const generated = new Map(prepared.files);
@@ -105,7 +104,7 @@ test('the JVM comment-suppression example proves the second detector independent
   }
 });
 
-test('a preserved runtime that ignores extra detectors cannot silently mount the JVM bundle', (t) => {
+test('a preserved runtime that ignores extra detectors cannot silently mount the JVM bundle', () => {
   const runtime = pathToFileURL(join(PLUGIN, 'templates', 'source.mjs')).href;
   const source = [
     `import { checkSource as current, liveSource } from ${JSON.stringify(runtime)};`,
@@ -114,7 +113,6 @@ test('a preserved runtime that ignores extra detectors cannot silently mount the
     '',
   ].join('\n');
   const root = project({ '.collet/source.mjs': source, 'AGENTS.md': '# Keep existing instructions\n' });
-  t.after(() => clean(root));
   const out = mount(root, ['--checks', '--edition', 'jvm']);
   assert.equal(out.status, 2, out.stdout + out.stderr);
   assert.match(out.stderr, /jvm\.blanket-lint-suppression failed its violation example/);
@@ -125,7 +123,6 @@ test('a preserved runtime that ignores extra detectors cannot silently mount the
 
 test('the combined language bundle leaves every original and additional near miss alone', async (t) => {
   const root = project();
-  t.after(() => clean(root));
   const specs = [];
   const examples = [];
   for (const edition of ['javascript-typescript', ...editions]) {

@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { prepareCatalogue } from '../scripts/catalogue.mjs';
 import { checkSource, liveSource } from '../templates/source.mjs';
-import { clean, git, PLUGIN, project, repo } from './temp-project.js';
+import { git, PLUGIN, project, repo } from './temp-project.js';
 
 const edition = JSON.parse(readFileSync(join(PLUGIN, 'catalogue/javascript-typescript.json'), 'utf8'));
 const task = { id: 't1', status: 'in_progress', scope: ['**'] };
@@ -31,9 +31,8 @@ function nativeRunner(root, extra = []) {
   });
 }
 
-test('native inline options catch all four public test and suite spellings', (t) => {
+test('native inline options catch all four public test and suite spellings', () => {
   const root = project();
-  t.after(() => clean(root));
   for (const key of ['skip', 'only']) {
     for (const name of ['test', 'it', 'describe', 'suite']) {
       assert.equal(write(root, key, declaration(key, 'true', name)).fires, true, `${name} ${key}: true`);
@@ -42,9 +41,8 @@ test('native inline options catch all four public test and suite spellings', (t)
   }
 });
 
-test('native patterns accept common literal names, omitted names and shallow companion options', (t) => {
+test('native patterns accept common literal names, omitted names and shallow companion options', () => {
   const root = project();
-  t.after(() => clean(root));
   for (const key of ['skip', 'only']) {
     const samples = [
       `test("case", { ${key}: true }, fn);`,
@@ -59,9 +57,8 @@ test('native patterns accept common literal names, omitted names and shallow com
   }
 });
 
-test('comments and strings resembling native calls stay quiet', (t) => {
+test('comments and strings resembling native calls stay quiet', () => {
   const root = project();
-  t.after(() => clean(root));
   for (const key of ['skip', 'only']) {
     const samples = [
       `// test('case', { ${key}: true }, fn);`,
@@ -75,9 +72,8 @@ test('comments and strings resembling native calls stay quiet', (t) => {
   }
 });
 
-test('option-like objects outside the options argument are honest look-alikes', (t) => {
+test('option-like objects outside the options argument are honest look-alikes', () => {
   const root = project();
-  t.after(() => clean(root));
   for (const key of ['skip', 'only']) {
     const samples = [
       `const options = { ${key}: true };`,
@@ -94,9 +90,8 @@ test('option-like objects outside the options argument are honest look-alikes', 
   }
 });
 
-test('computed, shadowed and dynamic option forms remain outside the conservative native pattern', (t) => {
+test('computed, shadowed and dynamic option forms remain outside the conservative native pattern', () => {
   const root = project();
-  t.after(() => clean(root));
   for (const key of ['skip', 'only']) {
     const samples = [
       declaration(key, 'false'),
@@ -120,18 +115,16 @@ test('computed, shadowed and dynamic option forms remain outside the conservativ
   }
 });
 
-test('a native test option is read independently from the other option', (t) => {
+test('a native test option is read independently from the other option', () => {
   const root = project();
-  t.after(() => clean(root));
   assert.equal(write(root, 'skip', "test('case', { only: true, skip: false }, fn);").fires, false);
   assert.equal(write(root, 'only', "test('case', { only: false, skip: true }, fn);").fires, false);
   assert.equal(write(root, 'skip', "test('case', { only: false, skip: true }, fn);").fires, true);
   assert.equal(write(root, 'only', "test('case', { only: true, skip: false }, fn);").fires, true);
 });
 
-test('native Write and Edit calls detect introduced options but preserve a preexisting match', (t) => {
+test('native Write and Edit calls detect introduced options but preserve a preexisting match', () => {
   const root = project();
-  t.after(() => clean(root));
   for (const key of ['skip', 'only']) {
     const before = declaration(key);
     writeFileSync(join(root, 'native.test.mjs'), before);
@@ -148,11 +141,10 @@ test('native Write and Edit calls detect introduced options but preserve a preex
   }
 });
 
-test('native live checks compare the complete HEAD source and catch a context-free edit at close', (t) => {
+test('native live checks compare the complete HEAD source and catch a context-free edit at close', () => {
   const root = project({
     'native.test.mjs': declaration('skip') + declaration('only') + declaration('skip', 'false'),
   });
-  t.after(() => clean(root));
   repo(root);
   const before = readFileSync(join(root, 'native.test.mjs'), 'utf8');
   writeFileSync(join(root, 'native.test.mjs'), before + '// unrelated update\n');
@@ -167,18 +159,16 @@ test('native live checks compare the complete HEAD source and catch a context-fr
   assert.equal(liveSource({ root, task }, spec('only')).fires, true);
 });
 
-test('the original catalogue pairs still prove the existing call spellings', (t) => {
+test('the original catalogue pairs still prove the existing call spellings', () => {
   const root = project();
-  t.after(() => clean(root));
   for (const key of ['skip', 'only']) {
     assert.equal(write(root, key, specs[key].fixtures.violation).fires, true);
     assert.equal(write(root, key, specs[key].fixtures.nearMiss).fires, false);
   }
 });
 
-test('the shipped native option pairs independently admit the appended patterns', async (t) => {
+test('the shipped native option pairs independently admit the appended patterns', async () => {
   const root = project();
-  t.after(() => clean(root));
   for (const key of ['skip', 'only']) {
     const entry = specs[key];
     const pair = entry.fixtures.additional.find((fixture) => fixture.id === 'native-options');
@@ -205,11 +195,10 @@ test('the shipped native option pairs independently admit the appended patterns'
   }
 });
 
-test('a planted native skip hides a real failing body and its false look-alike runs the failure', (t) => {
+test('a planted native skip hides a real failing body and its false look-alike runs the failure', () => {
   const pair = specs.skip.fixtures.additional.find((fixture) => fixture.id === 'native-options');
   const source = pair.violation;
   const root = project({ 'native.test.mjs': source });
-  t.after(() => clean(root));
   const skipped = nativeRunner(root);
   assert.equal(skipped.status, 0, skipped.stdout + skipped.stderr);
   assert.match(skipped.stdout, /# skipped 1/);
@@ -224,11 +213,10 @@ test('a planted native skip hides a real failing body and its false look-alike r
   assert.match(honest.stdout, /# skipped 0/);
 });
 
-test('a planted native focus hides an unfocused failure when the runner enables only mode', (t) => {
+test('a planted native focus hides an unfocused failure when the runner enables only mode', () => {
   const pair = specs.only.fixtures.additional.find((fixture) => fixture.id === 'native-options');
   const source = pair.violation;
   const root = project({ 'native.test.mjs': source });
-  t.after(() => clean(root));
   const selected = nativeRunner(root, ['--test-only']);
   assert.equal(selected.status, 0, selected.stdout + selected.stderr);
   assert.match(selected.stdout, /selected passing case/);

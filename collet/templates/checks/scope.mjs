@@ -11,7 +11,7 @@
 //   - anything outside the repository, including another drive and /dev/null;
 //   - the roadmap and state another planning tool owns, which that tool guards itself.
 import { execFileSync } from 'node:child_process';
-import { statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, parse, relative, resolve } from 'node:path';
 
 export const id = 'scope';
@@ -25,6 +25,19 @@ const PATCH_FILE = /^\s*\*\*\*\s+(?:(?:Add|Update|Delete)\s+File|Move to):\s*(.+
 const NEVER_WRITABLE = ['.collet/'];
 const ALWAYS_WRITABLE = ['.collet/unverified.md'];
 const OWNED_ELSEWHERE = ['ROADMAP.jsonl', '.foreman/'];
+// The files the mount writes its rules block into. Only the block between the markers is the
+// harness's own; the rest of each file is the project's.
+const RULES_SURFACES = ['AGENTS.md', 'CLAUDE.md', '.cursor/rules/collet.md'];
+const BLOCK_BEGIN = '<!-- collet:begin';
+const BLOCK_END = '<!-- collet:end -->';
+
+/** The text with the rules block cut out, or null when it holds no complete block. */
+function withoutBlock(text) {
+  const start = text.indexOf(BLOCK_BEGIN);
+  const end = text.indexOf(BLOCK_END);
+  if (start === -1 || end < start) return null;
+  return text.slice(0, start) + text.slice(end + BLOCK_END.length);
+}
 
 /**
  * Repository-relative, forward-slashed path, or null when it is not inside the repository.
@@ -226,8 +239,10 @@ export function check({ root, task, call }) {
     if (OWNED_ELSEWHERE.some((owned) => matchScope(owned, rel))) continue;
     if (ALWAYS_WRITABLE.includes(rel)) continue;
     if (NEVER_WRITABLE.some((prefix) => rel.startsWith(prefix))) {
+      // `harness` tells the guard that widening cannot help here, whatever the wording says.
       return {
         fires: true,
+        harness: true,
         reason: `${rel} is the harness's own state (${task.id} is open), not a task file.`,
       };
     }
@@ -253,26 +268,44 @@ export function live({ root, task }) {
   if (!task) return { fires: false, skipped: true, reason: 'no task is open, so nothing is enforced' };
   const git = (args) =>
     execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-  let out = '';
+  const names = (text) => text.split('\0').filter(Boolean);
+  let changed = [];
+  let fresh = [];
   try {
     // Tracked changes and new files both. A change the repository has never seen is still a change
-    // to it, and `git diff` alone reports only the first kind.
-    out = `${git(['diff', '--name-only', 'HEAD'])}\n${git(['ls-files', '--others', '--exclude-standard'])}`;
+    // to it, and `git diff` alone reports only the first kind. --relative and the `.` pathspec keep
+    // every path relative to the mount, which the scope is written against, including a mount below
+    // the Git root; NUL delimiters keep names Git would otherwise quote. --no-renames lists both
+    // sides of a move: with rename detection, a staged move out of a file the task may not touch
+    // shows only its destination.
+    changed = names(git(['diff', '--name-only', '--no-renames', '--relative', '-z', 'HEAD', '--', '.']));
+    fresh = names(git(['ls-files', '--others', '--exclude-standard', '-z', '--', '.']));
   } catch {
     return { fires: false, skipped: true, reason: 'not a git repository, or git is unavailable' };
   }
+  // The mount's rules block stays uncommitted until the project commits it. Counted as a task
+  // change, it would keep the first task after a mount from closing. A surface whose only change is
+  // that block is the harness's own write, like .collet/; a change to the project's text around it
+  // still counts.
+  const onlyTheBlock = (path) => {
+    if (!RULES_SURFACES.includes(path)) return false;
+    try {
+      const now = withoutBlock(readFileSync(join(root, path), 'utf8'));
+      if (now === null) return false;
+      const head = fresh.includes(path) ? '' : git(['show', `HEAD:./${path}`]);
+      // The mount trims the text it appends to, and Git may convert line endings on checkout.
+      const same = (text) => text.replace(/\r\n/g, '\n').trimEnd();
+      return same(now) === same(withoutBlock(head) ?? head);
+    } catch {
+      return false;
+    }
+  };
   const scope = task.scope ?? [];
-  const outside = [
-    ...new Set(
-      out
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-    ),
-  ]
+  const outside = [...new Set([...changed, ...fresh])]
     .filter((path) => !path.startsWith('.collet/'))
     .filter((path) => !OWNED_ELSEWHERE.some((owned) => matchScope(owned, path)))
-    .filter((path) => !scope.some((pattern) => matchScope(pattern, path)));
+    .filter((path) => !scope.some((pattern) => matchScope(pattern, path)))
+    .filter((path) => !onlyTheBlock(path));
   if (!outside.length) return { fires: false, reason: 'everything changed is inside the task' };
   return { fires: true, reason: `changed outside the open task ${task.id}: ${outside.join(', ')}` };
 }

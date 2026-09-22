@@ -5,7 +5,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { clean, mount, project, TREE } from './temp-project.js';
+import { mount, project, TREE } from './temp-project.js';
 
 test('the rules block reaches every surface an agent reads', () => {
   const root = project({ ...TREE, 'CLAUDE.md': '# House rules\n', '.cursor/rules/.keep': '' });
@@ -14,7 +14,6 @@ test('the rules block reaches every surface an agent reads', () => {
     assert.match(readFileSync(join(root, surface), 'utf8'), /collet:begin/, surface);
   }
   assert.match(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), /# House rules/);
-  clean(root);
 });
 
 // One host reads `AGENTS.md` only while no `CLAUDE.md` exists. A `CLAUDE.md` created here would
@@ -26,7 +25,6 @@ test('a project that keeps only AGENTS.md is not given a CLAUDE.md', () => {
   assert.equal(existsSync(join(root, 'CLAUDE.md')), false);
   assert.equal(existsSync(join(root, '.cursor')), false);
   assert.doesNotMatch(out.stdout, /CLAUDE\.md/);
-  clean(root);
 });
 
 test('mounting twice does not duplicate the block', () => {
@@ -37,7 +35,6 @@ test('mounting twice does not duplicate the block', () => {
   const twice = readFileSync(join(root, 'AGENTS.md'), 'utf8');
   assert.equal(once, twice);
   assert.equal(twice.split('collet:begin').length - 1, 1);
-  clean(root);
 });
 
 test("a project's own text survives a mount and a remount", () => {
@@ -47,7 +44,6 @@ test("a project's own text survives a mount and a remount", () => {
   const text = readFileSync(join(root, 'AGENTS.md'), 'utf8');
   assert.match(text, /Commit messages are in English/);
   assert.match(text, /collet:begin/);
-  clean(root);
 });
 
 test('an existing config is kept, and only a missing accept command is filled in', () => {
@@ -62,7 +58,6 @@ test('an existing config is kept, and only a missing accept command is filled in
   const config = JSON.parse(readFileSync(join(root, '.collet', 'config.json'), 'utf8'));
   assert.equal(config.project, 'mine');
   assert.equal(config.accept, 'npm test');
-  clean(root);
 });
 
 test('the placeholders leave no room to mistake them for a decision', () => {
@@ -72,7 +67,6 @@ test('the placeholders leave no room to mistake them for a decision', () => {
   assert.match(config.project, /^REPLACE ME/);
   assert.match(config.accept, /^REPLACE ME/);
   assert.equal(config.verifier, undefined);
-  clean(root);
 });
 
 test('every check a project receives arrives with the fixtures that admit it', () => {
@@ -88,7 +82,6 @@ test('every check a project receives arrives with the fixtures that admit it', (
     assert.ok(fixtures.some((name) => name.startsWith(`${id}.nearmiss`)), `${id} has no near miss`);
   }
   assert.equal(existsSync(join(dir, 'run.mjs')), true);
-  clean(root);
 });
 
 test('what a session regenerates is not committed', () => {
@@ -98,7 +91,6 @@ test('what a session regenerates is not committed', () => {
   for (const name of ['guard-log.jsonl', 'handoff.md', 'checks/discarded.json', 'off']) {
     assert.match(ignore, new RegExp(name.replace('/', '\\/')), name);
   }
-  clean(root);
 });
 
 test('the rules a project receives name commands that work in that project', () => {
@@ -108,7 +100,6 @@ test('the rules a project receives name commands that work in that project', () 
   assert.match(mine, /node \.collet\/task\.mjs widen/);
   assert.match(mine, /node \.collet\/task\.mjs close/);
   assert.doesNotMatch(mine, /\{\{/);
-  clean(own);
 });
 
 // The whole of collet's relationship with a project that plans its work elsewhere: it stays out.
@@ -128,7 +119,6 @@ test('a project that plans its work elsewhere is left alone entirely', () => {
     assert.match(out.stderr, /roadmap collet does not own/);
     assert.equal(existsSync(join(root, '.collet')), false);
     assert.equal(existsSync(join(root, 'AGENTS.md')), false);
-    clean(root);
   }
 });
 

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { checkSource, liveSource } from '../templates/source.mjs';
-import { clean, git, PLUGIN, project, repo } from './temp-project.js';
+import { git, PLUGIN, project, repo } from './temp-project.js';
 
 const edition = JSON.parse(readFileSync(join(PLUGIN, 'catalogue/javascript-typescript.json'), 'utf8'));
 const task = { id: 't1', status: 'in_progress', scope: ['**'] };
@@ -15,13 +15,12 @@ const ordinary = "it('case', () => { expect(1).toBe(1); });\n";
 const write = (root, file, content, check = focused, cwd = root) =>
   checkSource({ root, task, call: { tool: 'Write', cwd, input: { file_path: file, content } } }, check);
 
-test('a Rust result invariant is a real assertion while a literal tautology is refused', (t) => {
+test('a Rust result invariant is a real assertion while a literal tautology is refused', () => {
   const catalogue = JSON.parse(readFileSync(join(PLUGIN, 'catalogue/rust.json'), 'utf8'));
   const item = catalogue.classes.find((entry) => entry.id === 'softened-assertion');
   const check = { ...item, commentSyntax: catalogue.commentSyntax };
   const pair = item.fixtures.additional.find((entry) => entry.id === 'result-invariant');
   const root = project({ [pair.path]: pair.nearMiss });
-  t.after(() => clean(root));
   repo(root);
   const changed = pair.nearMiss + '\n// Preserve the successful operation invariant.\n';
   assert.equal(write(root, pair.path, changed, check).fires, false);
@@ -37,9 +36,8 @@ function fixturePath(glob) {
     .replace(/\*\*\//g, '').replace(/\*/g, 'fixture');
 }
 
-test('the twelve source classes prove their original plain-source fixture pairs', (t) => {
+test('the twelve source classes prove their original plain-source fixture pairs', () => {
   const root = project();
-  t.after(() => clean(root));
   assert.equal(edition.classes.length, 12);
   assert.equal(new Set(edition.classes.map((entry) => entry.id)).size, 12);
   for (const entry of edition.classes) {
@@ -53,17 +51,15 @@ test('the twelve source classes prove their original plain-source fixture pairs'
   }
 });
 
-test('Write compares the existing file and detects growth beyond a preexisting match', (t) => {
+test('Write compares the existing file and detects growth beyond a preexisting match', () => {
   const root = project({ 'a.test.js': focus });
-  t.after(() => clean(root));
   assert.equal(write(root, 'a.test.js', focus + ordinary).fires, false);
   assert.equal(write(root, 'a.test.js', focus.repeat(2)).fires, true);
   assert.equal(write(root, 'a.test.js', ordinary).fires, false);
 });
 
-test('Edit and every MultiEdit replacement compare old and new text', (t) => {
+test('Edit and every MultiEdit replacement compare old and new text', () => {
   const root = project();
-  t.after(() => clean(root));
   const edit = (tool, input) => checkSource({ root, task, call: { tool, input: { file_path: 'a.test.js', ...input } } }, focused);
   assert.equal(edit('Edit', { old_string: focus, new_string: focus + ordinary }).fires, false);
   assert.equal(edit('Edit', { old_string: focus, new_string: focus.repeat(2) }).fires, true);
@@ -75,15 +71,13 @@ test('Edit and every MultiEdit replacement compare old and new text', (t) => {
   assert.equal(edit('MultiEdit', { edits: [{ new_string: focus }] }).skipped, true);
 });
 
-test('patterns count independently so removing one shape cannot conceal a newly added shape', (t) => {
+test('patterns count independently so removing one shape cannot conceal a newly added shape', () => {
   const root = project({ 'a.test.js': focus });
-  t.after(() => clean(root));
   assert.equal(write(root, 'a.test.js', "it.concurrent.only('case', () => { expect(1).toBe(1); });").fires, true);
 });
 
-test('source blanking ignores comments, quoted text and regex bodies but keeps live calls', (t) => {
+test('source blanking ignores comments, quoted text and regex bodies but keeps live calls', () => {
   const root = project();
-  t.after(() => clean(root));
   const prose = [
     '// it.only("comment", run);',
     '/* it.only("block", run); */',
@@ -98,19 +92,17 @@ test('source blanking ignores comments, quoted text and regex bodies but keeps l
   assert.equal(write(root, 'a.ts', '// @ts-ignore\nconst x = 1;', spec('blanket-type-suppression')).fires, true);
 });
 
-test('keeping string content does not mistake URLs and path globs for comments', (t) => {
+test('keeping string content does not mistake URLs and path globs for comments', () => {
   const root = project();
-  t.after(() => clean(root));
   const source = 'export default { url: "https://example.invalid", include: ["**/*.test.ts"], allowOnly: true };';
   assert.equal(write(root, 'vitest.config.ts', source, spec('test-config-loosened')).fires, true);
   assert.equal(write(root, 'tsconfig.json', '// "strict": false\n{"strict": true}', spec('relaxed-tsconfig-strictness')).fires, false);
   assert.equal(write(root, '.github/workflows/ci.yml', '# npx vitest run -u\nrun: npx vitest run', spec('snapshot-updated-wholesale')).fires, false);
 });
 
-test('per-line matches grow from one to two and never combine separate lines', (t) => {
+test('per-line matches grow from one to two and never combine separate lines', () => {
   const source = '- run: npm test || true\n- run: npm run lint\n';
   const root = project({ '.github/workflows/ci.yml': source });
-  t.after(() => clean(root));
   const ci = spec('ci-step-allowed-to-fail');
   assert.equal(write(root, '.github/workflows/ci.yml', source + '- run: npm run build\n', ci).fires, false);
   assert.equal(write(root, '.github/workflows/ci.yml', source + '- run: npm run typecheck || true\n', ci).fires, true);
@@ -119,9 +111,8 @@ test('per-line matches grow from one to two and never combine separate lines', (
   assert.equal(write(root, 'a.js', '/* two\nlines */ disabled\n', lineCheck).fires, true);
 });
 
-test('path matching handles root files, nested braces, call directories and unusual filenames', (t) => {
+test('path matching handles root files, nested braces, call directories and unusual filenames', () => {
   const root = project();
-  t.after(() => clean(root));
   assert.equal(write(root, 'root.spec.tsx', focus).fires, true);
   assert.equal(write(root, 'nested/a test.spec.mts', focus).fires, true);
   assert.equal(write(root, '../a.test.js', focus, focused, join(root, 'nested')).fires, true);
@@ -130,9 +121,8 @@ test('path matching handles root files, nested braces, call directories and unus
   assert.equal(write(root, '..valid.test.js', focus).fires, true);
 });
 
-test('unsupported tools, incomplete inputs and unreadable existing files disclose a gap', (t) => {
+test('unsupported tools, incomplete inputs and unreadable existing files disclose a gap', () => {
   const root = project();
-  t.after(() => clean(root));
   mkdirSync(join(root, 'directory.test.js'));
   assert.equal(write(root, 'directory.test.js', focus).skipped, true);
   assert.equal(write(root, 'a.test.js', undefined).skipped, true);
@@ -144,9 +134,8 @@ test('unsupported tools, incomplete inputs and unreadable existing files disclos
   assert.equal(checkSource({ root, task: null, call: {} }, focused).skipped, true);
 });
 
-test('live checks keep the HEAD baseline for unchanged matches and detect staged or unstaged growth', (t) => {
+test('live checks keep the HEAD baseline for unchanged matches and detect staged or unstaged growth', () => {
   const root = project({ 'a.test.js': focus, 'base.txt': 'base\n' });
-  t.after(() => clean(root));
   repo(root);
   writeFileSync(join(root, 'a.test.js'), focus + ordinary);
   assert.equal(liveSource({ root, task }, focused).fires, false);
@@ -158,9 +147,8 @@ test('live checks keep the HEAD baseline for unchanged matches and detect staged
   assert.equal(liveSource({ root, task }, focused).fires, false);
 });
 
-test('live checks include untracked names verbatim, respect ignores and accept deletions', (t) => {
+test('live checks include untracked names verbatim, respect ignores and accept deletions', () => {
   const root = project({ 'a.test.js': focus, '.gitignore': 'ignored.test.js\n' });
-  t.after(() => clean(root));
   repo(root);
   unlinkSync(join(root, 'a.test.js'));
   writeFileSync(join(root, 'ignored.test.js'), focus);
@@ -176,9 +164,8 @@ test('live checks include untracked names verbatim, respect ignores and accept d
   assert.equal(liveSource({ root, task }, focused).fires, false);
 });
 
-test('a tracked rename carries the original HEAD source into its new filename', (t) => {
+test('a tracked rename carries the original HEAD source into its new filename', () => {
   const root = project({ 'old.test.js': focus.repeat(8) });
-  t.after(() => clean(root));
   repo(root);
   renameSync(join(root, 'old.test.js'), join(root, 'renamed café.test.js'));
   git(root, ['add', '-A']);
@@ -187,18 +174,16 @@ test('a tracked rename carries the original HEAD source into its new filename', 
   assert.equal(liveSource({ root, task }, focused).fires, true);
 });
 
-test('a rename into a checked filename introduces source that was previously outside the check', (t) => {
+test('a rename into a checked filename introduces source that was previously outside the check', () => {
   const root = project({ 'example.txt': focus });
-  t.after(() => clean(root));
   repo(root);
   renameSync(join(root, 'example.txt'), join(root, 'example.test.js'));
   git(root, ['add', '-A']);
   assert.equal(liveSource({ root, task }, focused).fires, true);
 });
 
-test('a mount below the Git root matches its own paths and reads the corresponding HEAD files', (t) => {
+test('a mount below the Git root matches its own paths and reads the corresponding HEAD files', () => {
   const root = project({ 'nested/a.test.js': focus, 'outside.test.js': ordinary });
-  t.after(() => clean(root));
   repo(root);
   const nested = join(root, 'nested');
   writeFileSync(join(root, 'outside.test.js'), focus);
@@ -211,11 +196,10 @@ test('a mount below the Git root matches its own paths and reads the correspondi
   assert.equal(liveSource({ root: nested, task }, focused).fires, true);
 });
 
-test('live per-line patterns compare counts across the complete HEAD and working files', (t) => {
+test('live per-line patterns compare counts across the complete HEAD and working files', () => {
   const file = '.github/workflows/ci.yml';
   const source = '- run: npm test || true\n- run: npm run lint\n';
   const root = project({ [file]: source });
-  t.after(() => clean(root));
   repo(root);
   writeFileSync(join(root, file), source + '- run: npm run build\n');
   assert.equal(liveSource({ root, task }, spec('ci-step-allowed-to-fail')).fires, false);
@@ -223,9 +207,8 @@ test('live per-line patterns compare counts across the complete HEAD and working
   assert.equal(liveSource({ root, task }, spec('ci-step-allowed-to-fail')).fires, true);
 });
 
-test('missing Git history and unreadable HEAD blobs never become clean baseline results', (t) => {
+test('missing Git history and unreadable HEAD blobs never become clean baseline results', () => {
   const root = project({ 'a.test.js': ordinary });
-  t.after(() => clean(root));
   assert.equal(liveSource({ root, task }, focused).skipped, true);
   git(root, ['init', '-q']);
   assert.equal(liveSource({ root, task }, focused).skipped, true);

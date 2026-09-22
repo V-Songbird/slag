@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { checks, clean, CONFIG, mount, project, repo, task, TREE } from './temp-project.js';
+import { checks, CONFIG, mount, project, repo, task, TREE } from './temp-project.js';
 
 function ready(extra = {}) {
   const root = project({ ...TREE, ...extra });
@@ -22,7 +22,6 @@ test('the shipped check is admitted by catching every violation and no near miss
   const out = checks(root);
   assert.equal(out.status, 0, out.stdout + out.stderr);
   assert.match(out.stdout, /ok {3}scope — 5 violation\(s\) caught, 6 near miss\(es\) left alone/);
-  clean(root);
 });
 
 test('a fixture that does not parse discards its check instead of crashing the run', () => {
@@ -34,7 +33,6 @@ test('a fixture that does not parse discards its check instead of crashing the r
   assert.match(out.stdout, /FAIL scope — .*does not parse/);
   assert.match(out.stdout, /discarded/);
   assert.equal(existsSync(join(root, '.collet', 'checks', 'discarded.json')), true);
-  clean(root);
 });
 
 test('a check that fires on its own near miss is discarded and named', () => {
@@ -48,7 +46,6 @@ test('a check that fires on its own near miss is discarded and named', () => {
   assert.match(out.stdout, /FAIL always/);
   const discarded = JSON.parse(readFileSync(join(dir, 'discarded.json'), 'utf8'));
   assert.equal(discarded.discarded[0].id, 'always');
-  clean(root);
 });
 
 test('a check with no fixture pair is not coverage', () => {
@@ -57,7 +54,6 @@ test('a check with no fixture pair is not coverage', () => {
   const out = checks(root);
   assert.equal(out.status, 1);
   assert.match(out.stdout, /needs at least one \.violation and one \.nearmiss fixture/);
-  clean(root);
 });
 
 test('a check that will not even load is reported, not skipped', () => {
@@ -66,7 +62,6 @@ test('a check that will not even load is reported, not skipped', () => {
   const out = checks(root);
   assert.equal(out.status, 1);
   assert.match(out.stdout, /FAIL broken — could not load/);
-  clean(root);
 });
 
 test('live says nothing is enforced when nothing is open', () => {
@@ -74,7 +69,6 @@ test('live says nothing is enforced when nothing is open', () => {
   const out = checks(root, ['--live']);
   assert.equal(out.status, 0);
   assert.match(out.stdout, /no task is open/);
-  clean(root);
 });
 
 test('a tree it could not read is skipped, never printed as ok', () => {
@@ -84,7 +78,6 @@ test('a tree it could not read is skipped, never printed as ok', () => {
   assert.match(out.stdout, /skip scope — not a git repository/);
   assert.doesNotMatch(out.stdout, /ok {3}scope/);
   assert.equal(out.status, 0);
-  clean(root);
 });
 
 test('--strict makes a check that could not run a failure', () => {
@@ -93,7 +86,6 @@ test('--strict makes a check that could not run a failure', () => {
   const out = checks(root, ['--live', '--strict']);
   assert.equal(out.status, 1);
   assert.match(out.stdout, /--strict counts that as a failure/);
-  clean(root);
 });
 
 for (const [name, body] of [
@@ -103,11 +95,10 @@ for (const [name, body] of [
   ['a non-boolean verdict', 'return { fires: "false" };'],
   ['a Promise resolving to a violation', 'return Promise.resolve({ fires: true, reason: "violation" });'],
 ]) {
-  test(`live refuses ${name} instead of accepting an unevaluated result`, (t) => {
+  test(`live refuses ${name} instead of accepting an unevaluated result`, () => {
     const root = ready({
       'accept.mjs': "import { writeFileSync } from 'node:fs';\nwriteFileSync('accept-ran', 'yes');\n",
     });
-    t.after(() => clean(root));
     writeFileSync(join(root, '.collet', 'checks', 'invalid-result.mjs'), [
       "export const id = 'invalid-result';",
       'export function check() { return { fires: false }; }',
@@ -134,9 +125,8 @@ for (const [name, body] of [
   });
 }
 
-test('an explicit skipped result without a verdict keeps standalone and strict policy distinct', (t) => {
+test('an explicit skipped result without a verdict keeps standalone and strict policy distinct', () => {
   const root = ready();
-  t.after(() => clean(root));
   writeFileSync(join(root, '.collet', 'checks', 'unavailable.mjs'), [
     "export const id = 'unavailable';",
     'export function check() { return { fires: false }; }',
@@ -162,7 +152,6 @@ test('live reports the files that landed outside the task', () => {
   const out = checks(root, ['--live']);
   assert.equal(out.status, 1);
   assert.match(out.stdout, /fail scope — changed outside the open task t1: src\/report\.mjs/);
-  clean(root);
 });
 
 test('live is quiet once everything is back inside the task', () => {
@@ -173,5 +162,4 @@ test('live is quiet once everything is back inside the task', () => {
   const out = checks(root, ['--live']);
   assert.equal(out.status, 0, out.stdout);
   assert.match(out.stdout, /ok {3}scope — everything changed is inside the task/);
-  clean(root);
 });

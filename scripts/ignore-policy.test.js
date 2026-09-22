@@ -9,13 +9,12 @@ const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const harness = import('../collet/tests/temp-project.js');
 
-async function checkPaths(t, filename, cases) {
-  const { project, clean } = await harness;
+async function checkPaths(filename, cases) {
+  const { project } = await harness;
   const fixture = project({
     '.gitignore': readFileSync(path.join(root, filename), 'utf8'),
     'empty-global-ignore': '',
   });
-  t.after(() => clean(fixture));
   const initialized = spawnSync('git', ['init', '-q', fixture], { encoding: 'utf8' });
   assert.equal(initialized.status, 0, initialized.stderr);
   for (const [name, expectedIgnored] of cases) {
@@ -45,7 +44,7 @@ const publicProduct = [
   'src/main.js', 'tests/fixtures/example.json',
 ];
 
-test('Slag protects private subdirectories without hiding public product documentation', async (t) => {
-  await checkPaths(t, '.gitignore', privateDocuments.map(name => [name, true])
+test('Slag protects private subdirectories without hiding public product documentation', async () => {
+  await checkPaths('.gitignore', privateDocuments.map(name => [name, true])
     .concat(publicProduct.map(name => [name, false])));
 });

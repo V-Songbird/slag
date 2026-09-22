@@ -21,6 +21,28 @@ silent on its own near miss.** Nothing else counts — not who wrote it, not how
 not how many other checks passed beside it. A second pattern is not covered because the pattern
 next to it matched.
 
+## First, look for an open task
+
+Run `node .collet/task.mjs status` before writing anything. While a task is open, the session guard
+refuses writes under `.collet/` other than `.collet/unverified.md`: the checks, their fixtures and
+the ledger are the harness's own state, not task files. Widening cannot lift that refusal, and
+`task.mjs widen` refuses those paths.
+
+If a task is open, tell the person before any write is refused, and add the check between tasks:
+
+1. Finish the open task and close it:
+   `node .collet/task.mjs close --left-out "..." --unverified "..."`. A task whose accept command
+   does not pass yet cannot close; name the missing check in `--left-out` when it does close, or in
+   your summary, so it is not lost.
+2. With no task open, follow the steps below, admission included.
+3. Open the next task. The check runs from then on, when a file is written and when a task closes.
+
+Do not work around the refusal. The guard does not stop a shell command that creates a new file
+under `.collet/`, and the close-time scope check skips that directory. A check added that way is
+never reviewed, yet it runs when the open task closes, and one without a working `live` keeps that
+task open. `.collet/off` silences every session guard, the open task's scope included. Switching it
+on is the person's decision, not a step of this skill.
+
 ## 1. Say the mistake in one line
 
 Not "we should be more careful". The shape that works names the moment and the slip:

@@ -38,9 +38,13 @@ The session guard loads project checks with the scope fallback from the plugin. 
 open; the explicit .collet/off file disables hooks, not committed standalone checks.
 
 Closing a task first requires strict live checks against the Git baseline, including untracked
-files, then runs the acceptance command. Missing scope, unavailable Git, skipped required checks
-or invalid results cannot prove completion. A failing stage leaves the task open. A successful
-close records what was left out and unverified and clears obsolete handoff state.
+files, then runs the acceptance command. The scope check reads those changes relative to the
+mounted directory, so a mount below the Git root covers only its own directory. It does not count
+the harness's own writes: `.collet/` and the rules block between the collet markers in
+`AGENTS.md`, `CLAUDE.md` or `.cursor/rules/collet.md`. The project's text around that block still
+counts. Missing scope, unavailable Git, skipped required checks or invalid results cannot prove
+completion. A failing stage leaves the task open. A successful close records what was left out
+and unverified and clears obsolete handoff state.
 
 The optional language catalogue is a source-pattern policy, not a judgment of intent. Code text
 unavailable at write time is evaluated later against the working tree. Custom checks must provide
@@ -49,6 +53,7 @@ according to the mount preflight; collet-owned runtime files are refreshed on re
 
 ## Verification
 
-Run npm run check for the repository or node --test from collet/. Fixtures are self-contained and
-require no private notes or owner profile. See the [plugin README](../../README.md) for commands
-and current limits, and the [harness workflow](harness-workflow.md) for configuration and usage.
+Run npm run check for the repository, which also fails when a suite fails outside its tests, or
+node --test from collet/. Fixtures are self-contained and require no private notes or owner
+profile. See the [plugin README](../../README.md) for commands and current limits, and the
+[harness workflow](harness-workflow.md) for configuration and usage.
