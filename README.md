@@ -58,6 +58,19 @@ Read the [collet README](./collet/README.md).
 
 They compose: anneal gets the layout into shape, and collet keeps a session from wandering out of it.
 
+## Deprecated ideas
+
+These plugins are retired and are not included in the current marketplace.
+
+| Plugin | Idea |
+| --- | --- |
+| assay | Audit and improve agent instructions. |
+| jig | Turn recurring mistakes into verified repository checks. |
+| brink | Warn before context limits and suggest focused compaction. |
+| jetbrains-router | Route reads, searches and edits through JetBrains IDEs. |
+| scribe | Clarify ambiguous requests before implementation. |
+| verity | Ground Claude Code answers in current official documentation. |
+
 ## Development
 
 ```bash
