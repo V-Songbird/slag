@@ -2,6 +2,7 @@
 paths:
   - "**/README.md"
   - "**/CHANGELOG.md"
+  - "**/docs/knowledge/changelog.md"
   - "**/.claude-plugin/*.json"
   - "**/.codex-plugin/*.json"
   - ".agents/plugins/*.json"
@@ -40,14 +41,14 @@ fixture strings, branch names, PR text, and commit messages.
 
 A CHANGELOG never carries counts at all — it states the effect — so it never carries a name either.
 
-The names that are not published live in `docs/research/`, which is gitignored and is not in a
-standard clone.
+The optional name list is local input and is absent from a standard clone.
 
 ## What enforces it
 
 `scripts/git-hooks/check-reference-names.js`, armed once per clone with
 `git config core.hooksPath scripts/git-hooks`, scans the staged change and the commit message
-against the blocklist in `docs/research/reference-names.txt`.
+against the first nonempty readable blocklist: `HOUSE_REFERENCE_BLOCKLIST`, then
+`.private/reference-names.txt` in the current directory, then the same path in its parent.
 
 **That gate fails open.** With no blocklist present it passes everything, on purpose, so a
 standalone clone can still commit. A green commit is not proof the gate ran, and on most clones it

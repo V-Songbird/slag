@@ -1,3 +1,13 @@
+---
+type: knowledge
+summary: "Records user-facing collet changes by release; read when upgrading or checking when behavior changed."
+related_files:
+  - collet/README.md
+  - collet/.claude-plugin/plugin.json
+  - collet/.codex-plugin/plugin.json
+  - collet/plugin.json
+---
+
 # Changelog
 
 All notable changes to collet are documented here. The format follows

@@ -12,7 +12,7 @@ metadata:
 # cut-release
 
 Cuts a release for one plugin in this repository. Plugins here live in-tree, so a release is a
-single commit: the plugin's code, its `CHANGELOG.md` entry, and its version in every manifest that a
+single commit: the plugin's code, its `docs/knowledge/changelog.md` entry, and its version in every manifest that a
 host reads, all moving together.
 
 Which plugins exist is not written down here. Plugins get added and retired, so this skill reads the
@@ -37,7 +37,8 @@ Two files never carry a version, and a bump must not add one:
 - `.agents/plugins/marketplace.json` — the Codex index; that host reads its version from
   `.codex-plugin/plugin.json`.
 
-Nothing checks any of this. See `AGENTS.md` → "Rules that outrank everything".
+`scripts/plugin-integrity.test.js` checks version placement, agreement and referenced resources.
+See [host contracts](../../../docs/knowledge/host-plugin-formats.md) for the current packaging contract.
 
 ## Step 0 — which plugin, its manifests, and is it ready
 
@@ -81,7 +82,7 @@ release drops it.
 A plugin's CHANGELOG follows Keep a Changelog: `## [Unreleased]` at the top, then `## [<version>] —
 <YYYY-MM-DD>` entries under `### Added` / `### Changed` / `### Fixed`.
 
-1. `Read` `<plugin>/CHANGELOG.md`.
+1. `Read` `<plugin>/docs/knowledge/changelog.md`.
 2. If `[Unreleased]` has no entries, ask the user what this release changes for a user, or draft it
    from the Step 0 commit log and confirm it.
 3. `Edit` the file: rename the `## [Unreleased]` heading to `## [<version>] — <YYYY-MM-DD>`, keeping

@@ -1,3 +1,13 @@
+---
+type: knowledge
+summary: "Records user-facing anneal changes by release; read when upgrading or checking when behavior changed."
+related_files:
+  - anneal/README.md
+  - anneal/.claude-plugin/plugin.json
+  - anneal/.codex-plugin/plugin.json
+  - anneal/plugin.json
+---
+
 # Changelog
 
 All notable changes to anneal are documented here.

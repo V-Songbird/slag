@@ -19,8 +19,8 @@ const { execFileSync } = require("child_process");
 function loadBlocklist() {
   const candidates = [
     process.env.HOUSE_REFERENCE_BLOCKLIST,
-    path.join(process.cwd(), "docs", "research", "reference-names.txt"),
-    path.join(process.cwd(), "..", "docs", "research", "reference-names.txt"),
+    path.join(process.cwd(), ".private", "reference-names.txt"),
+    path.join(process.cwd(), "..", ".private", "reference-names.txt"),
   ].filter(Boolean);
   for (const p of candidates) {
     try {
@@ -85,7 +85,7 @@ function main() {
   if (hits.length) {
     console.error("reference-name check: private reference-project names must never reach public records.");
     for (const h of hits.slice(0, 20)) console.error("  " + h);
-    console.error("Reword generically (\"a rival tool\", \"a public reference\") or move the detail to gitignored docs/research/.");
+    console.error("Reword generically (\"a rival tool\", \"a public reference\") or move the detail to gitignored docs/knowledge/private/.");
     return 1;
   }
   return 0;

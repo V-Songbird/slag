@@ -1,62 +1,49 @@
-# slag
+# Slag
 
-Slag is a marketplace of experimental agent plugins. Slag is the byproduct that comes off the good metal, and this repository is where plugin ideas live before they are worth anyone's trust.
+Slag contains experimental plugins for coding agents that inspect repositories, reconcile documentation, and constrain implementation tasks.
 
-Two plugins are installable from here. Both work on their own and stay out of the other's way.
-
-> **Nothing here is a product.** These plugins get rewritten, renamed and deleted without notice or a migration path. There is no support, no stability promise and no release schedule. You are welcome to install any of them. If one breaks your session, that is the deal you took.
+Use [anneal](anneal/README.md) for repository and documentation reviews.
+Use [collet](collet/README.md) for an already planned task with a writable scope and an acceptance command.
+These experiments have no support or stability promise.
 
 ## Requirements
 
-- Node 22 or later, for both plugins and the test suite.
-- Claude Code, Codex or Antigravity.
+- Node 22 or later.
+- Claude Code, Codex or Antigravity to load a plugin.
+- Git for collet and anneal migrations; anneal's read-only audit can also inspect a directory without Git.
 
-## Install
+## Install and try
+
+In Claude Code, install anneal from this marketplace:
 
 ```text
 /plugin marketplace add V-Songbird/slag
-/plugin install <plugin-name>@slag
-```
-
-The first command registers this collection once. The second installs one plugin, and takes effect next session. To confirm it loaded, start a new session and type `/anneal:repo-layout audit` or `/collet:task-harness`.
-
-The marketplace itself has no settings. Each plugin's README says whether that plugin has any. Uninstall with `/plugin uninstall <plugin-name>@slag`.
-
-On Codex, add this repository as a marketplace and install from `Slag`.
-
-For Antigravity CLI, clone this repository and run `agy plugin install <path-to-clone>/<plugin-name>`. Confirm the plugin appears in `agy plugin list`; each plugin README states its tested host behavior.
-
-## The plugins
-
-### [anneal](./anneal) — improve navigation, documentation and session instructions
-
-`repo-layout` audits a repository's layout and migrates approved steps, running the project's checks before and after each change. `session-review` turns one session's detours into instruction changes you approve. `docs-align` checks documentation and non-code development files against the project, then applies authorized corrections or reports findings in audit mode.
-
-```text
 /plugin install anneal@slag
 ```
 
-Read the [anneal README](./anneal/README.md).
-
-### [collet](./collet) — hold a session inside the task it was given
-
-A session will finish work it never did. collet gives it one open task, the exact files it may touch, and a command that decides when it is over. A write outside the list is refused as it happens. Closing runs the accept command and checks that nothing landed outside the list first. A project that already plans its work in a roadmap it does not own is left alone: the mount writes nothing there.
+Start a new session in the repository you want to inspect, then request:
 
 ```text
-/plugin install collet@slag
+/anneal:repo-layout audit
 ```
 
-Read the [collet README](./collet/README.md).
+The skill reports navigation findings with counts and example paths without changing files.
+If Node is unavailable, the scan cannot run; check that the host can run `node --version`.
 
-### Which one first?
+For Codex and Antigravity installation, invocation and hook activation, follow the
+[anneal instructions](anneal/README.md#install) or [collet instructions](collet/README.md#install).
+The plugin guides distinguish subprocess tests from live host validation.
 
-| You want to… | Install |
+## Choose a workflow
+
+| Need | Plugin guide |
 | --- | --- |
-| Make a repository easier for an agent to find its way around | **anneal** |
-| Reconcile documentation or learn from one session's detours | **anneal** |
-| Stop a session drifting past its task, or calling work done | **collet** |
+| Audit repository navigation or plan an approved migration | [Anneal workflows](anneal/docs/knowledge/workflows.md) |
+| Reconcile documentation or explicitly review a session | [Anneal skills](anneal/README.md#what-you-can-do) |
+| Mount a task harness or add a targeted check | [Collet workflow](collet/docs/knowledge/harness-workflow.md) |
 
-They compose: anneal gets the layout into shape, and collet keeps a session from wandering out of it.
+Slag has no application configuration. Anneal has no settings;
+collet's mounted project uses [its harness configuration](collet/docs/knowledge/harness-workflow.md#configuration).
 
 ## Deprecated ideas
 
@@ -73,23 +60,23 @@ These plugins are retired and are not included in the current marketplace.
 
 ## Development
 
-```bash
+From the root of a Git clone, with Node 22 or later and Git available:
+
+```shell
 npm run check
 ```
 
-That runs every suite with `node --test --test-reporter=spec`. There is no CI.
+The command runs all repository and plugin tests and exits non-zero on failure.
+No dependency installation is needed. Read [repository scope and checks](docs/knowledge/repository-scope.md)
+and [host contracts](docs/knowledge/host-plugin-formats.md) before changing a plugin.
 
-Plugins live in-tree as plain directories, with one history and no submodules.
-[AGENTS.md](AGENTS.md) is the map: the layout, the three manifests each plugin ships, and the
-conventions a change has to respect.
+## Support and changes
 
-## Support
-
-- Bugs and questions: the [issue tracker](https://github.com/V-Songbird/slag/issues) for this repository. It is the only channel.
-- Security reports: the same issue tracker. There is no `SECURITY.md` and no private address, so anything you file is public.
-- What changed: each plugin's own `CHANGELOG.md` — [anneal](./anneal/CHANGELOG.md), [collet](./collet/CHANGELOG.md).
-- This repository accepts no outside contributions and carries no `CONTRIBUTING.md`.
+The [issue tracker](https://github.com/V-Songbird/slag/issues) is the only listed channel for bugs and usage questions.
+There is no dedicated security-reporting policy in this repository; avoid posting sensitive details publicly.
+Release changes are recorded in the [anneal changelog](anneal/docs/knowledge/changelog.md)
+and [collet changelog](collet/docs/knowledge/changelog.md).
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT. See [LICENSE](LICENSE).
