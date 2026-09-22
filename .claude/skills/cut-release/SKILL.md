@@ -66,9 +66,13 @@ npm run check
 Report what is uncommitted and what is unpushed. Everything lands in one commit in Step 4, so
 uncommitted plugin source is fine — say what is coming along rather than sweeping it in silently.
 
-`npm run check` is `node --test` from the root, covering every plugin's suite plus the repository's
-own. If it fails, stop and report. Do not release over a red suite without the user's explicit
-go-ahead. To run one plugin alone, `cd <plugin>` and run `node --test` there.
+`npm run check` runs `node --test` from the root with the suite-failure reporter
+(`scripts/suite-failure-reporter.js`), covering every plugin's suite plus the repository's own. The
+reporter fails the run when a suite fails outside its tests, such as a describe callback that throws
+before it registers a test or a suite's after hook that throws; plain `node --test` exits 0 on
+those. If `npm run check` fails, stop and report. Do not release over a red suite without the
+user's explicit go-ahead. To run one plugin alone, `cd <plugin>` and run `node --test` there; its
+exit code can miss a failed suite, so the release still rests on `npm run check`.
 
 ## Step 1 — pick the new version
 

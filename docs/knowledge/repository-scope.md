@@ -5,6 +5,8 @@ related_files:
   - AGENTS.md
   - .gitignore
   - package.json
+  - scripts/suite-failure-reporter.js
+  - scripts/claude-hooks/run-tests-on-edit.js
   - scripts/plugin-integrity.test.js
   - scripts/ignore-policy.test.js
   - anneal/
@@ -37,6 +39,19 @@ npm run check runs the plugin suites and repository tests using Node 22 or later
 suite validates marketplace sources, local resource paths, host metadata and version ownership.
 The navigation audit is heuristic; its three runtime-name matches in audit.test.js are intentional
 fixture strings and must retain their detector coverage.
+
+On Node 22 the test runner reports a failed suite without counting a failed test, so a describe
+callback that throws or rejects before it registers a test, or a suite's after hook that throws,
+prints the error yet exits 0. An error at the top level of a test file or in a before hook already
+exits 1. The check script therefore adds
+[scripts/suite-failure-reporter.js](../../scripts/suite-failure-reporter.js) as a second reporter:
+it sets exit code 1 for every failure the runner reports and writes one stderr line for each suite
+that failed outside its tests. scripts/suite-failure-reporter.test.js runs the fixtures in
+scripts/fixtures, whose names keep them out of test discovery, with the check script's own
+arguments. The edit hook passes the same reporter, with tap in place of spec, and quotes those
+lines in its feedback. A plain node --test run, including one inside a plugin, has no such guard,
+so keep file reads, processes and fixture setup in before hooks or tests rather than in describe
+callbacks.
 
 The configured commit gate can use an optional private name blocklist. It passes when no list is
 available, so a successful commit is not proof that this optional filter checked any names.

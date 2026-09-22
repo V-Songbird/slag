@@ -12,6 +12,8 @@
 //     files outside the repo
 //   - end-to-end: reruns the owning plugin's tests, silent on green,
 //     surfaces failure via additionalContext on red
+//   - a suite that fails outside its tests counts as red and is named, through
+//     the suite-failure reporter that npm run check also uses
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
@@ -169,6 +171,24 @@ describe('main (end-to-end against a real plugin)', () => {
       const out = JSON.parse(result.stdout);
       assert.match(out.hookSpecificOutput.additionalContext, /demo-plugin\/ failed after this edit to x\.js/);
       assert.match(out.hookSpecificOutput.additionalContext, /# fail \d/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('reports a suite that fails outside its tests, which plain node --test exits 0 on', () => {
+    const { root, pluginRoot } = makeFakeRepo();
+    try {
+      for (const fixture of ['suite-throws', 'after-hook-throws']) {
+        fs.copyFileSync(path.join(__dirname, '..', 'fixtures', `${fixture}.js`), path.join(pluginRoot, 'tests', `${fixture}.test.js`));
+      }
+      const payload = { tool_name: 'Edit', tool_input: { file_path: path.join(pluginRoot, 'scripts', 'x.js') } };
+      const result = runHook(payload, { CLAUDE_PROJECT_DIR: root });
+      assert.equal(result.status, 0, result.stderr);
+      const context = JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
+      assert.match(context, /demo-plugin\/ failed after this edit to x\.js/);
+      assert.match(context, /Suite failed outside its tests: "a suite that throws while defining its tests"/);
+      assert.match(context, /Suite failed outside its tests: "a suite whose after hook throws"/);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

@@ -21,7 +21,7 @@ Run from the repository root unless a row names another directory.
 | `npm run check` | All plugin and repository tests | Local subprocesses and temporary fixtures; no paid services |
 | `node --test scripts/plugin-integrity.test.js` | Manifest paths and cross-host metadata | Local |
 | `node --test scripts/ignore-policy.test.js` | Documentation visibility contract | Local temporary Git fixtures |
-| `node --test` from `anneal/` or `collet/` | One plugin's suite | Local temporary fixtures |
+| `node --test` from `anneal/` or `collet/` | One plugin's suite, without the suite-failure reporter: a suite that fails outside its tests can still exit 0 | Local temporary fixtures |
 | `node anneal/scripts/audit.js --root .` | Heuristic navigation audit | Read-only, local |
 
 The live session evals have separate host, sandbox and service requirements;
@@ -35,7 +35,7 @@ see [eval prerequisites](anneal/docs/knowledge/workflows.md#running-the-evals).
 | `collet/` | Harness skills, runtime templates, language catalogues, hooks and tests |
 | `.claude-plugin/marketplace.json` | Claude marketplace and its plugin versions |
 | `.agents/plugins/marketplace.json` | Codex marketplace with local plugin sources |
-| `scripts/` | Repository integrity tests, edit-triggered test hook and optional Git gates |
+| `scripts/` | Repository integrity tests, edit-triggered test hook, optional Git gates, and the suite-failure reporter that `npm run check` and the edit hook add |
 | `docs/knowledge/` | Repository contracts and contributor documentation |
 | `<plugin>/docs/knowledge/` | Plugin workflows, technical contracts and changelog |
 

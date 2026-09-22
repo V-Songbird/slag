@@ -17,7 +17,8 @@
 
 const fs = require("fs");
 const path = require("path");
-const { execSync } = require("child_process");
+const { execFileSync } = require("child_process");
+const { pathToFileURL } = require("url");
 
 const WATCHED_TOOLS = new Set(["Edit", "Write", "apply_patch"]);
 // templates/ is collet's: the .mjs files it mounts into a project, held by
@@ -97,9 +98,9 @@ function findPluginRoot(root, filePath) {
 // Discovery runs from inside the plugin, never from a path argument.
 // `node --test <glob>` only expands on node 22+; on node 20, this repo's floor
 // until 2026-09-21, it exits with "Could not find" and this hook would report
-// a failed suite after every single edit. A bare
-// `node --test` recurses from cwd and finds all 49 in anneal and 59 in collet
-// on both v20.11.1 and v22.22.2.
+// a failed suite after every single edit. With no path argument, `node --test`
+// recurses from cwd and finds every test file in the plugin on both v20.11.1
+// and v22.22.2.
 
 // Strip node's own test-runner IPC markers before spawning the nested
 // `node --test` -- inheriting NODE_TEST_CONTEXT (set when this hook's own
@@ -112,10 +113,23 @@ function cleanEnv() {
   return env;
 }
 
+// npm run check's reporters, with tap in place of spec on stdout because
+// failureContext reads tap's summary. The suite-failure reporter fails the run
+// when a suite fails outside its tests, which node 22 alone exits 0 on, and
+// names that suite on stderr. It is passed as a file URL: node imports it as a
+// module specifier, and a Windows drive path is not one.
+const TEST_ARGS = [
+  "--test",
+  "--test-reporter=tap",
+  "--test-reporter-destination=stdout",
+  `--test-reporter=${pathToFileURL(path.join(__dirname, "..", "suite-failure-reporter.js")).href}`,
+  "--test-reporter-destination=stderr",
+];
+
 function runTests(pluginRoot, timeout = TEST_TIMEOUT_MS) {
   if (timeout <= 0) return { passed: false, output: "Hook test budget exhausted before this suite started." };
   try {
-    execSync("node --test", { cwd: pluginRoot, stdio: "pipe", timeout, env: cleanEnv() });
+    execFileSync(process.execPath, TEST_ARGS, { cwd: pluginRoot, stdio: "pipe", timeout, env: cleanEnv() });
     return { passed: true };
   } catch (err) {
     const output = `${err.stdout || ""}${err.stderr || ""}` || err.message || "";
@@ -154,7 +168,7 @@ function main() {
 }
 
 function failureContext(pluginRoot, edited, result) {
-  const stats = (result.output.match(/^# (?:tests|pass|fail) .+$/gm) || []).join("; ");
+  const stats = (result.output.match(/^(?:# (?:tests|pass|fail) |Suite failed outside its tests: ).+$/gm) || []).join("; ");
   const pluginName = path.basename(pluginRoot);
 
   // No TAP summary means the run never reached a verdict -- killed by the
@@ -164,7 +178,7 @@ function failureContext(pluginRoot, edited, result) {
   const detail = stats || result.output.trim().split(/\r?\n/).slice(-3).join(" ").slice(0, 300);
 
   return `[slag] node --test ${pluginName}/ ${verdict} after this edit to ${edited}. ` +
-    `${detail} Run \`node --test\` from ${pluginName}/ for the full trace before moving on.`;
+    `${detail} Run \`npm run check\` from the repository root for the full trace before moving on.`;
 }
 
 if (require.main === module) {
