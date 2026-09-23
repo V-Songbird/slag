@@ -155,6 +155,9 @@ All notable changes to collet are documented here. The format follows
 - Mounting again refreshes `.collet/source.mjs`, the runtime the bundle checks share, when it still
   holds what collet wrote, and then proves the checks against their examples. A copy with edits of
   its own is kept, and the mount says so.
+- The mount's next steps, the README and the skill say that only the `project` line and the
+  `accept` command block `task.mjs add`. A leftover `conventions` placeholder never blocked it and
+  is dropped before a session is told the config, and an empty list is valid.
 
 ## [0.4.0-alpha] — 2026-09-21
 

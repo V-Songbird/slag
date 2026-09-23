@@ -108,6 +108,18 @@ test('a task cannot be opened while the config still carries its placeholders', 
   assert.match(out.stderr, /still carries its placeholders/);
 });
 
+test('only the project line and the accept command block opening a task', () => {
+  // Conventions are optional: an empty list is the no-answer outcome, and a leftover placeholder
+  // is dropped before any session is told it, so neither may stand in the way of a task.
+  for (const conventions of [[], ['REPLACE ME: a decision that constrains what a change here may look like.']]) {
+    const root = project(TREE);
+    mount(root);
+    writeFileSync(join(root, '.collet', 'config.json'), JSON.stringify({ ...JSON.parse(CONFIG), conventions }), 'utf8');
+    const out = task(root, ['add', '--title', 't', '--why', 'w', '--scope', 'src/cli.mjs']);
+    assert.equal(out.status, 0, out.stderr);
+  }
+});
+
 test('an id is never handed out twice, even after a line is removed', () => {
   const root = ready();
   repo(root);

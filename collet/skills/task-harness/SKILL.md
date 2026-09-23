@@ -126,8 +126,10 @@ to receive it.** Claude Code reads `AGENTS.md` only while no `CLAUDE.md` exists,
 holding just the block would hide the project's own instructions from that host.
 
 Then fill in `.collet/config.json` — the one-line description of the project and the conventions a
-change here has to respect. **A task cannot be opened while those placeholders are still in the
-file**, because a session is told that file before it reads anything and `REPLACE ME` is not a fact.
+change here has to respect. **A task cannot be opened while the project line or the accept command
+still holds its placeholder**, because a session is told that file before it reads anything and
+`REPLACE ME` is not a fact. Conventions are optional: an empty list is valid, and a leftover
+convention placeholder is dropped rather than stated.
 
 Then open the first task:
 

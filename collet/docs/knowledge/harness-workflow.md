@@ -44,7 +44,7 @@ collet mounted into /path/to/project
 
 next:
   1. Fill in .collet/config.json — the project line and the conventions a change must respect.
-     A task cannot be opened while those placeholders are still there.
+     A task cannot be opened while the project line or the accept command is a placeholder.
   2. Open the first task, with the scope derived from reading the code it touches:
        node .collet/task.mjs add --title "..." --why "..." --scope "src/**,test/**"
   …
@@ -149,7 +149,7 @@ A fresh mount without `--checks` adds only scope. A later mount preserves each i
 
 ## Configuration
 
-`.collet/config.json` holds three values, plus up to three optional ones that the mount writes only when asked: `ask_first`, `exclude` and `removed_checks`. A session is told all of them before it reads a file, so a placeholder left in the file blocks `task.mjs add`.
+`.collet/config.json` holds three values, plus up to three optional ones that the mount writes only when asked: `ask_first`, `exclude` and `removed_checks`. A session is told all of them before it reads a file, so a placeholder left in `project` or `accept` blocks `task.mjs add`. A leftover `conventions` placeholder is dropped instead, and an empty list is valid.
 
 | Name | Required | Default | What it does |
 | --- | --- | --- | --- |

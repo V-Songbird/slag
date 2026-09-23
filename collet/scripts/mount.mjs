@@ -343,7 +343,7 @@ if (bundle || refreshed) {
 console.log(`
 next:
   1. Fill in .collet/config.json — the project line and the conventions a change must respect.
-     A task cannot be opened while those placeholders are still there.`);
+     A task cannot be opened while the project line or the accept command is a placeholder.`);
 
 console.log(`  2. Open the first task, with the scope derived from reading the code it touches:
        node .collet/task.mjs add --title "..." --why "..." --scope "src/**,test/**"

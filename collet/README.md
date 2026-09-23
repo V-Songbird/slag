@@ -55,7 +55,7 @@ It stops before performing the task itself.
 
 Mounting refuses a project with `.foreman/` or a recognized planning record in `ROADMAP.jsonl` without writing files.
 The [roadmap detection contract](docs/knowledge/harness-workflow.md#roadmap-detection) describes the accepted record shapes.
-Configuration placeholders also block opening a task; fill them with the project's actual details.
+A placeholder left in the `project` or `accept` configuration value also blocks opening a task; fill them with the project's actual details.
 
 In the mounted project, inspect the result:
 
@@ -93,7 +93,7 @@ Values live in `.collet/config.json`. There are no environment settings or secre
 | `exclude` | no | absent; set by `mount.mjs --exclude` | Path globs no bundle check reads, such as a generated mirror |
 | `removed_checks` | no | absent; set by `mount.mjs --remove` | Bundle checks a remount keeps out |
 
-Replace placeholders before opening a task. Creating `.collet/off` silences session guards; committed checks keep running.
+Replace the `project` and `accept` placeholders before opening a task; leftover `conventions` placeholders are ignored. Creating `.collet/off` silences session guards; committed checks keep running.
 The [configuration reference](docs/knowledge/harness-workflow.md#configuration) explains generated files, host rules, and remount behavior.
 
 ## Limits
