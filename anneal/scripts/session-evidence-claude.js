@@ -12,6 +12,7 @@ const {
 } = require("./session-evidence-records.js");
 const { CONTENT, normalizePath, shellShape } = require("./session-evidence-shell.js");
 const { answered, called, navigationOf, navigator, noticed, phaseOf, siblings } = require("./session-evidence-navigation.js");
+const { prompted, said, stallTracker, stallsOf, worked } = require("./session-evidence-stall.js");
 
 const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
 const EXIT = /^Exit code (-?\d+)\b/;
@@ -167,6 +168,7 @@ function analyzeClaude(file, before = null, limit = 6) {
 
   const track = tracker();
   const nav = navigator(limit);
+  const stalls = stallTracker(limit);
   const actors = new Map();
   const failures = [];
   const failedCalls = new WeakMap();
@@ -197,11 +199,23 @@ function analyzeClaude(file, before = null, limit = 6) {
     if (row.type === "assistant" && message.model) context.model = bounded(message.model);
     // A prompt claims only the calls its actor issues after it: the typed or queued prompt, or a subagent's task.
     if (actor === "main" ? typed.has(line) || isQueuedPrompt(row) : !row.isMeta && isPrompt(row)) state.promptLine = line;
+    // The owner's typed prompt settles the main session's turn before it. A prompt queued while the session worked, or
+    // one that carries more than text, such as an image, makes no stall candidate.
+    if (actor === "main" && (typed.has(line) || isQueuedPrompt(row))) {
+      const content = typed.has(line) ? message.content : row.attachment.prompt;
+      const text = (block) => typeof block === "string" || (block && block.type === "text");
+      const plain = typed.has(line) && (!Array.isArray(content) || content.every(text));
+      prompted(stalls, { line, timestamp: timeOf(row), text: textBlocks(content).join("\n"), plain });
+    }
     // Claude Code writes each call of an assistant message as a record of its own, and all of them carry its id.
     const messageId = typeof message.id === "string" && message.id ? message.id : null;
     for (const block of blocks) {
       if (!block || typeof block !== "object") continue;
+      if (actor === "main" && row.type === "assistant" && block.type === "text" && typeof block.text === "string") {
+        said(stalls, block.text, line, timeOf(row));
+      }
       if (block.type === "tool_use") {
+        if (actor === "main") worked(stalls);
         const fields = block.input && typeof block.input === "object" ? block.input : {};
         let input = block.input === undefined ? {} : block.input;
         if (input && typeof input.command === "string") input = input.command;
@@ -232,6 +246,7 @@ function analyzeClaude(file, before = null, limit = 6) {
         // Successful output is text-matched only for a shell command that neither reads nor searches: content quotes errors.
         const diagnostic = reported || (SHELL_TOOLS.has(call.tool) && !CONTENT.has(call.operation)) ? diagnose(CLAUDE_DIAGNOSTICS, output) : null;
         const failed = reported || Boolean(diagnostic);
+        if (call.actor === "main") worked(stalls, failed ? "failed" : "ok");
         const saved = persisted && SAVED_TO.exec(output);
         answered(nav, call, {
           line, timestamp: timeOf(row), output, size, persisted: Boolean(persisted), saved: saved ? normalizePath(saved[1].trim(), state.cwd) : null,
@@ -276,11 +291,12 @@ function analyzeClaude(file, before = null, limit = 6) {
     warnings.add("No assistant records precede the selected cutoff. For a finished session, the latest prompt is not this audit; pass --before-line or --before.");
   }
   const navigation = navigationOf(nav, warnings);
+  const stalled = stallsOf(stalls, warnings);
   const boundary = boundaryOf(cutoff, cutoffTime, buffer.length, before === null ? "before-latest-human-prompt" : null, warnings);
   return {
     sessionFile: file, sessionId, boundary,
     context, recordsSelected: selected, coverage: coverageOf(track, limit), candidateCounts: counts, candidates: failures,
-    navigationCounts: nav.counts, navigationCandidates: navigation,
+    navigationCounts: nav.counts, navigationCandidates: navigation, ...stalled,
     largestToolTexts: largest, subagentTranscripts: subagents.slice(0, 20), warnings: [...warnings].sort(),
     limits: "Counts are is_error and text candidates, not verified independent failures; is_error also marks hook blocks, "
       + "permission denials and user interrupts. Successful output of a read or search is content and is not text-matched. "

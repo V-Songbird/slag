@@ -7,10 +7,11 @@ const { test, describe } = require("node:test");
 const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
-const { analyzeClaude, analyzeCodex } = require("../scripts/session-evidence.js");
+const { spawnSync } = require("node:child_process");
 const {
-  SESSION, tempDir, transcript, at, truncated, human, use, result, typed, meta, started, turn, call, output,
+  CLI, SESSION, tempDir, transcript, at, truncated, human, use, result, typed, meta, started, turn, call, output,
 } = require("./session-transcripts.js");
+const { analyzeClaude, analyzeCodex } = require("../scripts/session-evidence.js");
 
 describe("a Claude Code transcript", () => {
   test("the latest human prompt is the cutoff, so the audit's own turn is left out", () => {
@@ -702,5 +703,113 @@ describe("identity and chronology in a Claude Code transcript", () => {
     assert.deepStrictEqual(read(huge), [
       truncated(huge.id, 120), truncated(huge.dir, 480), truncated(huge.version, 120), truncated(huge.model, 120), truncated(huge.agentType, 120),
     ]);
+  });
+});
+
+describe("the machine's account", () => {
+  // The helper pins a generic account before any script loads, and the scripts mask the account wherever it is a whole
+  // path segment. A child process stands in for a machine whose account is work, with the helper loaded first and not.
+  test("an account named like a fixture path segment changes no evidence", () => {
+    const file = transcript([
+      human("read the notes", 1),
+      use("t1", "Bash", { command: "cat /work/shop/notes.md" }, 2),
+      result("t1", "Exit code 1\ncat: /work/shop/notes.md: No such file or directory", 3, true),
+      human("audit this session", 4),
+    ]);
+    const saved = path.join(tempDir(), "report.json");
+    const onWork = (helper) => {
+      const script = `const os = require("node:os"); os.homedir = () => "/home/work"; os.userInfo = () => ({ username: "work" });`
+        + (helper ? `require(${JSON.stringify(require.resolve("./session-transcripts.js"))});` : "")
+        + `require("node:fs").writeFileSync(${JSON.stringify(saved)}, JSON.stringify(require(${JSON.stringify(CLI)}).analyzeClaude(${JSON.stringify(file)})));`;
+      const done = spawnSync(process.execPath, ["-e", script], { encoding: "utf8" });
+      assert.strictEqual(done.status, 0, done.stderr);
+      return JSON.parse(fs.readFileSync(saved, "utf8"));
+    };
+    const pinned = JSON.parse(JSON.stringify(analyzeClaude(file)));
+    assert.match(JSON.stringify(pinned.candidates), /\/work\/shop\/notes\.md/);
+    assert.deepStrictEqual(onWork(true), pinned);
+    assert.match(JSON.stringify(onWork(false).candidates), /\/<user>\/shop\/notes\.md/);
+  });
+});
+
+describe("a turn that stopped for a continue", () => {
+  // The assistant's text at the end of its turn.
+  const says = (text, second) => ({ type: "assistant", timestamp: at(second), message: { id: `msg-text-${second}`, model: "model-x", content: [{ type: "text", text }] } });
+  // A turn of work, its final text, the owner's next prompt, and the audit's own prompt as the cutoff.
+  const stalled = (ending, next, work = [use("t1", "Bash", { command: "npm test" }, 2), result("t1", "# pass 4", 3)]) => analyzeClaude(transcript([
+    human("fix the cart total", 1), ...work, says(ending, 4), human(next, 5), use("t9", "Read", { file_path: "src/cart.js" }, 6), result("t9", "x", 7),
+    human("audit this session", 8),
+  ]));
+
+  test("an offer to go on, a question and a list of next steps, each followed by a bare continue, are stall candidates", () => {
+    const endings = [
+      ["The cart total rounds to the cent and the tests pass. Want me to continue with the checkout page?", "continue", "offer"],
+      ["Listo el carrito.\n\n¿Quieres que siga con la página de pago?", "sí, continúa por favor", "offer"],
+      ["I rounded the cart total. Should the order total round the same way?", "go ahead", "question"],
+      ["The cart is done.\n\nNext steps:\n1. Round the order total\n2. Update the checkout test", "Keep going.", "next-steps"],
+      ["El carrito ya redondea.\n\nPróximos pasos:\n- Redondear el total del pedido\n- Actualizar la prueba", "sigue", "next-steps"],
+      ["The checkout copy is in place.\n\nNext: round the order total.", "Proceed", "next-steps"],
+      ["El carrito ya redondea. Con tu sí, hago la página de pago.", "dale", "offer"],
+    ];
+    for (const [ending, next, shape] of endings) {
+      const report = stalled(ending, next);
+      assert.deepStrictEqual(report.stallCounts, { [shape]: 1 }, ending);
+      const [candidate] = report.stallCandidates;
+      assert.deepStrictEqual([candidate.kind, candidate.observed.ending, candidate.scope], ["stall", shape, "machine"], ending);
+      assert.deepStrictEqual([candidate.observed.line, candidate.observed.promptLine, candidate.observed.nextPromptLine], [4, 1, 5]);
+      assert.strictEqual(candidate.observed.nextPrompt, next);
+      assert.deepStrictEqual(candidate.observed.projectCommands, []);
+    }
+  });
+
+  test("an ending that names a project command routes to the map file", () => {
+    const report = stalled("The migration file is ready. Shall I run `npm run db:migrate` next?", "continue");
+    const [candidate] = report.stallCandidates;
+    assert.deepStrictEqual([candidate.scope, candidate.observed.projectCommands], ["map-file", ["npm run db:migrate"]]);
+    const machine = stalled("The notes are ready. Want me to open `README.md` next?", "continue").stallCandidates[0];
+    assert.deepStrictEqual([machine.scope, machine.observed.projectCommands], ["machine", []]);
+  });
+
+  test("a question the owner answers, a continue after a failed command, a finished result and an ending that asks for a commit, push or release are not", () => {
+    const failed = [use("t1", "Bash", { command: "npm test" }, 2), result("t1", "Exit code 1\n1 failing", 3, true)];
+    const quiet = [
+      stalled("I rounded the cart total. Should the order total round the same way?", "Yes, round it half up too."),
+      stalled("The suite fails on the cart total. Want me to look into it?", "continue", failed),
+      stalled("All done: the cart total rounds to the cent and the tests pass.", "continue"),
+      stalled("Want me to continue with the checkout page?", "continue, but skip the docs"),
+      stalled("Want me to continue with the checkout page?", "yes"),
+      stalled("The fix is ready. Want me to commit it and push?", "go ahead"),
+      stalled("Próximos pasos:\n- Publicar la versión 1.2", "sigue"),
+      stalled("El carrito ya redondea. Con tu síntesis armé la página de pago.", "continue"),
+    ];
+    for (const report of quiet) assert.deepStrictEqual([report.stallCounts, report.stallCandidates], [{}, []]);
+  });
+
+  test("an offer earlier in the turn, a prompt with an image and the audit's own prompt are not", () => {
+    const earlier = analyzeClaude(transcript([
+      human("fix the cart total", 1), says("Want me to continue?", 2), use("t1", "Bash", { command: "npm test" }, 3), result("t1", "# pass 4", 4),
+      human("continue", 5), human("audit this session", 6),
+    ]));
+    assert.deepStrictEqual(earlier.stallCandidates, []);
+    const image = { ...human("continue", 5), message: { role: "user", content: [{ type: "text", text: "continue" }, { type: "image", source: {} }] } };
+    const pictured = analyzeClaude(transcript([human("fix the cart total", 1), says("Want me to continue?", 4), image, human("audit this session", 6)]));
+    assert.deepStrictEqual(pictured.stallCandidates, []);
+    const own = analyzeClaude(transcript([human("fix the cart total", 1), says("Want me to continue?", 4), human("continue", 5)]));
+    assert.strictEqual(own.boundary.line, 3);
+    assert.deepStrictEqual(own.stallCandidates, [], "the latest prompt is the audit's own cutoff");
+  });
+
+  test("the ending is redacted and bounded, and only the last candidates within the limit are kept", () => {
+    const home = stalled("The cart is done. Want me to continue in /home/quillfen/shop/checkout?", "continue");
+    assert.strictEqual(home.stallCandidates[0].observed.endingExcerpt, "The cart is done. Want me to continue in ~/shop/checkout?");
+    const long = stalled(`${"The cart work is long. ".repeat(20)}Want me to continue?`, "continue");
+    assert.strictEqual(long.stallCandidates[0].observed.endingExcerpt, truncated(`${"The cart work is long. ".repeat(20)}Want me to continue?`, 240));
+    const rows = [human("fix the cart total", 1)];
+    for (let i = 0; i < 8; i++) rows.push(says("Want me to continue?", 2 + i * 2), human("continue", 3 + i * 2));
+    rows.push(human("audit this session", 30));
+    const many = analyzeClaude(transcript(rows));
+    assert.deepStrictEqual(many.stallCounts, { offer: 8 });
+    assert.deepStrictEqual(many.stallCandidates.map((c) => c.observed.nextPromptLine), [7, 9, 11, 13, 15, 17]);
+    assert.match(many.warnings.join("\n"), /Only the last 6 stall candidates are shown/);
   });
 });

@@ -5,8 +5,8 @@
 
 const { test, describe } = require("node:test");
 const assert = require("node:assert");
-const { analyzeCodex } = require("../scripts/session-evidence.js");
 const { transcript, at, truncated, meta, started, turn, item, message, call, output, script, fn, returned } = require("./session-transcripts.js");
+const { analyzeCodex } = require("../scripts/session-evidence.js");
 
 describe("a Codex rollout", () => {
   test("the latest task start is the cutoff, and a code-mode result carries its own exit code", () => {
@@ -347,6 +347,20 @@ describe("a Codex rollout", () => {
     assert.deepStrictEqual([report.coverage.outcomeUnknown, report.coverage.pending], [6, 0]);
   });
 
+  test("a name that only contains catch, tools or globalThis is none of them, whatever letters it holds", () => {
+    const applied = (id, second) => output(id, ["Script completed\nWall time 0.1 seconds\nOutput:\n", "Success. Updated the following files:\nM src/cart.js"], second);
+    const report = analyzeCodex(transcript([
+      meta, started(1), turn(1), message("fix the cart total", 1),
+      script("c1", `const cañcatch = 1;\n${patch("src/cart.js", "a", "b")}`, 2), applied("c1", 3),
+      script("c2", `const $tools = {};\n${patch("src/cart.js", "b", "c")}`, 4), applied("c2", 5),
+      script("c3", `const ñglobalThis = 0;\n${patch("src/cart.js", "c", "d")}`, 6), applied("c3", 7),
+      // A real catch still keeps the script from vouching for how it ended.
+      script("c4", `try {\n  ${patch("src/cart.js", "d", "e")}\n} catch (error) {\n  text(String(error));\n}`, 8), applied("c4", 9),
+      started(10),
+    ]));
+    assert.strictEqual(report.coverage.outcomeUnknown, 1);
+  });
+
   test("a script still running is pending, and a wait on its cell completes it with the script's class", () => {
     const report = analyzeCodex(transcript([
       meta, started(1), turn(1), message("start the dev server and fix the header", 1),
@@ -594,5 +608,45 @@ describe("a Codex rollout", () => {
     assert.deepStrictEqual(report.candidates[0].nearbyReportedSuccesses.map((s) => [s.line, s.callLine, s.outputExcerpt]), [
       [8, 7, exit("built")], [10, 9, exit("3 passing")],
     ]);
+  });
+});
+
+describe("a Codex turn that stopped for a continue", () => {
+  // The assistant's message, and the event Codex writes beside it with the same text.
+  const says = (text, second) => item(second, { type: "message", role: "assistant", content: [{ type: "output_text", text }] });
+  const event = (text, second) => ({ timestamp: at(second), type: "event_msg", payload: { type: "agent_message", message: text } });
+  const typed = (text, second) => ({ timestamp: at(second), type: "event_msg", payload: { type: "user_message", message: text } });
+  // A task of work, its final text, a task the owner's next prompt starts, and the audit's own task as the cutoff.
+  const stalled = (ending, next, work = [call("c1", "npm test", 3), output("c1", ["Exit code: 0\nOutput:\n# pass 4"], 4)]) => analyzeCodex(transcript([
+    meta, started(1), turn(1), message("fix the cart total", 2), ...work, says(ending, 5), event(ending, 5),
+    started(6), message(next, 6), typed(next, 6), call("c9", "npm test", 7), output("c9", ["Exit code: 0\nOutput:\n# pass 4"], 8),
+    started(9), message("audit this session", 9),
+  ]));
+
+  test("an offer to go on, a question and a list of next steps, each followed by a bare continue, are stall candidates", () => {
+    const endings = [
+      ["The cart total rounds to the cent. Want me to continue with the checkout page?", "continue", "offer"],
+      ["I rounded the cart total. ¿Redondeo también el total del pedido?", "dale, sigue", "question"],
+      ["The cart is done.\n\nRemaining:\n- Round the order total\n- Update the checkout test", "proceed", "next-steps"],
+    ];
+    for (const [ending, next, shape] of endings) {
+      const report = stalled(ending, next);
+      assert.deepStrictEqual(report.stallCounts, { [shape]: 1 }, ending);
+      const [candidate] = report.stallCandidates;
+      assert.deepStrictEqual([candidate.observed.ending, candidate.scope, candidate.observed.line, candidate.observed.promptLine], [shape, "machine", 7, 4]);
+      assert.strictEqual(candidate.observed.nextPromptLine, 10, "the first of the prompt's two records");
+    }
+    const command = stalled("Want me to run `cargo test --workspace` now?", "go on").stallCandidates[0];
+    assert.deepStrictEqual([command.scope, command.observed.projectCommands], ["map-file", ["cargo test --workspace"]]);
+  });
+
+  test("a question the owner answers, a continue after a failed command and a task that ends on a finished result are not", () => {
+    const failed = [call("c1", "npm test", 3), output("c1", ["Exit code: 1\nOutput:\n1 failing"], 4)];
+    const quiet = [
+      stalled("I rounded the cart total. Should the order total round the same way?", "No, leave the order total alone."),
+      stalled("The suite fails on the cart total. Want me to look into it?", "continue", failed),
+      stalled("Done: the cart total rounds to the cent and the tests pass.", "continue"),
+    ];
+    for (const report of quiet) assert.deepStrictEqual([report.stallCounts, report.stallCandidates], [{}, []]);
   });
 });

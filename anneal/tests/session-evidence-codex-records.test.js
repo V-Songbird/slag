@@ -5,8 +5,8 @@
 
 const { test, describe } = require("node:test");
 const assert = require("node:assert");
-const { analyzeCodex } = require("../scripts/session-evidence.js");
 const { transcript, at, meta, started, turn, item, message, output, script, fn, returned } = require("./session-transcripts.js");
+const { analyzeCodex } = require("../scripts/session-evidence.js");
 
 describe("a Codex rollout", () => {
   // The host writes its own record of each command and server tool call, beside the call's result.

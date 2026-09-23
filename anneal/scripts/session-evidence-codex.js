@@ -12,6 +12,7 @@ const {
 } = require("./session-evidence-records.js");
 const { CONTENT, shellShape } = require("./session-evidence-shell.js");
 const { answered, called, navigationOf, navigator, phaseOf } = require("./session-evidence-navigation.js");
+const { prompted, said, stallTracker, stallsOf, worked } = require("./session-evidence-stall.js");
 
 // First match wins, so a host's own error text sits above the generic shell ones. A missing path is not listed:
 // it is read from a failed read, search or edit alone, with MISSING.
@@ -157,7 +158,12 @@ function commandShape(args, cwd) {
 
 // Comments and string literals carry patches and messages rather than code, and so does a template without a substitution.
 const LITERALS = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:[^"\\\n]|\\[\s\S])*"|'(?:[^'\\\n]|\\[\s\S])*'|`(?:[^`\\$]|\\[\s\S]|\$(?!\{))*`/g;
-const TOOL_CALL = /\btools\.([A-Za-z_$][\w$]*)\s*\(/g;
+// A name in a script's code, between JavaScript identifier edges: a name can hold any Unicode letter and `$`, so an
+// ASCII \b would find `catch` inside `cañcatch` or `tools` inside `$tools`.
+const named = (body, flags = "u") => new RegExp(String.raw`(?<![\p{ID_Continue}$])(?:${body})(?![\p{ID_Continue}$])`, flags);
+const TOOL_CALL = /(?<![\p{ID_Continue}$])tools\.([A-Za-z_$][\w$]*)\s*\(/gu;
+const TOOLS = named("tools", "gu");
+const GLOBAL_REACH = named("globalThis|Reflect");
 
 // A script's code: its comments and literals blanked, each to its own length, so positions still match the script. A
 // quote left unpaired throws the blanking off, as a template with a substitution, which holds code, leaves a backtick
@@ -203,14 +209,14 @@ function scriptShape(script, cwd) {
 // self["tools"], and drops no failure through catch, allSettled, Promise.any or Promise.race is vouched for:
 // `command` when it runs shell_command, whose output reads like any command's, and otherwise `content`. False if not.
 // How a script can drop a failure its tools threw and complete as if nothing had gone wrong.
-const SWALLOWS = /\bcatch\b|\ballSettled\b|\bPromise\s*\.\s*(?:any|race)\b/;
+const SWALLOWS = named(String.raw`catch|allSettled|Promise\s*\.\s*(?:any|race)`);
 
 function vouches(script) {
   const code = codeOf(script);
   const names = [...code.matchAll(TOOL_CALL)].map((match) => match[1]);
   const vouched = names.every((name) => name !== "exec_command" && name !== "write_stdin" && !name.includes("__"))
-    && names.length === (code.match(/\btools\b/g) || []).length && !/[\w$)\].]\[\s*" *"\s*\]/.test(code)
-    && !SWALLOWS.test(code) && !/\b(?:globalThis|Reflect)\b/.test(code);
+    && names.length === (code.match(TOOLS) || []).length && !/[\w$)\].]\[\s*" *"\s*\]/.test(code)
+    && !SWALLOWS.test(code) && !GLOBAL_REACH.test(code);
   return vouched && (names.includes("shell_command") ? "command" : "content");
 }
 
@@ -341,6 +347,7 @@ function analyzeCodex(file, before = null, limit = 6) {
   // Only a rollout can carry the host's own records, so only its coverage counts the outcomes they settled.
   track.coverage.recordedOutcomes = 0;
   const nav = navigator(limit);
+  const stalls = stallTracker(limit);
   const failures = [];
   const counts = {};
   const largest = [];
@@ -383,7 +390,20 @@ function analyzeCodex(file, before = null, limit = 6) {
       cwd = payload.cwd || null;
       context = { cwd: directory(payload.cwd), model: bounded(payload.model), effort: bounded(payload.effort) };
     }
-    if (isCodexPrompt(row)) promptLine = line;
+    // A prompt settles the turn before it for the stall candidates. Codex writes one as an item and as an event, and
+    // the first of the two settles it.
+    if (isCodexPrompt(row)) {
+      promptLine = line;
+      const text = textBlocks(row.type === "event_msg" ? payload.message : payload.content).join("\n");
+      prompted(stalls, { line, timestamp: timeOf(row), text });
+    }
+    // The assistant's text, as a message item or as the event that repeats it.
+    if (row.type === "response_item" && payload.type === "message" && payload.role === "assistant") {
+      said(stalls, textBlocks(payload.content).join("\n"), line, timeOf(row));
+    }
+    if (row.type === "event_msg" && payload.type === "agent_message" && typeof payload.message === "string") {
+      said(stalls, payload.message, line, timeOf(row));
+    }
     // The host writes its own record of each command and server tool call. It belongs to a call when it names it, or
     // when that call was the only one open, no other cell was running to have started the command, and the run began
     // at or after it. With no call open at all, the only cell still running is the only candidate owner, and it has to
@@ -425,6 +445,7 @@ function analyzeCodex(file, before = null, limit = 6) {
       let input = payload.arguments === undefined ? payload.input : payload.arguments;
       if (typeof input !== "string") input = JSON.stringify(input === undefined ? "" : input);
       const shape = codexShape(payload, input, cwd);
+      worked(stalls);
       const call = callEntry(payload.name, "main", line, promptLine, phaseOf(nav, "main", promptLine, null), shape, input);
       if (issue(track, payload.call_id, call, shape.opaque)) called(nav, call, shape, { actor: "main", key: payload.call_id, message: null, cwd });
       if (payload.type === "custom_tool_call" && payload.name === "exec") {
@@ -545,6 +566,7 @@ function analyzeCodex(file, before = null, limit = 6) {
         track.coverage.recordedOutcomes += 1;
       }
       if (settled && outcome === "unknown") track.coverage.outcomeUnknown += 1;
+      worked(stalls, outcome);
       answered(nav, call, {
         line, timestamp: timeOf(row), output: joined, size: joined.length, persisted: false, saved: null, appended: 0, outcome, missing,
         cut: outcome === "failed" ? null : lineOf(CODEX_CUT, joined),
@@ -557,11 +579,12 @@ function analyzeCodex(file, before = null, limit = 6) {
   }
   track.coverage.pending = running.size;
   const navigation = navigationOf(nav, warnings);
+  const stalled = stallsOf(stalls, warnings);
   const boundary = boundaryOf(cutoff, cutoffTime, buffer.length, before === null ? "before-latest-task-start" : null, warnings);
   return {
     sessionFile: file, sessionId: sessionId ?? null, boundary,
     context, recordsSelected: selected, coverage: coverageOf(track, limit), candidateCounts: counts, candidates: failures,
-    navigationCounts: nav.counts, navigationCandidates: navigation, largestToolTexts: largest, warnings: [...warnings].sort(),
+    navigationCounts: nav.counts, navigationCandidates: navigation, ...stalled, largestToolTexts: largest, warnings: [...warnings].sort(),
     limits: "Counts are text, exit and record candidates, not verified independent failures. Output of a read or "
       + "search that exited 0 is content and is not text-matched, and so is that of a vouched script that ran no shell "
       + "command. A result without an exit code is a success only when Script completed vouches for its script, and a "

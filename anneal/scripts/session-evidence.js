@@ -6,7 +6,7 @@
 // and navigation candidates that pair what happened with a cause it might have.
 // Read-only: it opens no other session and never touches an instruction file.
 // It prints what session-evidence-claude.js and session-evidence-codex.js read, with the shell
-// classification, navigation candidates, records and redaction they share in the sibling
+// classification, navigation and stall candidates, records and redaction they share in the sibling
 // session-evidence-*.js modules. Neither host documents its transcript format, so every record
 // shape read there is held by a fixture in one of the tests/session-evidence*.test.js files.
 

@@ -9,6 +9,12 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
+// The scripts read the home directory and the OS user name once, when they load, and mask the account name wherever it
+// is a whole path segment. Each test file requires this module before any script, so a generic account stands in for
+// the machine's: a fixture path such as /work/shop then reads the same on an account named work or shop.
+os.homedir = () => "/home/quillfen";
+os.userInfo = () => ({ username: "quillfen" });
+
 const CLI = path.join(__dirname, "..", "scripts", "session-evidence.js");
 const SESSION = "0a1b2c3d-0000-4000-8000-00000000abcd";
 

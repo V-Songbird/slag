@@ -29,8 +29,49 @@ function homeDirectory() {
   }
 }
 
+// The OS user name, or nothing where the OS has none for this process.
+function userName() {
+  try {
+    return os.userInfo().username;
+  } catch {
+    return "";
+  }
+}
+
+// The account name, the home directory's last segment and the OS user name when that differs, in the shapes that carry
+// it past the home: a whole path segment after a slash or backslash, a part of a Claude project key such as
+// C--Users-<name>-shop or -home-<name>-shop, a part of a lowercase folder name built from a path such as
+// -mnt-d-projects-<name>-shop, and the owner or group column of an `ls -l` line. A word in prose or code is left alone,
+// since an account name can be a common word such as dev, and so is a segment that only contains it, such as <name>2.
+// Case is ignored for a Windows home, as the home rule does.
+function accountShapes(home) {
+  const trimmed = home.replace(/[\\/]+$/, "");
+  const flags = /^(?:[A-Za-z]:|\\\\)/.test(trimmed) ? "giu" : "gu";
+  const names = [trimmed.split(/[\\/]+/).pop()];
+  const user = userName();
+  if (user && (flags.includes("i") ? user.toLowerCase() !== names[0].toLowerCase() : user !== names[0])) names.push(user);
+  const escape = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const any = names.map(escape).join("|");
+  // A project key spells every character but an ASCII letter or digit as a hyphen.
+  const keyed = names.map((name) => escape(name.replace(/[^A-Za-z0-9]/g, "-"))).join("|");
+  return {
+    names: new RegExp(`^(?:${any})$`, flags.replace("g", "")),
+    segment: new RegExp(String.raw`(?<=[\\/])(?:${any})(?![\p{L}\p{N}_-]|\.[\p{L}\p{N}_-])`, flags),
+    key: new RegExp(String.raw`(?<![\p{L}\p{N}_.-])([A-Za-z]--(?:[A-Za-z0-9]+-)*?|-(?:home|Users)-)(?:${keyed})(?=-|(?![\p{L}\p{N}_.]))`, flags),
+    // A folder name built from a whole path, lower case, with a hyphen for each separator: a WSL mount such as mnt-d-,
+    // a drive such as d--, or home- or users- comes first, and every part between it and the name has two or more
+    // characters, so that a longer name such as v-<name> keeps the word. The name is the project key's, in lower case.
+    folder: new RegExp(String.raw`(?<![\p{L}\p{N}_.-])(-?(?:[a-z0-9]+-+)*?(?:mnt-[a-z]-|[a-z]--|home-|users-)(?:[a-z0-9]{2,}-+)*?)`
+      + String.raw`(?:${keyed.toLowerCase()})(?=-|(?![\p{L}\p{N}_.]))`, "gu"),
+    listing: new RegExp(String.raw`(?:^|(?<=\\n))([ \t]*[-bcdlps][-rwxsStT]{9}[.+@]?[ \t]+\d+[ \t]+)(\S+)([ \t]+)(\S+)`, `m${flags}`),
+  };
+}
+
 const HOME = homeDirectory();
 const HOME_PATH = homePattern(HOME);
+// Where the home rule masks nothing, neither does the account rule.
+const ACCOUNT = HOME_PATH ? accountShapes(HOME) : null;
+const PLACEHOLDER = "<user>";
 
 const WORD = /^[A-Za-z][a-z]*(?:[A-Z][a-z]+)*(?:-[A-Za-z][a-z]*(?:[A-Z][a-z]+)*)*$/;
 
@@ -41,6 +82,9 @@ function isCredential(token) {
   return token.length >= 8 && !(bare.length < 20 && WORD.test(bare)) && !/^\d[\d./:-]*$/.test(bare)
     && !/^(?:[\w-]+\/)*[\w-]+\.[A-Za-z][A-Za-z0-9]{0,4}$/.test(bare) && !/^[A-Za-z]+(?:\/[A-Za-z]+)+$/.test(bare);
 }
+
+// The redaction patterns here keep ASCII \b edges on purpose. Before a keyword, a non-ASCII letter such as ñ counts
+// as an edge, so the ASCII edge errs toward masking: a Unicode edge would let `contraseña_token: …` through.
 
 // A value named as a secret, after a colon or an assignment but never a comparison or an arrow:
 // `token === null` is code.
@@ -63,12 +107,21 @@ function redact(value) {
     .replace(/(https?:\/\/)[^/\s:@]+:[^/\s@]+@/g, "$1[REDACTED]@")
     .replace(/(--(?:api-key|access-token|password|secret|token)\s+)\S+/gi, "$1[REDACTED]")
     .replace(NAMED_SECRET, (match, name, secret) => (CODE_VALUE.test(secret) ? match : `${name}[REDACTED]`));
-  return withoutHome(text);
+  return withoutAccount(withoutHome(text));
 }
 
 // The home directory shortened to ~, and nothing else changed.
 function withoutHome(text) {
   return HOME_PATH ? text.replace(HOME_PATH, "~") : text;
+}
+
+// The account name replaced by the placeholder in its known shapes, once the home is shortened.
+function withoutAccount(text) {
+  if (!ACCOUNT) return text;
+  const column = (value) => (ACCOUNT.names.test(value) ? PLACEHOLDER : value);
+  return text.replace(ACCOUNT.segment, PLACEHOLDER).replace(ACCOUNT.key, `$1${PLACEHOLDER}`)
+    .replace(ACCOUNT.folder, `$1${PLACEHOLDER}`)
+    .replace(ACCOUNT.listing, (line, lead, owner, gap, group) => `${lead}${column(owner)}${gap}${column(group)}`);
 }
 
 function cut(text, size) {

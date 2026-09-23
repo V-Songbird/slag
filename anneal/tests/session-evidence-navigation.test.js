@@ -4,8 +4,8 @@
 
 const { test, describe } = require("node:test");
 const assert = require("node:assert");
-const { analyzeClaude, analyzeCodex } = require("../scripts/session-evidence.js");
 const { transcript, at, human, use, result, typed, meta, started, turn, item, message, call, output } = require("./session-transcripts.js");
+const { analyzeClaude, analyzeCodex } = require("../scripts/session-evidence.js");
 
 // Each pair holds the case that supports a change beside the one that must not. The host shapes follow the records
 // Claude Code and Codex write; every path, command and text in them is made up.
