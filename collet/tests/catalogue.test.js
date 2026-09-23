@@ -17,9 +17,10 @@ function temporary(files = marker) {
   return root;
 }
 
+// The opt-in class is named, so every class of the edition is mounted and proven.
 function mounted(files = marker) {
   const root = temporary(files);
-  const out = mount(root, ['--checks']);
+  const out = mount(root, ['--checks', '--with', 'javascript-typescript.type-widened-to-any']);
   assert.equal(out.status, 0, out.stdout + out.stderr);
   return root;
 }

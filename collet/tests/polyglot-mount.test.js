@@ -20,7 +20,8 @@ test('all detected languages are mounted and admitted together', () => {
   const out = mount(root, ['--checks']);
   assert.equal(out.status, 0, out.stdout + out.stderr);
   assert.match(out.stdout, /Selected check editions: dotnet, go, javascript-typescript, jvm, python, rust/);
-  assert.equal(installed(root).length, 47);
+  assert.equal(installed(root).length, 46);
+  assert.match(out.stdout, /opt-in {3}javascript-typescript\.type-widened-to-any \(add it with --with/);
   for (const edition of editions) assert.ok(installed(root).some((name) => name.startsWith(`${edition}.`)), edition);
   assert.equal(checks(root).status, 0);
   for (const [file, content] of Object.entries(markers)) assert.equal(readFileSync(join(root, file), 'utf8'), content);
@@ -31,7 +32,7 @@ test('explicit editions select only the requested languages and repeated ids do 
   const out = mount(root, ['--checks', '--edition', 'python', '--edition', 'javascript-typescript', '--edition', 'python']);
   assert.equal(out.status, 0, out.stdout + out.stderr);
   assert.match(out.stdout, /Selected check editions: javascript-typescript, python/);
-  assert.equal(installed(root).length, 20);
+  assert.equal(installed(root).length, 19);
   assert.ok(installed(root).every((name) => /^(?:javascript-typescript|python)\./.test(name)));
   assert.equal(checks(root).status, 0);
 });

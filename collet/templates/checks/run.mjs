@@ -49,6 +49,9 @@ if (live) {
   console.log(`open task ${task.id} — "${task.title}"`);
   let failed = 0;
   let skipped = 0;
+  // One cache per pass, shared by every check: the source checks list the changes and read each
+  // HEAD baseline once instead of once per check.
+  const cache = new Map();
   for (const { file, module, broken } of await loadChecks()) {
     const id = module?.id ?? file.replace(/\.mjs$/, '');
     if (broken || typeof module.live !== 'function') {
@@ -58,7 +61,7 @@ if (live) {
     }
     let result;
     try {
-      result = module.live({ root: ROOT, task });
+      result = module.live({ root: ROOT, task, cache });
     } catch (error) {
       console.log(`fail ${id} — threw: ${String(error.message)}`);
       failed += 1;

@@ -79,6 +79,10 @@ node "<plugin root>/scripts/mount.mjs" <project-directory> --accept "<the comman
 `<plugin root>` is `${CLAUDE_PLUGIN_ROOT}` on Claude Code. On Codex and Antigravity, resolve
 `../../` from this `SKILL.md`.
 
+On Antigravity, give every command the project root the person named as its working directory, the
+`Cwd` of `run_command`. Without it, commands can run in Antigravity's own scratch directory instead
+of the project. When the person named no project root, ask for it before running anything.
+
 When the person chose the checks, append `--checks`. Root marker files select every matching
 language, including project/solution filename patterns for .NET. Read those markers and the
 source so the selected set is part of the person's choice. For packages below the root or a
@@ -86,10 +90,21 @@ deliberate subset, repeat `--edition <id>` for each requested language; this rep
 selection. The ids are `javascript-typescript`, `python`, `go`, `rust`, `jvm` and `dotnet`.
 `--edition` requires `--checks`. With no supported bundle detected, `--checks` refuses before
 writing anything; explain that result and do not silently fall back to mounting without checks.
+`type-widened-to-any` is opt-in: add `--with javascript-typescript.type-widened-to-any` when the
+person wants it.
+
+Pass the answer to question three as `--ask-first <thing>`, once per thing, for example
+`--ask-first deploy --ask-first "publish a release"`. The mount stores the list as `ask_first` in
+`.collet/config.json`, and the rules block and the session start state it as a fact about the
+project, with a line that every other step goes ahead until the accept command exits zero. With no
+answer, pass nothing: the config and the rules block stay exactly as they were.
 
 It prints every path it wrote and every path it kept. A re-run refreshes collet's own scripts —
 `task.mjs`, `state.mjs` and the built-in scope checks — and keeps the project's `config.json`,
-`unverified.md`, generated bundle checks, their examples and `source.mjs`. Preserved checks keep
+`unverified.md`, generated bundle checks and their examples. It refreshes `.collet/source.mjs`
+while that file still holds what collet wrote; a copy with edits of its own is kept, and the mount
+prints that this version's fixes to it were not applied and that removing it and mounting again
+takes them. After a refresh it proves the checks against their examples. Preserved checks keep
 their own revision; newly shipped patterns and examples are not automatically applied to them.
 A missing module or missing kind of example refuses the mount before writes; valid older pairs
 and custom fixture suffixes are preserved and rechecked. The rules block goes

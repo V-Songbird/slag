@@ -45,7 +45,8 @@
         "**/*.py"
       ],
       "patterns": [
-        "@pytest\\.mark\\.(?:skip|skipif|xfail)\\b",
+        "@pytest\\.mark\\.(?:skip|xfail)\\b",
+        "@pytest\\.mark\\.skipif\\s*\\(\\s*(?:True|1)\\s*[,)]",
         "\\bpytest\\.skip\\s*\\("
       ],
       "stripComments": true,
@@ -53,9 +54,16 @@
       "perLine": false,
       "fixtures": {
         "violation": "import pytest\n\nfrom ingest import load_manifest\n\n\n@pytest.mark.skip(reason=\"flaky on CI\")\ndef test_load_manifest_validates_checksum() -> None:\n    manifest = load_manifest(\"fixtures/manifest.json\")\n    assert manifest.checksum_ok\n\n\ndef test_load_manifest_handles_empty_file() -> None:\n    pytest.skip(\"revisit after the refactor\")\n    assert load_manifest(\"fixtures/empty.json\") is None\n",
-        "nearMiss": "import pytest\n\nfrom ingest import load_manifest\n\nyaml = pytest.importorskip(\"yaml\")\n\n\n@pytest.mark.slow\ndef test_load_manifest_large_file() -> None:\n    manifest = load_manifest(\"fixtures/large.yaml\")\n    assert manifest.entry_count > 1000\n\n\n@pytest.mark.parametrize(\"skip_header\", [True, False])\ndef test_load_manifest_header_toggle(skip_header: bool) -> None:\n    manifest = load_manifest(\"fixtures/manifest.json\", skip_header=skip_header)\n    assert manifest.entry_count >= 0\n"
+        "nearMiss": "import pytest\n\nfrom ingest import load_manifest\n\nyaml = pytest.importorskip(\"yaml\")\n\n\n@pytest.mark.slow\ndef test_load_manifest_large_file() -> None:\n    manifest = load_manifest(\"fixtures/large.yaml\")\n    assert manifest.entry_count > 1000\n\n\n@pytest.mark.parametrize(\"skip_header\", [True, False])\ndef test_load_manifest_header_toggle(skip_header: bool) -> None:\n    manifest = load_manifest(\"fixtures/manifest.json\", skip_header=skip_header)\n    assert manifest.entry_count >= 0\n",
+        "additional": [
+          {
+            "id": "literal-condition",
+            "violation": "import pytest\n\n\n@pytest.mark.skipif(True, reason=\"flaky\")\ndef test_sync_retries() -> None:\n    assert sync_retries() == 3\n",
+            "nearMiss": "import sys\n\nimport pytest\n\n\n@pytest.mark.skipif(sys.platform == \"win32\", reason=\"POSIX only\")\ndef test_sync_permissions() -> None:\n    assert sync_permissions() == 0o644\n"
+          }
+        ]
       },
-      "gapNotes": "Legitimate platform gates and optional-feature skips use the same tokens as abandoned tests, so this check also refuses those introductions. unittest.skip, unittest.expectedFailure and runner filters are not covered; the check cannot determine whether a quarantine is justified.",
+      "gapNotes": "Legitimate platform gates and optional-feature skips use the same tokens as abandoned tests, so this check also refuses those introductions. unittest.skip, unittest.expectedFailure and runner filters are not covered; the check cannot determine whether a quarantine is justified. A `skipif` with a real condition passes, including a condition chosen to hide a failure on the CI platform.",
       "example": "@pytest.mark.skip(reason=\"flaky on CI\")"
     },
     {

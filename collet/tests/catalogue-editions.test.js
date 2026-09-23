@@ -153,3 +153,36 @@ test('the combined language bundle leaves every original and additional near mis
   t.diagnostic(`${specs.length} classes against ${examples.length} near misses: ${comparisons} comparisons (${crossComparisons} across classes); ${findings.length} findings`);
   assert.deepEqual(findings, [], findings.join('\n'));
 });
+
+test('opt-in, exclude and remedy fields are optional, checked, and change nothing when absent', async () => {
+  const js = JSON.parse(readFileSync(join(PLUGIN, 'catalogue', 'javascript-typescript.json'), 'utf8'));
+  const plain = js.classes.find((entry) => entry.id === 'focused-test');
+  const catalogue = (item) => ({ ...js, classes: [item] });
+  const root = project();
+  const before = await prepareCatalogue(root, catalogue(plain));
+  assert.deepEqual(before.optional, []);
+  assert.doesNotMatch(before.files[0][1], /"exclude"|"remedy"|"optional"/);
+
+  const optIn = { ...plain, optional: true };
+  const skipped = await prepareCatalogue(root, catalogue(optIn));
+  assert.deepEqual(skipped.files, []);
+  assert.deepEqual(skipped.optional, ['javascript-typescript.focused-test']);
+  const chosen = await prepareCatalogue(root, catalogue(optIn), ['javascript-typescript.focused-test']);
+  assert.deepEqual(chosen.files.map(([name]) => name), before.files.map(([name]) => name));
+
+  const excluded = await prepareCatalogue(root, catalogue({
+    ...plain,
+    exclude: ['**/generated/**'],
+    remedy: 'Remove the focus before closing.',
+    fixtures: { ...plain.fixtures, additional: [{ id: 'excluded', nearMissPath: 'generated/a.test.js', violation: plain.fixtures.violation, nearMiss: plain.fixtures.violation }] },
+  }));
+  const nearMiss = JSON.parse(new Map(excluded.files).get('javascript-typescript.focused-test.nearmiss-excluded.json'));
+  assert.equal(nearMiss.call.input.file_path, 'generated/a.test.js');
+  const module = excluded.files[0][1];
+  assert.match(module, /"exclude": \[\n\s+"\*\*\/generated\/\*\*"\n\s+\]/);
+  assert.match(module, /"remedy": "Remove the focus before closing\."/);
+
+  for (const [field, value] of [['remedy', 3], ['exclude', 'dist/**'], ['optional', 'yes']]) {
+    await assert.rejects(prepareCatalogue(root, catalogue({ ...plain, [field]: value })), new RegExp(`focused-test has an? ${field}`));
+  }
+});

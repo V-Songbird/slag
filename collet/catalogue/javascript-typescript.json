@@ -102,6 +102,7 @@
     {
       "id": "type-widened-to-any",
       "title": "Type widened to any to silence the checker",
+      "optional": true,
       "paths": [
         "**/*.{ts,mts,cts,tsx}"
       ],
@@ -127,6 +128,12 @@
       "paths": [
         "**/*.{ts,mts,cts,tsx}"
       ],
+      "exclude": [
+        "**/*.{test,spec}.{ts,mts,cts,tsx}",
+        "**/__tests__/**",
+        "**/tests/**",
+        "**/test/**"
+      ],
       "patterns": [
         "\\bas\\s+unknown\\s+as\\b"
       ],
@@ -135,9 +142,17 @@
       "perLine": false,
       "fixtures": {
         "violation": "import type { Account, LedgerEntry } from './domain.js';\n\nexport function fixtureAccount(overrides: Partial<Account>): Account {\n  return { id: 'acc_1', ...overrides } as unknown as Account;\n}\n\nexport function coerceEntry(row: Record<string, string>): LedgerEntry {\n  const entry = row as unknown as LedgerEntry;\n  return entry;\n}\n",
-        "nearMiss": "import type { Account, LedgerEntry } from './domain.js';\n\nconst DEFAULTS = { id: 'acc_1', balance: 0, currency: 'EUR' } as const;\n\nexport function fixtureAccount(overrides: Partial<Account>): Account {\n  return { ...DEFAULTS, ...overrides } satisfies Account;\n}\n\nexport function coerceEntry(row: Record<string, string>): LedgerEntry {\n  const amount = Number(row['amount']);\n  if (Number.isNaN(amount)) throw new TypeError('amount is not numeric');\n  const unknownSource: unknown = row;\n  void unknownSource;\n  return { id: String(row['id']), amount };\n}\n"
+        "nearMiss": "import type { Account, LedgerEntry } from './domain.js';\n\nconst DEFAULTS = { id: 'acc_1', balance: 0, currency: 'EUR' } as const;\n\nexport function fixtureAccount(overrides: Partial<Account>): Account {\n  return { ...DEFAULTS, ...overrides } satisfies Account;\n}\n\nexport function coerceEntry(row: Record<string, string>): LedgerEntry {\n  const amount = Number(row['amount']);\n  if (Number.isNaN(amount)) throw new TypeError('amount is not numeric');\n  const unknownSource: unknown = row;\n  void unknownSource;\n  return { id: String(row['id']), amount };\n}\n",
+        "additional": [
+          {
+            "id": "test-file",
+            "nearMissPath": "src/__tests__/fixture.test.ts",
+            "violation": "import type { Account, LedgerEntry } from './domain.js';\n\nexport function fixtureAccount(overrides: Partial<Account>): Account {\n  return { id: 'acc_1', ...overrides } as unknown as Account;\n}\n\nexport function coerceEntry(row: Record<string, string>): LedgerEntry {\n  const entry = row as unknown as LedgerEntry;\n  return entry;\n}\n",
+            "nearMiss": "import type { Account, LedgerEntry } from './domain.js';\n\nexport function fixtureAccount(overrides: Partial<Account>): Account {\n  return { id: 'acc_1', ...overrides } as unknown as Account;\n}\n\nexport function coerceEntry(row: Record<string, string>): LedgerEntry {\n  const entry = row as unknown as LedgerEntry;\n  return entry;\n}\n"
+          }
+        ]
       },
-      "gapNotes": "Matches adjacent `as unknown as` only. Laundering across two statements, such as `const tmp: unknown = x; const y = tmp as T`, and through helpers such as cast<T>(x), has none of those adjacent tokens and is missed.",
+      "gapNotes": "Matches adjacent `as unknown as` only. Laundering across two statements, such as `const tmp: unknown = x; const y = tmp as T`, and through helpers such as cast<T>(x), has none of those adjacent tokens and is missed. Test files are excluded; a double cast that builds a partial fixture there is not refused.",
       "example": "return { id: 'acc_1', ...overrides } as unknown as Account;"
     },
     {
@@ -173,6 +188,7 @@
       "stripComments": false,
       "stripStrings": true,
       "perLine": false,
+      "remedy": "If the suppression is deliberate, add the reason after the rule: // eslint-disable-next-line <rule> -- <why>.",
       "fixtures": {
         "violation": "/* eslint-disable */\nimport { spawnSync } from 'node:child_process';\n\nexport function build(target) {\n  // eslint-disable-next-line n/no-sync\n  const out = spawnSync('npm', ['run', target], { encoding: 'utf8' });\n  console.log(out.stdout);\n  return out.status;\n}\n",
         "nearMiss": "import { spawn } from 'node:child_process';\n\nexport function build(target: string): Promise<number> {\n  // eslint-disable-next-line security/detect-child-process -- target is validated against a fixed allowlist above\n  const child = spawn('npm', ['run', target], { stdio: 'inherit' });\n  return new Promise((resolve) => child.on('close', (code) => resolve(code ?? 1)));\n}\n"

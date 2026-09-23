@@ -42,6 +42,11 @@ function matchesAny(rel, globs) {
   return globs.some((g) => globToRegExp(g).test(rel));
 }
 
+// A class's optional `exclude` globs take a path back out of whatever its `paths` let in.
+function eligible(rel, paths, spec) {
+  return matchesAny(rel, paths) && !matchesAny(rel, spec.exclude ?? []);
+}
+
 // ---------------------------------------------------------------------------
 // Comment and string blanking
 // ---------------------------------------------------------------------------
@@ -242,6 +247,19 @@ function blankRegions(text, rel, opts) {
   return out.join("");
 }
 
+// A project's own `exclude` in `.collet/config.json` keeps paths such as a committed generated
+// mirror out of every bundle check, next to each class's own list. An unreadable config adds none.
+function withProjectExclude(root, spec) {
+  let list;
+  try {
+    list = JSON.parse(readFileSync(path.join(root, '.collet', 'config.json'), 'utf8')).exclude;
+  } catch {
+    return spec;
+  }
+  const globs = Array.isArray(list) ? list.filter((glob) => typeof glob === 'string' && glob) : [];
+  return globs.length ? { ...spec, exclude: [...(spec.exclude ?? []), ...globs] } : spec;
+}
+
 function relativeFile(root, target, cwd = root) {
   if (typeof target !== 'string' || !target) return null;
   const base = path.resolve(root);
@@ -251,29 +269,82 @@ function relativeFile(root, target, cwd = root) {
   return rel;
 }
 
-function counts(text, rel, spec) {
+// Each pattern's matches, one entry per match holding the source lines it spans with whitespace
+// collapsed, so a match that moved to another file can be recognized there. The count is the length.
+function constructs(text, rel, spec) {
+  const plain = (lines) => lines.replace(/\s+/g, ' ').trim();
   // A class may recognize a code annotation and a comment directive with different blanking
   // rules. Keep their counters independent; flattening flags would hide one or invent matches.
   return (spec.detectors ?? [spec]).flatMap((detector) => {
-    if (!matchesAny(rel, detector.paths)) return detector.patterns.map(() => 0);
+    if (!eligible(rel, detector.paths, spec)) return detector.patterns.map(() => []);
     const source = blankRegions(text, rel, { ...detector, commentSyntax: spec.commentSyntax });
     return detector.patterns.map((pattern) => {
       if (detector.perLine) {
         const regex = new RegExp(pattern);
-        return source.split('\n').filter((line) => regex.test(line)).length;
+        const lines = text.split('\n');
+        return source.split('\n').flatMap((line, index) => (regex.test(line) ? [plain(lines[index])] : []));
       }
-      return [...source.matchAll(new RegExp(pattern, 'g'))].length;
+      return [...source.matchAll(new RegExp(pattern, 'g'))].map((match) => {
+        const end = text.indexOf('\n', match.index + match[0].length);
+        return plain(text.slice(text.lastIndexOf('\n', match.index - 1) + 1, end === -1 ? text.length : end));
+      });
     });
   });
 }
 
 function introduces(before, after, rel, spec) {
-  const oldCounts = counts(before, rel, spec);
-  return counts(after, rel, spec).some((count, index) => count > oldCounts[index]);
+  const old = constructs(before, rel, spec);
+  return constructs(after, rel, spec).some((matches, index) => matches.length > old[index].length);
 }
 
-function finding(rel, spec) {
-  return { fires: true, reason: `${spec.id} (${spec.title}): ${rel} introduces a matching source pattern. Fix the change before continuing.` };
+// The entries of `list` left after taking out one per entry of `other`.
+function beyond(list, other) {
+  const rest = [...list];
+  for (const item of other) {
+    const at = rest.indexOf(item);
+    if (at !== -1) rest.splice(at, 1);
+  }
+  return rest;
+}
+
+// The changed files whose growth is not explained by matches that moved within the change. A file
+// whose count fell can explain as many identical matches gained elsewhere as it lost, and no more,
+// so splitting a file is not an introduction while any other added match still is.
+function unmoved(files) {
+  const found = new Set();
+  for (let index = 0; index < (files[0]?.before.length ?? 0); index++) {
+    const grown = files.filter(({ before, after }) => after[index].length > before[index].length);
+    if (!grown.length) continue;
+    const donors = files.map(({ before, after }) => ({
+      spare: before[index].length - after[index].length,
+      lost: beyond(before[index], after[index]),
+    })).filter((donor) => donor.spare > 0);
+    for (const file of grown) {
+      let surplus = file.after[index].length - file.before[index].length;
+      for (const match of beyond(file.after[index], file.before[index])) {
+        const donor = donors.find((candidate) => candidate.spare > 0 && candidate.lost.includes(match));
+        if (!donor) continue;
+        donor.spare -= 1;
+        donor.lost.splice(donor.lost.indexOf(match), 1);
+        if (--surplus === 0) break;
+      }
+      if (surplus > 0) found.add(file);
+    }
+  }
+  return files.filter((file) => found.has(file));
+}
+
+// A refusal names the introducing files in change order, up to this many, and counts the rest.
+const NAMED_FILES = 10;
+
+function finding(rels, spec) {
+  const more = rels.length > NAMED_FILES ? ` and ${rels.length - NAMED_FILES} more` : '';
+  const what = rels.length === 1
+    ? `${rels[0]} introduces a matching source pattern`
+    : `${rels.length} files introduce a matching source pattern: ${rels.slice(0, NAMED_FILES).join(', ')}${more}`;
+  // A class's optional `remedy` says how a deliberate case passes.
+  const remedy = spec.remedy ? ` ${spec.remedy}` : '';
+  return { fires: true, reason: `${spec.id} (${spec.title}): ${what}. Fix the change before continuing.${remedy}` };
 }
 
 function skipped(reason) {
@@ -295,12 +366,13 @@ function readSource(file) {
 /** Editor calls carry proposed source; other tools are covered by the working-tree check. */
 export function checkSource({ root, task, call }, spec) {
   if (!task) return skipped('no task is open, so nothing is enforced');
+  spec = withProjectExclude(root, spec);
   if (!['Write', 'Edit', 'MultiEdit'].includes(call?.tool)) {
     return skipped('this tool does not carry supported source text; use the live check after the change');
   }
   const input = call.input ?? {};
   const rel = relativeFile(root, input.file_path, call.cwd ?? root);
-  if (!rel || !matchesAny(rel, spec.paths)) return { fires: false, reason: 'outside this source check\'s paths' };
+  if (!rel || !eligible(rel, spec.paths, spec)) return { fires: false, reason: 'outside this source check\'s paths' };
   let pairs;
   if (call.tool === 'Write') {
     if (typeof input.content !== 'string') return skipped(`cannot read proposed source for ${rel}`);
@@ -317,14 +389,14 @@ export function checkSource({ root, task, call }, spec) {
     }
   }
   for (const edit of pairs) {
-    if (introduces(edit.old_string, edit.new_string, rel, spec)) return finding(rel, spec);
+    if (introduces(edit.old_string, edit.new_string, rel, spec)) return finding([rel], spec);
   }
   return { fires: false, reason: 'no matching source pattern was introduced' };
 }
 
-/** Compare changed files with HEAD, including new files; existing matches are not new failures. */
-export function liveSource({ root, task }, spec) {
-  if (!task) return skipped('no task is open, so nothing is enforced');
+// The change list against HEAD, with each working file and HEAD baseline read at most once.
+// Returns null when Git cannot list the changes. A read that failed fails the same way again.
+function changeSet(root) {
   const git = (args) => execFileSync('git', args, {
     cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     maxBuffer: 16 * 1024 * 1024,
@@ -350,26 +422,86 @@ export function liveSource({ root, task }, spec) {
       if (!changed.has(rel)) changed.set(rel, { status: 'A', beforeRel: rel });
     }
   } catch {
+    return null;
+  }
+  const once = (cache, key, read) => {
+    if (!cache.has(key)) {
+      try {
+        cache.set(key, { value: read() });
+      } catch (error) {
+        cache.set(key, { error });
+      }
+    }
+    const { value, error } = cache.get(key);
+    if (error) throw error;
+    return value;
+  };
+  const sources = new Map();
+  const heads = new Map();
+  return {
+    changed,
+    source: (rel) => once(sources, rel, () => readSource(path.resolve(root, rel))),
+    head: (rel) => once(heads, rel, () => git(['show', `HEAD:${prefix}${rel}`])),
+  };
+}
+
+/**
+ * Compare changed files with HEAD, including new files. Existing matches are not new failures,
+ * including matches that moved from one changed file to another. The live runner passes one
+ * `cache` to every check in a pass, so the change list and each baseline are read once per pass.
+ */
+export function liveSource({ root, task, cache }, spec) {
+  if (!task) return skipped('no task is open, so nothing is enforced');
+  spec = withProjectExclude(root, spec);
+  const key = `source.mjs changes ${path.resolve(root)}`;
+  let changes = cache?.get(key);
+  if (changes === undefined) {
+    changes = changeSet(root);
+    cache?.set(key, changes);
+  }
+  if (!changes) {
     return skipped('cannot read the Git change list and HEAD baseline; Git or a committed HEAD may be unavailable');
   }
+  const { changed } = changes;
+  // A renamed file keeps its baseline only if its old name was eligible for this check too.
+  // A failed show is not absence: only an added file or newly eligible path starts empty.
+  const baseline = ({ status, beforeRel }) =>
+    status === 'A' || (status.startsWith('R') && !eligible(beforeRel, spec.paths, spec))
+      ? '' : changes.head(beforeRel);
   const gaps = [];
-  for (const [rel, { status, beforeRel }] of changed) {
-    if (rel.startsWith('.collet/') || !matchesAny(rel, spec.paths)) continue;
+  const files = [];
+  const emptied = [];
+  for (const [rel, change] of changed) {
+    if (rel.startsWith('.collet/') || !eligible(rel, spec.paths, spec)) continue;
     let before;
     let after;
     try {
-      after = readSource(path.resolve(root, rel));
-      if (!after) continue;
-      // A renamed file keeps its baseline only if its old name was eligible for this check too.
-      // A failed show is not absence: only an added file or newly eligible path starts empty.
-      const newPath = status === 'A' || (status.startsWith('R') && !matchesAny(beforeRel, spec.paths));
-      before = newPath ? '' : git(['show', `HEAD:${prefix}${beforeRel}`]);
+      after = changes.source(rel);
+      if (!after) {
+        emptied.push([rel, change]);
+        continue;
+      }
+      before = baseline(change);
     } catch {
       gaps.push(rel);
       continue;
     }
-    if (introduces(before, after, rel, spec)) return finding(rel, spec);
+    files.push({ rel, before: constructs(before, rel, spec), after: constructs(after, rel, spec) });
   }
+  let introducing = unmoved(files);
+  // A deleted or emptied file adds nothing, so its baseline is read only to explain growth
+  // elsewhere, and only when some growth is still unexplained.
+  if (introducing.length && emptied.length) {
+    for (const [rel, change] of emptied) {
+      try {
+        files.push({ rel, before: constructs(baseline(change), rel, spec), after: constructs('', rel, spec) });
+      } catch {
+        // An unreadable baseline explains no move, so the growth stays an introduction.
+      }
+    }
+    introducing = unmoved(files);
+  }
+  if (introducing.length) return finding(introducing.map((file) => file.rel), spec);
   if (gaps.length) return skipped(`cannot read source or its HEAD baseline for: ${gaps.join(', ')}; no baseline was assumed`);
   return { fires: false, reason: 'no matching source pattern was introduced against HEAD' };
 }

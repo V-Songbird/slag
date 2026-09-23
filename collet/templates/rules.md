@@ -3,7 +3,7 @@
 
 `.collet/` holds this project's harness. The open task, the files it may touch and the command that
 ends it are printed by `node .collet/task.mjs status`, and a new session is told them before it
-reads anything.
+reads anything.{{ASK_FIRST}}
 
 1. **Change only the files the open task lists.** If the task genuinely needs another one, widen the
    list first — {{WIDEN}} That is allowed and recorded; working around the list is not the same
