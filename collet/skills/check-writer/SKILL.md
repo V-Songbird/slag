@@ -21,6 +21,10 @@ silent on its own near miss.** Nothing else counts — not who wrote it, not how
 not how many other checks passed beside it. A second pattern is not covered because the pattern
 next to it matched.
 
+On Antigravity, give every command the project root the person named as its working directory, the
+`Cwd` of `run_command`. Without it, commands can run in Antigravity's own scratch directory instead
+of the project. When the person named no project root, ask for it before running anything.
+
 ## First, look for an open task
 
 Run `node .collet/task.mjs status` before writing anything. While a task is open, the session guard
@@ -37,11 +41,13 @@ If a task is open, tell the person before any write is refused, and add the chec
 2. With no task open, follow the steps below, admission included.
 3. Open the next task. The check runs from then on, when a file is written and when a task closes.
 
-Do not work around the refusal. The guard does not stop a shell command that creates a new file
-under `.collet/`, and the close-time scope check skips that directory. A check added that way is
-never reviewed, yet it runs when the open task closes, and one without a working `live` keeps that
-task open. `.collet/off` silences every session guard, the open task's scope included. Switching it
-on is the person's decision, not a step of this skill.
+Do not work around the refusal. The guard also refuses a shell command that would create a new file
+under `.collet/`, `touch`, `ni` and `mkdir` included, a `.collet` path in another letter case, and
+removing or moving `.collet` itself. It reads only the shell forms it recognizes, though, and the
+close-time scope check skips that directory. A check that gets there another way is never
+reviewed, yet it runs when the open task closes, and one without a working `live` keeps that task
+open. `.collet/off` silences every session guard, the open task's scope included. Switching it on
+is the person's decision, not a step of this skill.
 
 ## 1. Say the mistake in one line
 

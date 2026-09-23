@@ -1,7 +1,9 @@
 // The three hooks, driven the way the host drives them: the event on stdin, the project in the
 // environment, and only whatever they print to judge them by.
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
@@ -42,6 +44,29 @@ test('session start states the task, its files and the command that ends it', ()
   assert.match(context, /src\/cli\.mjs/);
   assert.match(context, /node -e 0/);
   assert.match(context, /Dates are parsed in one place/);
+});
+
+// The ask-first list is said as a fact about the project, never as an order, and going on is tied to
+// the command that ends the open task. A project without a list hears exactly what it always did.
+test('session start states the ask-first list as a fact and ties going on to the accept command', () => {
+  const root = ready();
+  const settings = JSON.parse(CONFIG);
+  writeFileSync(join(root, '.collet', 'config.json'), JSON.stringify({ ...settings, ask_first: ['deploy', 'publish a release'] }), 'utf8');
+  const idle = hookOutput(hook('session-start.js', root)).additionalContext;
+  assert.match(idle, /^In this project the person is asked before any of these: deploy, publish a release\.$/m);
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const open = hookOutput(hook('session-start.js', root)).additionalContext;
+  assert.match(open, /^In this project the person is asked before any of these: deploy, publish a release\. Every other step goes ahead until `node -e 0` exits zero\.$/m);
+});
+
+test('without an ask-first list session start says what it always said', () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const before = hookOutput(hook('session-start.js', root)).additionalContext;
+  assert.doesNotMatch(before, /asked before/);
+  const settings = JSON.parse(CONFIG);
+  writeFileSync(join(root, '.collet', 'config.json'), JSON.stringify({ ...settings, ask_first: [] }), 'utf8');
+  assert.equal(hookOutput(hook('session-start.js', root)).additionalContext, before);
 });
 
 test('a placeholder is not a fact, so it is never stated', () => {
@@ -117,6 +142,119 @@ test('the guard takes the close advice from the harness flag, not from the wordi
   assert.match(reason('src/theme.mjs'), /^Reworded scope refusal\. .*node \.collet\/task\.mjs widen --add/);
 });
 
+// The refusal lives in the scope check, so each host's event has to reach it with the call's
+// directory: a path that does not exist yet can only be placed under .collet/ from there.
+test('every host shape refuses a shell command that would create .collet/off', () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const shell = (command) => ({ tool_name: 'Bash', tool_input: { command }, cwd: root });
+  for (const [name, options] of [['Claude Code', {}], ['Codex', { cwd: PLUGIN, project: null }]]) {
+    const denied = hookOutput(hook('guard.js', root, shell('printf x > .collet/off'), options));
+    assert.equal(denied?.permissionDecision, 'deny', name);
+    assert.match(denied.permissionDecisionReason, /\.collet\/off is the harness's own state.*node \.collet\/task\.mjs close/);
+    assert.equal(hook('guard.js', root, shell('printf x > build/out.txt'), options).stdout, '', name);
+  }
+  const antigravity = (command) => JSON.parse(hook('guard.js', root, {
+    toolCall: { name: 'run_command', args: { CommandLine: command, Cwd: root } },
+    workspacePaths: [root],
+  }, { args: ['antigravity'], cwd: PLUGIN, project: null }).stdout);
+  const denied = antigravity('printf x > .collet/off');
+  assert.equal(denied.decision, 'deny');
+  assert.match(denied.reason, /\.collet\/off is the harness's own state/);
+  assert.deepEqual(antigravity('printf x > build/out.txt'), { decision: 'allow' });
+});
+
+// The routes a redirect does not cover: a command that creates without one, the directory spelled
+// in another case, and the directory itself. Under a scope of ** only the harness rule can deny.
+test('every host shape refuses touch, ni, mkdir, another letter case and the .collet directory itself', () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', '**']);
+  const event = (tool, arg) => ({ tool_name: tool, tool_input: tool === 'Write' ? { file_path: arg } : { command: arg }, cwd: root });
+  const antigravity = (tool, arg) => JSON.parse(hook('guard.js', root, {
+    toolCall: tool === 'Write'
+      ? { name: 'write_to_file', args: { TargetFile: join(root, arg) } }
+      : { name: 'run_command', args: { CommandLine: arg, Cwd: root } },
+    workspacePaths: [root],
+  }, { args: ['antigravity'], cwd: PLUGIN, project: null }).stdout);
+  const hosts = [['Claude Code', {}], ['Codex', { cwd: PLUGIN, project: null }]];
+  for (const [tool, arg] of [
+    ['Bash', 'touch .collet/off'],
+    ['PowerShell', 'ni .collet/off'],
+    ['Bash', 'mkdir .collet/checks/x'],
+    ['Bash', 'printf x > .Collet/off'],
+    ['Write', '.Collet/off'],
+    ['Bash', 'rm -rf .collet'],
+    ['Bash', 'mv .collet x'],
+  ]) {
+    for (const [name, options] of hosts) {
+      const denied = hookOutput(hook('guard.js', root, event(tool, arg), options));
+      assert.equal(denied?.permissionDecision, 'deny', `${name}: ${arg}`);
+      assert.match(denied.permissionDecisionReason, /is the harness's own state.*node \.collet\/task\.mjs close/, `${name}: ${arg}`);
+    }
+    const denied = antigravity(tool, arg);
+    assert.equal(denied.decision, 'deny', `Antigravity: ${arg}`);
+    assert.match(denied.reason, /is the harness's own state/, `Antigravity: ${arg}`);
+  }
+  for (const [tool, arg] of [['Bash', 'touch .collet/unverified.md'], ['Write', '.colletrc']]) {
+    for (const [name, options] of hosts) {
+      assert.equal(hook('guard.js', root, event(tool, arg), options).stdout, '', `${name}: ${arg}`);
+    }
+    assert.deepEqual(antigravity(tool, arg), { decision: 'allow' }, `Antigravity: ${arg}`);
+  }
+});
+
+// One command from each alias family, Rename-Item and New-Item -Name, through every host's event.
+// Outside .collet/ Rename-Item stays allowed, as it was before the guard read it.
+test('every host shape refuses PowerShell aliases, Rename-Item and New-Item -Name under .collet/', () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const event = (command) => ({ tool_name: 'PowerShell', tool_input: { command }, cwd: root });
+  const antigravity = (command) => JSON.parse(hook('guard.js', root, {
+    toolCall: { name: 'run_command', args: { CommandLine: command, Cwd: root } },
+    workspacePaths: [root],
+  }, { args: ['antigravity'], cwd: PLUGIN, project: null }).stdout);
+  const hosts = [['Claude Code', {}], ['Codex', { cwd: PLUGIN, project: null }]];
+  for (const command of [
+    'ren .collet x', 'move .collet x', 'del .collet/config.json', 'copy src/cli.mjs .collet/off',
+    'ac .collet/off x', 'md .collet/checks/x', 'New-Item -Name .collet/off -ItemType File',
+  ]) {
+    for (const [name, options] of hosts) {
+      const denied = hookOutput(hook('guard.js', root, event(command), options));
+      assert.equal(denied?.permissionDecision, 'deny', `${name}: ${command}`);
+      assert.match(denied.permissionDecisionReason, /is the harness's own state.*node \.collet\/task\.mjs close/, `${name}: ${command}`);
+    }
+    const denied = antigravity(command);
+    assert.equal(denied.decision, 'deny', `Antigravity: ${command}`);
+    assert.match(denied.reason, /is the harness's own state/, `Antigravity: ${command}`);
+  }
+  for (const command of ['ren src/theme.mjs t.mjs']) {
+    for (const [name, options] of hosts) {
+      assert.equal(hook('guard.js', root, event(command), options).stdout, '', `${name}: ${command}`);
+    }
+    assert.deepEqual(antigravity(command), { decision: 'allow' }, `Antigravity: ${command}`);
+  }
+});
+
+// Under PowerShell this cp is Copy-Item and copies src/cli.mjs onto the kill switch; a POSIX cp
+// writes src/cli.mjs, inside the task. The PowerShell tool names its shell, a Bash tool names a
+// POSIX shell only off Windows, and Antigravity names none, so an unknown shell reads both ways.
+test('every host shape reads cp by the shell it ran in, and both ways when the shell is unknown', () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const command = 'cp -Dest .collet/off src/cli.mjs';
+  const answer = (tool, options = {}) => hookOutput(hook('guard.js', root, { tool_name: tool, tool_input: { command }, cwd: root }, options));
+  for (const options of [{}, { cwd: PLUGIN, project: null }]) {
+    assert.equal(answer('PowerShell', options)?.permissionDecision, 'deny');
+    assert.equal(answer('Bash', options)?.permissionDecision, process.platform === 'win32' ? 'deny' : undefined);
+  }
+  const antigravity = JSON.parse(hook('guard.js', root, {
+    toolCall: { name: 'run_command', args: { CommandLine: command, Cwd: root } },
+    workspacePaths: [root],
+  }, { args: ['antigravity'], cwd: PLUGIN, project: null }).stdout);
+  assert.equal(antigravity.decision, 'deny');
+  assert.match(antigravity.reason, /is the harness's own state/);
+});
+
 test('the guard records what it refused', () => {
   const root = ready();
   task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
@@ -124,6 +262,147 @@ test('the guard records what it refused', () => {
   const log = readFileSync(join(root, '.collet', 'guard-log.jsonl'), 'utf8');
   assert.match(log, /"task":"t1"/);
   assert.match(log, /src\/theme\.mjs/);
+});
+
+// A guard the host cuts short writes no answer, and the host lets the call go ahead unjudged. The
+// start it logs before its checks is the trace: the next guard call reports it once, never refusing
+// for it, and a log the guard cannot use changes no answer.
+const SLOW = "export const id = 'slow';\nexport function check() { const end = Date.now() + 60000; while (Date.now() < end); return { fires: false }; }\n";
+// A start the host's 10 s timeout has already passed, as a guard cut short leaves it.
+const cut = (root, id, call) =>
+  appendFileSync(
+    join(root, '.collet', 'guard-log.jsonl'),
+    `${JSON.stringify({ at: new Date(Date.now() - 11_000).toISOString(), start: id, task: 't1', tool: 'Bash', call })}\n`
+  );
+
+test('a guard cut short between its two records leaves a start with no finish', async () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  writeFileSync(join(root, '.collet', 'checks', 'slow.mjs'), SLOW, 'utf8');
+  const log = join(root, '.collet', 'guard-log.jsonl');
+  const guard = spawn(process.execPath, [join(PLUGIN, 'hooks', 'guard.js')], { env: { ...process.env, CLAUDE_PROJECT_DIR: root } });
+  const exited = once(guard, 'exit');
+  guard.stdin.end(JSON.stringify({ tool_name: 'Write', tool_input: { file_path: 'src/cli.mjs' }, cwd: root }));
+  for (let i = 0; i < 600 && !(existsSync(log) && readFileSync(log, 'utf8').includes('"start"')); i += 1) {
+    await new Promise((done) => setTimeout(done, 50));
+  }
+  guard.kill();
+  await exited;
+  const entries = readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(entries.map(({ start, finish, task: id, tool, call }) => ({ start: Boolean(start), finish, id, tool, call })), [
+    { start: true, finish: undefined, id: 't1', tool: 'Write', call: 'src/cli.mjs' },
+  ]);
+});
+
+test('the next guard call reports a call cut short once, and refuses nothing for it', () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const event = (file) => ({ tool_name: 'Write', tool_input: { file_path: file }, cwd: root });
+  cut(root, 'a', 'rm -rf src');
+  const allowed = hookOutput(hook('guard.js', root, event('src/cli.mjs')));
+  assert.equal(allowed.permissionDecision, undefined);
+  assert.match(allowed.additionalContext, /A guard call did not finish: Bash rm -rf src at .*check what it changed/);
+  assert.equal(hook('guard.js', root, event('src/cli.mjs')).stdout, '');
+  cut(root, 'b', 'rm -rf test');
+  const denied = hookOutput(hook('guard.js', root, event('src/theme.mjs')));
+  assert.equal(denied.permissionDecision, 'deny');
+  assert.match(denied.permissionDecisionReason, /outside the open task.*A guard call did not finish: Bash rm -rf test/s);
+});
+
+test('a start still inside the timeout, or a log the guard cannot use, changes no answer', () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const event = (file) => ({ tool_name: 'Write', tool_input: { file_path: file }, cwd: root });
+  const log = join(root, '.collet', 'guard-log.jsonl');
+  writeFileSync(log, `not json\n${JSON.stringify({ at: new Date().toISOString(), start: 'c', task: 't1', tool: 'Bash', call: 'x' })}\n`);
+  assert.equal(hook('guard.js', root, event('src/cli.mjs')).stdout, '');
+  rmSync(log);
+  mkdirSync(log);
+  assert.equal(hook('guard.js', root, event('src/cli.mjs')).stdout, '');
+  assert.equal(hookOutput(hook('guard.js', root, event('src/theme.mjs'))).permissionDecision, 'deny');
+});
+
+// A session start or handoff the host cuts short prints nothing the session sees. The mark each
+// writes before it loads the project's state is the trace: the next session start reports it once,
+// and a mark the hooks cannot use changes no output.
+const SLOW_STATE = "const end = Date.now() + 60000; while (Date.now() < end);\nexport const filled = () => '';\nexport const openTask = () => null;\n";
+const running = (root, name) => join(root, '.collet', `${name}.running`);
+const context = (root) => hookOutput(hook('session-start.js', root)).additionalContext;
+
+/** Spawn a hook as the host does, and stop it once it has marked itself running. */
+async function stopMidway(root, name, event) {
+  const statePath = join(root, '.collet', 'state.mjs');
+  const real = readFileSync(statePath, 'utf8');
+  writeFileSync(statePath, SLOW_STATE, 'utf8');
+  const child = spawn(process.execPath, [join(PLUGIN, 'hooks', `${name}.js`)], { env: { ...process.env, CLAUDE_PROJECT_DIR: root } });
+  const exited = once(child, 'exit');
+  child.stdin.end(JSON.stringify(event));
+  for (let i = 0; i < 600 && !existsSync(running(root, name)); i += 1) await new Promise((done) => setTimeout(done, 50));
+  child.kill();
+  await exited;
+  writeFileSync(statePath, real, 'utf8');
+}
+
+/** Age a run's mark past the host's 10 s timeout, as a run the host stopped leaves it. */
+function stale(root, name) {
+  const mark = JSON.parse(readFileSync(running(root, name), 'utf8'));
+  const at = new Date(Date.now() - 11_000).toISOString();
+  writeFileSync(running(root, name), JSON.stringify({ ...mark, at }), 'utf8');
+  return at;
+}
+
+test('a session start cut short leaves its mark, and the next session start reports it once', async () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const before = context(root);
+  assert.equal(existsSync(running(root, 'session-start')), false);
+  await stopMidway(root, 'session-start', {});
+  const at = stale(root, 'session-start');
+  assert.equal(
+    context(root),
+    `${before}\nThe previous session start began at ${at} and did not finish, so that session may have started without this context.`
+  );
+  assert.equal(context(root), before);
+  assert.equal(existsSync(running(root, 'session-start')), false);
+});
+
+test('a handoff cut short leaves its mark, and the next session start says the note may be missing or stale, once', async () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const before = context(root);
+  await stopMidway(root, 'handoff', { trigger: 'auto' });
+  assert.equal(existsSync(join(root, '.collet', 'handoff.md')), false);
+  const at = stale(root, 'handoff');
+  assert.equal(
+    context(root),
+    `${before}\nThe handoff hook that ran before the last compaction started at ${at} and did not finish, so .collet/handoff.md may be missing or stale.`
+  );
+  assert.equal(context(root), before);
+  assert.equal(existsSync(running(root, 'handoff')), false);
+});
+
+test('a finished run, a mark inside the timeout, or a mark the hooks cannot use changes no output', () => {
+  const root = ready();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  hook('handoff.js', root, { trigger: 'auto' });
+  const before = context(root);
+  assert.match(before, /State carried over/);
+  for (const name of ['session-start', 'handoff']) assert.equal(existsSync(running(root, name)), false, name);
+  // A run still inside the timeout may be running beside this one.
+  writeFileSync(running(root, 'handoff'), JSON.stringify({ run: 'x', at: new Date().toISOString() }), 'utf8');
+  assert.equal(context(root), before);
+  writeFileSync(running(root, 'handoff'), 'not json', 'utf8');
+  writeFileSync(running(root, 'session-start'), 'not json', 'utf8');
+  assert.equal(context(root), before);
+  // A mark that cannot be written: each path is a directory.
+  for (const name of ['session-start', 'handoff']) {
+    rmSync(running(root, name), { force: true });
+    mkdirSync(running(root, name));
+  }
+  assert.equal(context(root), before);
+  rmSync(join(root, '.collet', 'handoff.md'));
+  hook('handoff.js', root, { trigger: 'manual' });
+  assert.match(readFileSync(join(root, '.collet', 'handoff.md'), 'utf8'), /task: t1/);
 });
 
 test("a missing project check falls back to the plugin's own copy rather than disarming", () => {

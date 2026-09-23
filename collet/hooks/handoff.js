@@ -8,20 +8,28 @@
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { COLLET, mounted, projectModule, readEvent, root } from './lib.js';
+import { COLLET, finished, mounted, projectModule, readEvent, root, started } from './lib.js';
 
 const event = readEvent();
 const dir = root(event);
 if (!mounted(dir)) process.exit(0);
 
+// Marked before anything slow: a run the host stops leaves the mark, and the next session start
+// says the note may be missing or stale.
+const run = started(dir, 'handoff');
+const done = () => {
+  finished(dir, 'handoff', run);
+  process.exit(0);
+};
+
 const state = await projectModule(dir, 'state.mjs');
-if (!state) process.exit(0);
+if (!state) done();
 
 const path = join(dir, COLLET, 'handoff.md');
 const task = state.openTask(dir);
 if (!task) {
   rmSync(path, { force: true });
-  process.exit(0);
+  done();
 }
 
 const body = [
@@ -43,4 +51,4 @@ try {
   /* a handoff nobody could write is not worth stopping the session for */
 }
 
-process.exit(0);
+done();

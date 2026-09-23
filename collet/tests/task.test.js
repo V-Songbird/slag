@@ -3,7 +3,7 @@
 // only half of what it claimed.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
@@ -73,6 +73,31 @@ test("add refuses the harness's own files and records nothing", () => {
   const opened = task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
   assert.equal(opened.status, 0, opened.stderr);
   assert.match(opened.stdout, /task t1 — window/);
+});
+
+// The guard refuses the harness in any letter case, so a scope entry spelled .Collet would promise
+// a write that never comes. A name that only starts with .collet is not the harness.
+test('the harness is kept out of a scope in any letter case, and a lookalike name is not', () => {
+  const root = ready({ '.colletrc': 'x\n' });
+  const ledger = join(root, '.collet', 'ledger.jsonl');
+  for (const scope of ['.Collet/off', '.COLLET/checks/x.mjs', 'src/cli.mjs,.Collet']) {
+    const out = task(root, ['add', '--title', 'check', '--why', 'w', '--scope', scope]);
+    assert.equal(out.status, 2, scope);
+    assert.match(out.stderr, /cannot join a task, so no task was opened/, scope);
+    assert.equal(existsSync(ledger), false, scope);
+  }
+  assert.equal(task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']).status, 0);
+  const before = readFileSync(ledger, 'utf8');
+  // The unverified list is an exception only as spelled: the guard refuses .Collet/unverified.md too.
+  for (const path of ['.Collet/off', '.COLLET/checks/x.mjs', '.Collet', '.Collet/unverified.md']) {
+    const out = task(root, ['widen', '--add', path, '--why', 'a check']);
+    assert.equal(out.status, 2, path);
+    assert.match(out.stderr, /cannot join a task, so nothing was widened/, path);
+  }
+  assert.equal(readFileSync(ledger, 'utf8'), before);
+  const lookalike = task(root, ['widen', '--add', '.colletrc', '--why', 'the tool reads it']);
+  assert.equal(lookalike.status, 0, lookalike.stderr);
+  assert.match(readFileSync(ledger, 'utf8'), /"\.colletrc"/);
 });
 
 test('a task cannot be opened while the config still carries its placeholders', () => {
@@ -401,6 +426,25 @@ test('status reports the refusals the guard recorded', () => {
   assert.match(out.stdout, /src\/x\.mjs is outside/);
 });
 
+test('status and close name a guard call that did not finish, and close still closes', () => {
+  const root = ready();
+  repo(root);
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const at = new Date(Date.now() - 11_000).toISOString();
+  const entries = [
+    { at, start: 'a', task: 't1', tool: 'Bash', call: 'rm -rf src' },
+    { at, start: 'b', task: 't1', tool: 'Write', call: 'src/cli.mjs' },
+    { at, finish: 'b' },
+  ];
+  writeFileSync(join(root, '.collet', 'guard-log.jsonl'), entries.map((entry) => `${JSON.stringify(entry)}\n`).join(''), 'utf8');
+  const status = task(root, ['status']);
+  assert.match(status.stdout, /1 guard call\(s\) did not finish.*\n\s+\S+\s+Bash rm -rf src/);
+  assert.doesNotMatch(status.stdout, /Write src\/cli\.mjs/);
+  const closed = task(root, ['close', '--left-out', 'nothing', '--unverified', 'nothing']);
+  assert.equal(closed.status, 0, closed.stdout + closed.stderr);
+  assert.match(closed.stdout, /did not finish[\s\S]*Bash rm -rf src/);
+});
+
 test('a second task cannot be opened while one is still open', () => {
   const root = ready();
   task(root, ['add', '--title', 'one', '--why', 'w', '--scope', 'src/cli.mjs']);
@@ -418,4 +462,114 @@ test('a ledger line that does not parse does not stop the CLI', () => {
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /task t1/);
   rmSync(ledger);
+});
+
+// A guard log as it stands when task t1 closes: 5,000 finished calls of t1, one refusal of t1, one t1
+// call that never finished and its reported marker, a finished call of another task and a line that
+// does not parse. `kept` is what close leaves, in order.
+function guardLogAtClose() {
+  const old = new Date(Date.now() - 11_000).toISOString();
+  const line = (entry) => JSON.stringify({ at: old, ...entry });
+  const finished = Array.from({ length: 5_000 }, (_, i) => [
+    line({ start: `p${i}`, task: 't1', tool: 'Write', call: 'src/cli.mjs' }),
+    line({ finish: `p${i}` }),
+  ]).flat();
+  const refusal = line({ finish: 'r', task: 't1', check: 'scope', tool: 'Write', reason: 'src/x.mjs is outside the open task (t1).' });
+  const unfinished = line({ start: 'u', task: 't1', tool: 'Bash', call: 'rm -rf src' });
+  const other = [line({ start: 'o', task: 't9', tool: 'Edit', call: 'src/theme.mjs' }), line({ finish: 'o' })];
+  const all = [
+    ...finished.slice(0, 5_000),
+    line({ start: 'r', task: 't1', tool: 'Write', call: 'src/x.mjs' }),
+    refusal,
+    unfinished,
+    line({ reported: 'u' }),
+    ...other,
+    '{ not json',
+    ...finished.slice(5_000),
+  ];
+  return { text: `${all.join('\n')}\n`, kept: [refusal, unfinished, ...other, '{ not json'] };
+}
+
+function closeWithLog(text) {
+  const root = ready();
+  repo(root);
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const log = join(root, '.collet', 'guard-log.jsonl');
+  writeFileSync(log, text, 'utf8');
+  return { root, log };
+}
+
+test("close prunes its task's finished guard calls and keeps refusals, unfinished calls and other tasks' records", () => {
+  const { text, kept } = guardLogAtClose();
+  const { root, log } = closeWithLog(text);
+  const closed = task(root, ['close', '--left-out', 'nothing', '--unverified', 'nothing']);
+  assert.equal(closed.status, 0, closed.stdout + closed.stderr);
+  assert.equal(readFileSync(log, 'utf8'), `${kept.join('\n')}\n`);
+  assert.deepEqual(readdirSync(join(root, '.collet')).filter((name) => name.endsWith('.tmp')), []);
+});
+
+test('status prints the same after the prune as it printed for the whole log', () => {
+  const { text } = guardLogAtClose();
+  const { root, log } = closeWithLog(text);
+  assert.equal(task(root, ['close', '--left-out', 'nothing', '--unverified', 'nothing']).status, 0);
+  assert.equal(task(root, ['add', '--title', 'next', '--why', 'w', '--scope', 'src/report.mjs']).status, 0);
+  const pruned = task(root, ['status']);
+  writeFileSync(log, text, 'utf8');
+  const whole = task(root, ['status']);
+  assert.equal(pruned.stdout, whole.stdout);
+  assert.match(pruned.stdout, /last 1 refusal/);
+});
+
+test('a refused close and a failed close leave the guard log byte-identical', () => {
+  const { text } = guardLogAtClose();
+  const refused = closeWithLog(text);
+  assert.equal(task(refused.root, ['close', '--left-out', 'nothing']).status, 2);
+  assert.equal(readFileSync(refused.log, 'utf8'), text);
+  const failed = closeWithLog(text);
+  writeFileSync(join(failed.root, '.collet', 'config.json'), CONFIG.replace('node -e 0', 'node no-such-file.mjs'), 'utf8');
+  rmSync(join(failed.root, '.collet', 'ledger.jsonl'));
+  assert.equal(task(failed.root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']).status, 0);
+  assert.equal(task(failed.root, ['close', '--left-out', 'nothing', '--unverified', 'nothing']).status, 1);
+  assert.equal(readFileSync(failed.log, 'utf8'), text);
+});
+
+test('a record the guard appends while close rewrites the log survives', () => {
+  const { text, kept } = guardLogAtClose();
+  const { root, log } = closeWithLog(text);
+  const late = JSON.stringify({ at: new Date().toISOString(), start: 'late', task: 't2', tool: 'Edit', call: 'src/report.mjs' });
+  // Stands in for a guard call: it appends one record after close has read the log and before the
+  // rename, when the pruned copy is written. Kept under .collet/, which is not a task change.
+  const preload = join(root, '.collet', 'append-during-prune.cjs');
+  writeFileSync(
+    preload,
+    [
+      "const fs = require('node:fs');",
+      'const write = fs.writeFileSync;',
+      'fs.writeFileSync = function (file, ...rest) {',
+      `  if (String(file).endsWith('.tmp')) fs.appendFileSync(${JSON.stringify(log)}, ${JSON.stringify(`${late}\n`)});`,
+      '  return write.call(this, file, ...rest);',
+      '};',
+      "require('node:module').syncBuiltinESMExports();",
+      '',
+    ].join('\n'),
+    'utf8'
+  );
+  const closed = spawnSync(
+    process.execPath,
+    ['--require', preload, join(root, '.collet', 'task.mjs'), 'close', '--left-out', 'nothing', '--unverified', 'nothing'],
+    { cwd: root, encoding: 'utf8' }
+  );
+  assert.equal(closed.status, 0, closed.stdout + closed.stderr);
+  assert.equal(readFileSync(log, 'utf8'), `${[...kept, late].join('\n')}\n`);
+});
+
+test('a guard log that cannot be read leaves the close and its output as they were', () => {
+  const root = ready();
+  repo(root);
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  mkdirSync(join(root, '.collet', 'guard-log.jsonl'));
+  const closed = task(root, ['close', '--left-out', 'nothing', '--unverified', 'nothing']);
+  assert.equal(closed.status, 0, closed.stdout + closed.stderr);
+  assert.match(closed.stdout, /task t1 closed\./);
+  assert.equal(closed.stderr, '');
 });

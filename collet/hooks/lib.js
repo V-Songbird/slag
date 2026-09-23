@@ -4,7 +4,7 @@
 // One thing is deliberately not silent — the kill switch. `.collet/off` turns every hook off, and
 // it exists so that "disabled" is a state somebody chose rather than the accidental result of a
 // file going missing. The committed checks and anything wired to run them never read it.
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -95,6 +95,43 @@ export function fileText(dir, name) {
   }
 }
 
+// hooks.json gives the session-start and handoff hooks 10 s, and a host that reaches it stops the
+// hook and drops what it printed. Each run marks itself running in `.collet/<name>.running` and
+// clears the mark when it ends, so a mark older than that is a run the host stopped. A mark that
+// cannot be written, read or removed changes nothing else the hook does.
+const HOOK_TIMEOUT_MS = 10_000;
+const marker = (dir, name) => join(dir, COLLET, `${name}.running`);
+
+/** Mark this run of a hook as running, and return its id. */
+export function started(dir, name) {
+  const mark = { run: `${Date.now()}-${process.pid}`, at: new Date().toISOString() };
+  try {
+    writeFileSync(marker(dir, name), `${JSON.stringify(mark)}\n`, 'utf8');
+  } catch {
+    /* a trace nobody could write is not worth stopping the session for */
+  }
+  return mark.run;
+}
+
+/** The mark a run left behind longer ago than the host's timeout, or null. */
+export function cutShort(dir, name) {
+  try {
+    const mark = JSON.parse(readFileSync(marker(dir, name), 'utf8'));
+    return typeof mark?.run === 'string' && Date.now() - Date.parse(mark.at) > HOOK_TIMEOUT_MS ? mark : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Clear a run's mark, and only that run's: a run started meanwhile keeps its own. */
+export function finished(dir, name, run) {
+  try {
+    if (JSON.parse(readFileSync(marker(dir, name), 'utf8'))?.run === run) rmSync(marker(dir, name), { force: true });
+  } catch {
+    /* nothing to clear, or nothing that can be */
+  }
+}
+
 export function emit(event, context) {
   if (!context) return;
   process.stdout.write(
@@ -118,12 +155,19 @@ const ANTIGRAVITY_TOOLS = {
 // answers with a bare decision, and is told the allow out loud.
 const HOSTS = {
   claude: {
-    // `cwd` is where the call runs, which is what a relative path in it is relative to.
-    call: (event) => ({ tool: event.tool_name ?? '', input: event.tool_input ?? {}, cwd: event.cwd }),
+    // `cwd` is where the call runs, which is what a relative path in it is relative to. The shell is
+    // named where the tool says it: PowerShell, or a Bash tool off Windows. On Windows the same
+    // Bash tool name can reach a PowerShell, so the shell stays unknown there.
+    call: (event) => {
+      const tool = event.tool_name ?? '';
+      const shell = tool === 'PowerShell' ? 'powershell' : tool === 'Bash' && process.platform !== 'win32' ? 'posix' : undefined;
+      return { tool, input: event.tool_input ?? {}, cwd: event.cwd, shell };
+    },
     deny: (reason) => ({
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
     }),
-    allow: () => null,
+    // A notice rides on an allowed call as context for the session, with no decision in it.
+    allow: (notice) => (notice ? { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: notice } } : null),
   },
   antigravity: {
     call: (event) => {

@@ -9,7 +9,17 @@
 // On a project whose work is planned elsewhere it writes nothing at all: `status` reads that
 // plan and every mutating subcommand refuses, naming the tool that owns the record. Two ledgers
 // and nobody knowing which is authoritative is worse than no ledger.
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -199,7 +209,10 @@ function list(values) {
 function harnessEntries(paths) {
   return paths.filter((path) => {
     const entry = path.split('\\').join('/').replace(/^\.\//, '').replace(/\/+$/, '');
-    return (entry === COLLET || entry.startsWith(`${COLLET}/`)) && entry !== `${COLLET}/unverified.md`;
+    // The rule of harnessPath in checks/scope.mjs, which this CLI does not import so that a missing
+    // or broken scope check still leaves status, add and close working: .collet itself or anything
+    // under it, in any letter case, since a case-insensitive filesystem resolves .Collet/off to it.
+    return `${entry}/`.toLowerCase().startsWith(`${COLLET}/`) && entry !== `${COLLET}/unverified.md`;
   });
 }
 
@@ -218,17 +231,83 @@ function describe(task) {
     .join('\n');
 }
 
-/** The last few refusals, so the log the guard writes is read by something. */
-function recentDenials(limit = 3) {
-  if (!existsSync(GUARD_LOG)) return [];
+/** What the guard logged, oldest first. A line that does not parse is skipped. */
+function guardLog() {
+  let lines = [];
   try {
-    return readFileSync(GUARD_LOG, 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .slice(-limit)
-      .map((line) => JSON.parse(line));
+    lines = readFileSync(GUARD_LOG, 'utf8').split('\n');
   } catch {
     return [];
+  }
+  return lines.flatMap((line) => {
+    try {
+      return [JSON.parse(line)];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/** The last few refusals, so the log the guard writes is read by something. */
+function recentDenials(limit = 3) {
+  return guardLog()
+    .filter((entry) => entry.reason)
+    .slice(-limit);
+}
+
+/**
+ * The last few guard calls of a task that started and never finished. The host cut them short and
+ * may have run the call unjudged. A start younger than the guard's 10 s timeout may still be running.
+ */
+function reportUnfinished(id, limit = 3) {
+  const entries = guardLog();
+  const finished = new Set(entries.map((entry) => entry.finish));
+  const calls = entries
+    .filter((entry) => entry.start && entry.task === id && !finished.has(entry.start) && Date.now() - Date.parse(entry.at) > 10_000)
+    .slice(-limit);
+  if (!calls.length) return;
+  console.log(`\n  ${calls.length} guard call(s) did not finish, so the host may have run them unjudged:`);
+  for (const line of calls) console.log(`    ${line.at.slice(0, 19)}  ${line.tool} ${line.call}`);
+}
+
+/**
+ * After a task closes, the log without what no command reads any more: the task's calls that
+ * finished, their plain finish records and the markers that reported its calls cut short. Every
+ * refusal, every call that never finished, every other task's record and every line that does not
+ * parse stay, in their order. The guard may append while this runs, so the bytes past what was read
+ * are copied over just before the rename. Any failure leaves the log as it was.
+ */
+function pruneGuardLog(id) {
+  const temp = `${GUARD_LOG}.${process.pid}.tmp`;
+  try {
+    const read = readFileSync(GUARD_LOG);
+    const lines = read.toString('utf8').split('\n');
+    const entries = lines.map((line) => {
+      try {
+        const entry = JSON.parse(line);
+        return entry && typeof entry === 'object' ? entry : null;
+      } catch {
+        return null;
+      }
+    });
+    const finished = new Set(entries.flatMap((entry) => (entry?.finish ? [entry.finish] : [])));
+    const starts = new Set(entries.flatMap((entry) => (entry?.start && entry.task === id ? [entry.start] : [])));
+    const done = new Set([...starts].filter((start) => finished.has(start)));
+    const kept = lines.filter((line, index) => {
+      const entry = entries[index];
+      if (!entry) return true;
+      if (entry.start && entry.task === id) return !done.has(entry.start);
+      if (entry.finish && !entry.reason) return !done.has(entry.finish);
+      if (entry.reported) return !starts.has(entry.reported);
+      return true;
+    });
+    if (kept.length === lines.length) return;
+    writeFileSync(temp, kept.join('\n'));
+    const appended = readFileSync(GUARD_LOG).subarray(read.length);
+    if (appended.length) appendFileSync(temp, appended);
+    renameSync(temp, GUARD_LOG);
+  } catch {
+    rmSync(temp, { force: true });
   }
 }
 
@@ -300,6 +379,7 @@ switch (command) {
       console.log(`\n  last ${denials.length} refusal(s):`);
       for (const line of denials) console.log(`    ${line.at?.slice(0, 19) ?? ''}  ${line.reason}`);
     }
+    reportUnfinished(task.id);
     break;
   }
 
@@ -359,6 +439,8 @@ switch (command) {
       console.error('"nothing" is a valid answer for either, and it goes on the record as a claim.');
       process.exit(2);
     }
+    // Reported, never refused: the live checks below still read what such a call changed.
+    reportUnfinished(task.id);
 
     // The live checks first: a green accept command does not prove the scope held or that no
     // other admitted check found a mistake in the working tree. Every check must have run:
@@ -405,6 +487,7 @@ switch (command) {
     // The handoff described a task that is now finished. Left behind, it is stated at every
     // future session start as if the work were still open.
     rmSync(HANDOFF, { force: true });
+    pruneGuardLog(entry.id);
 
     console.log(`task ${entry.id} closed. Nothing changed outside its files, and the accept command exited 0.`);
     break;

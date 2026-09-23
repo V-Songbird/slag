@@ -2,9 +2,11 @@
 // cases that matter are the ones where it could quietly say yes: a fixture it cannot read, a check
 // that catches its own near miss, and a tree it could not look at reported as clean.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 import { checks, CONFIG, mount, project, repo, task, TREE } from './temp-project.js';
 
@@ -142,6 +144,65 @@ test('an explicit skipped result without a verdict keeps standalone and strict p
   assert.equal(strict.status, 1, strict.stdout + strict.stderr);
   assert.match(strict.stdout, /skip unavailable — input unavailable/);
   assert.match(strict.stdout, /1 check\(s\) could not run, and --strict counts that as a failure/);
+});
+
+test('every live check in a pass shares one cache, and the next pass starts a new one', () => {
+  const root = ready();
+  for (const name of ['first', 'second']) {
+    writeFileSync(join(root, '.collet', 'checks', `${name}.mjs`), [
+      `export const id = '${name}';`,
+      'export function check() { return { fires: false }; }',
+      "export function live({ cache }) { const seen = (cache.get('seen') ?? 0) + 1; cache.set('seen', seen); return { fires: false, reason: `check ${seen} of this pass` }; }",
+    ].join('\n'), 'utf8');
+  }
+  repo(root);
+  assert.equal(task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']).status, 0);
+  for (let pass = 0; pass < 2; pass++) {
+    const out = checks(root, ['--live']);
+    assert.equal(out.status, 0, out.stdout + out.stderr);
+    assert.match(out.stdout, /ok {3}first — check 1 of this pass/);
+    assert.match(out.stdout, /ok {3}second — check 2 of this pass/);
+  }
+});
+
+// A --live pass lists the changes twice on purpose: once for every bundle check together, through
+// the pass cache, and once for the scope check on its own (see live() in checks/scope.mjs). Git is
+// counted by wrapping execFileSync before the runner loads, so no check changes to be counted.
+test('a live pass lists the changes once for every bundle check and once for scope', () => {
+  const root = project({ ...TREE, 'package.json': '{"private":true}\n' });
+  const mounted = mount(root, ['--checks']);
+  assert.equal(mounted.status, 0, mounted.stdout + mounted.stderr);
+  writeFileSync(join(root, '.collet', 'config.json'), CONFIG, 'utf8');
+  repo(root);
+  assert.equal(task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']).status, 0);
+  writeFileSync(join(root, 'src', 'cli.mjs'), "import { build } from './digest.mjs';\nexport const run = () => build() + 1;\n", 'utf8');
+  const counter = project({
+    'count-git.mjs': [
+      "import childProcess from 'node:child_process';",
+      "import { appendFileSync } from 'node:fs';",
+      "import { syncBuiltinESMExports } from 'node:module';",
+      'const original = childProcess.execFileSync;',
+      'childProcess.execFileSync = function (file, args, ...rest) {',
+      "  if (file === 'git') appendFileSync(process.env.COLLET_GIT_LOG, `${args.join(' ')}\\n`);",
+      '  return original.call(this, file, args, ...rest);',
+      '};',
+      'syncBuiltinESMExports();',
+      '',
+    ].join('\n'),
+  });
+  const log = join(counter, 'git.log');
+  const out = spawnSync(process.execPath, ['--import', pathToFileURL(join(counter, 'count-git.mjs')).href, join(root, '.collet', 'checks', 'run.mjs'), '--live'], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, COLLET_GIT_LOG: log },
+  });
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  assert.ok(out.stdout.split('\n').filter((line) => /^ok {3}javascript-typescript\./.test(line)).length > 1, out.stdout);
+  assert.match(out.stdout, /ok {3}scope — everything changed is inside the task/);
+  const calls = readFileSync(log, 'utf8').trim().split('\n');
+  const listings = calls.filter((call) => call.startsWith('diff ')).map((call) => (call.includes('--no-renames') ? 'scope' : 'bundle'));
+  assert.deepEqual(listings.sort(), ['bundle', 'scope'], calls.join('\n'));
+  assert.equal(calls.filter((call) => call.startsWith('ls-files ')).length, 2, calls.join('\n'));
 });
 
 test('live reports the files that landed outside the task', () => {
