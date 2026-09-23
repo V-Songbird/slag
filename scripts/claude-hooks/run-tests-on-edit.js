@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 "use strict";
 
-// Repo-wide dev hook (not shipped with any plugin): reruns whichever
-// plugin's own test suite after an Edit/Write lands in that plugin's
+// Repo-wide dev hook (not shipped with any plugin): reruns the test files of
+// a plugin that reach a file an Edit/Write lands in, under that plugin's
 // scripts/, hooks/ or templates/ dir, so a regression surfaces immediately
 // instead of sitting silent until someone runs the suite by hand. There is no
 // CI here, so this is the only thing that reruns a suite unasked. Registered
 // in .claude/settings.json and .codex/hooks.json, not shipped with a plugin.
-// Patch events can touch multiple plugins; each affected suite runs once.
+// Patch events can touch multiple plugins; each affected plugin runs once.
 //
 // It lives under scripts/ rather than .claude/ so that `npm run check` finds
 // its test file. Node 22's default discovery skips dot-directories, and every
@@ -26,11 +26,12 @@ const WATCHED_TOOLS = new Set(["Edit", "Write", "apply_patch"]);
 // like any other, so it belongs here beside scripts/ and hooks/.
 const WATCHED_SUBDIRS = new Set(["scripts", "hooks", "templates"]);
 
-// Must stay under this hook's own `timeout` in .claude/settings.json -- Claude
-// Code kills the whole hook at that mark. anneal's suite is the long pole here
-// at ~10s, collet's at ~6s, both measured on v22.22.2, so the cap is headroom
-// rather than a target. A suite slower than this reports "did not complete",
-// not a verdict -- raise both numbers together if one gets that slow.
+// Must stay under this hook's own `timeout` in .claude/settings.json and
+// .codex/hooks.json, 120 s -- the host kills the whole hook at that mark. On a
+// machine running other suites at once, anneal's whole suite took 93-122 s and
+// collet's 59-104 s on v22.22.2, so the hook runs only the test files that
+// reach the edit: 27-90 s under the same load. A run slower than this reports
+// "did not complete", not a verdict -- raise both numbers together to change it.
 const TEST_TIMEOUT_MS = 110000;
 
 function readInput() {
@@ -126,10 +127,54 @@ const TEST_ARGS = [
   "--test-reporter-destination=stderr",
 ];
 
-function runTests(pluginRoot, timeout = TEST_TIMEOUT_MS) {
+const SOURCE = /\.[cm]?js$/i;
+const TEST_FILE = /\.test\.[cm]?js$/i;
+
+function pluginFiles(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.name === "node_modules" || entry.name.startsWith(".")) return [];
+    const full = path.join(dir, entry.name);
+    return entry.isDirectory() ? pluginFiles(full) : SOURCE.test(entry.name) ? [full] : [];
+  });
+}
+
+const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Whether a file's text can reach a target file: a quoted string that ends in the target's name, with or without its
+// extension, as a relative require or import does and as a path joined from parts does. A template is also reached by
+// a quoted name of a folder on its path, as a script that copies every template of a folder does.
+function reaches(text, target, pluginRoot) {
+  const name = path.basename(target);
+  const stem = name.replace(SOURCE, "");
+  const parts = path.relative(pluginRoot, path.dirname(target)).split(path.sep).filter(Boolean);
+  const folders = parts[0] && parts[0].toLowerCase() === "templates" ? parts : [];
+  const quoted = new RegExp(String.raw`[/\\"'\x60](?:${escape(name)}|${escape(stem)})["'\x60]`);
+  return quoted.test(text) || folders.some((folder) => new RegExp(String.raw`["'\x60]${escape(folder)}["'\x60/]`).test(text));
+}
+
+// The test files that reach an edited file, directly or through other files of the plugin, relative to the plugin.
+// Over-inclusion only costs time. Null when no test reaches it, so that the whole suite runs.
+function affectedTests(pluginRoot, edited) {
+  const texts = new Map(pluginFiles(pluginRoot).map((file) => [file, fs.readFileSync(file, "utf8")]));
+  const seen = new Set(edited.map((file) => path.resolve(file)));
+  for (const queue = [...seen]; queue.length;) {
+    const target = queue.shift();
+    for (const [file, text] of texts) {
+      if (!seen.has(file) && reaches(text, target, pluginRoot)) {
+        seen.add(file);
+        queue.push(file);
+      }
+    }
+  }
+  const tests = [...seen].filter((file) => TEST_FILE.test(file) && texts.has(file)).map((file) => path.relative(pluginRoot, file)).sort();
+  return tests.length ? tests : null;
+}
+
+// `files` are the test files to run, relative to the plugin; without them node discovers every test file itself.
+function runTests(pluginRoot, timeout = TEST_TIMEOUT_MS, files = []) {
   if (timeout <= 0) return { passed: false, output: "Hook test budget exhausted before this suite started." };
   try {
-    execFileSync(process.execPath, TEST_ARGS, { cwd: pluginRoot, stdio: "pipe", timeout, env: cleanEnv() });
+    execFileSync(process.execPath, [...TEST_ARGS, ...files], { cwd: pluginRoot, stdio: "pipe", timeout, env: cleanEnv() });
     return { passed: true };
   } catch (err) {
     const output = `${err.stdout || ""}${err.stderr || ""}` || err.message || "";
@@ -147,15 +192,17 @@ function main() {
     const pluginRoot = findPluginRoot(root, file);
     if (pluginRoot && fs.existsSync(path.join(pluginRoot, "tests"))) {
       if (!plugins.has(pluginRoot)) plugins.set(pluginRoot, new Set());
-      plugins.get(pluginRoot).add(path.basename(file));
+      plugins.get(pluginRoot).add(path.resolve(file));
     }
   }
   const deadline = Date.now() + TEST_TIMEOUT_MS;
   const feedback = [];
   for (const [pluginRoot, files] of plugins) {
-    const result = runTests(pluginRoot, deadline - Date.now());
+    // A deleted or moved file has no text, so the tests that named its path still reach it by name.
+    const tests = affectedTests(pluginRoot, [...files]) || [];
+    const result = runTests(pluginRoot, deadline - Date.now(), tests);
     if (result.passed) continue; // silent on green
-    feedback.push(failureContext(pluginRoot, [...files].join(", "), result));
+    feedback.push(failureContext(pluginRoot, [...files].map((file) => path.basename(file)).join(", "), result, tests));
   }
   if (!feedback.length) return;
   const payload = {
@@ -167,9 +214,10 @@ function main() {
   process.stdout.write(Buffer.from(JSON.stringify(payload), "utf-8"));
 }
 
-function failureContext(pluginRoot, edited, result) {
+function failureContext(pluginRoot, edited, result, tests = []) {
   const stats = (result.output.match(/^(?:# (?:tests|pass|fail) |Suite failed outside its tests: ).+$/gm) || []).join("; ");
   const pluginName = path.basename(pluginRoot);
+  const ran = tests.length ? ` (${tests.length} test file${tests.length === 1 ? " that reaches" : "s that reach"} the edit)` : "";
 
   // No TAP summary means the run never reached a verdict -- killed by the
   // timeout, or node bailed before the first test. Say so rather than blame a
@@ -177,7 +225,7 @@ function failureContext(pluginRoot, edited, result) {
   const verdict = stats ? "failed" : "did not complete";
   const detail = stats || result.output.trim().split(/\r?\n/).slice(-3).join(" ").slice(0, 300);
 
-  return `[slag] node --test ${pluginName}/ ${verdict} after this edit to ${edited}. ` +
+  return `[slag] node --test ${pluginName}/${ran} ${verdict} after this edit to ${edited}. ` +
     `${detail} Run \`npm run check\` from the repository root for the full trace before moving on.`;
 }
 
@@ -189,4 +237,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, findPluginRoot, runTests, repoRoot, editedPaths };
+module.exports = { main, findPluginRoot, affectedTests, runTests, repoRoot, editedPaths };

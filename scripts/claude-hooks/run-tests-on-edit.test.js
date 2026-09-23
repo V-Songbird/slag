@@ -23,15 +23,25 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const HOOK_PATH = path.join(__dirname, 'run-tests-on-edit.js');
-const { findPluginRoot, runTests, editedPaths, repoRoot } = require('./run-tests-on-edit');
+const { findPluginRoot, affectedTests, runTests, editedPaths, repoRoot } = require('./run-tests-on-edit');
+// How long the registered command may take to spawn and finish.
+const SPAWN_TIMEOUT_MS = 60000;
 
-function runHook(payload, env) {
-  return spawnSync('node', [HOOK_PATH], {
+// Each end-to-end run spawns the hook, which spawns node --test in a fake plugin. With 19-25 other node --test
+// processes on the machine, and again with the anneal and collet suites running beside this file, the slowest of 66
+// runs took 7.0 s, under half of this limit, so the limit stays. A run that never finishes is killed at it, and
+// runHook fails the test even when the test only reads stdout.
+const HOOK_TIMEOUT_MS = 30000;
+
+function runHook(payload, env, hook = HOOK_PATH, timeout = HOOK_TIMEOUT_MS) {
+  const result = spawnSync('node', [hook], {
     input: JSON.stringify(payload),
     encoding: 'utf-8',
-    timeout: 30000,
+    timeout,
     env: { ...process.env, ...(env || {}) },
   });
+  assert.equal(result.error, undefined, `the hook run did not finish within ${timeout} ms`);
+  return result;
 }
 
 /** Build a throwaway repo root with one fake plugin folder (marked via .claude-plugin/plugin.json). */
@@ -141,6 +151,68 @@ describe('runTests', () => {
   });
 });
 
+describe('affectedTests', () => {
+  // A plugin whose tests reach its files in the three ways the hook follows: a relative require, a path joined from a
+  // file's name, and a script that copies every template of a folder it names.
+  function makeLinkedPlugin() {
+    const repo = makeFakeRepo();
+    const write = (file, text) => {
+      fs.mkdirSync(path.dirname(path.join(repo.pluginRoot, file)), { recursive: true });
+      fs.writeFileSync(path.join(repo.pluginRoot, file), text);
+    };
+    write('scripts/format.js', 'module.exports = (cents) => (cents / 100).toFixed(2);');
+    write('scripts/cart.js', "const format = require('./format');\nmodule.exports = (items) => format(items.length);");
+    write('scripts/mount.mjs', "import { readdirSync } from 'node:fs';\nexport const checks = readdirSync(new URL('../templates/' + 'checks', import.meta.url));");
+    write('templates/checks/scope.mjs', 'export default 1;');
+    write('hooks/guard.js', 'module.exports = 1;');
+    write('tests/cart.test.js', "require('node:test')('cart', () => require('../scripts/cart.js'));");
+    write('tests/mount.test.js', "const path = require('path');\nrequire('node:test')('mount', () => path.join(__dirname, '..', 'scripts', 'mount.mjs'));");
+    write('tests/guard.test.js', "require('node:test')('guard', () => require('../hooks/guard.js'));");
+    return repo;
+  }
+
+  test('finds the tests that reach an edited file directly or through other files, and only those', () => {
+    const { root, pluginRoot } = makeLinkedPlugin();
+    try {
+      const reach = (file) => affectedTests(pluginRoot, [path.join(pluginRoot, file)]);
+      assert.deepEqual(reach('scripts/format.js'), [path.join('tests', 'cart.test.js')]);
+      assert.deepEqual(reach('templates/checks/scope.mjs'), [path.join('tests', 'mount.test.js')]);
+      assert.deepEqual(reach('hooks/guard.js'), [path.join('tests', 'guard.test.js')]);
+      const both = affectedTests(pluginRoot, [path.join(pluginRoot, 'scripts', 'format.js'), path.join(pluginRoot, 'hooks', 'guard.js')]);
+      assert.deepEqual(both, [path.join('tests', 'cart.test.js'), path.join('tests', 'guard.test.js')]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a file no test reaches leaves the whole suite to run', () => {
+    const { root, pluginRoot } = makeLinkedPlugin();
+    try {
+      fs.writeFileSync(path.join(pluginRoot, 'scripts', 'unused.js'), 'module.exports = 0;');
+      assert.equal(affectedTests(pluginRoot, [path.join(pluginRoot, 'scripts', 'unused.js')]), null);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('the hook runs only the tests that reach the edit, and names how many when one fails', () => {
+    const { root, pluginRoot } = makeLinkedPlugin();
+    try {
+      fs.writeFileSync(path.join(pluginRoot, 'tests', 'guard.test.js'),
+        "require('node:test')('guard', () => { require('../hooks/guard.js'); throw new Error('guard broke'); });");
+      const edit = (file) => runHook({ tool_name: 'Edit', tool_input: { file_path: path.join(pluginRoot, file) } }, { CLAUDE_PROJECT_DIR: root });
+      const quiet = edit('scripts/format.js');
+      assert.equal(quiet.status, 0, quiet.stderr);
+      assert.equal(quiet.stdout, '', 'the failing guard test does not reach format.js');
+      const loud = JSON.parse(edit('hooks/guard.js').stdout).hookSpecificOutput.additionalContext;
+      assert.match(loud, /demo-plugin\/ \(1 test file that reaches the edit\) failed after this edit to guard\.js/);
+      assert.match(loud, /# fail 1/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('main (end-to-end against a real plugin)', () => {
   test('stays silent when the owning plugin\'s tests are green', () => {
     const { root, pluginRoot } = makeFakeRepo();
@@ -191,6 +263,17 @@ describe('main (end-to-end against a real plugin)', () => {
       assert.match(context, /Suite failed outside its tests: "a suite whose after hook throws"/);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a hook run that never finishes fails its test', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slag-hook-'));
+    try {
+      const hang = path.join(dir, 'hang.js');
+      fs.writeFileSync(hang, 'setInterval(() => {}, 1000);');
+      assert.throws(() => runHook({}, {}, hang, 1000), /did not finish within 1000 ms/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -296,6 +379,8 @@ describe('patch events', () => {
     assert.match(result.output, /budget exhausted/);
   });
 
+  // powershell.exe alone takes about 9 s to start and run this command on a machine running several suites at once, so
+  // the spawn has a minute. A command that hangs is still killed at that mark, and its null status fails the test.
   test('registered command runs from a repository subdirectory', () => {
     const config = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../.codex/hooks.json'), 'utf8'));
     const group = config.hooks.PostToolUse[0];
@@ -306,7 +391,7 @@ describe('patch events', () => {
     const args = process.platform === 'win32'
       ? ['-NoProfile', '-Command', command.command] : ['-c', command.command];
     const result = spawnSync(shell, args, {
-      cwd: __dirname, input: '{}', encoding: 'utf8', timeout: 10000,
+      cwd: __dirname, input: '{}', encoding: 'utf8', timeout: SPAWN_TIMEOUT_MS,
     });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, '');

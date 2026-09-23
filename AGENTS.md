@@ -35,7 +35,7 @@ see [eval prerequisites](anneal/docs/knowledge/workflows.md#running-the-evals).
 | `collet/` | Harness skills, runtime templates, language catalogues, hooks and tests |
 | `.claude-plugin/marketplace.json` | Claude marketplace and its plugin versions |
 | `.agents/plugins/marketplace.json` | Codex marketplace with local plugin sources |
-| `scripts/` | Repository integrity tests, edit-triggered test hook, optional Git gates, and the suite-failure reporter that `npm run check` and the edit hook add |
+| `scripts/` | Repository integrity tests, the edit hook that reruns the test files reaching an edited plugin file, optional Git gates, and the suite-failure reporter that `npm run check` and the edit hook add |
 | `docs/knowledge/` | Repository contracts and contributor documentation |
 | `<plugin>/docs/knowledge/` | Plugin workflows, technical contracts and changelog |
 
