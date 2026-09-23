@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: migration-moves-into-new-directory
+description: The clean repository of migration-applies-approved-step, whose one finding is the generic name src/utils.js. The user approves one step, moving it to src/lib/money.js, whose directory does not exist yet. The run must create the branch, the directory and the move each in a Bash call of its own, rewrite both imports, keep the checks passing and change nothing else.
+tags: [migration]
+context:
+  scaffold_script: new-directory-fixture.sh

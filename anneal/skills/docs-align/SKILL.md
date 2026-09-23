@@ -20,9 +20,11 @@ metadata:
 
 Make the maintained documentation agree with what the project actually does, and make its development instructions usable by each intended host. A complete pass accounts for every in-scope document; it does not require changing every file.
 
-Argument: `$ARGUMENTS`. If the host leaves it literal, read the request instead. `audit`, a review request or an explicit no-edit instruction means report only, including no saved report. Otherwise an explicit reconciliation or cleanup request authorizes ordinary in-scope documentation fixes. Resolve an ambiguous request as an audit. A path narrows the pass to that area plus its incoming references; state that boundary.
+Argument: `$ARGUMENTS`. If the host leaves it literal, read the request instead. `audit`, a review request or an explicit no-edit instruction means report only: nothing is written in the project and no report is saved. Otherwise an explicit reconciliation or cleanup request authorizes ordinary in-scope documentation fixes. Resolve an ambiguous request as an audit. A path narrows the pass to that area plus its incoming references; state that boundary.
 
 On Claude Code invoke `/anneal:docs-align`; on Codex use `$docs-align`; on Antigravity use `/docs-align`. Find the plugin files through `${CLAUDE_PLUGIN_ROOT}` on Claude Code, or resolve `../../` from this file on other hosts. Resolve target paths against the project root, never the installed plugin directory.
+
+On Antigravity, give every command the project root the person named as its working directory, the `Cwd` of `run_command`. Without it, commands can run in Antigravity's own scratch directory instead of the project. When the person named no project root, ask for it before running anything.
 
 ## Scope and authority
 
@@ -38,9 +40,9 @@ Confirm the project root and capture the starting Git status, including ignored 
 
 Inventory by purpose, not extension alone. Include maintained docs and nested READMEs, instructions, examples, templates, manifests, toolchain pins, host adapters, check commands, repository metadata and ignore rules. Classify vendored/generated content, historical records, private local notes and unrelated artifacts separately. Do not rewrite third-party READMEs or historical claims into present-tense instructions.
 
-Maintain one coverage checklist with each in-scope area marked reviewed, changed, blocked or excluded with a reason. Reuse the project's current task note when authorized; keep it in the reply in audit mode. Read summaries and entry points first, then follow references and open documents in bounded batches. Account for all maintained documents before claiming a complete pass; sampling is a partial review.
+Maintain one coverage checklist with each in-scope area marked reviewed, changed, blocked or excluded with a reason. Reuse the project's current task note when authorized. In audit mode, keep the checklist in a scratch file outside the repository when the host names a scratch directory for the session that you can write without a new approval; otherwise keep it in the reply. Whether Codex or Antigravity offers such a directory has not been checked. Name the file's path in the reply while it exists, read it again after a compaction, and delete it before the final report. Read summaries and entry points first, then follow references and open documents in bounded batches. Account for all maintained documents before claiming a complete pass; sampling is a partial review.
 
-Build a compact finding ledger as you go: location, claim or defect, source of truth, evidence, consequence, proposed action and verification status. Deduplicate findings at their source so one obsolete command repeated across files becomes one coordinated fix.
+Build a compact finding ledger as you go: location, claim or defect, source of truth, evidence, consequence, proposed action and verification status: verified, contradicted or unverified. Deduplicate findings at their source so one obsolete command repeated across files becomes one coordinated fix.
 
 ## 2. Reuse the specialist passes
 
@@ -54,7 +56,7 @@ Use the findings as candidates, and read [the conventions](../repo-layout/refere
 
 **Every maintained README.** Locate and read the available `readme` skill once, then use its Review mode on each in-scope README, including nested packages, examples and tools. In a cleanup, use its Edit or Improve mode only where findings justify it. Group shared corrections while retaining a coverage entry for each README. Keep detailed rubric results in the review ledger; synthesize the actionable findings in the final report unless the user requests full scores. If the skill is unavailable, disclose that gap and perform a bounded manual review of purpose, fit, prerequisites, first working result and next steps; never claim `/readme` ran or install it silently.
 
-Independent read-only reviewers can divide README groups, host setup and claim verification when delegation is available. Give each the same scope and instruction sources, keep edits with one owner, and merge duplicate findings. A host without delegation performs the same pass inline.
+Independent read-only reviewers can divide README groups, host setup and claim verification when delegation is available. Give each the same scope and instruction sources, keep edits with one owner, and merge duplicate findings. Before a reviewer's finding enters the ledger, check the evidence it cites: open the cited file at its line, or compare the cited command output with a run that step 3 allows. A finding whose evidence holds is verified; record one the source contradicts as contradicted, and one you cannot confirm as unverified. A host without delegation performs the same pass inline.
 
 ## 3. Reconcile against evidence
 
@@ -70,7 +72,7 @@ For stale content choose the smallest useful action: correct, consolidate, archi
 
 ## 4. Apply and verify the reconciliation
 
-In audit mode, return the ledger and stop without writing. In cleanup mode, apply the verified in-scope fixes as a coherent batch and continue independent work while a material decision is pending. Do not ask for approval again for edits the owner already authorized. Keep uncertain claims qualified or explicitly unresolved; do not replace them with plausible facts.
+In audit mode, return the ledger and stop without writing in the project. In cleanup mode, apply the verified in-scope fixes as a coherent batch and continue independent work while a material decision is pending. Do not ask for approval again for edits the owner already authorized. Keep uncertain claims qualified or explicitly unresolved; do not replace them with plausible facts.
 
 Follow the project's actual docs policy for location, frontmatter, stable filenames, document types and task-note closure. Update related-file metadata, examples, links and active invocation names together. Keep durable content in one current document per topic when that policy requires it. Do not retrofit document schemas onto README or instruction files if they are exempt.
 
@@ -80,6 +82,6 @@ Review the final diff and `git status --short --ignored` against the starting sn
 
 ## 5. Report the outcome
 
-State scope and coverage, the changes made or proposed, meaningful removals and their rationale, the exact checks and whether each passed, failed or was not run, and remaining blockers. Separate static host review from live discovery and execution for Claude Code, Codex and Antigravity. Name unavailable tools and instruction sources. Say explicitly when privacy review excludes Git history or actual package contents.
+Lead with what the owner owes: the decisions, approvals and remaining blockers that only they can resolve. Then state scope and coverage, the changes made or proposed, meaningful removals and their rationale, and the exact checks and whether each passed, failed or was not run. Separate static host review from live discovery and execution for Claude Code, Codex and Antigravity. Name unavailable tools and instruction sources. Say explicitly when privacy review excludes Git history or actual package contents.
 
 Stop when all in-scope areas have a disposition, every changed claim has evidence or a clear qualification, and validation is recorded. A pass with blocked areas is partial. Do not claim that the repository is leak-free, that every sentence is proven, or that all hosts work from a static review.

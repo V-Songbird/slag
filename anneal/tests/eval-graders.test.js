@@ -387,6 +387,9 @@ describe("migration-applies-approved-step", () => {
   let checks;
   let script;
   const BRANCH = "anneal/2026-09-22";
+  // The skill's POSIX baseline form for the case's check: output, exit code and
+  // line count, with no file.
+  const POSIX_CHECKS = `{ npm test 2>&1; echo "exit $?"; } | awk '{ print } END { print "lines", NR - 1 }'`;
   // The entries the harness and its sandbox add to a run's workspace.
   const ADDED = [".bash_profile", ".bashrc", ".claude/", ".eval-artifacts", ".gitconfig", ".gitmodules", ".idea", ".mcp.json", ".profile", ".ripgreprc", ".vscode", ".zprofile", ".zshrc"];
   const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: "1" };
@@ -417,22 +420,24 @@ describe("migration-applies-approved-step", () => {
     return { passed: run.status === 0, output: `${run.stdout}${run.stderr}` };
   }
 
-  // A run on a copy of the fixture. Each step is a Bash command for the trace,
-  // done here for real; the run keeps the created paths and the trace.
+  // A run on a copy of the fixture. Each step is a Bash call and its trace
+  // events, done here for real; the run keeps the calls, the created paths and
+  // the trace.
   function migrate(steps) {
     const dir = tempDir("anneal-graders-approved-run-");
     fs.cpSync(fixture, dir, { recursive: true });
     const before = listRunFiles(dir);
+    // The prompt's slash command expands the skill without a Skill call; the
+    // expanded skill reads its conventions before it plans.
+    const calls = [{ name: "Read", input: { file_path: "/plugins/anneal/skills/repo-layout/references/conventions.md" } }];
     const events = [];
     const bashStep = (command, perform) => {
+      calls.push({ name: "Bash", input: { command } });
       events.push({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: `toolu_${events.length}`, name: "Bash", input: { command } }] } });
       const output = perform() ?? "";
       events.push({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: `toolu_${events.length - 1}`, content: output }] } });
     };
     steps(dir, bashStep);
-    // The prompt's slash command expands the skill without a Skill call; the
-    // expanded skill reads its conventions before it plans.
-    const calls = [{ name: "Read", input: { file_path: "/plugins/anneal/skills/repo-layout/references/conventions.md" } }];
     return { dir, calls, created: createdPaths(before, listRunFiles(dir)), trace: events.map((event) => JSON.stringify(event)).join("\n") };
   }
 
@@ -440,14 +445,15 @@ describe("migration-applies-approved-step", () => {
   const commit = (dir, subject) => git(dir, "commit", "-qm", subject, "-m", "src/utils.js moved; the imports that named it follow.");
   const rename = (dir) => fs.renameSync(path.join(dir, "src/utils.js"), path.join(dir, "src/money.js"));
 
-  // The approved step as the skill applies it.
-  function approvedStep(dir, step, { plainMove = false, reporter = "tap" } = {}) {
+  // The approved step as the skill applies it. `checks` is the command that
+  // reruns the checks after the move.
+  function approvedStep(dir, step, { plainMove = false, reporter = "tap", checks = "npm test" } = {}) {
     step(`git switch -c ${BRANCH}`, () => git(dir, "switch", "-q", "-c", BRANCH));
     if (plainMove) step("mv src/utils.js src/money.js", () => rename(dir));
     else step("git mv src/utils.js src/money.js", () => git(dir, "mv", "src/utils.js", "src/money.js"));
     step('node "/plugins/anneal/scripts/update-imports.js" --root . --from src/utils.js --to src/money.js', () => move(dir, "src/money.js"));
     step("git add -A src", () => git(dir, "add", "-A", "src"));
-    step("npm test", () => check(dir, reporter).output);
+    step(checks, () => check(dir, reporter).output);
     step('git commit -m "anneal: rename src/utils.js to src/money.js"', () => commit(dir, "anneal: rename src/utils.js to src/money.js"));
   }
 
@@ -483,6 +489,11 @@ describe("migration-applies-approved-step", () => {
     "the approved step as the skill applies it": { steps: (dir, step) => approvedStep(dir, step), fails: [] },
     "the approved step with a plain mv": { steps: (dir, step) => approvedStep(dir, step, { plainMove: true }), fails: [] },
     "the approved step checked with the spec reporter": { steps: (dir, step) => approvedStep(dir, step, { reporter: "spec" }), fails: [] },
+    "the approved step checked in the skill's POSIX form": { steps: (dir, step) => approvedStep(dir, step, { checks: POSIX_CHECKS }), fails: [] },
+    "the approved step with its check output saved to a file": {
+      steps: (dir, step) => approvedStep(dir, step, { checks: "npm test > /tmp/checks.out 2>&1; cat /tmp/checks.out; rm -f /tmp/checks.out" }),
+      fails: ["checks-run-without-a-file"],
+    },
     "no migration": {
       steps: () => {},
       fails: ["moved-file-intact", "old-path-untracked", "migration-branch-created", "step-committed", "cart-import-rewritten", "summary-import-rewritten", "checks-pass-after-the-move"],
@@ -619,8 +630,260 @@ describe("migration-applies-approved-step", () => {
     assert.strictEqual(passes(grader, { calls: [READ("/work/cwd/docs/conventions.md")] }), false, "the project's own conventions");
   });
 
+  describe("checks-run-without-a-file", () => {
+    let grader;
+    before(() => {
+      grader = checks["checks-run-without-a-file"];
+    });
+
+    test("it is scored in both arms and allows no such call", () => {
+      assert.deepStrictEqual([grader.type, grader.tool, grader.min, grader.max, grader.arm], ["tool_used", "Bash", "0", "0", undefined]);
+    });
+
+    test("the forms that stopped the interactive migration runs fail it: a temporary file, a scratchpad file and tee", () => {
+      // The refused baseline commands of two interactive runs, scratchpad paths replaced.
+      const scratch = "/tmp/claude-1000/-work-cwd/0a1b2c3d/scratchpad";
+      const recorded = [
+        'npm test > /tmp/x.out 2>&1; echo "EXIT=$?"; echo "LINES=$(wc -l < /tmp/x.out)"; cat /tmp/x.out; rm -f /tmp/x.out; echo "--- status after ---"; git status --porcelain',
+        `OUT="$CLAUDE_SCRATCHPAD/base.out"; OUT="\${OUT:-./.anneal-base.out}"; npm test > "${scratch}/base.out" 2>&1; echo "EXIT=$?"; wc -l < "${scratch}/base.out"; cat "${scratch}/base.out"; echo "--- status after ---"; git status --porcelain`,
+        'npm test > /tmp/../dev/null 2>&1; echo "skip"; npm test 2>&1 | tee "$SCRATCH/baseline.txt" 2>/dev/null | wc -l; echo "exit=${PIPESTATUS[0]}"',
+        `npm test 2>&1 | tee ${scratch}/baseline.txt; echo "EXIT=\${PIPESTATUS[0]}"; wc -l < ${scratch}/baseline.txt`,
+      ];
+      for (const command of recorded) assert.strictEqual(passes(grader, { calls: bash(command) }), false, command);
+    });
+
+    test("every baseline form the skill gives passes it", () => {
+      // The skill's forms, each with <check> standing for the check command.
+      const forms = [...read(path.join(__dirname, "..", "skills", "repo-layout"), "SKILL.md").matchAll(/`([^`]*<check>[^`]*)`/g)].map(([, form]) => form);
+      assert.ok(forms.length >= 2, "the skill gives a POSIX and a PowerShell form");
+      assert.ok(forms.includes(POSIX_CHECKS.replace("npm test", "<check>")), "the POSIX form replayed above is the skill's");
+      for (const form of forms) {
+        for (const command of ["npm test", "node --test"]) {
+          assert.strictEqual(passes(grader, { calls: bash(form.replaceAll("<check>", command)) }), true, form);
+        }
+      }
+    });
+
+    test("other ways to send a check's output into a file or through tee fail it", () => {
+      const saved = [
+        '{ npm test 2>&1; echo "exit $?"; } > baseline.txt',
+        `{ npm test 2>&1; echo "exit $?"; } | tee baseline.txt | awk '{ print } END { print "lines", NR - 1 }'`,
+        '( npm test 2>&1; echo "exit $?" ) > baseline.txt',
+        "npm test &> out.txt",
+        "npm run test >> log.txt",
+        "npm test |& tee out.txt",
+        "npm test 2>&1 | awk '{ print }' > out.txt",
+        "node --test --test-reporter=tap > out.tap",
+        "git status --porcelain\nnpm test > out.txt",
+        'bash -c "npm test > out.txt"',
+        "$out = npm test 2>&1 | Tee-Object -FilePath out.txt",
+        "npm test 2>&1 | Out-File baseline.txt",
+      ];
+      for (const command of saved) assert.strictEqual(passes(grader, { calls: bash(command) }), false, command);
+    });
+
+    test("a check that prints, discards or pages its output, and a redirect of another command, pass it", () => {
+      const allowed = [
+        "npm test",
+        "npm test 2>&1 | tail -20",
+        'npm test > /dev/null 2>&1; echo "exit $?"',
+        "npm test 2>&1 >&2",
+        'node "/plugins/anneal/scripts/audit.js" --root . --json > /tmp/audit.json',
+        'node "/plugins/anneal/scripts/audit.js" --root "$(pwd)" --json | tee "$CLAUDE_SCRATCHPAD/audit.json"',
+        "git status --porcelain > /tmp/status.txt; npm test",
+        "npm test; git diff > /tmp/diff.txt",
+        'echo "baseline" > notes.txt && npm test 2>&1',
+        "npm run testing > out.txt",
+      ];
+      for (const command of allowed) assert.strictEqual(passes(grader, { calls: bash(command) }), true, command);
+      const described = [{ name: "Bash", input: { command: "git status --short", description: "Then run npm test > baseline.txt" } }];
+      assert.strictEqual(passes(grader, { calls: described }), true, "a description is not a command");
+    });
+
+    test("the first paired run's calls pass it in both arms", () => {
+      for (const calls of Object.values(PAIRED_RUN)) assert.strictEqual(passes(grader, { calls }), true);
+    });
+  });
+
   test("the fixture's check fails wherever the move broke an import", () => {
     const run = migrate(RUNS["the move without its imports"].steps);
     assert.strictEqual(check(run.dir).passed, false);
+  });
+
+  // migration-moves-into-new-directory scaffolds this case's fixture, which has
+  // no src/lib, and approves a move into that directory.
+  describe("migration-moves-into-new-directory", () => {
+    const NEW = path.join(EVALS, "migration-moves-into-new-directory");
+    const TO = "src/lib/money.js";
+    let newChecks;
+    let alone;
+    before(() => {
+      newChecks = graders(NEW);
+      alone = newChecks["branch-directory-and-move-alone"];
+    });
+
+    test("its scaffold runs this case's fixture script, whose repository has no src/lib", () => {
+      assert.match(read(NEW, "case.yaml"), /^ {2}scaffold_script: new-directory-fixture\.sh$/m);
+      assert.match(read(NEW, "new-directory-fixture.sh"), /^bash "\$\(dirname "\$0"\)\/\.\.\/migration-applies-approved-step\/approved-step-fixture\.sh"$/m);
+      assert.strictEqual(fs.existsSync(path.join(fixture, "src/lib")), false);
+    });
+
+    test("the graders it shares with this case are the same files", () => {
+      const shared = ["checks-run-without-a-file", "manifest-unchanged", "map-file-unchanged", "migration-branch-created", "skill-fired", "step-committed", "test-unchanged"];
+      for (const name of shared) assert.strictEqual(read(path.join(NEW, "graders"), `${name}.md`), read(path.join(CASE, "graders"), `${name}.md`), name);
+    });
+
+    // The approved step as the skill applies it: the branch, the directory and
+    // the move each in a Bash call of its own. `join` names commands to run as
+    // one call instead, and `separator` joins them.
+    function newDirectoryStep(dir, step, { checks = "npm test", join = [], separator = " && " } = {}) {
+      const commands = [
+        ["branch", `git switch -c ${BRANCH}`, () => git(dir, "switch", "-q", "-c", BRANCH)],
+        ["directory", "mkdir -p src/lib", () => fs.mkdirSync(path.join(dir, "src/lib"), { recursive: true })],
+        ["move", `git mv src/utils.js ${TO}`, () => git(dir, "mv", "src/utils.js", TO)],
+        ["status", "git status --porcelain", () => git(dir, "status", "--porcelain")],
+      ];
+      const joined = commands.filter(([name]) => join.includes(name));
+      for (const [name, command, perform] of commands) {
+        if (joined.length && name === joined[0][0]) step(joined.map(([, text]) => text).join(separator), () => joined.map(([, , run]) => run() ?? "").join(""));
+        else if (!join.includes(name) && name !== "status") step(command, perform);
+      }
+      step(`node "/plugins/anneal/scripts/update-imports.js" --root . --from src/utils.js --to ${TO}`, () => move(dir, TO));
+      step("git add -A src", () => git(dir, "add", "-A", "src"));
+      step(checks, () => check(dir).output);
+      step(`git commit -m "anneal: move src/utils.js to ${TO}"`, () => commit(dir, `anneal: move src/utils.js to ${TO}`));
+    }
+
+    const CHAINED = ["branch-directory-and-move-alone"];
+    const NEW_RUNS = {
+      "the approved step as the skill applies it": { steps: (dir, step) => newDirectoryStep(dir, step), fails: [] },
+      "the approved step checked in the skill's POSIX form": { steps: (dir, step) => newDirectoryStep(dir, step, { checks: POSIX_CHECKS }), fails: [] },
+      "the branch, directory and move chained with && and a status": {
+        steps: (dir, step) => newDirectoryStep(dir, step, { join: ["branch", "directory", "move", "status"] }),
+        fails: CHAINED,
+      },
+      "the directory and move chained with ;": { steps: (dir, step) => newDirectoryStep(dir, step, { join: ["directory", "move"], separator: "; " }), fails: CHAINED },
+      "the directory and move on two lines of one call": { steps: (dir, step) => newDirectoryStep(dir, step, { join: ["directory", "move"], separator: "\n" }), fails: CHAINED },
+      "the branch chained with the directory": { steps: (dir, step) => newDirectoryStep(dir, step, { join: ["branch", "directory"] }), fails: CHAINED },
+      "the move chained with a status check": { steps: (dir, step) => newDirectoryStep(dir, step, { join: ["move", "status"] }), fails: CHAINED },
+      "the check output saved to a file": {
+        steps: (dir, step) => newDirectoryStep(dir, step, { checks: "npm test 2>&1 | tee /tmp/checks.out" }),
+        fails: ["checks-run-without-a-file"],
+      },
+      "the move kept in src, as the other case approves": {
+        steps: (dir, step) => approvedStep(dir, step),
+        fails: ["moved-file-intact", "old-path-untracked", "cart-import-rewritten", "summary-import-rewritten", "checks-pass-after-the-move", "only-the-approved-step"],
+      },
+      "no migration": {
+        steps: () => {},
+        fails: ["moved-file-intact", "old-path-untracked", "migration-branch-created", "step-committed", "cart-import-rewritten", "summary-import-rewritten", "checks-pass-after-the-move"],
+      },
+    };
+
+    for (const [name, { steps, fails }] of Object.entries(NEW_RUNS)) {
+      test(`${name}: ${fails.length ? `fails ${fails.join(", ")}` : "passes every grader"}`, () => {
+        const run = migrate(steps);
+        const failed = Object.values(newChecks).filter((grader) => !passes(grader, run)).map((grader) => grader.name).sort();
+        assert.deepStrictEqual(failed, [...fails].sort(), `created:\n${run.created}`);
+        if (!fails.length || fails === CHAINED) assert.strictEqual(check(run.dir).passed, true, "the fixture's check passes after the step");
+      });
+    }
+
+    test("branch-directory-and-move-alone fails the refused chain of an interactive run and passes each command alone", () => {
+      assert.deepStrictEqual([alone.type, alone.tool, alone.min, alone.max, alone.arm], ["tool_used", "Bash", "0", "0", undefined]);
+      assert.strictEqual(passes(alone, { calls: bash("git checkout -b anneal/2026-09-22 && mkdir -p src/lib && git mv src/utils.js src/lib/money.js && git status --porcelain") }), false);
+      const chained = [
+        "git switch -c anneal/2026-09-22 && git status",
+        "git rev-parse HEAD; git switch -c anneal/2026-09-22",
+        "git branch anneal/2026-09-22 && git switch anneal/2026-09-22",
+        "mkdir -p src/lib || true",
+        "cd /work/cwd && git mv src/utils.js src/lib/money.js",
+        "mv src/utils.js src/lib/money.js && node update-imports.js",
+        "New-Item -ItemType Directory -Path src/lib; git mv src/utils.js src/lib/money.js",
+        "New-Item -ItemType Directory -Path src/lib\nMove-Item src/utils.js src/lib/money.js",
+      ];
+      for (const command of chained) assert.strictEqual(passes(alone, { calls: bash(command) }), false, command);
+      const single = [
+        "git switch -c anneal/2026-09-22",
+        "git checkout -b anneal/2026-09-22",
+        "mkdir -p src/lib",
+        "New-Item -ItemType Directory -Path src/lib",
+        "git mv src/utils.js src/lib/money.js",
+        "git mv src/utils.js src/lib/money.js\n",
+        "git rev-parse HEAD && git rev-parse --verify --quiet refs/heads/anneal/2026-09-22",
+        "git branch --show-current && git status --porcelain",
+        "git add -A src && git status --porcelain",
+        'node "/plugins/anneal/scripts/update-imports.js" --root . --from src/utils.js --to src/lib/money.js',
+        POSIX_CHECKS,
+      ];
+      for (const command of single) assert.strictEqual(passes(alone, { calls: bash(command) }), true, command);
+    });
+
+    test("branch-directory-and-move-alone fails both arms of the other case's first paired run, which chained the move", () => {
+      for (const calls of Object.values(PAIRED_RUN)) assert.strictEqual(passes(alone, { calls }), false);
+    });
+  });
+
+  // plan-flags-a-wrong-importer-count scaffolds this case's fixture and hands over a layout survey whose rename row
+  // claims one importer of src/utils.js. The plan it asks for must show that row flagged with what the search found.
+  describe("plan-flags-a-wrong-importer-count", () => {
+    const WRONG = path.join(EVALS, "plan-flags-a-wrong-importer-count");
+    const REPLY_GRADERS = ["search-result-shown", "stale-row-flagged", "stale-row-not-planned"];
+    let wrongChecks;
+    before(() => {
+      wrongChecks = graders(WRONG);
+    });
+    // The reply graders a plan fails.
+    const failedBy = (reply) => REPLY_GRADERS.filter((name) => !passes(wrongChecks[name], { reply }));
+
+    test("its scaffold runs this case's fixture script, where two files import the file the survey row says one does", () => {
+      assert.match(read(WRONG, "case.yaml"), /^ {2}scaffold_script: wrong-count-fixture\.sh$/m);
+      assert.match(read(WRONG, "wrong-count-fixture.sh"), /^bash "\$\(dirname "\$0"\)\/\.\.\/migration-applies-approved-step\/approved-step-fixture\.sh"$/m);
+      const row = /^\| `src\/utils\.js` \| `src\/money\.js` \| (\d+) \|/m.exec(read(WRONG, "prompt.md"));
+      assert.ok(row, "the prompt carries the survey's rename row in the mapper's format");
+      const importers = listRunFiles(path.join(fixture, "src")).filter((file) => /from "\.\.?\/utils\.js"/.test(read(path.join(fixture, "src"), file)));
+      assert.deepStrictEqual(importers.sort(), ["cart.js", "orders/summary.js"]);
+      assert.notStrictEqual(Number(row[1]), importers.length);
+    });
+
+    test("the graders it shares with the other cases are the same files", () => {
+      assert.strictEqual(read(path.join(WRONG, "graders"), "skill-fired.md"), read(path.join(CASE, "graders"), "skill-fired.md"));
+      assert.strictEqual(read(path.join(WRONG, "graders"), "no-new-refs-or-files.md"), read(path.join(MIGRATION, "graders"), "no-new-refs-or-files.md"));
+    });
+
+    test("a plan that shows the row flagged with what the search found passes, in a list, a table or Spanish", () => {
+      const flagged = [
+        "Plan\n\n1. **Map file.** Nothing to do: `AGENTS.md` is on the sequence.\n\nFlagged survey rows:\n"
+          + "- `src/utils.js` → `src/money.js`: the survey says 1 importer, but the search found 2, `src/cart.js` and `src/orders/summary.js`.\n\n"
+          + "Which steps should I apply?",
+        "No step is planned yet.\n\n**Flagged rows**\n\n| From | To | Survey | Search found |\n| --- | --- | --- | --- |\n"
+          + "| `src/utils.js` | `src/money.js` | 1 | 2: `src/cart.js`, `src/orders/summary.js` |\n\nShould I plan the rename with both importers?",
+        "Filas marcadas:\n- `src/utils.js` → `src/money.js`: la propuesta dice 1 importador; la búsqueda encontró 2 archivos que lo importan, "
+          + "`src/cart.js` y `src/orders/summary.js`.\n\n¿Qué pasos aplico?",
+      ];
+      for (const reply of flagged) assert.deepStrictEqual(failedBy(reply), [], reply);
+    });
+
+    test("a plan that plans the row as proposed, corrects it silently or drops it fails", () => {
+      const plans = {
+        "planned as proposed": ["Plan\n\n1. Rename `src/utils.js` to `src/money.js` (1 importer).\n\nWhich steps should I apply?", REPLY_GRADERS],
+        "planned as proposed in a table": [
+          "| # | Step | Files |\n| --- | --- | --- |\n| 6 | Rename `src/utils.js` → `src/money.js` | 1 importer |", REPLY_GRADERS,
+        ],
+        "corrected without a flag": [
+          "Plan\n\n1. Rename `src/utils.js` to `src/money.js`, with its 2 importers `src/cart.js` and `src/orders/summary.js`.", ["stale-row-flagged"],
+        ],
+        "dropped quietly": ["Plan\n\nNothing to rename. The map file is fine.\n\nWhich steps should I apply?", ["search-result-shown", "stale-row-flagged"]],
+      };
+      for (const [name, [reply, fails]] of Object.entries(plans)) assert.deepStrictEqual(failedBy(reply), [...fails].sort(), name);
+    });
+
+    test("a plan-only run passes the workspace graders, and a run that renamed the file fails them", () => {
+      const plan = migrate(() => {});
+      assert.strictEqual(passes(wrongChecks["no-new-refs-or-files"], plan), true);
+      assert.strictEqual(passes(wrongChecks["skill-fired"], plan), true);
+      const renamed = migrate((dir, step) => approvedStep(dir, step));
+      assert.strictEqual(passes(wrongChecks["no-new-refs-or-files"], renamed), false);
+    });
   });
 });

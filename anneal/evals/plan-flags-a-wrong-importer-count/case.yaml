@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: plan-flags-a-wrong-importer-count
+description: The clean repository of migration-applies-approved-step, where two files import src/utils.js. The user hands over a layout survey whose rename row claims one importer and asks for the plan only. The plan must show that row flagged, with the two importers the search finds, and never plan the rename as proposed or change anything.
+tags: [migration]
+context:
+  scaffold_script: wrong-count-fixture.sh

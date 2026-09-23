@@ -27,7 +27,7 @@ Argument: `$ARGUMENTS`. A host that does not fill that in leaves it as written; 
 
 ## What differs by host
 
-Three things in this procedure have a different name on each host. Everything else is the same everywhere.
+Three things in this procedure have a different name on each host. The notes after the table cover the other host differences.
 
 | | Claude Code | Codex | Antigravity |
 | --- | --- | --- | --- |
@@ -36,6 +36,8 @@ Three things in this procedure have a different name on each host. Everything el
 | The layout survey (step 5) | the `anneal:mapper` subagent | a read-only subagent, or inline | `invoke_subagent`, `TypeName: "research"` |
 
 Where a host has no subagent to delegate to, do the survey inline and keep it short: read the audit's JSON and the files it names, not the tree.
+
+On Antigravity, give every command the project root the person named as its working directory, the `Cwd` of `run_command`. Without it, commands can run in Antigravity's own scratch directory instead of the project. When the person named no project root, ask for it before running anything.
 
 ## Rules for the whole run
 
@@ -80,6 +82,11 @@ Stop and tell the owner when either is true:
 
 Take the check commands from the audit's `checks` line, then from the map file and contributing docs; prefer commands the docs say must pass. Run each once and record the exact command, its exit code and how many lines it printed.
 
+Take all three from that one run, in the shell you already use. The form below prints the check's own output, then `exit <code>`, then `lines <count>`. It needs no temporary file and no `tee`: each of those can cost an approval, and a refused one stops the migration here. Replace `<check>` with the command, and use the same form whenever a later step reruns the checks.
+
+- POSIX shells: `{ <check> 2>&1; echo "exit $?"; } | awk '{ print } END { print "lines", NR - 1 }'`
+- PowerShell: `$out = <check> 2>&1; $out; "exit $LASTEXITCODE"; "lines $($out.Count)"`
+
 - A check that fails now is a pre-existing failure. Show it and ask whether to continue. Never blame a later step for it.
 - A check that prints more than 200 lines when it passes is a candidate for a quieter reporter flag in the plan.
 - Run `git status --porcelain` again. Files the checks created are build output: add them to the ignore step of the plan, and never commit them.
@@ -87,6 +94,8 @@ Take the check commands from the audit's `checks` line, then from the map file a
 ## 5. Plan
 
 When the audit reported `generic-names`, `duplicate-names`, `large-files`, `deep-nesting` or `re-export-files`, hand the layout survey to a subagent with the repository root and the audit JSON, observations included, and base the rename and move steps on its proposal. The survey's instructions are in [../../agents/mapper.md](../../agents/mapper.md) — on a host without its own agent definition, pass that file's body as the subagent's prompt and ignore its frontmatter. Don't survey the tree yourself.
+
+Check each proposed rename and move before it enters the plan. Its `From` file must exist, and its `Importers` count must match the files that import it, found by searching for its path and basename as step 6 does before a move. Show a row that fails either check to the owner as flagged, with what the search found. Never drop it quietly, and never plan it as proposed.
 
 The plan holds structural work. A duplicate name, a deep path or a large file alone is no reason to rename, move or split, and these findings go elsewhere:
 
@@ -107,14 +116,14 @@ Build the plan from these steps, in this order, keeping only the ones with somet
 7. **Moves.** From the approved proposal, each for an observed obstacle that a smaller step would leave.
 8. **Wiring notes.** Runtime-name spots go into the map file's pitfalls section as notes. The code stays as it is.
 
-Show the plan as a numbered list with the files each step touches, then ask the owner which steps to apply, noting that applying creates the branch `anneal/<YYYY-MM-DD>` from the current `HEAD`. For renames and moves touching more than 10 files, ask per group.
+Show the plan as a numbered list with the files each step touches, and after it a separate list of the flagged mapper rows, each with what the search found. Then ask the owner which steps to apply, noting that applying creates the branch `anneal/<YYYY-MM-DD>` from the current `HEAD`, or reuses it when it already points there. For renames and moves touching more than 10 files, ask per group.
 
 ## 6. Apply, one step at a time
 
-Create the branch `anneal/<YYYY-MM-DD>` from the current `HEAD` before the first step. Then, for each approved step:
+Create the branch `anneal/<YYYY-MM-DD>` from the current `HEAD` before the first step. An earlier run the same day may have left that branch, so first compare `git rev-parse HEAD` with `git rev-parse --verify --quiet refs/heads/anneal/<YYYY-MM-DD>`, which prints nothing when the branch does not exist. When the branch points at the current `HEAD`, it holds no commits of its own: switch to it instead of creating it. When it points anywhere else, it holds another run's commits: stop and tell the owner, naming the branch and its commits. The owner can merge it, rename it or delete it, and then run the migration again. Those are the owner's commands; never run them yourself. Never commit onto that branch, and never pick another name, because anneal's guard covers only `anneal/<YYYY-MM-DD>` and its set-aside branches. Then, for each approved step:
 
 1. Make only that step's change.
-2. For renames and moves, move with `git mv`, then update every import, path alias, config entry and doc reference that named the old path. In the JavaScript and TypeScript family, the relative specifiers are mechanical — let the script do them:
+2. For renames and moves, create a missing target directory, then move with `git mv`. The branch, the target directory and the move each run as a command of their own, one per call, never chained with `&&`, `;` or a line break. The person can refuse any one of them: a refused chain gives no cause, and a refused single command names its own. Report the refused command by name. Then update every import, path alias, config entry and doc reference that named the old path. In the JavaScript and TypeScript family, the relative specifiers are mechanical — let the script do them:
 
    ```
    node "<plugin root>/scripts/update-imports.js" --root "<repository root>" --from "<old path>" --to "<new path>"
@@ -122,7 +131,7 @@ Create the branch `anneal/<YYYY-MM-DD>` from the current `HEAD` before the first
 
    It covers relative `import`, `export ... from`, `import()` and `require()` only. Path aliases, bare specifiers, other languages, config files and docs are still yours: search for the old path and the old basename before and after, and remove folders the move left empty. When a language server is available, confirm with its diagnostics and find-references that nothing still points at the old location. Keep other content edits out of the step, so git still recognizes each move as a rename.
 3. Stage only the files this step changed, so checks that read the staged change see it, then rerun the baseline checks.
-4. When a check that passed in step 4 now fails, fix it only if this step caused it: a missed import, a stale path, or a doc the project requires alongside the change. If the cause is elsewhere, or the fix doesn't restore the baseline, set the step aside by committing it on a branch named `anneal/<YYYY-MM-DD>-set-aside-<n>` and switching back to the migration branch. Tell the owner and move on.
+4. When a check that passed in step 4 now fails, fix it only if this step caused it: a missed import, a stale path, or a doc the project requires alongside the change. If the cause is elsewhere, or the fix doesn't restore the baseline, set the step aside by committing it, with the subject `anneal: <step>` like a kept step, on a branch named `anneal/<YYYY-MM-DD>-set-aside-<n>`, with `<n>` the next number no branch uses, and switching back to the migration branch. Tell the owner and move on.
 5. When the checks match the baseline, commit with the subject `anneal: <step>` and a body listing what moved or changed.
 
 While the migration branch is checked out, anneal's guard refuses destructive git commands — `reset --hard`, `clean -f`, `checkout --force`, `push --force`, `branch -D`. Undo a step with `git revert`; leave the branch to abandon the migration.
@@ -134,7 +143,7 @@ Run the audit again, then report:
 - the commits, one line each;
 - each finding's count before and after;
 - the check results before and after;
-- steps skipped or set aside, and why;
+- steps skipped or set aside, and why, naming each set-aside branch with the step it holds, read from its commit subject (`git log -1 --format=%s <branch>`);
 - path hints no step wrote, and findings left to docs-align or to their owner;
 - names and paths kept because an observation explains them;
 - conflicts with the project's own rules.
