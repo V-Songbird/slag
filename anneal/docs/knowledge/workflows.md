@@ -1,6 +1,6 @@
 ---
 type: knowledge
-summary: "Explains Anneal's audit findings, migration and review workflows, limitations, eval prerequisites and the paired navigation eval protocol; read before using a workflow beyond the quick start or running the evals."
+summary: "Explains Anneal's audit findings, migration and review workflows, interactive Claude Code setup, limitations, eval prerequisites and the paired navigation eval protocol; read before using a workflow beyond the quick start, testing one interactively or running the evals."
 related_files:
   - anneal/README.md
   - anneal/skills/repo-layout/SKILL.md
@@ -15,6 +15,7 @@ related_files:
   - anneal/scripts/session-evidence-records.js
   - anneal/scripts/session-evidence-redaction.js
   - anneal/scripts/session-evidence-shell.js
+  - anneal/scripts/session-evidence-stall.js
   - anneal/tests/session-evidence.test.js
   - anneal/tests/session-evidence-claude.test.js
   - anneal/tests/session-evidence-codex.test.js
@@ -101,6 +102,16 @@ No observation asks for a list of every folder, a particular heading, a split at
 
 anneal stops before step 4 when `git status --porcelain` prints anything. The branch you were on is left exactly as it was.
 
+### In an interactive Claude Code session
+
+On Claude Code 2.1.278:
+
+- Auto is the default permission mode, and in it a classifier answers most permission prompts. Start the session with `claude --permission-mode manual` to answer each one yourself.
+- Answering No to a permission prompt ends the turn at once, and nothing more runs until you send a message. A denied compound command, such as `git checkout -b … && mkdir -p … && git mv …`, reaches the session without saying which part you refused, so name it in that message.
+- The read-only helper of step 3, `anneal:mapper`, runs as a background agent. While it works, the main turn ends with `Waiting for 1 background agent to finish` and the input looks idle. The session goes on by itself when the agent finishes, which took 45 seconds on a nine-file repository.
+
+A complete migration has not been observed in an interactive session on any host. The eval case [a migration on a clean tree](#a-migration-on-a-clean-tree) drives one through the eval harness, where the granted tools run without a prompt.
+
 ## The map file it writes
 
 A map file anneal writes carries the same sections in the same order: `Start here`, `Rules that outrank everything`, `Commands`, `Where things live`, `Conventions`, `Pitfalls`. A section with nothing true to say is left out. What goes in each one, and what stays out of the file, is in [the map file skeleton](../../skills/repo-layout/references/map-file.md). When your repository already has a map file off that order, anneal offers the reshape as a step of its own. It moves sentences without rewriting them, and lists anything that would leave the file before you approve.
@@ -175,13 +186,15 @@ Scopes: `map-file` is a change session-review proposes for the map file. `docume
 
 A missing path and a cut read also carry `observed.next`: up to four calls the same actor made for the same prompt after the result, or after the notice of a cut Read, whatever their operation, mixed commands included. Each has an `outcome` of `ok`, `failed`, on Codex `unknown` or `pending` as above, or `null` when no result arrived in the interval. A call that ran beside the result never joins: one issued before it, or on Claude Code one from the same assistant message. Neither does another actor's call or a call for a later prompt. A later write of the path, a file found elsewhere and a read of the rest count only when a successful call among them made it.
 
-The output does not grow with the transcript. It holds at most `--limit` candidates (6 by default, 30 at most) with two later successes each, `--limit` navigation candidates with four later calls each, `--limit` unanswered call lines, three largest outputs and 20 subagent transcripts. When more navigation candidates arise, one that has settled on scope `none` or `transient` leaves first, so it never pushes out one that may call for a change. A candidate has settled when later calls can no longer change its cause: it follows no later calls, it is a cut read of a file that is no document or one the actor already read on, the actor went on to create the missing file, the missing path is temporary, or its later calls are all answered and no more can come, because four are in or because its actor has moved on to a later prompt. An excerpt keeps at most 480 characters and says when it was cut.
+`stallCandidates` are turns that stopped for a word the session did not need. The main session's turn ended on its own text, and your next typed prompt only says to go on, in English or Spanish, such as `continue`, `go ahead` or `sí, sigue`. The text's last paragraph offers to go on, asks a question, or names what is left: a list after a lead such as `Next steps:` or `Pendientes:`, or a closing `Next:` line. None arises from a prompt that adds anything, a bare `yes`, a prompt with an image, one queued while the session worked, a turn whose latest result failed or that ended on a call, or an ending that asks for a commit, a push, a merge, a deployment, a publication, a release, a pull request, a tag or spending, which you authorize on their own. Each holds `kind` `stall` and an `observed` with the text's `line` and `timestamp`, the `promptLine` that started the turn, the `ending` (`offer`, `question` or `next-steps`), an `endingExcerpt` of at most 240 characters, the `nextPromptLine`, `nextPromptTimestamp` and `nextPrompt`, and the `projectCommands` the ending names in code spans. `candidateCause`, `scope`, `intervention` and `verification` read as above. The scope is `machine`, a line for your own global instruction file, unless the ending names a project command, which makes it `map-file`. `stallCounts` counts each ending over the whole interval. The ending and the prompt are matched by their words alone, so whether the stop was needed is for the reviewer: an instruction, an approval or a permission can require one.
+
+The output does not grow with the transcript. It holds at most `--limit` candidates (6 by default, 30 at most) with two later successes each, `--limit` navigation candidates with four later calls each, the last `--limit` stall candidates, `--limit` unanswered call lines, three largest outputs and 20 subagent transcripts. When more navigation candidates arise, one that has settled on scope `none` or `transient` leaves first, so it never pushes out one that may call for a change. A candidate has settled when later calls can no longer change its cause: it follows no later calls, it is a cut read of a file that is no document or one the actor already read on, the actor went on to create the missing file, the missing path is temporary, or its later calls are all answered and no more can come, because four are in or because its actor has moved on to a later prompt. An excerpt keeps at most 480 characters and says when it was cut.
 
 Limits of the evidence:
 
-- `sessionFile` and `subagentTranscripts[].file` are copied without redaction, so they can show your home directory. `context.cwd` has only its home prefix shortened to `~`; session-review expands the `~` again to compare it with the repository root.
+- `sessionFile` and `subagentTranscripts[].file` are copied without redaction, so they can show your home directory and account name. `context.cwd` has only its home prefix shortened to `~` and keeps the account name; session-review expands the `~` again to compare it with the repository root.
 - `path` is redacted like the other fields and cut at 480 characters, so two paths longer than that can look alike. It can also differ from `context.cwd`, which keeps the transcript's spelling apart from the `~`.
-- Home redaction finds the home directory on path boundaries and, for a Windows home, in any case and in its MSYS `/c/Users/…`, WSL `/mnt/c/Users/…` and escaped JSON spellings. A relative path that climbs into the home, and the account name anywhere else, stay visible.
+- Home redaction finds the home directory on path boundaries and, for a Windows home, in any case and in its MSYS `/c/Users/…`, WSL `/mnt/c/Users/…` and escaped JSON spellings. After it, the account name, the home directory's last segment and the OS user name when that differs, becomes `<user>` where it is a whole path segment after a slash or backslash, as in `D:/Projects/<user>/` or `../../Users/<user>`, part of a Claude project key such as `C--Users-<user>-shop` or `-home-<user>-shop`, part of a lowercase folder name built from a path such as `demo-app-c-users-<user>-codex` or `-mnt-d-projects-<user>-shop`, or the owner or group column of an `ls -l` line. In such a folder name a WSL mount (`mnt-d-`), a drive with two hyphens (`d--`), `home-` or `users-` comes before the name, and every part between them has two or more characters. It stays as a word in prose or code, inside a longer name such as `<name>2`, `<name>.old`, `V-<name>` or `v-<name>` in a folder name, and, on a POSIX home, in another case. Without a home directory, or with a root home, nothing is masked as either. Any other path segment that equals the account name is masked too, even when it names something else.
 - After `Basic` or `Bearer`, a word shorter than twenty letters stays, even when it is a credential written as a word. File names, paths, dates and numbers stay too.
 - Values named `password`, `secret` or `token` are redacted. Comparisons, type annotations and environment-variable references are left alone, but other code assigned to those names is still redacted.
 - Shell recognition is small. A pipeline through a program it does not know, such as `wc` or `sort`, is mixed, and so is anything with command substitution or a redirect into a file. On Codex, a command a script computes instead of writing it as a literal is a `command` of unknown effect. A project tool is known only by its program's name or a relative script path, so a script PowerShell runs through `&` with a quoted path, one a shell runs as an argument, as in `bash check.sh`, and a tool a wrapper such as a version manager runs as an argument count as no project tool. A script in the working directory counts as the project's even when the session wrote it there itself.
@@ -206,7 +219,6 @@ While a branch named `anneal/<YYYY-MM-DD>` is checked out, a hook refuses five g
 
 ## Limits
 
-
 - The scan is a heuristic. A flagged `index` file may be exactly what your framework expects, which is why nothing moves without your approval.
 - Observations match the paths a map names, not what its sentences mean: a package mentioned without its path, as in "the pricing package", counts as not named. Headings are read in Markdown only, and a section link is checked against GitHub's heading anchors and explicit `id` or `name` anchors.
 - The import fixer rewrites relative `import`, `export … from`, `import()` and `require()` in the JavaScript and TypeScript family. Path aliases, other languages, config files and documents are found by searching, and you see them inside the step.
@@ -214,21 +226,21 @@ While a branch named `anneal/<YYYY-MM-DD>` is checked out, a hook refuses five g
 - Moving files collides with branches other people have open. Migrate when few are.
 - A session audit reads one session. It cannot tell a pattern from an accident, so "repeated" means repeated inside that session.
 - The transcript parser reads the shapes held by its tests; host format changes can require parser updates. Antigravity has no known transcript location, so there the skill works only on a file you hand it.
-- Redaction of credentials and of your home directory in the evidence is best effort. Read an excerpt before you share it.
+- Redaction of credentials, your home directory and your account name in the evidence is best effort. Read an excerpt before you share it.
 - Documentation reconciliation covers the stated files and evidence. It does not prove every claim, host or distribution safe, and does not scan Git history by default.
 
 ## Running the evals
 
-Sixteen eval cases live in [evals](../../evals/). Three check skill discovery, audit mode leaving files unchanged, migration stopping on a dirty tree, and session proposals waiting for approval; [one](#a-migration-on-a-clean-tree) applies an approved migration step on a clean tree, the six navigation cases have their own [paired protocol](#paired-navigation-runs), and six [held-out cases](#held-out-checks) repeat it on a second repository. Each run drives a real session, so it is slow. The three build their fixtures with a `scaffold_script` and grade Bash calls, so a run needs `--scaffold` and a tool grant. Run them from the repository root, and write the results outside it:
+Eighteen eval cases live in [evals](../../evals/). Three check skill discovery, audit mode leaving files unchanged, migration stopping on a dirty tree, and session proposals waiting for approval; [two](#a-migration-on-a-clean-tree) apply an approved migration step on a clean tree, one of them into a new directory, [one](#a-plan-from-a-wrong-survey-row) shows a plan from a layout survey row whose importer count is wrong, the six navigation cases have their own [paired protocol](#paired-navigation-runs), and six [held-out cases](#held-out-checks) repeat it on a second repository. Each run drives a real session, so it is slow. The three build their fixtures with a `scaffold_script` and grade Bash calls, so a run needs `--scaffold` and a tool grant. Run them from the repository root, and write the results outside it:
 
 ```bash
 claude plugin eval ./anneal --tag smoke --tag safety --scaffold --no-publish \
   --allow-tools Bash Edit Write --output-dir <results>
 ```
 
-`--tag smoke --tag safety` selects the three. Without it the clean-tree migration, the navigation cases and the held-out cases run too, the last two in both arms, which their protocol does not use. Without `--output-dir` the harness writes `aggregate-result.json` and the HTML report under `anneal/evals/results/`, which git does not ignore. Each run's trace stays in its temporary directory as `out/trace.jsonl`. `--keep-temp` keeps that directory; in 2.1.278 it also seals the run's home and workspace under `sealed/` at mode 000 and asks that no git command run in the kept copy.
+`--tag smoke --tag safety` selects the three. Without it the clean-tree migrations, the plan from a wrong survey row, the navigation cases and the held-out cases run too, the last two in both arms, which their protocol does not use. Without `--output-dir` the harness writes `aggregate-result.json` and the HTML report under `anneal/evals/results/`, which git does not ignore. Each run's trace stays in its temporary directory as `out/trace.jsonl`. `--keep-temp` keeps that directory; in 2.1.278 it also seals the run's home and workspace under `sealed/` at mode 000 and asks that no git command run in the kept copy.
 
-With `--scaffold`, the harness runs each case's `scaffold_script` with bash from that case's folder in the target, as you and outside the sandbox, in the run's new workspace and with the `PATH` the harness started with. A script can therefore reach other files of the target through its own path: each navigation scaffold runs `../navigation-fixture.js`, which reads its contract from `navigation-partner-api.md` beside it, so a copy of `anneal/` used as the target has to keep both files in `evals/`. A scaffold that fails ends its run before the session starts, at no cost, and the run's error quotes the end of the script's error output. The harness keeps a failed run's temporary directory even without `--keep-temp`, unless `--json` is passed.
+With `--scaffold`, the harness runs each case's `scaffold_script` with bash from that case's folder in the target, as you and outside the sandbox, in the run's new workspace and with the `PATH` the harness started with. A script can therefore reach other files of the target through its own path: each navigation scaffold runs `../navigation-fixture.js`, which reads its contract from `navigation-partner-api.md` beside it, so a copy of `anneal/` used as the target has to keep both files in `evals/`. In the same way, `migration-moves-into-new-directory` and `plan-flags-a-wrong-importer-count` run the fixture script of `migration-applies-approved-step`. A scaffold that fails ends its run before the session starts, at no cost, and the run's error quotes the end of the script's error output. The harness keeps a failed run's temporary directory even without `--keep-temp`, unless `--json` is passed.
 
 The harness confines the granted shell in a sandbox, and native Windows has none. There it refuses the run: `A shell tool (Bash or PowerShell) was granted but this machine cannot confine it`. Run it under WSL2 or Linux, with `bubblewrap` and `socat` installed. With no terminal, add `--trust-plugin`, or the harness refuses an untrusted plugin directory. Inside the sandbox:
 
@@ -269,9 +281,10 @@ Plugin installation and interactive migration coverage remain incomplete across 
 - the move: `src/money.js` holding the old content, the index tracking it instead of `src/utils.js`, a new branch `anneal/<YYYY-MM-DD>`, and a last commit whose subject starts `anneal:`;
 - both imports of the old file rewritten, with nothing else in those files changed;
 - `AGENTS.md`, `package.json` and the test byte-identical, and no file created besides `src/money.js`;
-- a passing check after the move: in the trace, a test summary with no failures after the `mv`, and no failing one later.
+- a passing check after the move: in the trace, a test summary with no failures after the `mv`, and no failing one later;
+- no Bash call that sends a check's output into a file or through `tee`: `checks-run-without-a-file` fails `npm test > /tmp/x.out` and `npm test 2>&1 | tee …`, also from inside a `{ … }` group, and passes the skill's own baseline forms, `2>&1`, `/dev/null` and a redirect of any other command.
 
-[eval-graders.test.js](../../tests/eval-graders.test.js) replays the scaffold without bash and applies the approved step the way the skill does, which passes every grader. A copy instead of a move, an unapproved name, a move without its imports, a step left uncommitted or committed on the current branch, an extra step, an edited map file, manifest or test, and a check that fails or never runs after the move each fail the grader meant for it. Without the plugin a run has no reason to name the branch and the commit the migration's way, so `migration-branch-created` and `step-committed` measure its procedure.
+[eval-graders.test.js](../../tests/eval-graders.test.js) replays the scaffold without bash and applies the approved step the way the skill does, which passes every grader. A copy instead of a move, an unapproved name, a move without its imports, a step left uncommitted or committed on the current branch, an extra step, an edited map file, manifest or test, a check that fails or never runs after the move, and check output saved to a file each fail the grader meant for it. Without the plugin a run has no reason to name the branch and the commit the migration's way, so `migration-branch-created` and `step-committed` measure its procedure.
 
 `skill-fired`, an indicator that runs only with the plugin, looks for the read of the skill's `references/conventions.md`, which the skill requires before it plans. The prompt's slash command expands the skill without a Skill tool call, so a grader on that call never passes here. Against the paired run's two traces of this case, the indicator passes with the plugin and fails without it.
 
@@ -283,6 +296,18 @@ claude plugin eval ./anneal --case migration-applies-approved-step --scaffold --
 ```
 
 That is 6 sessions, three with the plugin and three without, each capped at 40 turns and 900 seconds. One run of the case in each arm, on Claude Code 2.1.278 with `claude-opus-5[1m]`, cost $0.58 with the plugin (20 turns, 66 seconds) and $0.27 without (17 turns, 22 seconds), as the harness estimates list price.
+
+`migration-moves-into-new-directory` scaffolds the same repository and approves one move, `src/utils.js` to `src/lib/money.js`, into a directory the repository does not have yet. Its graders are the ones above, for the new path, plus `branch-directory-and-move-alone`. That grader fails a Bash call that joins the branch, the new directory or the move to another command with `&&`, `||`, `;` or a line break, which the skill forbids, and passes each of them run alone. [eval-graders.test.js](../../tests/eval-graders.test.js) replays the step as the skill applies it, which passes every grader, and chained forms of it, which fail only that grader. The case has not run in a session yet. To run it, pass `--case migration-moves-into-new-directory` to the command above.
+
+### A plan from a wrong survey row
+
+`plan-flags-a-wrong-importer-count` scaffolds the repository of `migration-applies-approved-step`, where `src/cart.js` and `src/orders/summary.js` import `src/utils.js`. Its prompt runs `/anneal:repo-layout` for the plan only and hands over a finished layout survey in the mapper's reply format. The survey's one row renames `src/utils.js` to `src/money.js` and claims 1 importer. The case allows Read, Glob, Grep, Skill and Bash, 30 turns and 600 seconds. Its graders on the final reply require, in English or Spanish:
+
+- `stale-row-flagged`: `src/utils.js` within 300 characters of a word that marks the row, such as flagged, mismatch, stale, wrong or does not match;
+- `search-result-shown`: what the search found, as two importers or both `cart.js` and `summary.js`;
+- `stale-row-not-planned`: no numbered, bulleted or table line that plans `src/utils.js` to `src/money.js` unless the same line flags it or names what the search found.
+
+`no-new-refs-or-files` fails when the workspace gains a branch, tag, stash, git object or file, and `skill-fired` is the indicator described above. [eval-graders.test.js](../../tests/eval-graders.test.js) checks that the fixture has two importers where the row claims one, and runs the reply graders against plans that flag the row in a list, a table or Spanish, which pass, and plans that keep the row as proposed, correct it without a flag or drop it, which fail. A plan-only run passes the workspace grader, and a run that renames the file fails it. The case has not run in a session yet. To run it, pass `--case plan-flags-a-wrong-importer-count` to the command above.
 
 ### Paired navigation runs
 

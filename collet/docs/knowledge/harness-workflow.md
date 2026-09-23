@@ -1,6 +1,6 @@
 ---
 type: knowledge
-summary: "Explains Collet's task lifecycle, configuration, optional checks, fixture benchmark, and enforcement limits; read when mounting or operating the harness."
+summary: "Explains Collet's task lifecycle, configuration, optional checks, fixture benchmark, interactive Claude Code setup and enforcement limits; read when mounting, operating or testing the harness."
 related_files:
   - collet/README.md
   - collet/scripts/mount.mjs
@@ -8,6 +8,8 @@ related_files:
   - collet/templates/config.json
   - collet/templates/checks/scope.mjs
   - collet/templates/checks/run.mjs
+  - collet/hooks/handoff.js
+  - collet/hooks/session-start.js
   - collet/catalogue/
   - collet/skills/task-harness/SKILL.md
   - collet/skills/check-writer/SKILL.md
@@ -18,7 +20,6 @@ related_files:
 Requires Node 22 or later and a Git repository with a committed baseline. Host installation is in the [README](../../README.md).
 
 ## Mount and open a task
-
 
 Use the skill invocation in the [README](../../README.md), or run the command below from the Slag repository root. Replace `<project-directory>` with the target repository path and the accept placeholder with its real verification command:
 
@@ -51,7 +52,7 @@ next:
 
 A second run refreshes collet's own scripts: `task.mjs`, `state.mjs` and the built-in scope checks. Keep your own checks in their own files. Your `config.json` and `unverified.md` are kept.
 
-Generated bundle checks, their examples and `source.mjs` are also kept. The rules block sits between its own markers, so a second run replaces it and leaves your text untouched.
+Generated bundle checks and their examples are also kept. `.collet/source.mjs`, the bundle checks' shared runtime, is refreshed while it still holds what collet wrote; a copy with edits of your own is kept, and the mount says how to take this version's fixes to it: remove it and mount again. After a refresh the mount proves the checks against their examples, as a mount with `--checks` does. The rules block sits between its own markers, so a second run replaces it and leaves your text untouched.
 
 In the target project, fill in `.collet/config.json` with real project details and an acceptance command that verifies the work. For a project containing `src/cart.mjs`, open a task with:
 
@@ -84,7 +85,6 @@ The mount's own writes are not task changes: `.collet/` and the rules block betw
 
 ## Commands
 
-
 | You want to… | Command |
 | --- | --- |
 | Set the harness up in a repository | `/collet:task-harness` |
@@ -100,7 +100,6 @@ The mount's own writes are not task changes: `.collet/` and the rules block betw
 Add checks between tasks. While a task is open, the guard refuses writes under `.collet/` except `.collet/unverified.md`, because the harness's own files are not task files. Widening the task does not lift that refusal. Close the open task first, write and admit the check, then open the next task. The check then runs at write time and when that task closes.
 
 ## How it works
-
 
 - **"Finished" stops being an opinion.** Closing runs the accept command itself. A non-zero exit leaves the task open.
 - **Drift gets refused, not reported.** The guard reads write tools, patches, and the shell forms it can read with certainty. It also reads `rm -rf` on a directory, which is the one command worth catching before it lands.
@@ -125,7 +124,7 @@ Optional language checks catch patterns that weaken the command used to finish a
 
 | Language | Checks | Example root marker |
 | --- | --- | --- |
-| JavaScript/TypeScript | 12 | `package.json` |
+| JavaScript/TypeScript | 11, plus 1 opt-in | `package.json` |
 | Python | 8 | `pyproject.toml` |
 | Go | 5 | `go.mod` |
 | Rust | 7 | `Cargo.toml` |
@@ -144,17 +143,22 @@ Failures in mounted checks are recorded in `.collet/checks/discarded.json`. This
 
 For nested packages or a subset of languages, repeat `--edition <id>` to replace automatic selection. For example, append `--edition javascript-typescript --edition python` to select those two. Available ids are `javascript-typescript`, `python`, `go`, `rust`, `jvm` and `dotnet`. The override requires `--checks`. If no supported bundle is detected, mounting with `--checks` refuses before writing anything.
 
+`type-widened-to-any` is opt-in: mount with `--with javascript-typescript.type-widened-to-any` to add it. The mount names each opt-in class it leaves out.
+
 A fresh mount without `--checks` adds only scope. A later mount preserves each installed check revision and its examples, including your edits. New catalogue patterns do not upgrade those preserved files. A check missing its module or either kind of example stops the mount before writes; review it before trying again.
 
 ## Configuration
 
-`.collet/config.json` holds three values. A session is told all of them before it reads a file, so a placeholder left in the file blocks `task.mjs add`.
+`.collet/config.json` holds three values, plus up to three optional ones that the mount writes only when asked: `ask_first`, `exclude` and `removed_checks`. A session is told all of them before it reads a file, so a placeholder left in the file blocks `task.mjs add`.
 
 | Name | Required | Default | What it does |
 | --- | --- | --- | --- |
 | `project` | yes | `REPLACE ME: …` | One line on what this repository is and what it runs on |
 | `conventions` | no | two `REPLACE ME` entries | Decisions that constrain what a change here may look like |
 | `accept` | yes | `REPLACE ME: …` | The command a task closes with, unless the task names its own |
+| `ask_first` | no | absent unless the mount got `--ask-first` | What must never happen here without asking the person; the rules block and the session start state it as a fact |
+| `exclude` | no | absent unless the mount got `--exclude` | Path globs that no bundle check reads, at write time or at close, such as a committed generated mirror |
+| `removed_checks` | no | absent unless the mount got `--remove` | Bundle checks the project took out; a remount keeps them out until `--restore` |
 
 The rules block always goes into `AGENTS.md`. It also goes into `CLAUDE.md` when that file exists, and into `.cursor/rules/collet.md` when `.cursor/` exists. The mount does not create a new `CLAUDE.md`. There are no environment variables and no secrets.
 
@@ -177,15 +181,25 @@ Expected output:
 ok   scope — 5 violation(s) caught, 6 near miss(es) left alone
 ```
 
+## In an interactive Claude Code session
+
+On Claude Code 2.1.278:
+
+- Auto is the default permission mode, and in it a classifier answers most permission prompts. Start the session with `claude --permission-mode manual` to approve or refuse each tool call yourself, including `widen` and `close`.
+- Answering No to a permission prompt ends the turn at once, and nothing more runs until you send a message.
+- A manual `/compact` runs the `PreCompact` hook, which writes `.collet/handoff.md`, and then the `SessionStart` hook again. That second start gives the compacted session the open task, its scope with any widening, and the handoff.
+
+Automatic compaction, and compaction on Codex, have not been observed.
+
 ## Limits
 
 - Antigravity calls that omit workspace context need an absolute tool path to locate the harness. Relative arguments cannot establish that context.
-
 - With no task open, nothing is enforced. That is deliberate.
 - The scope check reads the shell forms it can read with certainty: redirects, `cp`, `mv`, `rm`, `tee`, `sed -i`, and the common PowerShell cmdlets. A path built from a variable, or a file written by a program it invoked, goes through. It narrows the hole, and does not close it.
 - The optional bundle reads `Write`, `Edit` and `MultiEdit` text. Shell writes, Codex patches, Antigravity file text and unsupported notebook edits wait for `close` or `run.mjs --live`. Only files matching a check's paths are read.
 - JavaScript skip and focus checks recognize Jest/Vitest calls and simple native `node:test` inline options such as `{ skip: true }` and `{ only: true }`. Dynamic calls, quoted option keys and complex option objects remain outside that coverage. An Edit containing only an option change needs the later full-file check to see its call context.
-- Bundle checks compare each detector's match count in changed files against `HEAD`; untracked files start at zero. An increase fails. Replacing one existing match with another can leave that count unchanged.
+- Bundle checks compare each detector's match count in changed files against `HEAD`; untracked files start at zero. An increase fails unless the matches moved: one removed from another changed file and added with the same text, ignoring whitespace, is not new. Replacing one existing match with another can leave that count unchanged, and removing an identical line from an unrelated file reads as a move.
+- The call-time check compares an edit only with that file's own text, so it refuses matches moved into a new file even though closing accepts them. To split a file, copy it with a shell command or `git mv`, then trim each copy with edits that only remove lines; closing checks the moved result against `HEAD`.
 - Closing treats the text between the collet markers as the harness's own, so it does not report an edit made there. While a task is open, the session guard still refuses writes to a rules file the task does not list.
 - An unavailable `HEAD` or unreadable source is reported as skipped. Closing uses `--live --strict`, so skipped checks prevent completion. Custom checks need a working-tree check to allow closure.
 - Planted examples do not establish a false-alarm rate on your code. The mount installs no commit or push hook.

@@ -16,16 +16,102 @@ All notable changes to collet are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A session start or handoff its host cut short leaves a trace: each hook marks itself running
+  under `.collet/` and clears the mark when it ends, and the next session start says once that the
+  handoff note may be missing or stale, or that the last session may have started without its
+  context. A hook that finishes changes nothing.
+- A guard call its host cut short leaves a trace: while a task is open the guard logs a start and a
+  finish for every call, and the next guard call, `task.mjs status` and `task.mjs close` name a
+  call that started and never finished. Nothing is refused because of it. A mounted project gets
+  the status and close reports by mounting again.
+- `mount.mjs --exclude <glob>` stores paths in `.collet/config.json` that no bundle check reads,
+  such as a committed generated mirror of `src/`. A project without the list is checked as before.
+- A bundle check you take out stays out: `mount.mjs --checks --remove <edition>.<class>` deletes it
+  and records it in `.collet/config.json`, so a remount no longer brings it back.
+  `--restore <edition>.<class>` returns it.
+- Catalogue classes can carry a refusal `remedy`, an `exclude` list of paths they skip, and an
+  `optional` flag that leaves them out of a mount unless `--with <edition>.<class>` names them.
+  Classes without these fields check and mount as before.
+- `task-harness` keeps the answer to "what must never happen here without asking":
+  `mount.mjs --ask-first <thing>` stores it in `.collet/config.json`, and the rules block and the
+  session start state it as a fact about the project, with a line that every other step goes ahead
+  until the accept command exits zero. A project without the list reads as before. A mounted project gets the
+  list and the rules text by mounting again with `--ask-first`.
+
 ### Changed
 
+- A successful `task.mjs close` prunes `.collet/guard-log.jsonl` to what is still read: the closed
+  task's finished calls go, and refusals, unfinished calls and other tasks' records stay. A mounted
+  project gets the pruning by mounting again.
+- The JavaScript/TypeScript `type-widened-to-any` check is opt-in: a mount writes it only with
+  `--with javascript-typescript.type-widened-to-any`, and keeps it where it is already installed.
+- Python `skipped-test` refuses a `skipif` only when its condition is a literal `True` or `1`; a
+  real platform or tool gate passes. `double-cast-through-unknown` no longer reads test files, and
+  `blanket-lint-suppression` refusals say how a deliberate suppression passes: add `-- <why>`.
 - `check-writer` looks for an open task before it writes anything. The guard refuses writes under
   `.collet/` while a task is open, so a check is added between tasks: close the open one, write
   and admit the check, then open the next.
 - `task-harness` says the mount's files are left uncommitted and that the first task can close
   before you commit them.
+- On Antigravity, `task-harness` and `check-writer` run every command from the project root you
+  named, and ask for it when you named none.
+- A bundle check that refuses a close names every file that introduces its pattern, up to ten,
+  and counts the rest. A refusal for one file reads as before.
+- Live checks share one read of the working tree: the bundle checks list the changes and read
+  each file and `HEAD` baseline once per pass instead of once per check.
 
 ### Fixed
 
+- The guard reads `rm`, `rmdir`, `cp`, `mv` and `tee` as the command of the shell that ran them:
+  PowerShell's cmdlets under the PowerShell tool, the POSIX commands in a POSIX shell. So
+  `cp -Dest .collet/off src/cli.mjs`, which PowerShell runs as a copy onto the kill switch, is refused
+  while a task is open. Where the host does not name the shell, the call is refused when either
+  reading writes under `.collet/`. A mounted project gets this by mounting again.
+- Under PowerShell the guard reads a quoted leading `~` as the home directory, as PowerShell does,
+  so `Remove-Item -Recurse '~'` is refused while a task is open when the home directory is outside
+  the task or holds the project. A POSIX shell's quoted `~` stays a literal name. A mounted project
+  gets this by mounting again.
+- The `.collet/.gitignore` the mount writes lists `*.running`, so a mark left by a session start or
+  handoff its host cut short no longer shows in `git status`. A mounted project gets the line by
+  mounting again, and its other lines stay as they were.
+- The guard reads `$PWD`, `${PWD}`, `%CD%` and a leading `~` in every path it reads, not only in a
+  removal: `echo x > $PWD/.collet/off` and `mv $PWD ../elsewhere` are refused while a task is open.
+  The quoting rules stay as they were. A mounted project gets this by mounting again.
+- The guard reads a PowerShell argument written `-Name:value` as `-Name value`, abbreviated or not,
+  so `Set-Content -Path:.collet/off -Value x` and `Remove-Item -LiteralPath:.collet` are refused
+  while a task is open. A switch written `-Recurse:$false` takes nothing further. A mounted project
+  gets this by mounting again.
+- The guard skips the value of every PowerShell parameter that takes one, the cmdlet's own such as
+  `-Width` or `-Credential` and the common ones such as `-ErrorAction` or `-OutVariable`, so the
+  value is never read as the path: `Out-File -Width 200 .collet/off` is refused while a task is open.
+  A mounted project gets this by mounting again.
+- While a task is open, the guard reads `$PWD`, `${PWD}`, `%CD%` and a leading `~` in a removal as
+  the working directory or home directory they name, so `rm -rf "$PWD"` at the project root is
+  refused as `rm -rf .` is. Single quotes keep them literal, and any other variable or substitution
+  stays unread. A mounted project gets this by mounting again.
+- While a task is open, PowerShell's built-in aliases such as `mi`, `del`, `copy`, `ac` and `ni`
+  get the decision of the cmdlet they name for every path, not only under `.collet/`: `mi notes.txt
+  src/cli.mjs` is refused under a narrow scope, as `Move-Item notes.txt src/cli.mjs` is. `rmdir`
+  reads as a removal in a POSIX shell too. This replaces the `.collet/`-only reading of those
+  aliases described below. A mounted project gets this by mounting again.
+- A mount over a `.collet/config.json` whose `accept` is not a string stops before writing anything
+  and names the file and the field, with or without `--accept`. It used to fail after writing
+  collet's scripts when `--accept` was given.
+- The guard reads a PowerShell flag abbreviated as PowerShell allows, such as `-Dest` for
+  `-Destination` or `-Na` for `-Name`, and decides it as the full flag. A prefix that begins more
+  than one parameter stays unread, as PowerShell refuses it. `Tee-Object` also counts the file it
+  names with `-LiteralPath` or `-Path` as written. A mounted project gets this by mounting again.
+- A new `AGENTS.md`, `CLAUDE.md` or `.cursor/rules/collet.md` that holds only the rules block no
+  longer keeps the first task open once you stage it; it counted as a change outside the task after
+  `git add` and not before. Your own text in a new rules file still keeps the task open.
+- A `--checks` remount over an unedited older `.collet/source.mjs` proves the new checks against
+  the runtime it installs, so it no longer refuses checks the refreshed runtime passes. An edited
+  copy is still the runtime they are proven against.
+- A mount over a `.collet/config.json` it cannot read stops before writing anything and names the
+  file and the problem. It used to fail halfway, with collet's scripts refreshed and no rules
+  block, and a config holding a JSON array was overwritten.
 - The first task after a mount can close before the mount is committed. Closing no longer counts
   `.collet/` or the rules block between the collet markers; your own text in those files still
   keeps the task open.
@@ -39,6 +125,32 @@ All notable changes to collet are documented here. The format follows
 - A project mounted before these fixes gets them by mounting again, because the mount copies
   `task.mjs` and the scope check into `.collet/`. Until then, a refused write under `.collet/`
   still advises widening the task.
+- While a task is open, the guard also refuses the shell writes it can read when they would create
+  a file under `.collet/`, such as a new check or the `.collet/off` kill switch.
+  `.collet/unverified.md` and new scratch files elsewhere stay allowed. A mounted project gets this
+  by mounting again, which refreshes its copy of the scope check.
+- While a task is open, the guard also refuses `touch`, `ni` and `mkdir` under `.collet/`, a
+  `.collet` path in another letter case, such as `.Collet/off`, and removing or moving `.collet`
+  itself. Paths outside `.collet/` keep their decisions. A mounted project gets this by mounting
+  again.
+- While a task is open, the guard also refuses `Rename-Item`, `New-Item -Name` and PowerShell's
+  built-in aliases such as `ren`, `move`, `del`, `rd`, `copy`, `ac` and `md` when they reach
+  `.collet/`. Elsewhere those commands keep their decisions. A mounted project gets this by
+  mounting again.
+- While a task is open, the guard refuses removing or moving the repository itself, or a
+  directory that holds it, such as `rm -rf ../<project>`: that takes `.collet/` with it. A sibling
+  directory and anything outside the project keep their decisions. A mounted project gets this by
+  mounting again.
+- `task.mjs add` and `task.mjs widen` refuse `.collet` paths in any letter case, such as
+  `.Collet/off`, as the guard does, instead of recording a scope entry the guard never allows. A
+  name that only starts with `.collet`, such as `.colletrc`, is still accepted. A mounted project
+  gets this by mounting again.
+- Closing no longer counts a bundle match as new when it only moved: removed from one changed file
+  and added with the same text to another, as when a file is split. Any other added match still
+  keeps the task open. A project mounted earlier gets the new comparison by mounting again.
+- Mounting again refreshes `.collet/source.mjs`, the runtime the bundle checks share, when it still
+  holds what collet wrote, and then proves the checks against their examples. A copy with edits of
+  its own is kept, and the mount says so.
 
 ## [0.4.0-alpha] — 2026-09-21
 

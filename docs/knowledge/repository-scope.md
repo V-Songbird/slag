@@ -65,7 +65,17 @@ is needed. Run npm run check from the root, or node --test inside one plugin to 
 Git fixtures and use Node's built-in test runner.
 
 The repository edit hook is configured in .claude/settings.json and .codex/hooks.json.
-It runs the affected plugin's tests after recognized edits to scripts, hooks or templates.
+After an edit to a .js or .mjs file under a plugin's scripts, hooks or templates directory, it runs
+that plugin's test files that reach the edited file. A file reaches it by quoting the file's name,
+with or without its extension, as a relative require, import or joined path does, or, for a
+template, by quoting a folder on the template's path; a plugin file reached that way passes the
+reach on. When no test file reaches the edit, the plugin's whole suite runs. The runs share a
+110-second budget, TEST_TIMEOUT_MS, under the 120-second timeout at which the host stops the hook.
+Every collet test file reaches collet/scripts/mount.mjs, so an edit to a collet script or template
+runs every one of them. With other suites running on the same machine that can take several minutes,
+past the budget, and the hook then reports that it did not complete instead of a verdict. A test
+that reaches a file only through a name built at run time is not selected, so npm run check
+remains the full gate.
 Those adapters are repository development configuration, separate from shipped plugin hooks.
 
 The optional Git gates can be enabled for a clone with git config core.hooksPath scripts/git-hooks.
