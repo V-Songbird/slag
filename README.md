@@ -27,7 +27,8 @@ Start a new session in the repository you want to inspect, then request:
 /anneal:repo-layout audit
 ```
 
-The skill reports navigation findings with counts and example paths without changing files.
+The skill reports navigation findings with counts and example paths.
+It changes nothing in the project on its own and saves its findings only after you say yes to its offer.
 If Node is unavailable, the scan cannot run; check that the host can run `node --version`.
 
 For Codex and Antigravity installation, invocation and hook activation, follow the

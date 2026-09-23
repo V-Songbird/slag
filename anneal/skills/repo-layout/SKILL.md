@@ -23,7 +23,7 @@ metadata:
 
 Make an existing repository cheaper for an agent to work in: fewer searches to find a file, fewer reads to understand it, one command to check a change. The target conventions and the reason for each are in [references/conventions.md](references/conventions.md). Read that file before building a plan. **No change is a valid result.**
 
-Argument: `$ARGUMENTS`. A host that does not fill that in leaves it as written; read the argument from the request instead. When it is `audit`, run steps 1 and 2 only, then stop without changing any file.
+Argument: `$ARGUMENTS`. A host that does not fill that in leaves it as written; read the argument from the request instead. When it is `audit`, run steps 1 and 2 only, then stop without changing any file. A findings, report or notes file in the project is a change too, even when standing instructions ask to save findings: show the findings in the reply, offer to save them, and write that file only after an explicit yes. When nobody can answer, as in a headless or automated run, write nothing.
 
 ## What differs by host
 

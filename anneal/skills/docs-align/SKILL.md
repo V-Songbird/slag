@@ -20,7 +20,7 @@ metadata:
 
 Make the maintained documentation agree with what the project actually does, and make its development instructions usable by each intended host. A complete pass accounts for every in-scope document; it does not require changing every file.
 
-Argument: `$ARGUMENTS`. If the host leaves it literal, read the request instead. `audit`, a review request or an explicit no-edit instruction means report only: nothing is written in the project and no report is saved. Otherwise an explicit reconciliation or cleanup request authorizes ordinary in-scope documentation fixes. Resolve an ambiguous request as an audit. A path narrows the pass to that area plus its incoming references; state that boundary.
+Argument: `$ARGUMENTS`. If the host leaves it literal, read the request instead. `audit`, a review request or an explicit no-edit instruction means report only: nothing is written in the project, and a report is saved only as step 4 allows. Otherwise an explicit reconciliation or cleanup request authorizes ordinary in-scope documentation fixes. Resolve an ambiguous request as an audit. A path narrows the pass to that area plus its incoming references; state that boundary.
 
 On Claude Code invoke `/anneal:docs-align`; on Codex use `$docs-align`; on Antigravity use `/docs-align`. Find the plugin files through `${CLAUDE_PLUGIN_ROOT}` on Claude Code, or resolve `../../` from this file on other hosts. Resolve target paths against the project root, never the installed plugin directory.
 
@@ -72,7 +72,7 @@ For stale content choose the smallest useful action: correct, consolidate, archi
 
 ## 4. Apply and verify the reconciliation
 
-In audit mode, return the ledger and stop without writing in the project. In cleanup mode, apply the verified in-scope fixes as a coherent batch and continue independent work while a material decision is pending. Do not ask for approval again for edits the owner already authorized. Keep uncertain claims qualified or explicitly unresolved; do not replace them with plausible facts.
+In audit mode, return the ledger and stop without writing in the project. Saving a findings, report or notes file there is such a write, even when the applicable instructions ask to persist findings: offer to save the findings, and write that file only after an explicit yes. When nobody can answer, as in a headless or automated run, write nothing in the project. In cleanup mode, apply the verified in-scope fixes as a coherent batch and continue independent work while a material decision is pending. Do not ask for approval again for edits the owner already authorized. Keep uncertain claims qualified or explicitly unresolved; do not replace them with plausible facts.
 
 Follow the project's actual docs policy for location, frontmatter, stable filenames, document types and task-note closure. Update related-file metadata, examples, links and active invocation names together. Keep durable content in one current document per topic when that policy requires it. Do not retrofit document schemas onto README or instruction files if they are exempt.
 

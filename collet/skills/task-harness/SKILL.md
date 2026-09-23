@@ -34,6 +34,11 @@ docs, its git log — so the questions you ask are only the ones the repository 
 2. What is the first task, and what command proves it works?
 3. What must never happen here without asking? (deploy, spend, publish, delete, install)
 4. Do you want checks that stop tests being switched off or checks being weakened during a task?
+5. Which conventions must a change here respect, one sentence each?
+
+Every answer comes from this project's own files or from the person. **Never read outside the
+project root to find one**, sibling projects included: another project's `.collet/config.json`
+describes that project, not this one.
 
 For question four, offer the bundle for the languages the project uses: JavaScript/TypeScript,
 Python, Go, Rust, JVM or .NET. From the corresponding `catalogue/<id>.json`, extract only `title`,
@@ -45,6 +50,10 @@ another mistake can be added later with `check-writer`.
 The bundle is optional. Include it when the person asks for it or accepts that choice; do not
 ask again when their request already covers it. These are source-pattern checks; they do not
 install compilers, linters or language runtimes. Do not offer coverage for languages outside that list.
+
+For question five, look in the project's README, contributing guide, decisions docs and lint and
+format configuration, and ask when they state none. A project can have no conventions to record:
+with no answer, leave the `conventions` list in `.collet/config.json` empty rather than borrow one.
 
 Then **derive the task's scope by reading the code the task touches.** Not from the task's title.
 This is the one mistake worth spending time on: a scope one file too narrow does not merely block

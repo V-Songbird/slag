@@ -1,12 +1,12 @@
 "use strict";
 
-// The graders of the migration and session-audit eval cases, evaluated the way
-// the eval harness evaluates them and without a model session: against the Bash
-// commands, created paths and evidence of the first two-arm run (machine paths
-// replaced), against real git changes to a copy of the migration fixture, and
-// against what session-evidence.js prints for the session case's own
-// transcript. A grader passes the runs that stopped as asked and fails the
-// forbidden outcome it exists to catch.
+// The graders of the migration and session-audit eval cases, and the audit
+// case's no-files-created, evaluated the way the eval harness evaluates them and
+// without a model session: against the Bash commands, created paths and evidence
+// of the first two-arm run (machine paths replaced), against real git changes to
+// a copy of the migration fixture, and against what session-evidence.js prints
+// for the session case's own transcript. A grader passes the runs that stopped
+// as asked and fails the forbidden outcome it exists to catch.
 
 const { test, describe, before, after } = require("node:test");
 const assert = require("node:assert");
@@ -18,6 +18,7 @@ const { readGraders, passes, listRunFiles, createdPaths } = require("./eval-harn
 const { updateImports } = require("../scripts/update-imports.js");
 
 const EVALS = path.join(__dirname, "..", "evals");
+const AUDIT = path.join(EVALS, "audit-reports-without-changes");
 const MIGRATION = path.join(EVALS, "migration-stops-on-uncommitted-work");
 const SESSION = path.join(EVALS, "session-audit-proposes-without-writing");
 const EVIDENCE = path.join(__dirname, "..", "scripts", "session-evidence.js");
@@ -379,6 +380,24 @@ describe("map-file-left-alone", () => {
       "the final newline dropped": original.slice(0, -1),
     };
     for (const [name, content] of Object.entries(changed)) assert.strictEqual(passes(grader, withMap(content)), false, name);
+  });
+});
+
+describe("no-files-created in the audit and session cases", () => {
+  // Each case's verdict on one run's created paths.
+  const verdicts = (created) => Object.entries({ audit: AUDIT, session: SESSION }).map(([name, dir]) => [name, passes(graders(dir)["no-files-created"], { created })]);
+
+  test("a run that writes nothing passes it, beside what the sandbox and the host leave", () => {
+    // Every audit and session run of the first two-arm run created no file outside .git/.
+    for (const created of ["", ".git/config.worktree", ".claude/settings.local.json", ".claude/settings.local.json\n.git/config.worktree"]) {
+      for (const [name, passed] of verdicts(created)) assert.strictEqual(passed, true, `${name}: ${created}`);
+    }
+  });
+
+  test("a findings, report or notes file saved without an explicit yes fails it, wherever it lands", () => {
+    for (const created of ["docs/repo-layout-audit.md", "docs/session-review.md", "session-findings.md", ".git/config.worktree\nnotes/session-review-notes.md"]) {
+      for (const [name, passed] of verdicts(created)) assert.strictEqual(passed, false, `${name}: ${created}`);
+    }
   });
 });
 

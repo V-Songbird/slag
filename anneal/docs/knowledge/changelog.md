@@ -32,6 +32,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Changed
 
+- repo-layout's audit, docs-align's audit and session-review treat a findings, report or notes file in the project as a change they do not make on their own, even when your own instructions ask to save findings. They show the findings, offer to save them and write that file only after an explicit yes; a run nobody can answer, such as a headless one, writes nothing. The session eval case now also fails a run that creates any file.
 - session-review checks the actor, prompt, path and operation before it calls a later call a recovery or a repeat, and weighs `unknown`, `pending` and host-record outcomes as evidence, not verdicts. Each finding goes to the map file, docs-align, repo-layout, your global instruction file or the source that printed it.
 - repo-layout and its layout survey propose a path hint before a rename or a move, and keep a name or path that an observation explains, including tracked folders that `source-dist` or `required-inputs` explains.
 - docs-align proposes routes that take each task to the one document holding its contract and to the check that proves it, and keeps a long reference whole when headings reach its parts.

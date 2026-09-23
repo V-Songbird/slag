@@ -42,6 +42,10 @@ All notable changes to collet are documented here. The format follows
 
 ### Changed
 
+- `task-harness` asks a fifth question, which conventions a change here must respect, and takes
+  the conventions it writes into `.collet/config.json` from the project's own files or from you.
+  It asks when those files state none, leaves the list empty when nobody answers, and never reads
+  outside the project root, sibling projects included, to answer a question.
 - A successful `task.mjs close` prunes `.collet/guard-log.jsonl` to what is still read: the closed
   task's finished calls go, and refusals, unfinished calls and other tasks' records stay. A mounted
   project gets the pruning by mounting again.

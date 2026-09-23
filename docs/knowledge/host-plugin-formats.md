@@ -54,8 +54,10 @@ on Windows on 2026-09-22, using agy --sandbox --output-format stream-json -p: ea
 needed the escalate_admin permission, which headless mode cannot prompt for. agy auto-denied it,
 ended the turn without output and exited 0. Its message suggests an allow rule under
 permissions.allow in settings.json, such as escalate_admin(<target>), or the
---dangerously-skip-permissions flag. Neither was measured, so no working allow setting is known,
-and a skill script does not run in headless agy as installed.
+--dangerously-skip-permissions flag. Neither was measured. Without --sandbox, with command(*)
+allowed and allowNonWorkspaceAccess set to true in settings.json, the same headless form ran every
+skill's shell commands with agy 1.2.8 and 1.2.9 on Windows on 2026-09-23. Whether it needs those
+settings was not measured.
 
 Session scratch directories, for a skill that keeps a working file outside the project, as
 docs-align's audit mode does. Each fact is marked measured, host-stated or not checked:

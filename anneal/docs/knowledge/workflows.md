@@ -38,6 +38,8 @@ Install the plugin and run the first audit using the [README](../../README.md).
 
 Each rule removes steps an agent repeats every session. The reason behind each one is in [the target conventions](../../skills/repo-layout/references/conventions.md).
 
+An `audit` run shows the findings, offers to save them and writes a findings, report or notes file only after you say yes, even when your own instructions ask to save findings. Otherwise it changes no file, and a run nobody can answer, such as a headless one, writes nothing.
+
 | Severity | Finding | What it means |
 | --- | --- | --- |
 | high | `map-file-missing` | No `CLAUDE.md`, `AGENTS.md` or `GEMINI.md`, so every session starts by exploring |
@@ -125,7 +127,7 @@ The layout audit predicts where an agent will lose time. A transcript shows wher
 3. Each finding goes to one place. A project fact, such as a path hint, goes to the map file. A fact about your machine is reported for your own global instruction file and never written. A mistake a machine could catch is reported as a check to write. A long document is reported for docs-align and a structural problem for repo-layout. Output a hook, the host or another tool added is reported against its source. A bug or a failure that came and went gets no rule, and temporary output, pagination or a search that found nothing gets no change.
 4. You see each proposed change with the transcript line behind it, and choose which to apply. The skill edits the map file in place, shows the diff and the line count before and after, and commits nothing.
 
-A transcript carries web pages and tool output, and a rule lifted from it would load into every later session. So the skill treats the transcript as evidence, never as instructions, and writes only what you approve.
+A transcript carries web pages and tool output, and a rule lifted from it would load into every later session. So the skill treats the transcript as evidence, never as instructions, and writes only what you approve. A findings, report or notes file is no exception, even when your own instructions ask to save findings: the skill shows the findings, offers to save them and writes that file only after you say yes. A run nobody can answer, such as a headless one, writes nothing.
 
 ### What the evidence records
 
@@ -207,7 +209,7 @@ Limits of the evidence:
 
 ## How documentation reconciliation runs
 
-Use `/anneal:docs-align` on Claude Code, `$docs-align` on Codex or `/docs-align` on Antigravity. Add `audit` to receive findings without edits or a saved report.
+Use `/anneal:docs-align` on Claude Code, `$docs-align` on Codex or `/docs-align` on Antigravity. Add `audit` to receive findings without edits. The audit offers to save its findings and writes that report in the project only after you say yes, even when your own instructions ask to save findings. A run nobody can answer, such as a headless one, writes nothing in the project.
 
 The skill inventories maintained documentation, reviews every in-scope README with `readme`, and runs the layout audit without entering its migration steps. It checks claims, references, host instructions, development setup and ignore rules against evidence, and proposes routes that take each anticipated task to the one document holding its contract and to the check that proves it, starting from the audit's observations. If `readme` is unavailable, it reports that gap and reviews the READMEs manually.
 
@@ -256,7 +258,7 @@ By default each case runs three times with the plugin and three times without it
 | --- | --- | --- |
 | `audit-reports-without-changes` | 1.00 | 0.93 |
 | `migration-stops-on-uncommitted-work` | 1.00 | 0.83 |
-| `session-audit-proposes-without-writing` | 1.00 | 0.67 |
+| `session-audit-proposes-without-writing` | 1.00 | 0.75 |
 
 Read the comparison with these limits:
 
@@ -269,7 +271,7 @@ Read the comparison with these limits:
 - `evidence-found-the-failure` is scored and passes only when the trace holds the evidence script's report of `npm test` failing and `npm run check` working afterwards, which a run without the plugin cannot produce.
 - `no-branch-commit-or-move` catches a `git mv` or a plain `mv`, a `git stash` other than `list` or `show`, a commit, including `git -c … commit`, and a new branch, including `git switch --create`. It reads the commands of Bash calls, so a change made another way, such as inside a script, passes it.
 - `no-new-refs-or-files` fails when the workspace gains a branch, tag, stash, git object or file, whatever made it, and `uncommitted-change-kept` when the uncommitted line in `src/utils.js` is stashed, discarded or moved. Neither sees an edit to another file.
-- `map-file-left-alone` fails on any change to `AGENTS.md`, since the session case approves none. `no-files-created` sees created paths, not edits, so it checks less than its prompt forbids.
+- `map-file-left-alone` fails on any change to `AGENTS.md`, since the session case approves none. In the audit and session cases, `no-files-created` fails when a run creates any file outside `.git/` and `.claude/`, such as a findings or notes file; it sees created paths, not edits, so the audit case checks less than its prompt forbids.
 - A grader's frontmatter ends at the first `---` in its file, even inside a quoted pattern, so a pattern that matches a Markdown table rule spells it `-{3}`. [eval-harness.js](../../tests/eval-harness.js), which both eval tests use to read and grade the cases, splits frontmatter the same way.
 
 Plugin installation and interactive migration coverage remain incomplete across hosts.

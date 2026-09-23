@@ -34,7 +34,7 @@ agy plugin install "<path-to-clone>/anneal"
 agy plugin list
 ```
 
-The list should name `anneal`, as it does on CLI 1.2.7. Running its skills on this host remains unverified.
+The list should name `anneal`, as it does on CLI 1.2.7. On CLI 1.2.8 and 1.2.9, headless runs without `--sandbox` ran the repo-layout audit, the docs-align audit and session review. With `--sandbox`, headless `agy` runs no shell command.
 
 anneal acts on your request. Its enabled hook inspects shell commands and stays silent outside a migration branch.
 
@@ -48,7 +48,7 @@ Ask for an audit using the invocation for your host:
 | Codex | `$repo-layout audit` |
 | Antigravity | `/repo-layout audit` |
 
-The skill runs the scan and reports findings by severity, with counts and example paths, followed by informational observations that carry no severity. Audit mode changes no files.
+The skill runs the scan and reports findings by severity, with counts and example paths, followed by informational observations that carry no severity. Audit mode changes nothing in the project on its own; it saves its findings only after you say yes to its offer.
 A missing Node runtime prevents the scan from running; confirm `node --version` reports 22 or later in the host's environment.
 
 From the Slag repository root, you can also run the scan directly. Replace `<your-repository>` with the directory to inspect:
@@ -72,7 +72,7 @@ These examples use Claude Code syntax. On Codex use `$<skill-name>`; on Antigrav
 
 A migration runs baseline checks, proposes changes, and creates an `anneal/<YYYY-MM-DD>` branch for approved steps.
 Each successful step is checked and committed. Session review proposes edits and waits for approval; it commits nothing.
-Documentation cleanup applies authorized corrections. Its `audit` mode reports findings without edits or a saved report.
+Documentation cleanup applies authorized corrections. Its `audit` mode reports findings without edits and saves a report only after you say yes to its offer.
 
 The [workflow guide](docs/knowledge/workflows.md) covers every audit finding, approval boundary, map-file format, safety hook, and standalone script.
 
@@ -87,7 +87,7 @@ anneal has no settings. Choose a skill and its mode.
 - Session review reads one transcript. Redaction is best effort; inspect excerpts before sharing them.
 - Transcript parsing depends on the formats covered by tests. Antigravity requires an explicit transcript file.
 - Documentation checks cover the stated evidence and do not scan Git history by default.
-- Complete interactive migrations remain unverified on every host. The published package installs on all three hosts and its skills are discovered in Claude Code and Codex, but audits have run only in Claude Code and session review has not been run from it.
+- Complete interactive migrations remain unverified on every host. The published package installs on all three hosts, and its skills are discovered in Claude Code, Codex and the Antigravity IDE. The audits and session review have run from it in Claude Code and in headless Antigravity CLI, and a repo-layout audit has run in the Antigravity IDE. The skills' flows on Codex, and the other flows in the Antigravity IDE, remain unverified.
 
 Read the [full limits](docs/knowledge/workflows.md#limits) before migrating a shared repository.
 
