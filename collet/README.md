@@ -65,7 +65,7 @@ node .collet/checks/run.mjs
 ```
 
 The first command prints the open task, scope and acceptance command. The second reports whether each check catches its violations and permits its near misses.
-When an active guard refuses a write, it names the affected path and explains how to widen the task with a recorded reason.
+When an active guard refuses a write, it names the affected path and the remedy that fits the refusal: widen the task with a recorded reason for a file outside its scope, change a harness file between tasks, or fix an edit that a check caught.
 
 See the [harness workflow](docs/knowledge/harness-workflow.md) for direct mounting, task commands, optional language checks, and the fixture benchmark.
 
@@ -89,6 +89,9 @@ Values live in `.collet/config.json`. There are no environment settings or secre
 | `project` | yes | `REPLACE ME: …` | Describes the project and runtime |
 | `conventions` | no | two `REPLACE ME` entries | Constrains project changes |
 | `accept` | yes | `REPLACE ME: …` | Command for closing tasks without their own override |
+| `ask_first` | no | absent; set by `mount.mjs --ask-first` | Things the person is asked about before they happen |
+| `exclude` | no | absent; set by `mount.mjs --exclude` | Path globs no bundle check reads, such as a generated mirror |
+| `removed_checks` | no | absent; set by `mount.mjs --remove` | Bundle checks a remount keeps out |
 
 Replace placeholders before opening a task. Creating `.collet/off` silences session guards; committed checks keep running.
 The [configuration reference](docs/knowledge/harness-workflow.md#configuration) explains generated files, host rules, and remount behavior.
@@ -100,7 +103,7 @@ The [configuration reference](docs/knowledge/harness-workflow.md#configuration) 
 - Optional checks inspect some edit tools immediately; other writes wait for working-tree checks.
 - Closing requires strict live checks and the acceptance command to pass. Unavailable verification leaves the task open.
 - Fixture success does not measure false alarms on your code, and an acceptance command passing does not establish correctness.
-- Long interactive sessions, real compaction, and installed discovery of the current skill names remain unverified.
+- A manual `/compact` on Claude Code 2.1.278 carries the open task into the compacted session. Automatic compaction, compaction on Codex, and a collet refusal or verified close inside a long interactive session have not been observed. The published skills are discovered in Claude Code and Codex, but mounting and check writing have run only in Claude Code.
 
 The [full limits](docs/knowledge/harness-workflow.md#limits) describe host context requirements, pattern coverage, and baseline comparison behavior.
 
@@ -113,8 +116,8 @@ cd collet
 node --test
 ```
 
-The suite supplies host-shaped events to hooks, reports test results, and exits non-zero on failure.
-From the Slag root, `npm run check` runs every suite. Unit tests do not prove live host integration.
+The suite supplies host-shaped events to hooks, reports test results, and exits non-zero when a test fails.
+From the Slag root, `npm run check` runs every suite and also exits non-zero when a suite fails outside its tests. Unit tests do not prove live host integration.
 
 ## Support
 

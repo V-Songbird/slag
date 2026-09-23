@@ -34,7 +34,7 @@ agy plugin install "<path-to-clone>/anneal"
 agy plugin list
 ```
 
-The list should name `anneal`. Installation of the current skill names remains unverified on this host.
+The list should name `anneal`, as it does on CLI 1.2.7. Running its skills on this host remains unverified.
 
 anneal acts on your request. Its enabled hook inspects shell commands and stays silent outside a migration branch.
 
@@ -48,7 +48,7 @@ Ask for an audit using the invocation for your host:
 | Codex | `$repo-layout audit` |
 | Antigravity | `/repo-layout audit` |
 
-The skill runs the scan and reports findings by severity, with counts and example paths. Audit mode changes no files.
+The skill runs the scan and reports findings by severity, with counts and example paths, followed by informational observations that carry no severity. Audit mode changes no files.
 A missing Node runtime prevents the scan from running; confirm `node --version` reports 22 or later in the host's environment.
 
 From the Slag repository root, you can also run the scan directly. Replace `<your-repository>` with the directory to inspect:
@@ -87,7 +87,7 @@ anneal has no settings. Choose a skill and its mode.
 - Session review reads one transcript. Redaction is best effort; inspect excerpts before sharing them.
 - Transcript parsing depends on the formats covered by tests. Antigravity requires an explicit transcript file.
 - Documentation checks cover the stated evidence and do not scan Git history by default.
-- Complete interactive migrations and published installation of the current skills remain unverified across all hosts.
+- Complete interactive migrations remain unverified on every host. The published package installs on all three hosts and its skills are discovered in Claude Code and Codex, but audits have run only in Claude Code and session review has not been run from it.
 
 Read the [full limits](docs/knowledge/workflows.md#limits) before migrating a shared repository.
 
@@ -100,8 +100,8 @@ cd anneal
 node --test
 ```
 
-The command reports test results and exits non-zero on failure. The suite covers the scripts and safety hook.
-From the Slag root, `npm run check` runs all repository suites.
+The command reports test results and exits non-zero when a test fails. The suite covers the scripts and safety hook.
+From the Slag root, `npm run check` runs all repository suites and also exits non-zero when a suite fails outside its tests.
 The [eval instructions](docs/knowledge/workflows.md#running-the-evals) describe the additional sandbox and host requirements for session tests.
 
 ## Support
