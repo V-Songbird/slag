@@ -30,14 +30,27 @@ function fixture(t, files = {}) {
 function runHook(project, mode = "message", extraEnv = {}) {
   const env = { ...process.env };
   delete env.HOUSE_REFERENCE_BLOCKLIST;
+  const started = Date.now();
   const result = spawnSync(process.execPath, [script, mode, path.join(project, "message.txt")], {
     cwd: project,
     encoding: "utf8",
     env: { ...env, ...extraEnv },
   });
+  result.elapsedMs = Date.now() - started;
   // A spawn or pipe error can leave stderr empty; name it instead of failing a later match on ''.
   assert.equal(result.error, undefined, `the hook run failed: ${result.error}`);
   return result;
+}
+
+// Every refusal writes its reason to stderr, while a forced termination on Windows also exits 1
+// with no output, so the two are told apart by stderr rather than by status.
+function assertRefused(result) {
+  assert.ok(
+    result.status !== 1 || result.stderr !== "",
+    `hook exited 1 with empty stderr after ${result.elapsedMs} ms, signal ${result.signal}: ` +
+      "a forced termination on Windows (taskkill /F, TerminateProcess) also exits 1 with no output",
+  );
+  assert.equal(result.status, 1);
 }
 
 function git(project, args) {
@@ -62,7 +75,7 @@ test("the canonical private blocklist filters comments and scans messages", (t) 
     "project/message.txt": "An ordinary summary\nUse SAMPLE-PROJECT-ALPHA here.\n",
   });
   const result = runHook(project);
-  assert.equal(result.status, 1);
+  assertRefused(result);
   assert.match(result.stderr, /commit message:2: contains "sample-project-alpha"/);
   assert.match(result.stderr, /docs\/knowledge\/private\//);
 });
@@ -74,7 +87,7 @@ test("an empty local list falls back to the parent private blocklist", (t) => {
     "project/message.txt": "sample-project-alpha\n",
   });
   const result = runHook(project);
-  assert.equal(result.status, 1);
+  assertRefused(result);
   assert.match(result.stderr, /contains "sample-project-alpha"/);
 });
 
@@ -97,8 +110,21 @@ test("an explicit blocklist takes precedence over the canonical location", (t) =
   const result = runHook(project, "message", {
     HOUSE_REFERENCE_BLOCKLIST: path.join(root, "override.txt"),
   });
-  assert.equal(result.status, 1);
+  assertRefused(result);
   assert.match(result.stderr, /contains "sample-project-beta"/);
+});
+
+test("a silent exit 1 is reported as a possible forced termination, not a refusal", () => {
+  assert.throws(
+    () => assertRefused({ status: 1, stderr: "", signal: null, elapsedMs: 42 }),
+    {
+      message:
+        "hook exited 1 with empty stderr after 42 ms, signal null: " +
+        "a forced termination on Windows (taskkill /F, TerminateProcess) also exits 1 with no output",
+    },
+  );
+  assertRefused({ status: 1, stderr: 'commit message:1: contains "sample-project-alpha"\n' });
+  assert.throws(() => assertRefused({ status: 0, stderr: "" }), { message: /Expected values to be strictly equal/ });
 });
 
 test("matching is case insensitive, bounded, and literal", () => {
@@ -130,6 +156,6 @@ test("staged scanning checks added contents, excluding filenames and unstaged te
 
   git(project, ["add", "--", "sample-project-alpha.txt"]);
   const blockedStage = runHook(project, "staged");
-  assert.equal(blockedStage.status, 1);
+  assertRefused(blockedStage);
   assert.match(blockedStage.stderr, /staged change:1: contains "sample-project-alpha"/);
 });
