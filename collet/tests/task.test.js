@@ -142,7 +142,7 @@ test('close refuses characters nobody sees in --left-out and --unverified, runs 
   assert.match(refused.stderr, /^--unverified holds characters that do not show on screen: 6 Unicode tag characters\.$/m);
   assert.match(refused.stderr, /^Task t1 stays open; the accept command was not run\. /m);
   assert.doesNotMatch(refused.stderr, /ignore|[\u200B\u{E0000}-\u{E007F}]/u);
-  assert.doesNotMatch(refused.stdout, /checking the working tree|running accept command/);
+  assert.doesNotMatch(refused.stdout, /running checks|running accept command/);
   assert.equal(existsSync(join(root, 'accept-ran')), false);
   assert.equal(readFileSync(join(root, '.collet', 'ledger.jsonl'), 'utf8'), ledger);
   assert.equal(readFileSync(join(root, '.collet', 'unverified.md'), 'utf8'), unverified);
@@ -670,6 +670,7 @@ test('a guard log that cannot be read leaves the close and its output as they we
   mkdirSync(join(root, '.collet', 'guard-log.jsonl'));
   const closed = task(root, ['close', '--left-out', 'nothing', '--unverified', 'nothing']);
   assert.equal(closed.status, 0, closed.stdout + closed.stderr);
+  assert.match(closed.stdout, /^running checks: node \.collet\/checks\/run\.mjs --live --strict$/m);
   assert.match(closed.stdout, /task t1 closed\./);
   assert.equal(closed.stderr, '');
 });

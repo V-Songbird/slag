@@ -73,6 +73,10 @@ All notable changes to collet are documented here. The format follows
 
 ### Changed
 
+- `task.mjs close` names the live check command it runs, as in
+  `running checks: node .collet/checks/run.mjs --live --strict`, the way the accept step names
+  its command. A refused close still prints neither line. A mounted project gets the new line by
+  mounting again.
 - `task-harness` asks a fifth question, which conventions a change here must respect, and takes
   the conventions it writes into `.collet/config.json` from the project's own files or from you.
   It asks when those files state none, leaves the list empty when nobody answers, and never reads

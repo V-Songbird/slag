@@ -484,11 +484,9 @@ switch (command) {
       console.error('Restore .collet/checks/scope.mjs before closing; the accept command was not run.');
       process.exit(1);
     }
-    console.log('checking the working tree against the task:');
-    const checked = spawnSync(process.execPath, [join(STATE, 'checks', 'run.mjs'), '--live', '--strict'], {
-      cwd: ROOT,
-      stdio: 'inherit',
-    });
+    const checks = ['.collet/checks/run.mjs', '--live', '--strict'];
+    console.log(`running checks: node ${checks.join(' ')}`);
+    const checked = spawnSync(process.execPath, checks, { cwd: ROOT, stdio: 'inherit' });
     if (checked.status !== 0) {
       console.error(`\nLive checks failed. Task ${task.id} stays open.`);
       console.error('Resolve failed or unavailable checks reported above before closing; the accept command was not run.');
