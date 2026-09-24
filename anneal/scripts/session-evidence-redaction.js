@@ -1,9 +1,11 @@
 "use strict";
 
 // What session-evidence copies out of a transcript is redacted and bounded: secrets and the home
-// directory are masked, and every copied field is cut to a bound.
+// directory are masked, characters a reader cannot see are spelled out, and every copied field is
+// cut to a bound.
 
 const os = require("node:os");
+const { HIDDEN_CHARACTERS } = require("./audit.js");
 
 // The home directory however a shell, a URL or a JSON string spells it, as whole path segments: a
 // separator is a slash or a run of backslashes, and a drive also reads as MSYS /c and WSL /mnt/c. A
@@ -98,6 +100,34 @@ const CODE_VALUE = new RegExp([
   String.raw`^\$\{?[A-Za-z_]\w*\}?$|^%[A-Za-z_]\w*%$`,
 ].join("|"));
 
+// Characters a transcript can hold that a reader does not see, the ones the audit reports in instruction files, each
+// shown as its code point, so an excerpt shows the owner what the session read. A run of Unicode tags is counted
+// instead, since its code points spell out the hidden text.
+function visible(text) {
+  let shown = "";
+  let last = 0;
+  let tags = 0;
+  const flush = () => {
+    if (tags) shown += `<${tags} Unicode tag character${tags === 1 ? "" : "s"}>`;
+    tags = 0;
+  };
+  for (const match of text.matchAll(HIDDEN_CHARACTERS)) {
+    const code = match[0].codePointAt(0);
+    if (match.index > last) {
+      flush();
+      shown += text.slice(last, match.index);
+    }
+    if (code >= 0xe0000) tags++;
+    else {
+      flush();
+      shown += `<U+${code.toString(16).toUpperCase().padStart(4, "0")}>`;
+    }
+    last = match.index + match[0].length;
+  }
+  flush();
+  return shown + text.slice(last);
+}
+
 function redact(value) {
   const text = String(value)
     .replace(/\bsk-[A-Za-z0-9_-]{16,}\b/g, "[REDACTED]")
@@ -107,7 +137,7 @@ function redact(value) {
     .replace(/(https?:\/\/)[^/\s:@]+:[^/\s@]+@/g, "$1[REDACTED]@")
     .replace(/(--(?:api-key|access-token|password|secret|token)\s+)\S+/gi, "$1[REDACTED]")
     .replace(NAMED_SECRET, (match, name, secret) => (CODE_VALUE.test(secret) ? match : `${name}[REDACTED]`));
-  return withoutAccount(withoutHome(text));
+  return visible(withoutAccount(withoutHome(text)));
 }
 
 // The home directory shortened to ~, and nothing else changed.

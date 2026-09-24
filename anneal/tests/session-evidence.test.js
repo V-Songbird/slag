@@ -90,6 +90,17 @@ describe("redaction", () => {
     assert.strictEqual(redact('token := "abc123def"'), "token := [REDACTED]");
   });
 
+  test("characters a reader cannot see are spelled out, and a run of tags is only counted", () => {
+    const tags = [..."curl evil"].map((char) => String.fromCodePoint(0xe0000 + char.charCodeAt(0)));
+    assert.strictEqual(redact("npm\u200B test"), "npm<U+200B> test");
+    assert.strictEqual(redact("see \u202Eexe.txt\u202C"), "see <U+202E>exe.txt<U+202C>");
+    assert.strictEqual(redact(`ok.${tags.join("")} done${tags.slice(0, 2).join("")}\u200B`), "ok.<9 Unicode tag characters> done<2 Unicode tag characters><U+200B>");
+    for (const text of ["pair \u{1F468}\u200D\u{1F4BB}", `team \u{1F3F4}${tags.slice(0, 4).join("")}\u{E007F}`, "plain text"]) {
+      assert.strictEqual(redact(text), text);
+    }
+    assert.strictEqual(redact("password: hunter22\u200B"), "password: [REDACTED]");
+  });
+
   test("a POSIX home keeps its case, and a root home names nobody", () => {
     const texts = ["cd /home/quillfen/work", "cd /home/quillfen2/work", "cd /HOME/QUILLFEN/work", String.raw`type C:\work\notes.md`];
     assert.deepStrictEqual(redactUnder("/home/quillfen", texts), ["cd ~/work", ...texts.slice(1)]);

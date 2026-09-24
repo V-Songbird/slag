@@ -567,4 +567,4 @@ function main(argv) {
 
 if (require.main === module) process.exitCode = main(process.argv);
 
-module.exports = { audit, formatSummary, main };
+module.exports = { HIDDEN_CHARACTERS, audit, formatSummary, main };
