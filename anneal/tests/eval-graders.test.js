@@ -483,7 +483,7 @@ describe("map-reader cases", () => {
     for (const variant of ["original", "oriented"]) {
       const dir = path.join(EVALS, `map-reader-${variant}`);
       checks[variant] = graders(dir);
-      const removed = /git rm -rq -- (.+)\n/.exec(read(dir, "reader-fixture.sh"))[1].split(" ");
+      const removed = /git rm -rq -- (.+)\n/.exec(read(dir, `${variant}-reader-fixture.sh`))[1].split(" ");
       const root = tempDir(`anneal-graders-reader-${variant}-`);
       const git = (...args) => execFileSync("git", args, { cwd: root, stdio: "pipe", env: { ...process.env, GIT_CONFIG_GLOBAL: path.join(root, ".git-global") } });
       execFileSync(process.execPath, [FIXTURE, variant], { cwd: root, stdio: "pipe", env: { ...process.env, GIT_CONFIG_GLOBAL: path.join(root, ".git-global") } });

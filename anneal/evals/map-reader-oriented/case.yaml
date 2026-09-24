@@ -3,4 +3,4 @@ name: map-reader-oriented
 description: The navigation repository reduced to its notes, the map and the files the map names by path, with the oriented map. The reader answers four questions from the notes alone and says when they do not say.
 tags: [map-reader]
 context:
-  scaffold_script: reader-fixture.sh
+  scaffold_script: oriented-reader-fixture.sh

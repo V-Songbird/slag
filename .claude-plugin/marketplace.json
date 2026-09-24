@@ -11,7 +11,7 @@
       "name": "anneal",
       "source": "./anneal",
       "description": "Improves agent navigation through a repository, turns session detours into approved map-file changes, and reconciles documentation and non-code development files with current behavior. Includes audit-only review, an approved layout migration, README review, host consistency and repository hygiene.",
-      "version": "0.4.0-alpha",
+      "version": "0.5.0-alpha",
       "license": "MIT",
       "author": {
         "name": "Victor Villegas",

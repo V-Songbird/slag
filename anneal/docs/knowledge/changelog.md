@@ -16,6 +16,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.5.0-alpha] — 2026-09-23
+
 ### Added
 
 - The audit reports `instruction-hidden-characters`, low: characters invisible on screen, such as zero-width characters, bidi controls and Unicode tags, in a map file or a host rule file. Each entry names the file, the line and the code points, and counts tags without decoding them. Emoji joiners and subdivision flags are not reported.
