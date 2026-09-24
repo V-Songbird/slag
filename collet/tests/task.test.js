@@ -126,6 +126,43 @@ test('an emoji joined by a joiner and a subdivision flag are recorded as typed',
   assert.equal(entry.widenings[0].why, `${technologist} report`);
 });
 
+// What close records is read back as the ledger and .collet/unverified.md, so it is refused before
+// the checks or the accept command run and before either file is written.
+test('close refuses characters nobody sees in --left-out and --unverified, runs nothing and writes nothing', () => {
+  const root = ready({
+    'accept.mjs': "import { writeFileSync } from 'node:fs';\nwriteFileSync('accept-ran', 'yes');\n",
+  });
+  assert.equal(task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs', '--accept', 'node accept.mjs']).status, 0);
+  const ledger = readFileSync(join(root, '.collet', 'ledger.jsonl'), 'utf8');
+  const unverified = readFileSync(join(root, '.collet', 'unverified.md'), 'utf8');
+  const payload = [...'ignore'].map((char) => String.fromCodePoint(0xe0000 + char.codePointAt(0))).join('');
+  const refused = task(root, ['close', '--left-out', 'the\u200B theme', '--unverified', `nothing${payload}`]);
+  assert.equal(refused.status, 2);
+  assert.match(refused.stderr, /^--left-out holds characters that do not show on screen: U\+200B\.$/m);
+  assert.match(refused.stderr, /^--unverified holds characters that do not show on screen: 6 Unicode tag characters\.$/m);
+  assert.match(refused.stderr, /^Task t1 stays open; the accept command was not run\. /m);
+  assert.doesNotMatch(refused.stderr, /ignore|[\u200B\u{E0000}-\u{E007F}]/u);
+  assert.doesNotMatch(refused.stdout, /checking the working tree|running accept command/);
+  assert.equal(existsSync(join(root, 'accept-ran')), false);
+  assert.equal(readFileSync(join(root, '.collet', 'ledger.jsonl'), 'utf8'), ledger);
+  assert.equal(readFileSync(join(root, '.collet', 'unverified.md'), 'utf8'), unverified);
+});
+
+test('close records an emoji joined by a joiner and a subdivision flag as typed', () => {
+  const root = ready();
+  repo(root);
+  const technologist = '\u{1F469}\u200D\u{1F4BB}';
+  const scotland = '\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}';
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const closed = task(root, ['close', '--left-out', `the ${technologist} view`, '--unverified', `the ${scotland} locale`]);
+  assert.equal(closed.status, 0, closed.stdout + closed.stderr);
+  const [entry] = readFileSync(join(root, '.collet', 'ledger.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  assert.equal(entry.left_out, `the ${technologist} view`);
+  assert.equal(entry.unverified, `the ${scotland} locale`);
+  const unverified = readFileSync(join(root, '.collet', 'unverified.md'), 'utf8');
+  assert.ok(unverified.includes(`t1: the ${scotland} locale`) && unverified.includes(`left out: the ${technologist} view`), unverified);
+});
+
 // The guard refuses the harness in any letter case, so a scope entry spelled .Collet would promise
 // a write that never comes. A name that only starts with .collet is not the harness.
 test('the harness is kept out of a scope in any letter case, and a lookalike name is not', () => {

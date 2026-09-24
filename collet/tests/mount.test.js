@@ -201,6 +201,37 @@ test('an emoji joined by a joiner and a subdivision flag reach the config and th
   assert.ok(readFileSync(join(root, 'AGENTS.md'), 'utf8').includes(`asked before any of these: ${entry}.`));
 });
 
+// An entry edited into the config by hand never passed --ask-first, and a remount renders the list
+// into the rules block, so it is refused there, named by what shows of it.
+test('an ask-first entry edited into the config with characters nobody sees is not rendered, and nothing is written', () => {
+  const root = project(TREE);
+  assert.equal(mount(root, ['--ask-first', 'deploy']).status, 0);
+  const configPath = join(root, '.collet', 'config.json');
+  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  const payload = [...'wipe'].map((char) => String.fromCodePoint(0xe0000 + char.codePointAt(0))).join('');
+  writeFileSync(configPath, JSON.stringify({ ...config, ask_first: ['deploy', `publish\u2060`, `release${payload}`] }, null, 2) + '\n', 'utf8');
+  writeFileSync(join(root, 'CLAUDE.md'), '# project\n', 'utf8');
+  const before = Object.fromEntries(['AGENTS.md', 'CLAUDE.md', '.collet/config.json'].map((path) => [path, readFileSync(join(root, path), 'utf8')]));
+  const out = mount(root);
+  assert.equal(out.status, 2, out.stderr);
+  assert.match(out.stderr, /^ask_first "publish" in \.collet\/config\.json holds characters that do not show on screen: U\+2060\.$/m);
+  assert.match(out.stderr, /^ask_first "release" in \.collet\/config\.json holds characters that do not show on screen: 4 Unicode tag characters\.$/m);
+  assert.match(out.stderr, /^Nothing was written\. /m);
+  assert.doesNotMatch(out.stderr, /deploy|wipe|[\u2060\u{E0000}-\u{E007F}]/u);
+  for (const [path, text] of Object.entries(before)) assert.equal(readFileSync(join(root, path), 'utf8'), text, path);
+});
+
+test('an emoji joined by a joiner in a hand-edited ask-first entry is rendered as typed', () => {
+  const root = project(TREE);
+  assert.equal(mount(root).status, 0);
+  const configPath = join(root, '.collet', 'config.json');
+  const entry = 'post \u{1F469}\u200D\u{1F4BB} to \u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}';
+  writeFileSync(configPath, JSON.stringify({ ...JSON.parse(readFileSync(configPath, 'utf8')), ask_first: [entry] }, null, 2) + '\n', 'utf8');
+  const out = mount(root);
+  assert.equal(out.status, 0, out.stderr);
+  assert.ok(readFileSync(join(root, 'AGENTS.md'), 'utf8').includes(`asked before any of these: ${entry}.`));
+});
+
 // Confirmed ask rules go into the project's shared Claude Code settings and nowhere else, merged
 // into what is there. Without one, no settings file appears.
 test('confirmed ask rules are merged into the project settings, keeping every existing key and rule', () => {

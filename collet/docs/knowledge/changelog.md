@@ -18,6 +18,11 @@ All notable changes to collet are documented here. The format follows
 
 ### Added
 
+- `task.mjs close` refuses `--left-out` or `--unverified` text holding the characters the session
+  start leaves out, before the checks or the accept command run, and the task stays open.
+  `mount.mjs` refuses to render an `ask_first` entry from `.collet/config.json` holding them, such
+  as one edited in by hand, and names it by the part that shows. Nothing is written in either case,
+  and the joiner inside an emoji and a subdivision flag still pass.
 - `task.mjs add` and `widen`, and `mount.mjs --ask-first`, `--accept` and `--ask-rule`, refuse text
   holding the characters the session start leaves out, with the same exceptions for the joiner
   inside an emoji and a subdivision flag. The message names each field and the code points,

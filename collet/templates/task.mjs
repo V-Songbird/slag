@@ -464,6 +464,14 @@ switch (command) {
       console.error('"nothing" is a valid answer for either, and it goes on the record as a claim.');
       process.exit(2);
     }
+    // Both go into the ledger and .collet/unverified.md, which sessions read back.
+    refuseUnseen(
+      [
+        ['--left-out', args.leftOut],
+        ['--unverified', args.unverified],
+      ],
+      `Task ${task.id} stays open; the accept command was not run.`
+    );
     // Reported, never refused: the live checks below still read what such a call changed.
     reportUnfinished(task.id);
 

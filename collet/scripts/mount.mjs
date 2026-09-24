@@ -158,6 +158,15 @@ if (existsSync(config)) {
     process.exit(2);
   }
 }
+// An ask-first entry edited into the config by hand never passed --ask-first, and the rules block
+// renders it into every session, so it is held to the same rule here.
+const hiddenAsked = stated(mine?.ask_first)
+  .map((item) => unseen(`ask_first ${JSON.stringify(item.replace(HIDDEN_CHARACTERS, ''))} in .collet/config.json`, item))
+  .filter(Boolean);
+if (hiddenAsked.length) {
+  console.error(`${hiddenAsked.join('\n')}\nNothing was written. Type the entry again without them, then mount again.`);
+  process.exit(2);
+}
 // The classes this project removed, as its config records them, with this mount's changes applied.
 const recorded = Array.isArray(mine?.removed_checks) ? mine.removed_checks.filter((id) => typeof id === 'string') : [];
 const removals = [...new Set([...recorded, ...toRemove])].filter((id) => !toRestore.includes(id));
