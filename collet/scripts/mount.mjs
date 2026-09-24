@@ -62,7 +62,7 @@ try {
       const value = shown(flag, process.argv[++index]?.trim());
       // A Claude Code permission rule: a tool name, optionally followed by its specifier in parentheses.
       if (!value || !/^[A-Za-z][\w-]*(\(.+\))?$/s.test(value)) {
-        throw new Error('--ask-rule needs a Claude Code permission rule such as "Bash(npm publish *)".');
+        throw new Error('--ask-rule needs a Claude Code permission rule such as "Bash(npm publish *)" or "PowerShell(npm publish *)".');
       }
       if (!askRules.includes(value)) askRules.push(value);
     } else if (flag === '--exclude') {

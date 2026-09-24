@@ -111,10 +111,13 @@ the work as a blocker named in the summary. With no answer, pass nothing: the co
 block stay exactly as they were.
 
 On Claude Code, when the person gave that list, offer host ask rules for it, so the host records
-their approval instead of the session claiming it. For each thing with a clear command, propose one
-rule in Claude Code's permission syntax, such as `Bash(npm publish *)` for publishing to npm or
-`Bash(git push *)` for pushing. A thing with no clear command pattern, such as "publish a
-release", gets no rule: say so and do not guess one. Show every proposed rule, and before the
+their approval instead of the session claiming it. For each thing with a clear command, propose two
+rules in Claude Code's permission syntax, one per shell tool, such as `Bash(npm publish *)` and
+`PowerShell(npm publish *)` for publishing to npm, or `Bash(git push *)` and
+`PowerShell(git push *)` for pushing. Say that a rule guards only the shell tool it names: the
+project's settings are shared by contributors whose Claude Code may run commands through either
+tool, so offer both rather than guessing. A thing with no clear command pattern, such as "publish
+a release", gets no rule: say so and do not guess one. Show every proposed rule, and before the
 person confirms, say that a headless or automated run cannot answer an ask prompt and stops at
 that command. Pass only the rules they confirm, once each as `--ask-rule "<rule>"`. The mount adds
 them to `permissions.ask` in the project's `.claude/settings.json`, creating the file when it is

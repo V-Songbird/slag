@@ -18,6 +18,10 @@ All notable changes to collet are documented here. The format follows
 
 ### Added
 
+- On Claude Code, task-harness offers a `PowerShell(<command> *)` ask rule beside each
+  `Bash(<command> *)` one and says that a rule guards only the shell tool it names, since the
+  project's settings are shared by contributors whose Claude Code may run commands through either
+  tool. Each rule is still confirmed on its own, and `mount.mjs --ask-rule` adds only those.
 - `task.mjs close` refuses `--left-out` or `--unverified` text holding the characters the session
   start leaves out, before the checks or the accept command run, and the task stays open.
   `mount.mjs` refuses to render an `ask_first` entry from `.collet/config.json` holding them, such

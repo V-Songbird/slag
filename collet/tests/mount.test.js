@@ -249,6 +249,14 @@ test('confirmed ask rules are merged into the project settings, keeping every ex
   assert.deepEqual(JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf8')), written);
 });
 
+test('a PowerShell ask rule is accepted and merged beside the Bash one for the same command', () => {
+  const root = project({ ...TREE, '.claude/settings.json': JSON.stringify({ permissions: { ask: ['Bash(npm run deploy *)'] } }) });
+  const out = mount(root, ['--ask-first', 'deploy', '--ask-rule', 'Bash(npm run deploy *)', '--ask-rule', 'PowerShell(npm run deploy *)']);
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  assert.match(out.stdout, /ask rules added: PowerShell\(npm run deploy \*\);/);
+  assert.deepEqual(JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf8')), { permissions: { ask: ['Bash(npm run deploy *)', 'PowerShell(npm run deploy *)'] } });
+});
+
 test('an ask rule creates the project settings when absent, and a mount without one writes none', () => {
   const root = project(TREE);
   mount(root, ['--ask-first', 'deploy']);
