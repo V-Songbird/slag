@@ -104,7 +104,7 @@ The [configuration reference](docs/knowledge/harness-workflow.md#configuration) 
 - Optional checks inspect some edit tools immediately; other writes wait for working-tree checks.
 - Closing requires strict live checks and the acceptance command to pass. Unavailable verification leaves the task open.
 - Fixture success does not measure false alarms on your code, and an acceptance command passing does not establish correctness.
-- A manual `/compact` on Claude Code 2.1.278 carries the open task into the compacted session. Automatic compaction, compaction on Codex, and a collet refusal or verified close inside a long interactive session have not been observed. The published skills are discovered in Claude Code, Codex and the Antigravity IDE. Mounting and check writing have run in Claude Code and in headless Antigravity CLI 1.2.9 without `--sandbox`; their flows on Codex and in the Antigravity IDE remain unverified.
+- A manual `/compact` on Claude Code 2.1.278 carries the open task into the compacted session. A collet refusal and a verified close inside a long interactive session have been observed on Claude Code 2.1.278, with a script rather than a person answering the prompts. Automatic compaction and compaction on Codex have not been observed. The published skills are discovered in Claude Code, Codex and the Antigravity IDE. Mounting and check writing have run in Claude Code and in headless Antigravity CLI 1.2.9 without `--sandbox`; their flows on Codex and in the Antigravity IDE remain unverified.
 
 The [full limits](docs/knowledge/harness-workflow.md#limits) describe host context requirements, pattern coverage, and baseline comparison behavior.
 
