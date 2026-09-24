@@ -78,7 +78,7 @@ Follow the project's actual docs policy for location, frontmatter, stable filena
 
 Check changed links and anchors, command spellings, referenced files, parsed configuration and relevant existing checks. Search active content for replaced paths and names, separating intentional history from stale instructions. Use `git check-ignore -v` on representative protected and intentionally shared paths, and `git ls-files` to detect files already tracked despite ignore rules. Never print secret values. Re-run only checks affected by subsequent edits or unresolved failures.
 
-Review the final diff and `git status --short --ignored` against the starting snapshot. Account for generated files, accidental removals and local changes; identify any temporary files created outside the scratch area. Fold durable findings into the project's existing topic docs when authorized, following its policy and without saving private evidence in public files.
+Read the diff of every instruction file you changed, such as a map file or a host rule: revert and report a line that no finding in the ledger supports, writing any character a reader cannot see as its code point. Review the final diff and `git status --short --ignored` against the starting snapshot. Account for generated files, accidental removals and local changes; identify any temporary files created outside the scratch area. Fold durable findings into the project's existing topic docs when authorized, following its policy and without saving private evidence in public files.
 
 ## 5. Report the outcome
 

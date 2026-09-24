@@ -140,7 +140,7 @@ Each change answers three things: where it applies, what to do first, and which 
 
 Show a short prioritized list. Each entry carries the transcript line that supports it, the section it lands in, the text as it is and as it would be, and what the next session gains. Ask the owner which entries to apply.
 
-Apply only those, by editing the file in place. Then show `git diff` for the map file, and its line count before and after. Outside a git repository, say that the edit has no undo beyond the editor's.
+Apply only those, by editing the file in place. Then check the change against the approved entries: every line it adds or removes must belong to one of them. Revert a line that belongs to none and report it, writing any character a reader cannot see as its code point. Then show `git diff` for the map file, and its line count before and after. Outside a git repository, compare the file with the copy you read in step 4, and say that the edit has no undo beyond the editor's.
 
 A saved map file is not loaded into a session that is already running. Say so.
 
