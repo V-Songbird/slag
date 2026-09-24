@@ -454,6 +454,25 @@ describe("session-audit-stops-on-unreadable-transcript", () => {
   });
 });
 
+describe("case files the harness can parse", () => {
+  // The harness reads case.yaml and a prompt's frontmatter as YAML, where an unquoted value
+  // holding ": " is a parse error that drops the whole case before any run.
+  test("no unquoted scalar value holds a colon followed by a space", () => {
+    const offending = [];
+    for (const name of fs.readdirSync(EVALS)) {
+      const dir = path.join(EVALS, name);
+      if (!fs.existsSync(path.join(dir, "case.yaml"))) continue;
+      const head = /^---\s*\n([\s\S]*?)---/.exec(read(dir, "prompt.md"));
+      const lines = [...read(dir, "case.yaml").split("\n"), ...(head ? head[1].split("\n") : [])];
+      for (const line of lines) {
+        const pair = /^\s*[a-z_]+: (.+)$/.exec(line);
+        if (pair && !/^['"[{]/.test(pair[1]) && pair[1].includes(": ")) offending.push(`${name}: ${line.trim()}`);
+      }
+    }
+    assert.deepStrictEqual(offending, []);
+  });
+});
+
 describe("map-reader cases", () => {
   const FIXTURE = path.join(EVALS, "navigation-fixture.js");
   const workspaces = {};
