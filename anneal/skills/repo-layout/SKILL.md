@@ -134,7 +134,7 @@ Create the branch `anneal/<YYYY-MM-DD>` from the current `HEAD` before the first
 4. When a check that passed in step 4 now fails, fix it only if this step caused it: a missed import, a stale path, or a doc the project requires alongside the change. If the cause is elsewhere, or the fix doesn't restore the baseline, set the step aside by committing it, with the subject `anneal: <step>` like a kept step, on a branch named `anneal/<YYYY-MM-DD>-set-aside-<n>`, with `<n>` the next number no branch uses, and switching back to the migration branch. Tell the owner and move on.
 5. When the checks match the baseline, commit with the subject `anneal: <step>` and a body listing what moved or changed.
 
-While the migration branch is checked out, anneal's guard refuses destructive git commands — `reset --hard`, `clean -f`, `checkout --force`, `push --force`, `branch -D`. Undo a step with `git revert`; leave the branch to abandon the migration.
+While the migration branch is checked out, anneal's guard refuses destructive git commands — `reset --hard`, `clean -f`, `checkout --force`, `switch --discard-changes`, `push --force`, `branch -D` — and history rewrites such as `commit --amend` and `rebase`. Undo a step with `git revert`; leave the branch to abandon the migration. A refused command stays refused in any other form.
 
 ## 7. Report
 

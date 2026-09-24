@@ -37,25 +37,38 @@ const HOSTS = {
   },
 };
 
-// Each of these discards committed or checked work rather than adding to it.
-// The subcommand has to follow `git` itself, past its global flags only, so a
-// commit message that merely names one is not a match. `--force-with-lease` is
-// left out: it refuses when the remote moved, which is the case this guard
-// exists to catch.
-const GIT = String.raw`\bgit\b(?:\s+-[cC]\s*\S+)*\s+`;
-const ARGS = String.raw`[^\n;|&]*\s`;
+// Each of these discards committed or checked work rather than adding to it,
+// or rewrites the commits that record it. The subcommand has to follow `git`
+// itself, past its global flags only, so a commit message that merely names one
+// is not a match; a message that holds ` --amend` still is. `--force-with-lease`
+// is left out: it refuses when the remote moved, which is the case this guard
+// exists to catch. A regex cannot see every rewrite of a command, such as git
+// run through a variable, so the denial also says what a rewrite would do.
+const GIT = String.raw`\bgit\b(?:\s+(?:-[cC]\s*\S+|--?[\w-]+(?:=\S+)?))*\s+`;
+const SEGMENT = String.raw`[^\n;|&]*`;
+const ARGS = String.raw`${SEGMENT}\s`;
 const DESTRUCTIVE_GIT = new RegExp(
   GIT +
     "(?:" +
     [
       String.raw`reset\b${ARGS}--hard\b`,
-      String.raw`clean\b${ARGS}-[a-zA-Z]*f`,
+      String.raw`clean\b${ARGS}(?:-[a-zA-Z]*f|--force\b)`,
       String.raw`checkout\b${ARGS}(?:--force|-f)\b`,
-      String.raw`push\b${ARGS}(?:--force\b(?!-with-lease)|-f\b)`,
+      String.raw`switch\b${ARGS}(?:--discard-changes|--force|-f)\b`,
+      String.raw`push\b${ARGS}(?:--force\b(?!-with-lease)|-f\b|\+\S)`,
       String.raw`branch\b${ARGS}-D\b`,
+      String.raw`branch\b(?=${ARGS}(?:-[a-zA-Z]*d|--delete\b))(?=${ARGS}(?:-[a-zA-Z]*f|--force\b))`,
+      String.raw`commit\b${ARGS}--amend\b`,
+      String.raw`rebase\b(?!${ARGS}--(?:abort|quit)\b)`,
+      String.raw`update-ref\b${ARGS}(?:-d|--delete)\b`,
+      String.raw`reflog\b${ARGS}(?:expire|delete)\b`,
     ].join("|") +
     ")"
 );
+
+// A shell line continuation, `\` in POSIX shells and a backtick in PowerShell,
+// joins one command across lines; read it as the one line it runs as.
+const isDestructive = (command) => DESTRUCTIVE_GIT.test(command.replace(/[\\`]\r?\n/g, " "));
 
 function readInput() {
   try {
@@ -85,12 +98,12 @@ function onMigrationBranch(cwd) {
 function decide(host, data) {
   const adapter = HOSTS[host] || HOSTS.claude;
   const command = adapter.command(data);
-  if (typeof command !== "string" || !DESTRUCTIVE_GIT.test(command)) return adapter.allow();
+  if (typeof command !== "string" || !isDestructive(command)) return adapter.allow();
   if (!onMigrationBranch(adapter.cwd(data))) return adapter.allow();
   return adapter.deny(
-    "anneal is mid-migration on this branch, and this command discards committed or checked work: " +
+    "anneal is mid-migration on this branch, and this command discards or rewrites committed or checked work: " +
       command.trim() +
-      ". Each migration step is its own commit; undo one with `git revert`, or leave the branch first if you meant to abandon the migration."
+      ". Each migration step is its own commit; undo one with `git revert`, or leave the branch first if you meant to abandon the migration. The same command in another form would discard or rewrite the same work."
   );
 }
 
@@ -111,4 +124,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { decide, DESTRUCTIVE_GIT, onMigrationBranch };
+module.exports = { decide, DESTRUCTIVE_GIT, isDestructive, onMigrationBranch };

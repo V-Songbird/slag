@@ -9,7 +9,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync, execFileSync } = require("node:child_process");
-const { decide, DESTRUCTIVE_GIT } = require("../hooks/safety-guard.js");
+const { decide, DESTRUCTIVE_GIT, isDestructive } = require("../hooks/safety-guard.js");
 
 const HOOK = path.join(__dirname, "..", "hooks", "safety-guard.js");
 
@@ -54,6 +54,40 @@ describe("what counts as destructive", () => {
       "npm test && git reset --hard",
       "git -C ../other reset --hard",
       "git reset HEAD~1 --hard",
+      "git clean --force -d",
+      "git switch --discard-changes main",
+      "git switch -f main",
+      "git push origin +anneal/2026-09-19",
+      "git branch --delete --force anneal/2026-09-19",
+      "git branch -d -f anneal/2026-09-19",
+      "git branch -df anneal/2026-09-19",
+    ]) {
+      assert.strictEqual(DESTRUCTIVE_GIT.test(command), true, command);
+    }
+  });
+
+  test("the same commands behind global flags or split across lines", () => {
+    for (const command of [
+      "git --no-pager reset --hard HEAD~1",
+      "git --git-dir=.git --work-tree=. clean -fd",
+      "git -c core.pager=cat -P push --force",
+      "git reset \\\n  --hard",
+      "git reset `\r\n  --hard",
+    ]) {
+      assert.strictEqual(isDestructive(command), true, JSON.stringify(command));
+    }
+  });
+
+  test("the commands that rewrite the commits a migration made", () => {
+    for (const command of [
+      "git commit --amend --no-edit",
+      "git rebase -i HEAD~3",
+      "git rebase main",
+      "git rebase --continue",
+      "git update-ref -d refs/heads/anneal/2026-09-19",
+      "git reflog expire --expire=now --all",
+      "git reflog delete HEAD@{1}",
+      "git rebase --abort && git rebase main",
     ]) {
       assert.strictEqual(DESTRUCTIVE_GIT.test(command), true, command);
     }
@@ -80,6 +114,13 @@ describe("what counts as destructive", () => {
       "git push --force-with-lease",
       "git config user.email",
       "git rev-parse --show-toplevel",
+      "git switch anneal/2026-09-19",
+      "git switch -c anneal/2026-09-19-set-aside-1",
+      "git --no-pager log -1 --format=%s anneal/2026-09-19-set-aside-1",
+      "git push origin anneal/2026-09-19",
+      "git branch -d merged-topic",
+      "git rebase --abort",
+      "git reflog",
     ]) {
       assert.strictEqual(DESTRUCTIVE_GIT.test(command), false, command);
     }
@@ -92,6 +133,12 @@ describe("scope", () => {
     const out = decide("claude", claudeCall("git reset --hard", root));
     assert.strictEqual(out.hookSpecificOutput.permissionDecision, "deny");
     assert.match(out.hookSpecificOutput.permissionDecisionReason, /git revert/);
+    assert.match(out.hookSpecificOutput.permissionDecisionReason, /in another form/);
+  });
+
+  test("a command split across lines is denied on an anneal branch", () => {
+    const root = repoOn("anneal/2026-09-19");
+    assert.ok(denied(decide("claude", claudeCall("git reset \\\n  --hard", root))));
   });
 
   test("a set-aside branch is guarded too", () => {

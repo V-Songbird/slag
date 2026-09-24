@@ -217,7 +217,16 @@ A cleanup request authorizes ordinary documentation fixes within its scope. Chan
 
 ## The safety hook
 
-While a branch named `anneal/<YYYY-MM-DD>` is checked out, a hook refuses five git commands: `reset --hard`, `clean -f`, `checkout --force`, `push --force` and `branch -D`. Each one would throw away the commits the migration had already made. `push --force-with-lease` is allowed, because it refuses on its own when the remote moved. Undo a step with `git revert`, or leave the branch to abandon the migration. On every other branch the hook allows everything.
+While a branch named `anneal/<YYYY-MM-DD>` or one of its set-aside branches is checked out, a hook refuses the git commands that would throw away the commits the migration had already made, or the working tree they were checked against:
+
+- `reset --hard`, `clean -f` or `--force`, `checkout --force`, `switch --discard-changes` or `--force`;
+- `push --force` or a `+` refspec, `branch -D` or a delete with `--force`.
+
+It also refuses the commands that rewrite those commits: `commit --amend`, `rebase` other than `--abort` and `--quit`, `update-ref -d` and `reflog expire` or `delete`.
+
+It reads the subcommand past git's global flags, such as `--no-pager` or `-C <path>`, and reads a command split with a line continuation as one line. `push --force-with-lease` is allowed, because it refuses on its own when the remote moved. Undo a step with `git revert`, or leave the branch to abandon the migration. On every other branch the hook allows everything.
+
+The hook matches command text, so it cannot see every rewrite, such as git run through a variable. Its denial says that the same command in another form would discard or rewrite the same work.
 
 ## Limits
 
