@@ -18,6 +18,12 @@ All notable changes to collet are documented here. The format follows
 
 ### Added
 
+- The session start leaves out characters a model reads and a person does not see — zero-width
+  characters, the word joiner, a byte order mark past the start, bidi embeddings and isolates, and
+  Unicode tags — from the project line, the ask-first list, the conventions, the open task's title,
+  scope and accept command, and the handoff note. A closing line names each field that held them
+  and their code points, counting tags and never decoding them. The joiner inside an emoji and a
+  subdivision flag stay, and text without such characters reads as before.
 - The rules block states that when a missing input or a broken environment means the accept
   command cannot pass as the task stands, the work ends as a blocker named in the summary and the
   task stays open; finished still means the accept command exited zero. With an ask-first list, the
