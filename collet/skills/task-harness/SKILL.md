@@ -110,6 +110,18 @@ until a missing input or a broken environment means it cannot pass as the task s
 the work as a blocker named in the summary. With no answer, pass nothing: the config and the rules
 block stay exactly as they were.
 
+On Claude Code, when the person gave that list, offer host ask rules for it, so the host records
+their approval instead of the session claiming it. For each thing with a clear command, propose one
+rule in Claude Code's permission syntax, such as `Bash(npm publish *)` for publishing to npm or
+`Bash(git push *)` for pushing. A thing with no clear command pattern, such as "publish a
+release", gets no rule: say so and do not guess one. Show every proposed rule, and before the
+person confirms, say that a headless or automated run cannot answer an ask prompt and stops at
+that command. Pass only the rules they confirm, once each as `--ask-rule "<rule>"`. The mount adds
+them to `permissions.ask` in the project's `.claude/settings.json`, creating the file when it is
+missing and keeping every other key and rule. With no list or no yes, pass none and nothing is
+written there. Never write the person's user settings, `.claude/settings.local.json` or any Codex
+or Antigravity configuration, and make no such offer on those hosts.
+
 It prints every path it wrote and every path it kept. A re-run refreshes collet's own scripts —
 `task.mjs`, `state.mjs` and the built-in scope checks — and keeps the project's `config.json`,
 `unverified.md`, generated bundle checks and their examples. It refreshes `.collet/source.mjs`

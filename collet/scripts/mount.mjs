@@ -3,7 +3,8 @@
 // the judgement about what a task's scope should be belong to the skill, and everything that has
 // to be identical every time belongs here, where it is executed rather than followed.
 //
-//   node scripts/mount.mjs <project-directory> [--accept "npm test"] [--ask-first <thing>]... [--exclude <glob>]...
+//   node scripts/mount.mjs <project-directory> [--accept "npm test"] [--ask-first <thing>]... [--ask-rule <rule>]...
+//                          [--exclude <glob>]...
 //                          [--checks [--edition <id>]... [--with <edition>.<class>]...
 //                                    [--remove <edition>.<class>]... [--restore <edition>.<class>]...]
 //
@@ -30,11 +31,13 @@ const toRemove = [];
 const toRestore = [];
 // What must never happen here without asking the person, one thing per --ask-first.
 const askFirst = [];
+// Claude Code permission rules the person confirmed for that list, one per --ask-rule.
+const askRules = [];
 // Paths no bundle check reads, such as a committed generated mirror, one glob per --exclude.
 const exclude = [];
 
 if (!process.argv[2] || !existsSync(target) || !statSync(target).isDirectory()) {
-  console.error('usage: node scripts/mount.mjs <project-directory> [--accept "npm test"] [--ask-first <thing>]... [--exclude <glob>]... [--checks [--edition <id>]... [--with <edition>.<class>]... [--remove <edition>.<class>]... [--restore <edition>.<class>]...]');
+  console.error('usage: node scripts/mount.mjs <project-directory> [--accept "npm test"] [--ask-first <thing>]... [--ask-rule <rule>]... [--exclude <glob>]... [--checks [--edition <id>]... [--with <edition>.<class>]... [--remove <edition>.<class>]... [--restore <edition>.<class>]...]');
   process.exit(2);
 }
 
@@ -46,6 +49,13 @@ try {
       const value = process.argv[++index]?.trim();
       if (!value || value.startsWith('--')) throw new Error('--ask-first needs the thing to ask about, such as deploy.');
       askFirst.push(value);
+    } else if (flag === '--ask-rule') {
+      const value = process.argv[++index]?.trim();
+      // A Claude Code permission rule: a tool name, optionally followed by its specifier in parentheses.
+      if (!value || !/^[A-Za-z][\w-]*(\(.+\))?$/s.test(value)) {
+        throw new Error('--ask-rule needs a Claude Code permission rule such as "Bash(npm publish *)".');
+      }
+      if (!askRules.includes(value)) askRules.push(value);
     } else if (flag === '--exclude') {
       const value = process.argv[++index]?.trim();
       if (!value || value.startsWith('--')) throw new Error('--exclude needs a path glob such as deno_dist/**.');
@@ -142,6 +152,33 @@ if (existsSync(config)) {
 // The classes this project removed, as its config records them, with this mount's changes applied.
 const recorded = Array.isArray(mine?.removed_checks) ? mine.removed_checks.filter((id) => typeof id === 'string') : [];
 const removals = [...new Set([...recorded, ...toRemove])].filter((id) => !toRestore.includes(id));
+
+// Ask rules go only into the project's shared Claude Code settings, and only for a project that
+// names what it asks first. Read before anything is written, like the config above.
+const claudeSettings = join(target, '.claude', 'settings.json');
+let claude = null;
+if (askRules.length) {
+  const problem = (message) => {
+    console.error(`${message}\nNothing was written.`);
+    process.exit(2);
+  };
+  if (!askFirst.length && !stated(mine?.ask_first).length) {
+    problem('--ask-rule needs an ask-first list, from --ask-first or from .collet/config.json.');
+  }
+  if (existsSync(claudeSettings)) {
+    try {
+      claude = JSON.parse(readFileSync(claudeSettings, 'utf8').replace(/^\uFEFF/, ''));
+      if (!claude || typeof claude !== 'object' || Array.isArray(claude)) throw new Error('it does not hold a JSON object');
+      const { permissions } = claude;
+      if (permissions !== undefined && (!permissions || typeof permissions !== 'object' || Array.isArray(permissions))) {
+        throw new Error('its "permissions" field is not an object');
+      }
+      if (permissions?.ask !== undefined && !Array.isArray(permissions.ask)) throw new Error('its "permissions.ask" field is not a list');
+    } catch (error) {
+      problem(`${claudeSettings} cannot be read as Claude Code settings: ${error.message}. Fix that file, then mount again.`);
+    }
+  } else claude = {};
+}
 
 let bundle;
 if (withChecks) {
@@ -270,6 +307,20 @@ if (mine) {
 } else {
   writeFileSync(config, JSON.stringify(template, null, 2) + '\n', 'utf8');
   wrote.push('.collet/config.json — fill in the project line, the conventions and the accept command');
+}
+
+// Every existing key and rule stays; a rule already there is not added twice.
+if (claude) {
+  const ask = claude.permissions?.ask ?? [];
+  const added = askRules.filter((rule) => !ask.includes(rule));
+  if (added.length) {
+    claude.permissions = { ...claude.permissions, ask: [...ask, ...added] };
+    mkdirSync(dirname(claudeSettings), { recursive: true });
+    writeFileSync(claudeSettings, JSON.stringify(claude, null, 2) + '\n', 'utf8');
+    wrote.push(`.claude/settings.json (ask rules added: ${added.join(', ')}; a headless run stops at a matching command)`);
+  } else {
+    skipped.push('.claude/settings.json (those ask rules are already there)');
+  }
 }
 
 const unverified = join(state, 'unverified.md');

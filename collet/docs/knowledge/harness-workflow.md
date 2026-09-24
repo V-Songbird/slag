@@ -160,7 +160,9 @@ A fresh mount without `--checks` adds only scope. A later mount preserves each i
 | `exclude` | no | absent unless the mount got `--exclude` | Path globs that no bundle check reads, at write time or at close, such as a committed generated mirror |
 | `removed_checks` | no | absent unless the mount got `--remove` | Bundle checks the project took out; a remount keeps them out until `--restore` |
 
-The rules block always goes into `AGENTS.md`. It also goes into `CLAUDE.md` when that file exists, and into `.cursor/rules/collet.md` when `.cursor/` exists. The mount does not create a new `CLAUDE.md`. There are no environment variables and no secrets.
+The rules block always goes into `AGENTS.md`. It also goes into `CLAUDE.md` when that file exists, and into `.cursor/rules/collet.md` when `.cursor/` exists. The mount does not create a new `CLAUDE.md`.
+
+On Claude Code, the skill offers a permission ask rule for each `ask_first` item with a clear command, such as `Bash(npm publish *)`, and says which items get none. It passes the rules you confirm as `--ask-rule "<rule>"`, and the mount adds them to `permissions.ask` in the project's `.claude/settings.json`, keeping everything already there. A headless or automated run cannot answer that prompt and stops at the matching command. With no confirmed rule, no settings file is written, and the mount never touches your user settings, `.claude/settings.local.json` or another host's configuration. There are no environment variables and no secrets.
 
 Commit what lands in `.collet/`. The `.collet/.gitignore` it writes already leaves out what is derived or belongs to your machine.
 

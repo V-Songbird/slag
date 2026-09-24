@@ -173,6 +173,52 @@ test('--ask-first with nothing after it is refused before anything is written', 
   assert.equal(existsSync(join(root, '.collet')), false);
 });
 
+// Confirmed ask rules go into the project's shared Claude Code settings and nowhere else, merged
+// into what is there. Without one, no settings file appears.
+test('confirmed ask rules are merged into the project settings, keeping every existing key and rule', () => {
+  const settings = { model: 'x', permissions: { allow: ['Bash(npm test)'], ask: ['Bash(git push *)'] } };
+  const root = project({ ...TREE, '.claude/settings.json': JSON.stringify(settings), '.claude/settings.local.json': '{}\n' });
+  const args = ['--ask-first', 'deploy', '--ask-first', 'publish a release', '--ask-rule', 'Bash(npm run deploy *)', '--ask-rule', 'Bash(git push *)'];
+  const out = mount(root, args);
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  assert.match(out.stdout, /wrote {4}\.claude\/settings\.json \(ask rules added: Bash\(npm run deploy \*\); a headless run stops at a matching command\)/);
+  const written = JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf8'));
+  assert.deepEqual(written, { model: 'x', permissions: { allow: ['Bash(npm test)'], ask: ['Bash(git push *)', 'Bash(npm run deploy *)'] } });
+  assert.equal(readFileSync(join(root, '.claude', 'settings.local.json'), 'utf8'), '{}\n');
+  const again = mount(root, args);
+  assert.match(again.stdout, /kept {5}\.claude\/settings\.json \(those ask rules are already there\)/);
+  assert.deepEqual(JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf8')), written);
+});
+
+test('an ask rule creates the project settings when absent, and a mount without one writes none', () => {
+  const root = project(TREE);
+  mount(root, ['--ask-first', 'deploy']);
+  assert.equal(existsSync(join(root, '.claude')), false);
+  const out = mount(root, ['--ask-rule', 'Bash(npm run deploy *)']);
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  assert.deepEqual(JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf8')), { permissions: { ask: ['Bash(npm run deploy *)'] } });
+});
+
+test('an ask rule without an ask-first list, a malformed rule or unreadable settings writes nothing', () => {
+  for (const [files, args, problem] of [
+    [{}, ['--ask-rule', 'Bash(npm publish *)'], /--ask-rule needs an ask-first list/],
+    [{}, ['--ask-first', 'deploy', '--ask-rule', 'npm publish'], /--ask-rule needs a Claude Code permission rule/],
+    [{}, ['--ask-first', 'deploy', '--ask-rule'], /--ask-rule needs a Claude Code permission rule/],
+    [{ '.claude/settings.json': '{ not json' }, ['--ask-first', 'deploy', '--ask-rule', 'Bash(npm publish *)'], /cannot be read as Claude Code settings/],
+    [{ '.claude/settings.json': '{"permissions":{"ask":"Bash"}}' }, ['--ask-first', 'deploy', '--ask-rule', 'Bash(npm publish *)'], /"permissions\.ask" field is not a list/],
+  ]) {
+    const root = project({ ...TREE, ...files });
+    const out = mount(root, args);
+    assert.equal(out.status, 2, args.join(' '));
+    assert.match(out.stderr, problem, args.join(' '));
+    assert.match(out.stderr, /Nothing was written/, args.join(' '));
+    assert.equal(existsSync(join(root, '.collet')), false, args.join(' '));
+    const before = files['.claude/settings.json'];
+    if (before) assert.equal(readFileSync(join(root, '.claude', 'settings.json'), 'utf8'), before);
+    else assert.equal(existsSync(join(root, '.claude')), false, args.join(' '));
+  }
+});
+
 // The whole of collet's relationship with a project that plans its work elsewhere: it stays out.
 // Mounting would put a second record of the same work on disk, and the files such a roadmap names
 // are a forecast its own tool rewrites rather than a boundary worth refusing a write against.

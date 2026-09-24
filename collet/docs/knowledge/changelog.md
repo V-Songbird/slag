@@ -18,6 +18,12 @@ All notable changes to collet are documented here. The format follows
 
 ### Added
 
+- On Claude Code, task-harness offers a permission ask rule for each ask-first item with a clear
+  command, such as `Bash(npm publish *)`, says which items get none, and warns that a headless run
+  stops at a matching command. `mount.mjs --ask-rule <rule>` adds only the confirmed rules to
+  `permissions.ask` in the project's `.claude/settings.json`, keeping every existing key and rule.
+  Without it no settings file is written; user settings, `.claude/settings.local.json` and other
+  hosts' configuration are never touched.
 - The session start leaves out characters a model reads and a person does not see — zero-width
   characters, the word joiner, a byte order mark past the start, bidi embeddings and isolates, and
   Unicode tags — from the project line, the ask-first list, the conventions, the open task's title,

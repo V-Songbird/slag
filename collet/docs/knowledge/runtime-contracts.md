@@ -25,6 +25,17 @@ the config, the block and the session start read exactly as before. With or with
 block states that such a blocker ends the work with the task still open; only an accept command
 that exits zero finishes it.
 
+`mount.mjs --ask-rule <rule>`, repeated per rule the person confirmed, adds Claude Code permission
+rules such as `Bash(npm publish *)` to `permissions.ask` in the project's `.claude/settings.json`.
+It needs an `ask_first` list, from `--ask-first` or the config, and a rule shaped as a tool name
+with an optional parenthesized specifier. The file is created when missing; every existing key and
+rule stays, and a rule already there is not added again. A settings file that is not a JSON object,
+or whose `permissions` is not an object or `permissions.ask` not a list, stops the mount before
+anything is written. The mount writes no other settings file: not the user's, not
+`.claude/settings.local.json`, and nothing for Codex or Antigravity. Without `--ask-rule` it
+touches no settings file. A headless run cannot answer the prompt such a rule raises, so the host
+refuses the matching command there.
+
 The session start leaves out of what it states every character a model reads and a person does
 not see: U+200B-U+200D, U+2060, U+FEFF past the start, U+202A-U+202E, U+2066-U+2069 and the
 Unicode tags U+E0000-U+E007F. That covers the project line, the `ask_first` list, the conventions,
