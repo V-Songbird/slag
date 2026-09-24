@@ -16,6 +16,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Fixed
+
+- A docs-align or repo-layout audit saves no copy of the audit's output outside the project. docs-align writes its coverage checklist only in a scratch directory the host names for the session; without one it writes no file anywhere. Eval case `audit-reports-without-changes` fails a run that sends the audit's output to a file.
+
 ## [0.5.0-alpha] — 2026-09-23
 
 ### Added

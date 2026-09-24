@@ -401,6 +401,50 @@ describe("no-files-created in the audit and session cases", () => {
   });
 });
 
+describe("audit-output-not-saved", () => {
+  // no-files-created sees only the workspace, so a copy of the audit's output
+  // saved beside it or in a temporary directory is caught from the command.
+  let grader;
+  before(() => {
+    grader = graders(AUDIT)["audit-output-not-saved"];
+  });
+  const audit = 'node "/plugins/anneal/scripts/audit.js" --root "/work/cwd"';
+
+  test("it is scored in both arms and allows no such call", () => {
+    assert.deepStrictEqual([grader.type, grader.tool, grader.min, grader.max, grader.arm], ["tool_used", "Bash", "0", "0", undefined]);
+  });
+
+  test("the audit's output saved to any file or through tee fails it", () => {
+    const saved = [
+      `${audit} --json > ../cc5-audit.json`,
+      `${audit} --json > /tmp/audit.json`,
+      `${audit} --json >> audit.json`,
+      `${audit} --json &> audit.json`,
+      `${audit} --json 2>&1 | tee "$CLAUDE_SCRATCHPAD/audit.json" | head -40`,
+      `{ ${audit} --json; echo "exit $?"; } > audit.json`,
+      `git status --porcelain\n${audit} --json > audit.json`,
+      `${audit} --json | Out-File audit.json`,
+    ];
+    for (const command of saved) assert.strictEqual(passes(grader, { calls: bash(command) }), false, command);
+  });
+
+  test("the audit printed, paged, discarded or piped into a script passes it, and so does another command's redirect", () => {
+    const allowed = [
+      audit,
+      `${audit} --json`,
+      `${audit} --json 2>&1 | head -100`,
+      `${audit} --json 2>/dev/null`,
+      `${audit} --json | node -e "require('fs').readFileSync(0, 'utf8').split('\\n').forEach((line) => console.log(line))"`,
+      `git diff > /tmp/diff.txt; ${audit} --json`,
+    ];
+    for (const command of allowed) assert.strictEqual(passes(grader, { calls: bash(command) }), true, command);
+    // The first two-arm run's audit calls, from the migration case above.
+    for (const calls of [["git rev-parse --show-toplevel && node --version", audit], [`export PATH="/opt/node/bin:$PATH"; ${audit}`]]) {
+      assert.strictEqual(passes(grader, { calls: bash(...calls) }), true);
+    }
+  });
+});
+
 describe("session-audit-stops-on-unreadable-transcript", () => {
   const CASE = path.join(EVALS, "session-audit-stops-on-unreadable-transcript");
   let checks;

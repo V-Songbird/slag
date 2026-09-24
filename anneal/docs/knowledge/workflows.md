@@ -38,7 +38,7 @@ Install the plugin and run the first audit using the [README](../../README.md).
 
 Each rule removes steps an agent repeats every session. The reason behind each one is in [the target conventions](../../skills/repo-layout/references/conventions.md).
 
-An `audit` run shows the findings, offers to save them and writes a findings, report or notes file only after you say yes, even when your own instructions ask to save findings. Otherwise it changes no file, and a run nobody can answer, such as a headless one, writes nothing.
+An `audit` run shows the findings, offers to save them and writes a findings, report or notes file only after you say yes, even when your own instructions ask to save findings. Otherwise it changes no file, and a run nobody can answer, such as a headless one, writes nothing. It saves no copy of the audit's output outside the project either: it reads the `--json` report from the command or through a pipe.
 
 | Severity | Finding | What it means |
 | --- | --- | --- |
@@ -219,7 +219,7 @@ Limits of the evidence:
 
 ## How documentation reconciliation runs
 
-Use `/anneal:docs-align` on Claude Code, `$docs-align` on Codex or `/docs-align` on Antigravity. Add `audit` to receive findings without edits. The audit offers to save its findings and writes that report in the project only after you say yes, even when your own instructions ask to save findings. A run nobody can answer, such as a headless one, writes nothing in the project.
+Use `/anneal:docs-align` on Claude Code, `$docs-align` on Codex or `/docs-align` on Antigravity. Add `audit` to receive findings without edits. The audit offers to save its findings and writes that report in the project only after you say yes, even when your own instructions ask to save findings. A run nobody can answer, such as a headless one, writes nothing in the project. Outside the project, the audit writes only its coverage checklist, and only in a scratch directory the host names for the session; without one it writes no file anywhere and reads command output from the command or through a pipe.
 
 The skill inventories maintained documentation, reviews every in-scope README with `readme`, and runs the layout audit without entering its migration steps. It checks claims, references, host instructions, development setup and ignore rules against evidence, and proposes routes that take each anticipated task to the one document holding its contract and to the check that proves it, starting from the audit's observations. If `readme` is unavailable, it reports that gap and reviews the READMEs manually.
 
@@ -290,7 +290,7 @@ Read the comparison with these limits:
 - `evidence-found-the-failure` is scored and passes only when the trace holds the evidence script's report of `npm test` failing and `npm run check` working afterwards, which a run without the plugin cannot produce.
 - `no-branch-commit-or-move` catches a `git mv` or a plain `mv`, a `git stash` other than `list` or `show`, a commit, including `git -c … commit`, and a new branch, including `git switch --create`. It reads the commands of Bash calls, so a change made another way, such as inside a script, passes it.
 - `no-new-refs-or-files` fails when the workspace gains a branch, tag, stash, git object or file, whatever made it, and `uncommitted-change-kept` when the uncommitted line in `src/utils.js` is stashed, discarded or moved. Neither sees an edit to another file.
-- `map-file-left-alone` fails on any change to `AGENTS.md`, since the session case approves none. In the audit and session cases, `no-files-created` fails when a run creates any file outside `.git/` and `.claude/`, such as a findings or notes file; it sees created paths, not edits, so the audit case checks less than its prompt forbids.
+- `map-file-left-alone` fails on any change to `AGENTS.md`, since the session case approves none. In the audit and session cases, `no-files-created` fails when a run creates any file outside `.git/` and `.claude/`, such as a findings or notes file; it sees created paths, not edits, so the audit case checks less than its prompt forbids. It cannot see outside the workspace either, so the audit case's `audit-output-not-saved` reads the Bash commands instead: it fails when the audit's output goes to a file, through a redirect other than to `/dev/null` or through `tee`, wherever that file lands. A copy saved another way, such as inside a script, passes it.
 - A grader's frontmatter ends at the first `---` in its file, even inside a quoted pattern, so a pattern that matches a Markdown table rule spells it `-{3}`. [eval-harness.js](../../tests/eval-harness.js), which both eval tests use to read and grade the cases, splits frontmatter the same way.
 
 Plugin installation and interactive migration coverage remain incomplete across hosts.
