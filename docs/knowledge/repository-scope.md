@@ -9,6 +9,7 @@ related_files:
   - scripts/claude-hooks/run-tests-on-edit.js
   - scripts/plugin-integrity.test.js
   - scripts/ignore-policy.test.js
+  - scripts/hidden-characters.test.js
   - anneal/
   - collet/
 ---
@@ -39,6 +40,9 @@ npm run check runs the plugin suites and repository tests using Node 22 or later
 suite validates marketplace sources, local resource paths, host metadata and version ownership.
 The navigation audit is heuristic; its three runtime-name matches in audit.test.js are intentional
 fixture strings and must retain their detector coverage.
+scripts/hidden-characters.test.js fails on raw zero-width, bidi-control, tag and misplaced
+byte-order-mark characters in tracked text files, naming file, line and code point; it walks the
+tree instead when there is no Git work tree. Write such characters as escapes (\u200B, \u{E0041}).
 
 On Node 22 the test runner reports a failed suite without counting a failed test, so a describe
 callback that throws or rejects before it registers a test, or a suite's after hook that throws,
