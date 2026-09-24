@@ -17,6 +17,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { cataloguesFor, prepareCatalogue, SOURCE_TEXT, unedited } from './catalogue.mjs';
+import { HIDDEN_CHARACTERS, unseen } from '../templates/state.mjs';
 
 const HERE = dirname(dirname(fileURLToPath(import.meta.url)));
 const TEMPLATES = join(HERE, 'templates');
@@ -41,16 +42,24 @@ if (!process.argv[2] || !existsSync(target) || !statSync(target).isDirectory()) 
   process.exit(2);
 }
 
+// The config, the settings and the rules block carry these values into every session, so one
+// holding characters a person does not see is refused, named by what shows of it.
+function shown(flag, value) {
+  const problem = value && unseen(`${flag} ${JSON.stringify(value.replace(HIDDEN_CHARACTERS, ''))}`, value);
+  if (problem) throw new Error(problem);
+  return value;
+}
+
 try {
   for (let index = 3; index < process.argv.length; index++) {
     const flag = process.argv[index];
     if (flag === '--checks') withChecks = true;
     else if (flag === '--ask-first') {
-      const value = process.argv[++index]?.trim();
+      const value = shown(flag, process.argv[++index]?.trim());
       if (!value || value.startsWith('--')) throw new Error('--ask-first needs the thing to ask about, such as deploy.');
       askFirst.push(value);
     } else if (flag === '--ask-rule') {
-      const value = process.argv[++index]?.trim();
+      const value = shown(flag, process.argv[++index]?.trim());
       // A Claude Code permission rule: a tool name, optionally followed by its specifier in parentheses.
       if (!value || !/^[A-Za-z][\w-]*(\(.+\))?$/s.test(value)) {
         throw new Error('--ask-rule needs a Claude Code permission rule such as "Bash(npm publish *)".');
@@ -69,7 +78,7 @@ try {
       if (!value || value.startsWith('--')) {
         throw new Error('--accept needs a command; --edition needs a language id and --checks.');
       }
-      if (flag === '--accept') accept = value;
+      if (flag === '--accept') accept = shown(flag, value);
       else editions.push(value);
     } else throw new Error(`Unknown mount option: ${flag}.`);
   }

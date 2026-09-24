@@ -84,7 +84,10 @@ test('session start leaves out characters nobody sees and names the fields that 
   const scotland = '\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}';
   const conventions = [`Release notes may use ${technologist} and ${scotland}.`];
   writeFileSync(join(root, '.collet', 'config.json'), JSON.stringify({ ...settings, project: `A digest CLI.${payload}`, conventions }), 'utf8');
-  task(root, ['add', '--title', 'window the\u200B digest', '--why', 'w', '--scope', 'src/cli.mjs']);
+  // The task CLI refuses such a title, so it arrives the way it still can: edited into the ledger.
+  task(root, ['add', '--title', 'window the digest', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const ledger = join(root, '.collet', 'ledger.jsonl');
+  writeFileSync(ledger, readFileSync(ledger, 'utf8').replace('window the digest', 'window the\u200B digest'), 'utf8');
   hook('handoff.js', root, { trigger: 'auto' });
 
   const context = hookOutput(hook('session-start.js', root)).additionalContext;

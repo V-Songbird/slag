@@ -24,7 +24,7 @@ import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-import { COLLET, colletLedger, config, filled, openTask } from './state.mjs';
+import { COLLET, colletLedger, config, filled, HIDDEN_CHARACTERS, openTask, unseen } from './state.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const STATE = join(ROOT, '.collet');
@@ -216,6 +216,21 @@ function harnessEntries(paths) {
   });
 }
 
+/**
+ * Stops before anything is written when a field holds characters a person does not see. The ledger
+ * is read back into every session, so what nobody can review never gets into it. Each problem names
+ * its field, a path by what shows of it, and never repeats the rest.
+ */
+function refuseUnseen(fields, outcome) {
+  const problems = fields.map(([field, value]) => unseen(field, value)).filter(Boolean);
+  if (!problems.length) return;
+  for (const problem of problems) console.error(problem);
+  console.error(`${outcome} Type the text again without them.`);
+  process.exit(2);
+}
+
+const pathField = (flag, path) => `${flag} ${JSON.stringify(path.replace(HIDDEN_CHARACTERS, ''))}`;
+
 function describe(task) {
   return [
     `task ${task.id} — ${task.title} [${task.status}]`,
@@ -335,6 +350,15 @@ switch (command) {
       console.error('you it worked is not defined yet. If you cannot name one, say so instead.');
       process.exit(2);
     }
+    refuseUnseen(
+      [
+        ['--title', args.title],
+        ['--why', args.why],
+        ...scope.map((path) => [pathField('--scope', path), path]),
+        [args.accept ? '--accept' : 'the accept command in .collet/config.json', accept],
+      ],
+      'No task was opened.'
+    );
     if (task) {
       console.error(`task ${task.id} is still open. Close it before opening another.`);
       process.exit(2);
@@ -397,6 +421,7 @@ switch (command) {
       console.error('widen needs --add <path> (repeatable) and --why "<reason>"');
       process.exit(2);
     }
+    refuseUnseen([...added.map((path) => [pathField('--add', path), path]), ['--why', args.why]], 'Nothing was widened.');
     const harness = harnessEntries(added);
     if (harness.length) {
       console.error(`${harness.join(', ')}: the harness's own files cannot join a task, so nothing was widened.`);

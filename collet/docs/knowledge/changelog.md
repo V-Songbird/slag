@@ -18,6 +18,11 @@ All notable changes to collet are documented here. The format follows
 
 ### Added
 
+- `task.mjs add` and `widen`, and `mount.mjs --ask-first`, `--accept` and `--ask-rule`, refuse text
+  holding the characters the session start leaves out, with the same exceptions for the joiner
+  inside an emoji and a subdivision flag. The message names each field and the code points,
+  counting tags and never decoding them, and nothing is written. A mounted project gets the refusal
+  in `task.mjs` by mounting again.
 - On Claude Code, task-harness offers a permission ask rule for each ask-first item with a clear
   command, such as `Bash(npm publish *)`, says which items get none, and warns that a headless run
   stops at a matching command. `mount.mjs --ask-rule <rule>` adds only the confirmed rules to

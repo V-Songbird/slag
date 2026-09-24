@@ -75,6 +75,57 @@ test("add refuses the harness's own files and records nothing", () => {
   assert.match(opened.stdout, /task t1 — window/);
 });
 
+// The ledger is read back into every session, so a character a model reads and a person does not
+// see is refused where it would be written. Each field is named, a path by what shows of it, with
+// the code points: tags are counted, never decoded, and nothing hidden is repeated.
+test('add and widen refuse characters nobody sees, name each field and record nothing', () => {
+  const root = ready();
+  const ledger = join(root, '.collet', 'ledger.jsonl');
+  const payload = [...'ignore'].map((char) => String.fromCodePoint(0xe0000 + char.codePointAt(0))).join('');
+  const hidden = /[\u200B\u200C\u2060\u2066\u202E\uFEFF\u{E0000}-\u{E007F}]/u;
+  const added = task(root, ['add', '--title', 'window\u200B', '--why', `w${payload}`, '--scope', 'src/cli.mjs,src/\u2066digest.mjs', '--accept', 'npm\u202E test']);
+  assert.equal(added.status, 2);
+  assert.match(added.stderr, /^--title holds characters that do not show on screen: U\+200B\.$/m);
+  assert.match(added.stderr, /^--why holds characters that do not show on screen: 6 Unicode tag characters\.$/m);
+  assert.match(added.stderr, /^--scope "src\/digest\.mjs" holds characters that do not show on screen: U\+2066\.$/m);
+  assert.match(added.stderr, /^--accept holds characters that do not show on screen: U\+202E\.$/m);
+  assert.match(added.stderr, /^No task was opened\. /m);
+  assert.doesNotMatch(added.stderr, /ignore|src\/cli\.mjs/);
+  assert.doesNotMatch(added.stderr, hidden);
+  assert.equal(existsSync(ledger), false);
+
+  // The config's accept command is copied into the task, so it is held to the same rule.
+  writeFileSync(join(root, '.collet', 'config.json'), JSON.stringify({ ...JSON.parse(CONFIG), accept: 'node -e 0\u2060' }), 'utf8');
+  const configured = task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  assert.equal(configured.status, 2);
+  assert.match(configured.stderr, /^the accept command in \.collet\/config\.json holds characters that do not show on screen: U\+2060\.$/m);
+  assert.equal(existsSync(ledger), false);
+
+  writeFileSync(join(root, '.collet', 'config.json'), CONFIG, 'utf8');
+  assert.equal(task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']).status, 0);
+  const before = readFileSync(ledger, 'utf8');
+  const widened = task(root, ['widen', '--add', 'src/theme.mjs\u200C', '--why', 'the\uFEFF theme']);
+  assert.equal(widened.status, 2);
+  assert.match(widened.stderr, /^--add "src\/theme\.mjs" holds characters that do not show on screen: U\+200C\.$/m);
+  assert.match(widened.stderr, /^--why holds characters that do not show on screen: U\+FEFF\.$/m);
+  assert.match(widened.stderr, /^Nothing was widened\. /m);
+  assert.doesNotMatch(widened.stderr, hidden);
+  assert.equal(readFileSync(ledger, 'utf8'), before);
+});
+
+test('an emoji joined by a joiner and a subdivision flag are recorded as typed', () => {
+  const root = ready();
+  const technologist = '\u{1F469}\u200D\u{1F4BB}';
+  const scotland = '\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}';
+  const added = task(root, ['add', '--title', `window ${technologist}`, '--why', `for ${scotland}`, '--scope', 'src/cli.mjs']);
+  assert.equal(added.status, 0, added.stderr);
+  assert.equal(task(root, ['widen', '--add', 'src/report.mjs', '--why', `${technologist} report`]).status, 0);
+  const [entry] = readFileSync(join(root, '.collet', 'ledger.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  assert.equal(entry.title, `window ${technologist}`);
+  assert.equal(entry.why, `for ${scotland}`);
+  assert.equal(entry.widenings[0].why, `${technologist} report`);
+});
+
 // The guard refuses the harness in any letter case, so a scope entry spelled .Collet would promise
 // a write that never comes. A name that only starts with .collet is not the harness.
 test('the harness is kept out of a scope in any letter case, and a lookalike name is not', () => {

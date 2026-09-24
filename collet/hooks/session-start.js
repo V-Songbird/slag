@@ -11,15 +11,18 @@
 // the same breath.
 //
 // Nor is a character a model reads and a person does not see: zero-width characters, the word
-// joiner, a byte order mark past the start, bidi embeddings and isolates, and Unicode tags. Text
-// written at mount can carry an order in them that nobody reviewing the file can read, and stating
-// it would deliver that order every session. They are left out, and a closing line names the field
-// that held them and their code points, counting tags and never decoding them. The joiner inside an
+// joiner, a byte order mark past the start, bidi embeddings and isolates, and Unicode tags. The
+// mount and the task CLI refuse them, but text edited in by hand, or written by an earlier collet,
+// can still carry an order in them that nobody reviewing the file can read, and stating it would
+// deliver that order every session. They are left out, and a closing line names the field that
+// held them and their code points, counting tags and never decoding them. The joiner inside an
 // emoji and the tags of a subdivision flag render, so they stay.
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { COLLET, config, cutShort, emit, fileText, finished, mounted, projectModule, readEvent, root, started } from './lib.js';
+// The plugin's own copy, not the project's: a project mounted by an earlier collet has none.
+import { HIDDEN_CHARACTERS, hiddenIn, nameHidden } from '../templates/state.mjs';
 
 const dir = root(readEvent());
 if (!mounted(dir)) process.exit(0); // not a collet project, or switched off: stay out of the way
@@ -39,14 +42,11 @@ const settings = config(dir);
 const filled = state.filled;
 const lines = [];
 
-// Copied from anneal's audit, since collet ships alone.
-const HIDDEN_CHARACTERS =
-  /(?<!\p{Extended_Pictographic}\uFE0F?|[\u{1F3FB}-\u{1F3FF}])\u200D|[\u200B\u200C\u2060\uFEFF\u202A-\u202E\u2066-\u2069]|(?<!\u{1F3F4}[\u{E0020}-\u{E007E}]*)[\u{E0000}-\u{E007F}]/gu;
 const hidden = new Map(); // field → the code points left out of it
 
 function visible(field, text) {
   if (typeof text !== 'string') return text;
-  const found = [...text.matchAll(HIDDEN_CHARACTERS)].map(([char]) => char.codePointAt(0));
+  const found = hiddenIn(text);
   if (!found.length) return text;
   hidden.set(field, [...(hidden.get(field) ?? []), ...found]);
   return text.replace(HIDDEN_CHARACTERS, '');
@@ -103,14 +103,7 @@ if (handoff) {
 }
 
 if (hidden.size) {
-  const held = [...hidden].map(([field, found]) => {
-    const tags = found.filter((code) => code >= 0xe0000).length;
-    const named = [...new Set(found.filter((code) => code < 0xe0000))].map(
-      (code) => `U+${code.toString(16).toUpperCase().padStart(4, '0')}`
-    );
-    if (tags) named.push(`${tags} Unicode tag character${tags === 1 ? '' : 's'}`);
-    return `${field} held ${named.join(', ')}`;
-  });
+  const held = [...hidden].map(([field, found]) => `${field} held ${nameHidden(found)}`);
   lines.push(`Characters that do not show on screen were left out of what is stated here: ${held.join('; ')}.`);
 }
 

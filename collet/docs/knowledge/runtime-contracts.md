@@ -44,6 +44,17 @@ emoji and the tags of a subdivision flag render, so they stay. A closing line na
 that held such characters and their code points, counting tags and never decoding them. Text
 without them reads exactly as before.
 
+The same characters, with the same exceptions, are refused where that text is written, and a
+refusal writes nothing. `task.mjs add` refuses a title, `--why` reason, scope entry or accept
+command holding one, an accept command taken from the config included; `task.mjs widen` refuses an
+added path or its reason. `mount.mjs` refuses an `--ask-first` value, `--accept` and an
+`--ask-rule` value. The message names each field, a path or mount value by the part of it that
+shows, and the code points, counting tags and never decoding them. The pattern is defined once, in
+`templates/state.mjs`: the hooks and the mount read the plugin's copy, and the task CLI reads the
+copy mounted beside it, which a project refreshes by mounting again. Text stored before, or edited
+into the config or ledger by hand, still reaches the session start, which leaves those characters
+out as above.
+
 ## Project state and scope
 
 The task CLI owns its ledger. Opening a task requires filled configuration and resolves supported

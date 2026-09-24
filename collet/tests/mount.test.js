@@ -173,6 +173,34 @@ test('--ask-first with nothing after it is refused before anything is written', 
   assert.equal(existsSync(join(root, '.collet')), false);
 });
 
+// The config, the settings and the rules block are read back into every session, so a value
+// holding a character a model reads and a person does not see is refused before anything is
+// written. It is named by what shows of it, with the code points: tags are counted, never decoded.
+test('an ask-first entry, an ask rule or an accept command holding characters nobody sees writes nothing', () => {
+  const payload = [...'deploy'].map((char) => String.fromCodePoint(0xe0000 + char.codePointAt(0))).join('');
+  for (const [args, problem] of [
+    [['--ask-first', 'deploy\u200B'], /^--ask-first "deploy" holds characters that do not show on screen: U\+200B\. Nothing was written\.$/m],
+    [['--ask-first', 'deploy', '--ask-rule', `Bash(npm publish *)${payload}`], /^--ask-rule "Bash\(npm publish \*\)" holds characters that do not show on screen: 6 Unicode tag characters\. Nothing was written\.$/m],
+    [['--accept', 'npm\u2069 test'], /^--accept "npm test" holds characters that do not show on screen: U\+2069\. Nothing was written\.$/m],
+  ]) {
+    const root = project(TREE);
+    const out = mount(root, args);
+    assert.equal(out.status, 2, out.stderr);
+    assert.match(out.stderr, problem);
+    assert.doesNotMatch(out.stderr, /[\u200B\u2069\u{E0000}-\u{E007F}]/u);
+    for (const path of ['.collet', '.claude', 'AGENTS.md']) assert.equal(existsSync(join(root, path)), false, `${path}: ${out.stderr}`);
+  }
+});
+
+test('an emoji joined by a joiner and a subdivision flag reach the config and the rules block as typed', () => {
+  const root = project(TREE);
+  const entry = 'post \u{1F469}\u200D\u{1F4BB} to \u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}';
+  const out = mount(root, ['--ask-first', entry]);
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(JSON.parse(readFileSync(join(root, '.collet', 'config.json'), 'utf8')).ask_first, [entry]);
+  assert.ok(readFileSync(join(root, 'AGENTS.md'), 'utf8').includes(`asked before any of these: ${entry}.`));
+});
+
 // Confirmed ask rules go into the project's shared Claude Code settings and nowhere else, merged
 // into what is there. Without one, no settings file appears.
 test('confirmed ask rules are merged into the project settings, keeping every existing key and rule', () => {
