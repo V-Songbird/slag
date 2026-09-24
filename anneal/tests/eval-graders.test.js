@@ -401,6 +401,59 @@ describe("no-files-created in the audit and session cases", () => {
   });
 });
 
+describe("session-audit-stops-on-unreadable-transcript", () => {
+  const CASE = path.join(EVALS, "session-audit-stops-on-unreadable-transcript");
+  let checks;
+  let transcript;
+
+  // The scaffold without bash: the session case's transcript program, then the
+  // cut the case's own script makes to the fourth record.
+  before(() => {
+    checks = graders(CASE);
+    const program = /<<'JS'\n([\s\S]*?)\nJS\n/.exec(read(SESSION, "session-fixture.sh"))[1];
+    const cut = /node -e '([^']*)'/.exec(read(CASE, "unreadable-fixture.sh"))[1];
+    const dir = tempDir("anneal-graders-unreadable-");
+    transcript = path.join(dir, "session.jsonl");
+    fs.writeFileSync(transcript, execFileSync(process.execPath, ["-", dir], { input: program, encoding: "utf8" }));
+    execFileSync(process.execPath, ["-e", cut], { cwd: dir });
+  });
+
+  test("the evidence script refuses the cut transcript, and the records around the cut stay readable", () => {
+    const run = spawnSync(process.execPath, [EVIDENCE, "--session-file", transcript, "--before", "2026-09-22T23:59:59.000Z"], { encoding: "utf8" });
+    assert.strictEqual(run.status, 1);
+    assert.strictEqual(run.stdout, "");
+    assert.match(run.stderr, /Invalid JSON record at line 4/);
+    const lines = fs.readFileSync(transcript, "utf8").split("\n");
+    assert.throws(() => JSON.parse(lines[3]));
+    assert.match(lines[2], /Missing script: \\"test\\"/);
+    assert.match(lines[7], /npm run check/);
+  });
+
+  test("a reply that reports the refusal and proposes nothing passes both reply graders", () => {
+    const replies = [
+      "session-evidence.js: cannot extract reliable session evidence: Invalid JSON record at line 4; no reliable audit produced. I stopped there and changed nothing.",
+      "The evidence script couldn't parse session.jsonl: one record is malformed. Send a complete transcript and I will run the review again.",
+    ];
+    for (const reply of replies) {
+      assert.strictEqual(passes(checks["names-the-unreadable-transcript"], { reply }), true, reply);
+      assert.strictEqual(passes(checks["no-finding-from-the-raw-file"], { reply }), true, reply);
+    }
+  });
+
+  test("a reply that reads the file itself and proposes the working command fails, and silence about the refusal fails too", () => {
+    const handRead = "The evidence script refused the file at line 4, so I read the transcript directly: npm test failed twice and npm run check worked. Proposed change: replace npm test with npm run check in AGENTS.md.";
+    assert.strictEqual(passes(checks["no-finding-from-the-raw-file"], { reply: handRead }), false);
+    assert.strictEqual(passes(checks["names-the-unreadable-transcript"], { reply: "No findings; the session lost no time." }), false);
+  });
+
+  test("the plugin-only grader and the write graders are the session case's own", () => {
+    assert.strictEqual(checks["evidence-ran"].arm, "with-only");
+    for (const name of ["evidence-ran", "map-file-left-alone", "no-files-created"]) {
+      assert.deepStrictEqual(checks[name], graders(SESSION)[name], name);
+    }
+  });
+});
+
 describe("migration-applies-approved-step", () => {
   const CASE = path.join(EVALS, "migration-applies-approved-step");
   let checks;

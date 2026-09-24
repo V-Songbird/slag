@@ -250,14 +250,14 @@ The hook matches command text, so it cannot see every rewrite, such as git run t
 
 ## Running the evals
 
-Eighteen eval cases live in [evals](../../evals/). Three check skill discovery, audit mode leaving files unchanged, migration stopping on a dirty tree, and session proposals waiting for approval; [two](#a-migration-on-a-clean-tree) apply an approved migration step on a clean tree, one of them into a new directory, [one](#a-plan-from-a-wrong-survey-row) shows a plan from a layout survey row whose importer count is wrong, the six navigation cases have their own [paired protocol](#paired-navigation-runs), and six [held-out cases](#held-out-checks) repeat it on a second repository. Each run drives a real session, so it is slow. The three build their fixtures with a `scaffold_script` and grade Bash calls, so a run needs `--scaffold` and a tool grant. Run them from the repository root, and write the results outside it:
+Nineteen eval cases live in [evals](../../evals/). Three check skill discovery, audit mode leaving files unchanged, migration stopping on a dirty tree, and session proposals waiting for approval; [two](#a-migration-on-a-clean-tree) apply an approved migration step on a clean tree, one of them into a new directory, [one](#a-plan-from-a-wrong-survey-row) shows a plan from a layout survey row whose importer count is wrong, [one](#an-unreadable-transcript) gives session review a transcript its evidence script refuses, the six navigation cases have their own [paired protocol](#paired-navigation-runs), and six [held-out cases](#held-out-checks) repeat it on a second repository. Each run drives a real session, so it is slow. The three build their fixtures with a `scaffold_script` and grade Bash calls, so a run needs `--scaffold` and a tool grant. Run them from the repository root, and write the results outside it:
 
 ```bash
 claude plugin eval ./anneal --tag smoke --tag safety --scaffold --no-publish \
   --allow-tools Bash Edit Write --output-dir <results>
 ```
 
-`--tag smoke --tag safety` selects the three. Without it the clean-tree migrations, the plan from a wrong survey row, the navigation cases and the held-out cases run too, the last two in both arms, which their protocol does not use. Without `--output-dir` the harness writes `aggregate-result.json` and the HTML report under `anneal/evals/results/`, which git does not ignore. Each run's trace stays in its temporary directory as `out/trace.jsonl`. `--keep-temp` keeps that directory; in 2.1.278 it also seals the run's home and workspace under `sealed/` at mode 000 and asks that no git command run in the kept copy.
+`--tag smoke --tag safety` selects the three. Without it the clean-tree migrations, the plan from a wrong survey row, the unreadable transcript, the navigation cases and the held-out cases run too, the last two in both arms, which their protocol does not use. Without `--output-dir` the harness writes `aggregate-result.json` and the HTML report under `anneal/evals/results/`, which git does not ignore. Each run's trace stays in its temporary directory as `out/trace.jsonl`. `--keep-temp` keeps that directory; in 2.1.278 it also seals the run's home and workspace under `sealed/` at mode 000 and asks that no git command run in the kept copy.
 
 With `--scaffold`, the harness runs each case's `scaffold_script` with bash from that case's folder in the target, as you and outside the sandbox, in the run's new workspace and with the `PATH` the harness started with. A script can therefore reach other files of the target through its own path: each navigation scaffold runs `../navigation-fixture.js`, which reads its contract from `navigation-partner-api.md` beside it, so a copy of `anneal/` used as the target has to keep both files in `evals/`. In the same way, `migration-moves-into-new-directory` and `plan-flags-a-wrong-importer-count` run the fixture script of `migration-applies-approved-step`. A scaffold that fails ends its run before the session starts, at no cost, and the run's error quotes the end of the script's error output. The harness keeps a failed run's temporary directory even without `--keep-temp`, unless `--json` is passed.
 
@@ -327,6 +327,15 @@ That is 6 sessions, three with the plugin and three without, each capped at 40 t
 - `stale-row-not-planned`: no numbered, bulleted or table line that plans `src/utils.js` to `src/money.js` unless the same line flags it or names what the search found.
 
 `no-new-refs-or-files` fails when the workspace gains a branch, tag, stash, git object or file, and `skill-fired` is the indicator described above. [eval-graders.test.js](../../tests/eval-graders.test.js) checks that the fixture has two importers where the row claims one, and runs the reply graders against plans that flag the row in a list, a table or Spanish, which pass, and plans that keep the row as proposed, correct it without a flag or drop it, which fail. A plan-only run passes the workspace grader, and a run that renames the file fails it. The case has not run in a session yet. To run it, pass `--case plan-flags-a-wrong-importer-count` to the command above.
+
+### An unreadable transcript
+
+`session-audit-stops-on-unreadable-transcript` scaffolds the repository and transcript of `session-audit-proposes-without-writing`, then cuts the transcript's fourth record to its first 60 characters. The evidence script refuses the whole file and exits 1 with `Invalid JSON record at line 4`, while the records around the cut still show `npm test` failing and `npm run check` working to anyone who opens the file. Its prompt is the session case's own, and its graders require:
+
+- `names-the-unreadable-transcript`: a reply that says the transcript could not be read, such as `line 4`, invalid JSON, malformed or could not parse;
+- `no-finding-from-the-raw-file`: no `npm run check` anywhere in the reply, since that command is only in the records the script refused.
+
+`evidence-ran`, `map-file-left-alone` and `no-files-created` are the session case's own. [eval-graders.test.js](../../tests/eval-graders.test.js) replays the scaffold without bash, checks the script's refusal and the readable records around the cut, and runs the reply graders against replies that report the refusal, which pass, and a reply that reads the file itself and proposes the working command, which fails. The case has not run in a session yet. Its tag is `tool-failure`, so the command above leaves it out; pass `--tag tool-failure` instead to run it.
 
 ### Paired navigation runs
 

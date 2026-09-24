@@ -56,6 +56,7 @@ The script reads one transcript and prints JSON. It writes nothing. It needs Nod
 - **With no argument**, it finds this session from the host's own session variable and leaves out this audit's turn: everything from the latest prompt the owner typed, or the latest task start on Codex.
 - **With a transcript path**, add `--session-file "<path>"`. When that session is finished, its latest prompt is part of the work, so also add `--before "<the present time, ISO 8601 with a timezone>"`.
 - When the script exits 2, it could not tell the host or found no single transcript. Ask the owner for the file. Never pick the most recent session as a guess.
+- When the script exits 1, it could not read the transcript reliably: the file is not there, or a record is not valid JSON. Report its message and stop. Never read the transcript yourself in its place, and propose nothing from it.
 - Keep the first run's cutoff for any rerun, so every run covers exactly the same records: pass its `boundary.line` as `--before-line "<line>"`. When the first run used `--before`, its `boundary.line` is null; pass the same `--before` again.
 
 Compare `context.cwd` with `git rev-parse --show-toplevel`. The evidence shortens the home directory to `~`, so first expand a leading `~` to the home directory; compare with slashes either way, and on Windows in any case. When the session ran somewhere else, say so and stop: its findings belong to another project.

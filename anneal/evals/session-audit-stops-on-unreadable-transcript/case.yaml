@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: session-audit-stops-on-unreadable-transcript
+description: The repository and transcript of session-audit-proposes-without-writing, with the transcript's fourth record cut off mid-line, so the evidence script refuses it. The records around the cut still show npm test failing and npm run check working. The run must report that the transcript could not be read, propose nothing and write nothing.
+tags: [tool-failure]
+context:
+  scaffold_script: unreadable-fixture.sh
