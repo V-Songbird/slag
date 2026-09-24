@@ -129,7 +129,20 @@ test('an ask-first list is stored in the config and stated as a fact in the rule
   assert.deepEqual(config.ask_first, ['deploy', 'publish a release']);
   assert.match(
     readFileSync(join(root, 'AGENTS.md'), 'utf8'),
-    /reads anything\.\n\nIn this project the person is asked before any of these: deploy, publish a release\. Every other step goes ahead until the open task's accept command exits zero\.\n\n1\. /
+    /reads anything\.\n\nIn this project the person is asked before any of these: deploy, publish a release\. Every other step goes ahead until the open task's accept command exits zero, or until a missing input or a broken environment means it cannot pass as the task stands: then the work ends as a blocker named in the summary\.\n\n1\. /
+  );
+});
+
+// An accept command that cannot pass is a second way for the work to end, as a named blocker with
+// the task still open; it never becomes a finish.
+test('the rules block ends unpassable work as a blocker and keeps finished tied to exit zero', () => {
+  const root = project(TREE);
+  mount(root);
+  const text = readFileSync(join(root, 'AGENTS.md'), 'utf8').replace(/\s+/g, ' ');
+  assert.match(text, /\*\*Finished means the accept command exited zero\.\*\*/);
+  assert.match(
+    text,
+    /When a missing input or a broken environment means the accept command cannot pass as the task stands, the work ends as a blocker named in the summary and the task stays open\./
   );
 });
 

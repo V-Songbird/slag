@@ -52,7 +52,10 @@ const askFirst = (Array.isArray(settings.ask_first) ? settings.ask_first : []).m
 if (askFirst.length) {
   lines.push(
     `In this project the person is asked before any of these: ${askFirst.join(', ')}.` +
-      (task ? ` Every other step goes ahead until \`${task.accept}\` exits zero.` : '')
+      (task
+        ? ` Every other step goes ahead until \`${task.accept}\` exits zero, or until a missing input or a broken environment` +
+          ' means it cannot pass as the task stands: then the work ends as a blocker named in the summary.'
+        : '')
   );
 }
 

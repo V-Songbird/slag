@@ -18,9 +18,12 @@ The delivered project runtime uses .mjs files independently of the target packag
 An optional `ask_first` list in `.collet/config.json`, written by `mount.mjs --ask-first`, names
 what must not happen without asking the person. The rules block and the session start state it as
 a fact about the project, never as an order, with a line that every other step goes ahead until
-the accept command exits zero. The session start reads the config each time; the rules block
-states the list from the last mount. Without a list, the config, the block and the session start
-read exactly as before. A remount fills in a missing list and keeps an existing one.
+the accept command exits zero, or until a missing input or a broken environment means it cannot
+pass as the task stands, which ends the work as a blocker named in the summary. The session start
+reads the config each time; the rules block states the list from the last mount. Without a list,
+the config, the block and the session start read exactly as before. With or without one, the rules
+block states that such a blocker ends the work with the task still open; only an accept command
+that exits zero finishes it.
 
 ## Project state and scope
 

@@ -296,7 +296,9 @@ const block = readFileSync(join(TEMPLATES, 'rules.md'), 'utf8')
     '{{ASK_FIRST}}',
     asked.length
       ? `\n\nIn this project the person is asked before any of these: ${asked.join(', ')}.` +
-          " Every other step goes ahead until the open task's accept command exits zero."
+          " Every other step goes ahead until the open task's accept command exits zero, or until a missing" +
+          ' input or a broken environment means it cannot pass as the task stands: then the work ends as a' +
+          ' blocker named in the summary.'
       : ''
   );
 

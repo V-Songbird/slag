@@ -56,7 +56,10 @@ test('session start states the ask-first list as a fact and ties going on to the
   assert.match(idle, /^In this project the person is asked before any of these: deploy, publish a release\.$/m);
   task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
   const open = hookOutput(hook('session-start.js', root)).additionalContext;
-  assert.match(open, /^In this project the person is asked before any of these: deploy, publish a release\. Every other step goes ahead until `node -e 0` exits zero\.$/m);
+  assert.match(
+    open,
+    /^In this project the person is asked before any of these: deploy, publish a release\. Every other step goes ahead until `node -e 0` exits zero, or until a missing input or a broken environment means it cannot pass as the task stands: then the work ends as a blocker named in the summary\.$/m
+  );
 });
 
 test('without an ask-first list session start says what it always said', () => {

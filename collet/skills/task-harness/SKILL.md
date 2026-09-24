@@ -105,8 +105,10 @@ person wants it.
 Pass the answer to question three as `--ask-first <thing>`, once per thing, for example
 `--ask-first deploy --ask-first "publish a release"`. The mount stores the list as `ask_first` in
 `.collet/config.json`, and the rules block and the session start state it as a fact about the
-project, with a line that every other step goes ahead until the accept command exits zero. With no
-answer, pass nothing: the config and the rules block stay exactly as they were.
+project, with a line that every other step goes ahead until the accept command exits zero, or
+until a missing input or a broken environment means it cannot pass as the task stands, which ends
+the work as a blocker named in the summary. With no answer, pass nothing: the config and the rules
+block stay exactly as they were.
 
 It prints every path it wrote and every path it kept. A re-run refreshes collet's own scripts —
 `task.mjs`, `state.mjs` and the built-in scope checks — and keeps the project's `config.json`,

@@ -9,7 +9,9 @@ reads anything.{{ASK_FIRST}}
    list first — {{WIDEN}} That is allowed and recorded; working around the list is not the same
    thing.
 2. **Finished means the accept command exited zero.** {{CLOSE}} Run it as you go, not only at the
-   end. A task that was not closed did not finish, whatever the summary says.
+   end. A task that was not closed did not finish, whatever the summary says. When a missing input
+   or a broken environment means the accept command cannot pass as the task stands, the work ends
+   as a blocker named in the summary and the task stays open.
 3. **Facts come from this repository.** Quote the file a fact came from. If the repository does not
    answer a question, say so rather than choosing a plausible default and stating it as fact.
 4. **Deliver what the task asks for, in full, and nothing beside it.** What it names is yours to do

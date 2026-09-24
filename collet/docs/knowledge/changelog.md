@@ -18,6 +18,11 @@ All notable changes to collet are documented here. The format follows
 
 ### Added
 
+- The rules block states that when a missing input or a broken environment means the accept
+  command cannot pass as the task stands, the work ends as a blocker named in the summary and the
+  task stays open; finished still means the accept command exited zero. With an ask-first list, the
+  rules block and the session start name that blocker as the other end of the keep-going line. A
+  mounted project gets the new rules text by mounting again.
 - A session start or handoff its host cut short leaves a trace: each hook marks itself running
   under `.collet/` and clears the mark when it ends, and the next session start says once that the
   handoff note may be missing or stale, or that the last session may have started without its
