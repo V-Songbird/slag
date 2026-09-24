@@ -209,6 +209,39 @@ function mapFileFindings(root, add) {
   return found;
 }
 
+// Characters a model reads and a person does not see: zero-width characters,
+// the word joiner, a byte order mark past the start, bidi embeddings and
+// isolates, and Unicode tags. A file an agent loads as instructions can carry
+// an order in them that nobody reviewing the file can read. The joiner inside
+// an emoji and the tags of a subdivision flag render, so they are skipped. The
+// evidence names each line and code point and counts tags, never decoding them.
+const HIDDEN_CHARACTERS =
+  /(?<!\p{Extended_Pictographic}️?|[\u{1F3FB}-\u{1F3FF}])‍|[​‌⁠﻿‪-‮⁦-⁩]|(?<!\u{1F3F4}[\u{E0020}-\u{E007E}]*)[\u{E0000}-\u{E007F}]/gu;
+const INSTRUCTION_DIRS = [".agents/", ".claude/", ".cursor/rules/", ".gemini/"];
+
+function isInstructionFile(file) {
+  if (MAP_FILES.includes(path.posix.basename(file))) return true;
+  return INSTRUCTION_DIRS.some((dir) => file.startsWith(dir)) && /\.(md|mdc)$/i.test(file);
+}
+
+function hiddenCharacterFindings(root, files, add) {
+  const evidence = [];
+  for (const file of files.filter(isInstructionFile)) {
+    const text = readFile(root, file)?.text;
+    if (!text) continue;
+    text.replace(/^﻿/, "").split("\n").forEach((line, i) => {
+      const found = [...line.matchAll(HIDDEN_CHARACTERS)].map(([char]) => char.codePointAt(0));
+      if (!found.length) return;
+      const tags = found.filter((code) => code >= 0xe0000).length;
+      const named = [...new Set(found.filter((code) => code < 0xe0000))].map((code) => `U+${code.toString(16).toUpperCase().padStart(4, "0")}`);
+      evidence.push(`${file}:${i + 1} ${[...named, ...(tags ? [plural(tags, "Unicode tag character")] : [])].join(", ")}`);
+    });
+  }
+  if (evidence.length) {
+    add("instruction-hidden-characters", "low", "Characters invisible on screen in files agents load as instructions", evidence);
+  }
+}
+
 // A .env that no template describes is a runtime the agent cannot reproduce:
 // the names it needs are in a file it must never read. Only fires when an env
 // file is actually there, so a project without one is never nagged.
@@ -405,6 +438,7 @@ function audit(rootArg) {
 
   if (!listing.isGit) add("not-a-git-repo", "high", "Not a git repository, so search can't use .gitignore to skip generated files", ["."]);
   const mapFiles = mapFileFindings(root, add);
+  hiddenCharacterFindings(root, files, add);
   envFindings(root, add);
 
   const { ecosystems, missing } = detectToolchain(root, reader);

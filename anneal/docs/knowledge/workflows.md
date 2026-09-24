@@ -59,6 +59,13 @@ An `audit` run shows the findings, offers to save them and writes a findings, re
 | low | `default-exports` | Default exports, which can be imported under another name |
 | low | `re-export-files` | Index files that only re-export, adding a hop to every lookup |
 | low | `check-command-split` | Checks exist, but no single command runs them all |
+| low | `instruction-hidden-characters` | Characters that a model reads and a person does not see in a file agents load as instructions |
+
+### Hidden characters in instruction files
+
+`instruction-hidden-characters` reads every `CLAUDE.md`, `AGENTS.md` and `GEMINI.md` at any depth, and the `.md` and `.mdc` files under `.agents/`, `.claude/`, `.cursor/rules/` and `.gemini/`. It reports zero-width characters U+200B to U+200D, the word joiner U+2060, a byte order mark U+FEFF after the first character, bidi controls U+202A to U+202E and U+2066 to U+2069, and Unicode tags U+E0000 to U+E007F. Text in these characters can carry an instruction that an agent follows and a reviewer never sees.
+
+Each evidence entry names the file, the line and each code point. Tags are only counted, because their code points spell out the hidden text. The joiner inside an emoji and the tags of a subdivision flag render on screen, so they are not reported. A zero-width non-joiner in a script that needs it is reported; the owner decides. The finding asks you to inspect the line; repo-layout never removes the characters, decodes them or copies them into a plan.
 
 ### Where the audit finds a check command
 

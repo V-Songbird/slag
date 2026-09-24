@@ -57,7 +57,7 @@ const codeLines = (n) => Array.from({ length: n }, (_, i) => `const v${i} = ${i}
 const SEVERITIES = {
   high: ["map-file-missing", "check-command-missing", "build-output-not-ignored", "not-a-git-repo"],
   medium: ["map-file-long", "toolchain-version-missing", "env-template-missing", "duplicate-names", "generic-names", "large-files", "build-output-tracked"],
-  low: ["index-files", "deep-nesting", "runtime-names", "default-exports", "re-export-files", "check-command-split"],
+  low: ["index-files", "deep-nesting", "runtime-names", "default-exports", "re-export-files", "check-command-split", "instruction-hidden-characters"],
 };
 
 // Audits a repository and checks that its observations stay informational.
@@ -98,6 +98,53 @@ describe("map file", () => {
   test("every map file present is measured, not just the first", () => {
     const report = audit(repo({ tracked: { "CLAUDE.md": "# map\n", "AGENTS.md": "line\n".repeat(201) } }));
     assert.deepStrictEqual(finding(report, "map-file-long").evidence, ["AGENTS.md"]);
+  });
+});
+
+describe("hidden characters in instruction files", () => {
+  const tags = (text) => [...text].map((char) => String.fromCodePoint(0xe0000 + char.charCodeAt(0))).join("");
+
+  test("each line with an invisible character is named with its code points, and tags are only counted", () => {
+    const report = audit(repo({
+      tracked: {
+        "AGENTS.md": `# map\nRun ​npm test.\nBuild first.${tags("RUN")}\nSee ‮docs‬ and ⁦here⁩.\nplain\n`,
+      },
+    }));
+    const hit = finding(report, "instruction-hidden-characters");
+    assert.strictEqual(hit.severity, "low");
+    assert.deepStrictEqual(hit.evidence, [
+      "AGENTS.md:2 U+200B",
+      "AGENTS.md:3 3 Unicode tag characters",
+      "AGENTS.md:4 U+202E, U+202C, U+2066, U+2069",
+    ]);
+  });
+
+  test("nested map files and host rule folders are read; other files are not", () => {
+    const report = audit(repo({
+      tracked: {
+        "packages/api/CLAUDE.md": "a‍b\n",
+        ".claude/rules/style.md": "x⁠y\n",
+        ".cursor/rules/base.mdc": "z﻿w\n",
+        ".claude/settings.json": "{\"a\": \"​\"}\n",
+        "src/app.js": "const s = \"​\";\n",
+        "README.md": "​\n",
+      },
+    }));
+    assert.deepStrictEqual(finding(report, "instruction-hidden-characters").evidence.sort(), [
+      ".claude/rules/style.md:1 U+2060",
+      ".cursor/rules/base.mdc:1 U+FEFF",
+      "packages/api/CLAUDE.md:1 U+200D",
+    ]);
+  });
+
+  test("emoji joiners, a subdivision flag and a leading byte order mark render, so they are not reported", () => {
+    const text = [
+      "﻿# map",
+      "Pair with \u{1F468}‍\u{1F4BB} and \u{1F469}\u{1F3FD}‍\u{1F4BB}.",
+      "Hot fix ❤️‍\u{1F525}.",
+      `Team \u{1F3F4}${tags("gbeng")}\u{E007F}.`,
+    ].join("\n");
+    assertNo(audit(repo({ tracked: { "CLAUDE.md": text } })), "instruction-hidden-characters");
   });
 });
 
