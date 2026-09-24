@@ -32,6 +32,7 @@ const CLAUDE_DIAGNOSTICS = [
   ["browser-executable-missing", BROWSER_MISSING],
   ["port-in-use", /\bEADDRINUSE\b|\bPort \d+ is in use\b/i],
   ["command-not-found", COMMAND_NOT_FOUND],
+  ["permission-refused", /Permission to use \S+(?: with [\s\S]*?)? has been denied\.|was blocked by a deny rule\.|is denied by your permission settings/],
   ["blocked", /\bis blocked\b|\bblocked by policy\b/i],
   ["permission-denied", /(?:Access is denied\.|Permission denied|Operation not permitted|\bEPERM\b)/i],
 ];
@@ -124,6 +125,58 @@ function claudeShape(tool, input, cwd) {
   const named = [input.file_path, input.notebook_path, input.path].find((value) => typeof value === "string");
   const whole = operation === "read" && ["offset", "limit", "pages"].every((range) => input[range] === undefined);
   return { operation, path: normalizePath(named === undefined && operation === "search" ? cwd : named, cwd), whole };
+}
+
+// A call the owner, a permission rule, a policy or a hook refused. A later call that does the same job in another form
+// works around the refusal instead of respecting it.
+const REFUSED = new Set(["user-declined", "permission-refused", "blocked"]);
+
+// Programs that only move, print, read or filter text. Two commands that share one say nothing about sharing a job, and
+// a read of a file is matched by its path instead.
+const PLUMBING = new Set([
+  "cd", "pwd", "echo", "printf", "export", "set", "true", "false", "sleep", "cat", "ls", "head", "tail", "grep", "rg", "sed",
+  "awk", "cut", "sort", "uniq", "wc", "tr", "xargs", "find", "jq", "tee", "select-object", "foreach-object", "where-object",
+  "get-content", "write-output", "out-string", "write-host",
+  // Shell keywords open a loop or a branch, not a job.
+  "for", "foreach", "while", "until", "do", "done", "if", "then", "else", "elif", "fi", "case", "esac", "function", "try", "catch", "{", "}",
+]);
+// An interpreter given code inline: the code's first word says nothing about the job.
+const INTERPRETERS = new Set(["node", "deno", "bun", "python", "python3", "py", "ruby", "perl", "bash", "sh", "zsh", "pwsh", "powershell"]);
+const INLINE_CODE = /^(?:-e|-c|-p|--eval|--print|-command)$/i;
+const WORDS = /[\s()<>`"']+/;
+// A word that can name a program: a name or a path, not a variable, an operator, a pattern or a piece of code.
+const PROGRAM = /^[A-Za-z.~/\\][\w.~/\\:+-]*$/;
+
+// Each segment of a command as its program and first argument that is no flag: `git -C .. --no-pager reset --hard` is
+// git and reset. Quoted text is one opaque word, so a pattern or a message cannot split a segment or name a program. A
+// segment that assigns a variable, runs a program in PLUMBING or runs inline code gives none.
+function commandPairs(command) {
+  const pairs = [];
+  const unquoted = String(command || "").replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "#");
+  for (const segment of unquoted.split(/&&|\|\|?|;|\n/)) {
+    const words = segment.trim().split(WORDS).filter(Boolean);
+    while (words.length && /^[\w$]+=/.test(words[0])) words.shift();
+    if (!words.length || !PROGRAM.test(words[0]) || PLUMBING.has(words[0].toLowerCase())) continue;
+    const args = words.slice(1);
+    if (INTERPRETERS.has(words[0].toLowerCase()) && args.some((word) => INLINE_CODE.test(word))) continue;
+    // git's -C and -c take the next word as their value.
+    for (let i = 0; i < args.length; i++) if (words[0] === "git" && /^-[cC]$/.test(args[i])) args.splice(i, 2, "-");
+    pairs.push([words[0], args.find((word) => !word.startsWith("-")) ?? null]);
+  }
+  return pairs;
+}
+
+// A later call retries a refused one when it reaches the same path by the same operation, or, for a shell command that
+// names no path, when a shell command runs the same program with the same first argument, whatever flags or wrapping
+// come between. Any other tool retries only with the same input.
+function retries(refused, call) {
+  if (refused.path !== null) return call.path === refused.path && call.operation === refused.operation;
+  if (!SHELL_TOOLS.has(refused.tool)) return call.tool === refused.tool && call.commandOrArguments === refused.commandOrArguments;
+  if (!SHELL_TOOLS.has(call.tool) || typeof call.commandOrArguments !== "string") return false;
+  const words = new Set(call.commandOrArguments.split(/[\s;&|()<>`"']+/));
+  const programs = new Set(commandPairs(call.commandOrArguments).map(([program]) => program));
+  return commandPairs(refused.commandOrArguments).some(([program, argument]) => (
+    argument === null ? programs.has(program) : words.has(program) && words.has(argument)));
 }
 
 function subagentTranscripts(file) {
@@ -229,6 +282,15 @@ function analyzeClaude(file, before = null, limit = 6) {
             actor, key, message: messageId, cwd: state.cwd, background: SHELL_TOOLS.has(block.name) && fields.run_in_background === true,
             task: BACKGROUND_OUTPUT.test(String(block.name)) ? String(task ?? "").slice(0, 120) : null,
           });
+          for (const failure of failures) {
+            // A failure exists only once its result is read, so every call here came later. A call of the refused one's
+            // own assistant message ran beside it, whenever the host wrote it down, and one for another prompt is other work.
+            if (failure.retriesAfterRefusal && failure.actor === call.actor && failure.promptLine === call.promptLine
+              && !siblings(nav, failedCalls.get(failure), call)
+              && failure.retriesAfterRefusal.length < 2 && retries(failure, call)) {
+              failure.retriesAfterRefusal.push({ ...call });
+            }
+          }
         }
       } else if (block.type === "tool_result") {
         const settled = settle(track, JSON.stringify([actor, block.tool_use_id]), true);
@@ -266,6 +328,7 @@ function analyzeClaude(file, before = null, limit = 6) {
             evidenceBasis: reported ? "reported-error" : "diagnostic-text-match-only",
             diagnosticCandidate: excerpt(output.slice(named ? Math.max(0, named.index - 100) : 0)),
             laterSameToolSuccesses: [],
+            ...(REFUSED.has(category) ? { retriesAfterRefusal: [] } : {}),
           };
           failedCalls.set(failure, call);
           keepLast(failures, failure, limit);

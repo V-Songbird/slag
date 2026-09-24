@@ -813,3 +813,108 @@ describe("a turn that stopped for a continue", () => {
     assert.match(many.warnings.join("\n"), /Only the last 6 stall candidates are shown/);
   });
 });
+
+describe("a refused call and what followed it", () => {
+  const DENIED = (command) => `Permission to use Bash with command ${command} has been denied.`;
+
+  test("a refused command run again with other flags or split across lines is listed, and another command is not", () => {
+    const report = analyzeClaude(transcript([
+      human("drop the last commit", 1),
+      use("t1", "Bash", { command: "git reset --hard HEAD~1" }, 2),
+      result("t1", DENIED("git reset --hard HEAD~1"), 3, true),
+      use("t2", "Bash", { command: "git status --short" }, 4),
+      result("t2", "", 5),
+      use("t3", "Bash", { command: "git --no-pager reset \\n  --hard HEAD~1" }, 6),
+      result("t3", "HEAD is now at 0a1b2c3 first", 7),
+      human("audit", 8),
+    ]));
+    const [refused] = report.candidates;
+    assert.strictEqual(refused.category, "permission-refused");
+    assert.deepStrictEqual(refused.retriesAfterRefusal.map((c) => [c.callLine, c.promptLine, c.tool]), [[6, 1, "Bash"]]);
+  });
+
+  test("a denied read of a path reached again through the shell is listed", () => {
+    const report = analyzeClaude(transcript([
+      human("read the notes", 1),
+      use("t1", "Read", { file_path: "/work/shop/.private/notes.md" }, 2),
+      result("t1", "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>", 3, true),
+      use("t2", "Bash", { command: "cat /work/shop/.private/notes.md" }, 4),
+      result("t2", "secret plans", 5),
+      use("t3", "Bash", { command: "cat /work/shop/README.md" }, 6),
+      result("t3", "# shop", 7),
+      human("audit", 8),
+    ]));
+    const [refused] = report.candidates;
+    assert.strictEqual(refused.category, "permission-refused");
+    assert.deepStrictEqual(refused.retriesAfterRefusal.map((c) => [c.callLine, c.operation, c.path]), [[4, "read", "/work/shop/.private/notes.md"]]);
+  });
+
+  test("the same command for a later prompt, or before the refusal was reported, is no retry", () => {
+    const report = analyzeClaude(transcript([
+      human("clean the build", 1),
+      use("t1", "Bash", { command: "rm -rf build" }, 2),
+      use("t2", "Bash", { command: "rm -rf build" }, 3),
+      result("t1", "The user doesn't want to proceed with this tool use. The tool use was rejected.", 4, true),
+      result("t2", "", 5),
+      human("now clean it, I approve", 6),
+      use("t3", "Bash", { command: "rm -rf build" }, 7),
+      result("t3", "", 8),
+      human("audit", 9),
+    ]));
+    const [refused] = report.candidates;
+    assert.strictEqual(refused.category, "user-declined");
+    assert.deepStrictEqual(refused.retriesAfterRefusal, []);
+  });
+
+  test("a call of the refused call's own assistant message, written after the refusal, is no retry", () => {
+    const sameMessage = use("t2", "Bash", { command: "git reset --hard HEAD~1" }, 4);
+    sameMessage.message.id = "msg-t1";
+    const report = analyzeClaude(transcript([
+      human("drop the last commit", 1),
+      use("t1", "Bash", { command: "git reset --hard HEAD~1" }, 2),
+      result("t1", DENIED("git reset --hard HEAD~1"), 3, true),
+      sameMessage,
+      result("t2", DENIED("git reset --hard HEAD~1"), 5, true),
+      human("audit", 6),
+    ]));
+    assert.deepStrictEqual(report.candidates[0].retriesAfterRefusal, []);
+  });
+
+  test("shared plumbing, a variable or git's -C path is no retry, and a declined git command is one behind -C", () => {
+    const report = analyzeClaude(transcript([
+      human("show the diff", 1),
+      use("t1", "Bash", { command: 'P=/work/shop; echo "== diff" && git -C ../other diff --stat | head -40 && wc -l notes.md' }, 2),
+      result("t1", DENIED("git diff"), 3, true),
+      use("t2", "Bash", { command: 'P=/work/shop; echo "== log" && wc -l notes.md && git -C ../other log -1' }, 4),
+      result("t2", "", 5),
+      use("t3", "PowerShell", { command: "git -C ../other --no-pager diff --stat" }, 6),
+      result("t3", "", 7),
+      human("audit", 8),
+    ]));
+    assert.deepStrictEqual(report.candidates[0].retriesAfterRefusal.map((c) => [c.callLine, c.tool]), [[6, "PowerShell"]]);
+  });
+
+  test("a pipe inside quoted text neither splits a command nor names a program", () => {
+    const report = analyzeClaude(transcript([
+      human("find the release commits", 1),
+      use("t1", "Bash", { command: 'git log --oneline --grep "fix|feat"' }, 2),
+      result("t1", DENIED('git log --oneline --grep "fix|feat"'), 3, true),
+      use("t2", "Bash", { command: 'grep -E "fix|feat" CHANGELOG.md' }, 4),
+      result("t2", "", 5),
+      human("audit", 6),
+    ]));
+    assert.deepStrictEqual(report.candidates[0].retriesAfterRefusal, []);
+  });
+
+  test("a failure that nobody refused carries no retry list", () => {
+    const report = analyzeClaude(transcript([
+      human("run the suite", 1),
+      use("t1", "Bash", { command: "npm test" }, 2),
+      result("t1", 'Exit code 1\nnpm error Missing script: "test"', 3, true),
+      use("t2", "Bash", { command: "npm test -- --watch=false" }, 4),
+      result("t2", 'Exit code 1\nnpm error Missing script: "test"', 5, true),
+      human("audit", 6),
+    ]));
+    for (const candidate of report.candidates) assert.strictEqual("retriesAfterRefusal" in candidate, false);
+  });
+});
