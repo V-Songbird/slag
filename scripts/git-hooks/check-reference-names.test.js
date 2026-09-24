@@ -30,11 +30,14 @@ function fixture(t, files = {}) {
 function runHook(project, mode = "message", extraEnv = {}) {
   const env = { ...process.env };
   delete env.HOUSE_REFERENCE_BLOCKLIST;
-  return spawnSync(process.execPath, [script, mode, path.join(project, "message.txt")], {
+  const result = spawnSync(process.execPath, [script, mode, path.join(project, "message.txt")], {
     cwd: project,
     encoding: "utf8",
     env: { ...env, ...extraEnv },
   });
+  // A spawn or pipe error can leave stderr empty; name it instead of failing a later match on ''.
+  assert.equal(result.error, undefined, `the hook run failed: ${result.error}`);
+  return result;
 }
 
 function git(project, args) {
