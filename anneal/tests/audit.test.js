@@ -107,7 +107,7 @@ describe("hidden characters in instruction files", () => {
   test("each line with an invisible character is named with its code points, and tags are only counted", () => {
     const report = audit(repo({
       tracked: {
-        "AGENTS.md": `# map\nRun ​npm test.\nBuild first.${tags("RUN")}\nSee ‮docs‬ and ⁦here⁩.\nplain\n`,
+        "AGENTS.md": `# map\nRun \u200Bnpm test.\nBuild first.${tags("RUN")}\nSee \u202Edocs\u202C and \u2066here\u2069.\nplain\n`,
       },
     }));
     const hit = finding(report, "instruction-hidden-characters");
@@ -122,12 +122,12 @@ describe("hidden characters in instruction files", () => {
   test("nested map files and host rule folders are read; other files are not", () => {
     const report = audit(repo({
       tracked: {
-        "packages/api/CLAUDE.md": "a‍b\n",
-        ".claude/rules/style.md": "x⁠y\n",
-        ".cursor/rules/base.mdc": "z﻿w\n",
-        ".claude/settings.json": "{\"a\": \"​\"}\n",
-        "src/app.js": "const s = \"​\";\n",
-        "README.md": "​\n",
+        "packages/api/CLAUDE.md": "a\u200Db\n",
+        ".claude/rules/style.md": "x\u2060y\n",
+        ".cursor/rules/base.mdc": "z\uFEFFw\n",
+        ".claude/settings.json": "{\"a\": \"\u200B\"}\n",
+        "src/app.js": "const s = \"\u200B\";\n",
+        "README.md": "\u200B\n",
       },
     }));
     assert.deepStrictEqual(finding(report, "instruction-hidden-characters").evidence.sort(), [
@@ -139,9 +139,9 @@ describe("hidden characters in instruction files", () => {
 
   test("emoji joiners, a subdivision flag and a leading byte order mark render, so they are not reported", () => {
     const text = [
-      "﻿# map",
-      "Pair with \u{1F468}‍\u{1F4BB} and \u{1F469}\u{1F3FD}‍\u{1F4BB}.",
-      "Hot fix ❤️‍\u{1F525}.",
+      "\uFEFF# map",
+      "Pair with \u{1F468}\u200D\u{1F4BB} and \u{1F469}\u{1F3FD}\u200D\u{1F4BB}.",
+      "Hot fix \u2764\uFE0F\u200D\u{1F525}.",
       `Team \u{1F3F4}${tags("gbeng")}\u{E007F}.`,
     ].join("\n");
     assertNo(audit(repo({ tracked: { "CLAUDE.md": text } })), "instruction-hidden-characters");

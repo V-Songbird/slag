@@ -216,7 +216,7 @@ function mapFileFindings(root, add) {
 // an emoji and the tags of a subdivision flag render, so they are skipped. The
 // evidence names each line and code point and counts tags, never decoding them.
 const HIDDEN_CHARACTERS =
-  /(?<!\p{Extended_Pictographic}️?|[\u{1F3FB}-\u{1F3FF}])‍|[​‌⁠﻿‪-‮⁦-⁩]|(?<!\u{1F3F4}[\u{E0020}-\u{E007E}]*)[\u{E0000}-\u{E007F}]/gu;
+  /(?<!\p{Extended_Pictographic}\uFE0F?|[\u{1F3FB}-\u{1F3FF}])\u200D|[\u200B\u200C\u2060\uFEFF\u202A-\u202E\u2066-\u2069]|(?<!\u{1F3F4}[\u{E0020}-\u{E007E}]*)[\u{E0000}-\u{E007F}]/gu;
 const INSTRUCTION_DIRS = [".agents/", ".claude/", ".cursor/rules/", ".gemini/"];
 
 function isInstructionFile(file) {
@@ -229,7 +229,7 @@ function hiddenCharacterFindings(root, files, add) {
   for (const file of files.filter(isInstructionFile)) {
     const text = readFile(root, file)?.text;
     if (!text) continue;
-    text.replace(/^﻿/, "").split("\n").forEach((line, i) => {
+    text.replace(/^\uFEFF/, "").split("\n").forEach((line, i) => {
       const found = [...line.matchAll(HIDDEN_CHARACTERS)].map(([char]) => char.codePointAt(0));
       if (!found.length) return;
       const tags = found.filter((code) => code >= 0xe0000).length;
