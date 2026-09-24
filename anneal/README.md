@@ -87,7 +87,7 @@ anneal has no settings. Choose a skill and its mode.
 - Session review reads one transcript. Redaction is best effort; inspect excerpts before sharing them.
 - Transcript parsing depends on the formats covered by tests. Antigravity requires an explicit transcript file.
 - Documentation checks cover the stated evidence and do not scan Git history by default.
-- Complete interactive migrations remain unverified on every host. The published package installs on all three hosts, and its skills are discovered in Claude Code, Codex and the Antigravity IDE. The audits and session review have run from it in Claude Code and in headless Antigravity CLI, and a repo-layout audit has run in the Antigravity IDE. The skills' flows on Codex, and the other flows in the Antigravity IDE, remain unverified.
+- A complete migration and the Git guard's refusal on its branch have been observed in interactive Claude Code 2.1.278 sessions, with a script rather than a person answering the prompts. Complete interactive migrations remain unverified on Codex and Antigravity. The published package installs on all three hosts, and its skills are discovered in Claude Code, Codex and the Antigravity IDE. The audits and session review have run from it in Claude Code and in headless Antigravity CLI, and a repo-layout audit has run in the Antigravity IDE. The skills' flows on Codex, and the other flows in the Antigravity IDE, remain unverified.
 
 Read the [full limits](docs/knowledge/workflows.md#limits) before migrating a shared repository.
 

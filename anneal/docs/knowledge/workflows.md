@@ -119,7 +119,7 @@ On Claude Code 2.1.278:
 - Answering No to a permission prompt ends the turn at once, and nothing more runs until you send a message. A denied compound command, such as `git checkout -b … && mkdir -p … && git mv …`, reaches the session without saying which part you refused, so name it in that message.
 - The read-only helper of step 3, `anneal:mapper`, runs as a background agent. While it works, the main turn ends with `Waiting for 1 background agent to finish` and the input looks idle. The session goes on by itself when the agent finishes, which took 45 seconds on a nine-file repository.
 
-A complete migration has not been observed in an interactive session on any host. The eval case [a migration on a clean tree](#a-migration-on-a-clean-tree) drives one through the eval harness, where the granted tools run without a prompt.
+A complete migration and the Git guard's refusal on its branch have been observed in interactive sessions on Claude Code 2.1.278, with a script rather than a person answering the prompts. On Codex and Antigravity a complete interactive migration remains unverified. The eval case [a migration on a clean tree](#a-migration-on-a-clean-tree) drives one through the eval harness, where the granted tools run without a prompt.
 
 ## The map file it writes
 
