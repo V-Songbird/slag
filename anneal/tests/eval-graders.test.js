@@ -454,6 +454,65 @@ describe("session-audit-stops-on-unreadable-transcript", () => {
   });
 });
 
+describe("map-reader cases", () => {
+  const FIXTURE = path.join(EVALS, "navigation-fixture.js");
+  const workspaces = {};
+  const checks = {};
+
+  // Each scaffold without bash: the navigation fixture, then the removal its script commits.
+  before(() => {
+    for (const variant of ["original", "oriented"]) {
+      const dir = path.join(EVALS, `map-reader-${variant}`);
+      checks[variant] = graders(dir);
+      const removed = /git rm -rq -- (.+)\n/.exec(read(dir, "reader-fixture.sh"))[1].split(" ");
+      const root = tempDir(`anneal-graders-reader-${variant}-`);
+      const git = (...args) => execFileSync("git", args, { cwd: root, stdio: "pipe", env: { ...process.env, GIT_CONFIG_GLOBAL: path.join(root, ".git-global") } });
+      execFileSync(process.execPath, [FIXTURE, variant], { cwd: root, stdio: "pipe", env: { ...process.env, GIT_CONFIG_GLOBAL: path.join(root, ".git-global") } });
+      git("rm", "-rq", "--", ...removed);
+      git("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "notes only");
+      workspaces[variant] = { root, tracked: git("ls-files").toString().trim().split("\n") };
+    }
+  });
+
+  const verdicts = (variant, reply) => Object.fromEntries(Object.entries(checks[variant])
+    .filter(([, grader]) => grader.target === undefined)
+    .map(([name, grader]) => [name, passes(grader, { reply })]));
+  const allPass = (variant, reply) => Object.values(verdicts(variant, reply)).every(Boolean);
+
+  test("only the notes stay: the map files and the files the map names by path", () => {
+    assert.deepStrictEqual(workspaces.original.tracked, [".nvmrc", "AGENTS.md", "CLAUDE.md"]);
+    assert.deepStrictEqual(workspaces.oriented.tracked, [".nvmrc", "AGENTS.md", "CLAUDE.md", "docs/partner-api.md"]);
+  });
+
+  test("the oriented map answers all four questions, and the original map only two", () => {
+    const oriented = read(workspaces.oriented.root, "AGENTS.md");
+    const original = read(workspaces.original.root, "AGENTS.md");
+    assert.match(oriented, /packages\/price-engine\//);
+    assert.match(oriented, /## 8\. Endpoint reference.*docs\/partner-api\.md/);
+    assert.match(read(workspaces.oriented.root, "docs/partner-api.md"), /^## 8\. Endpoint reference$/m);
+    for (const map of [oriented, original]) {
+      assert.match(map, /`node --test <file>`/);
+      assert.match(map, /Node 22/);
+    }
+    assert.doesNotMatch(original, /price-engine|partner-api|Endpoint reference/);
+  });
+
+  test("the answers each map supports pass every reply grader, in either order or path style", () => {
+    assert.strictEqual(allPass("oriented", "From AGENTS.md.\n\nA1: packages/price-engine/\nA2: node --test <file>\nA3: docs/partner-api.md, ## 8. Endpoint reference, that endpoint's entry\nA4: 22"), true);
+    assert.strictEqual(allPass("oriented", "A1: `packages\\price-engine`\nA2: `node --test path/to/file.test.js`\nA3: section 8 (Endpoint reference) of docs/partner-api.md\nA4: Node 22"), true);
+    assert.strictEqual(allPass("original", "A1: not in the notes\nA2: node --test <file>\nA3: not in the notes; they only say contracts live in docs/\nA4: v22"), true);
+  });
+
+  test("an answer the notes do not support, a wrong section or a missing line fails", () => {
+    const guessed = verdicts("original", "A1: packages/price-engine\nA2: node --test <file>\nA3: docs/partner-api.md, section 8\nA4: 22");
+    assert.deepStrictEqual([guessed["a1-not-in-the-notes"], guessed["a3-not-in-the-notes"]], [false, false]);
+    assert.strictEqual(verdicts("oriented", "A1: packages/price-engine\nA2: node --test <file>\nA3: docs/partner-api.md, ## 7. Pagination\nA4: 22")["a3-endpoint-reference"], false);
+    assert.strictEqual(verdicts("oriented", "A1: not in the notes\nA2: node --test <file>\nA3: docs/partner-api.md, ## 8. Endpoint reference\nA4: 22")["a1-price-engine"], false);
+    assert.strictEqual(verdicts("oriented", "A1: packages/price-engine\nA2: npm test\nA3: docs/partner-api.md, ## 8\nA4: 20")["a2-single-test-command"], false);
+    assert.strictEqual(verdicts("original", "A1: not in the notes\nA2: node --test <file>\nA4: 22")["four-answer-lines"], false);
+  });
+});
+
 describe("migration-applies-approved-step", () => {
   const CASE = path.join(EVALS, "migration-applies-approved-step");
   let checks;
