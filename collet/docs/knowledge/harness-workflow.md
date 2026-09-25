@@ -211,3 +211,11 @@ Automatic compaction on Claude Code, and compaction in an interactive Codex sess
 - An unavailable `HEAD` or unreadable source is reported as skipped. Closing uses `--live --strict`, so skipped checks prevent completion. Custom checks need a working-tree check to allow closure.
 - Planted examples do not establish a false-alarm rate on your code. The mount installs no commit or push hook.
 - A green accept command means one command exited zero and the writes stayed inside a list someone drew. It does not mean the work is correct.
+
+### Host coverage
+
+The published skills are discovered in Claude Code, Codex and the Antigravity IDE. Mounting and check writing have run in Claude Code, headless Codex CLI 0.155.1 and headless Antigravity CLI 1.2.9 without `--sandbox`, and on Codex a collet refusal stopped a write outside the open task. Both flows in the Antigravity IDE remain unverified.
+
+A collet refusal and a verified close inside a long interactive session have been observed on Claude Code 2.1.278, with a script rather than a person answering the prompts, and in the Antigravity IDE 2.17.0 across two interactive conversations, with a person answering.
+
+A manual `/compact` on Claude Code 2.1.278 carries the open task into the compacted session. Automatic compaction has been observed only on headless Codex CLI 0.155.1. The sections [In an interactive Claude Code session](#in-an-interactive-claude-code-session) and [In a headless Codex session](#in-a-headless-codex-session) describe each.

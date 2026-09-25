@@ -119,7 +119,7 @@ On Claude Code 2.1.278:
 - Answering No to a permission prompt ends the turn at once, and nothing more runs until you send a message. A denied compound command, such as `git checkout -b … && mkdir -p … && git mv …`, reaches the session without saying which part you refused, so name it in that message.
 - The read-only helper of step 3, `anneal:mapper`, runs as a background agent. While it works, the main turn ends with `Waiting for 1 background agent to finish` and the input looks idle. The session goes on by itself when the agent finishes, which took 45 seconds on a nine-file repository.
 
-A complete migration and the Git guard's refusal on its branch have been observed in interactive sessions on Claude Code 2.1.278, with a script rather than a person answering the prompts, and in the Antigravity IDE 2.17.0, with a person answering. On Codex CLI 0.155.1 a complete migration and the Git guard's refusal have been observed with a script answering and the project's `.git` added as a writable root (`codex exec --add-dir <project>/.git`, because the `workspace-write` sandbox keeps `.git` read-only); that plan only changed the map file, so a migration that moves files remains unverified on Codex. The eval case [a migration on a clean tree](#a-migration-on-a-clean-tree) drives one through the eval harness, where the granted tools run without a prompt.
+[Host coverage](#host-coverage) lists the hosts on which a complete migration has been observed. The eval case [a migration on a clean tree](#a-migration-on-a-clean-tree) drives one through the eval harness, where the granted tools run without a prompt.
 
 ## The map file it writes
 
@@ -250,6 +250,14 @@ The hook matches command text, so it cannot see every rewrite, such as git run t
 - The transcript parser reads the shapes held by its tests; host format changes can require parser updates. Antigravity has no known transcript location, so there the skill works only on a file you hand it.
 - Redaction of credentials, your home directory and your account name in the evidence is best effort. Read an excerpt before you share it.
 - Documentation reconciliation covers the stated files and evidence. It does not prove every claim, host or distribution safe, and does not scan Git history by default.
+
+### Host coverage
+
+The published package installs on all three hosts, and its skills are discovered in Claude Code, Codex and the Antigravity IDE.
+
+A complete migration and the Git guard's refusal on its branch have been observed in interactive sessions on Claude Code 2.1.278, with a script rather than a person answering the prompts, and in the Antigravity IDE 2.17.0, with a person answering. On Codex CLI 0.155.1 a complete migration and the Git guard's refusal have been observed with a script answering and the project's `.git` added as a writable root (`codex exec --add-dir <project>/.git`, because the `workspace-write` sandbox keeps `.git` read-only); that plan only changed the map file, so a migration that moves files remains unverified on Codex.
+
+The audits and session review have run from the published package in Claude Code, headless Codex CLI 0.155.1 and headless Antigravity CLI, and a repo-layout audit has run in the Antigravity IDE and the Codex desktop app 26.917. The other flows in the Antigravity IDE remain unverified.
 
 ## Running the evals
 
