@@ -216,6 +216,6 @@ Automatic compaction on Claude Code, and compaction in an interactive Codex sess
 
 The published skills are discovered in Claude Code, Codex and the Antigravity IDE. Mounting and check writing have run in Claude Code, headless Codex CLI 0.155.1 and headless Antigravity CLI 1.2.9 without `--sandbox`, and on Codex a collet refusal stopped a write outside the open task. Both flows in the Antigravity IDE remain unverified.
 
-A collet refusal and a verified close inside a long interactive session have been observed on Claude Code 2.1.278, with a script rather than a person answering the prompts, and in the Antigravity IDE 2.17.0 across two interactive conversations, with a person answering.
+A collet refusal and a verified close inside a long interactive session have been observed on Claude Code 2.1.278, with a script rather than a person answering the prompts, and in the Antigravity IDE 2.17.0 across two interactive conversations, with a person answering. Both have also been observed inside one long headless session on Codex CLI 0.155.1, with a script answering.
 
 A manual `/compact` on Claude Code 2.1.278 carries the open task into the compacted session. Automatic compaction has been observed only on headless Codex CLI 0.155.1. The sections [In an interactive Claude Code session](#in-an-interactive-claude-code-session) and [In a headless Codex session](#in-a-headless-codex-session) describe each.

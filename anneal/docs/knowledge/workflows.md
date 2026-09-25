@@ -253,11 +253,11 @@ The hook matches command text, so it cannot see every rewrite, such as git run t
 
 ### Host coverage
 
-The published package installs on all three hosts, and its skills are discovered in Claude Code, Codex and the Antigravity IDE.
+The published package installs on all three hosts, and its skills are discovered in Claude Code, Codex and the Antigravity IDE. On Antigravity CLI 1.2.7, `agy plugin list` names `anneal` after installation.
 
 A complete migration and the Git guard's refusal on its branch have been observed in interactive sessions on Claude Code 2.1.278, with a script rather than a person answering the prompts, and in the Antigravity IDE 2.17.0, with a person answering. On Codex CLI 0.155.1 a complete migration and the Git guard's refusal have been observed with a script answering and the project's `.git` added as a writable root (`codex exec --add-dir <project>/.git`, because the `workspace-write` sandbox keeps `.git` read-only); that plan only changed the map file, so a migration that moves files remains unverified on Codex.
 
-The audits and session review have run from the published package in Claude Code, headless Codex CLI 0.155.1 and headless Antigravity CLI, and a repo-layout audit has run in the Antigravity IDE and the Codex desktop app 26.917. The other flows in the Antigravity IDE remain unverified.
+The audits and session review have run from the published package in Claude Code, headless Codex CLI 0.155.1 and headless Antigravity CLI 1.2.8 and 1.2.9 without `--sandbox`, and a repo-layout audit has run in the Antigravity IDE and the Codex desktop app 26.917. The other flows in the Antigravity IDE remain unverified.
 
 ## Running the evals
 

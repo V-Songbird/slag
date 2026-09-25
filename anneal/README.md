@@ -34,7 +34,7 @@ agy plugin install "<path-to-clone>/anneal"
 agy plugin list
 ```
 
-The list should name `anneal`, as it does on CLI 1.2.7. On CLI 1.2.8 and 1.2.9, headless runs without `--sandbox` ran the repo-layout audit, the docs-align audit and session review. With `--sandbox`, headless `agy` runs no shell command.
+The list should name `anneal`. With `--sandbox`, headless `agy` runs no shell command.
 
 anneal acts on your request. Its enabled hook inspects shell commands and stays silent outside a migration branch.
 

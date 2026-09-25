@@ -66,7 +66,11 @@ node .collet/checks/run.mjs
 ```
 
 The first command prints the open task, scope and acceptance command. The second reports whether each check catches its violations and permits its near misses.
-When an active guard refuses a write, it names the affected path and the remedy that fits the refusal: widen the task with a recorded reason for a file the stated task needs (asking the person first for one beyond their request), change a harness file between tasks, or fix an edit that a check caught.
+When an active guard refuses a write, it names the affected path and the remedy that fits the refusal:
+
+- For a file the stated task needs, widen the task with a recorded reason. Ask the person first for a file beyond their request.
+- For a harness file, change it between tasks.
+- For an edit that a check caught, fix the edit.
 
 See the [harness workflow](docs/knowledge/harness-workflow.md) for direct mounting, task commands, optional language checks, and the fixture benchmark.
 
@@ -105,7 +109,7 @@ The [configuration reference](docs/knowledge/harness-workflow.md#configuration) 
 - Closing requires strict live checks and the acceptance command to pass. Unavailable verification leaves the task open.
 - Fixture success does not measure false alarms on your code, and an acceptance command passing does not establish correctness.
 - Mounting and check writing have run in Claude Code, in headless Codex sessions and in headless Antigravity CLI sessions without `--sandbox`. Both are unverified in the Antigravity IDE.
-- A collet refusal and a verified close have been observed in long interactive sessions on Claude Code and in the Antigravity IDE. On Codex, a refusal has stopped a write outside the open task.
+- A collet refusal and a verified close have been observed in long sessions: interactive on Claude Code and the Antigravity IDE, headless on Codex.
 - The open task carries over a manual `/compact` on Claude Code and an automatic compaction on headless Codex. Automatic compaction on Claude Code, and compaction in an interactive Codex session, are unverified.
 - These results come from runs on specific host versions, some with a script rather than a person answering the prompts. [Host coverage](docs/knowledge/harness-workflow.md#host-coverage) lists each run.
 
