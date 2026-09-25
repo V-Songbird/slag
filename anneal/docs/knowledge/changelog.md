@@ -16,9 +16,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.5.1-alpha] — 2026-09-25
+
 ### Fixed
 
-- A docs-align or repo-layout audit saves no copy of the audit's output outside the project. docs-align writes its coverage checklist only in a scratch directory the host names for the session; without one it writes no file anywhere. Eval case `audit-reports-without-changes` fails a run that sends the audit's output to a file.
+- A docs-align or repo-layout audit saves no copy of the audit's output outside the project. docs-align writes its coverage checklist only in a scratch directory the host names for the session; without one it writes no file anywhere.
 - The audit keeps running when Git cannot read an ignore file, such as a global excludes file that a sandbox denies. It lists untracked files without that file's rules and names it in a `limitation:` line, `limitations` in the JSON; before, the script crashed when Git could open the file but not read it, and said nothing when Git skipped a file it could not access. docs-align and repo-layout report the limitation instead of skipping the audit.
 
 ## [0.5.0-alpha] — 2026-09-23
