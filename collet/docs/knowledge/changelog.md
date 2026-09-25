@@ -73,6 +73,13 @@ All notable changes to collet are documented here. The format follows
 
 ### Changed
 
+- A scope refusal no longer calls a widen simply allowed. It says to widen only for a file the
+  stated task needs, to ask the person first when the file goes beyond what they asked for, and
+  otherwise to leave the file and name it in the summary. On Claude Code, a project with an ask
+  rule for the widen command can then be asked twice for such a widen. The session start's scope
+  line and the rules block's widen step say the same; a mounted project gets the new rules block
+  by mounting again. The widen command, its recorded reason and the guard's enforcement are
+  unchanged.
 - `task.mjs close` names the live check command it runs, as in
   `running checks: node .collet/checks/run.mjs --live --strict`, the way the accept step names
   its command. A refused close still prints neither line. A mounted project gets the new line by

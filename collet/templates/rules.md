@@ -5,9 +5,9 @@
 ends it are printed by `node .collet/task.mjs status`, and a new session is told them before it
 reads anything.{{ASK_FIRST}}
 
-1. **Change only the files the open task lists.** If the task genuinely needs another one, widen the
-   list first — {{WIDEN}} That is allowed and recorded; working around the list is not the same
-   thing.
+1. **Change only the files the open task lists.** If the stated task needs another one, widen the
+   list first — {{WIDEN}} If the file goes beyond what the person asked for, ask them first; with
+   nobody to ask, leave it and name it in your summary. Working around the list is not a widen.
 2. **Finished means the accept command exited zero.** {{CLOSE}} Run it as you go, not only at the
    end. A task that was not closed did not finish, whatever the summary says. When a missing input
    or a broken environment means the accept command cannot pass as the task stands, the work ends

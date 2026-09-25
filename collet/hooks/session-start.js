@@ -67,7 +67,7 @@ if (task) {
   lines.push(
     `The open task is ${task.id} — "${visible(`the title of task ${task.id}`, task.title)}" (status ${task.status}).` +
       ` Writable files: ${scope.join(', ') || 'none declared'}.` +
-      ` Writes outside that list are refused, and \`node .collet/task.mjs widen --add <path> --why "<reason>"\` is the way to extend it.` +
+      ` Writes outside that list are refused. \`node .collet/task.mjs widen --add <path> --why "<reason>"\` extends it for a file the stated task needs; a file beyond what the person asked for needs their yes first.` +
       ` The task ends when \`${accept}\` exits zero, which \`node .collet/task.mjs close\` runs after checking that nothing landed outside the list.`
   );
 } else {

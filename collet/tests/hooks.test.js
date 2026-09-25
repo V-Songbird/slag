@@ -153,6 +153,9 @@ test('a refused harness write is told to close the task, and any other refused w
   assert.match(harness, /node \.collet\/task\.mjs close/);
   assert.doesNotMatch(harness, /widen --add/);
   assert.match(reason('src/theme.mjs'), /node \.collet\/task\.mjs widen --add/);
+  // A widen beyond the request goes to the person, and a run that cannot ask leaves the file.
+  assert.match(reason('src/theme.mjs'), /beyond what the person asked for, ask them first/);
+  assert.match(reason('src/theme.mjs'), /nobody can be asked, leave it alone and name it in your summary/);
 });
 
 test('the guard takes the close advice from the harness flag, not from the wording', () => {

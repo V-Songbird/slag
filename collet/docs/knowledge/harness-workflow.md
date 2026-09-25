@@ -65,10 +65,11 @@ The command prints the open task, its scope, and the configured acceptance comma
 From here the session is held. A write to a file outside the list comes back refused:
 
 ```text
-src/checkout.mjs is outside the open task (t1). Writable: src/cart.mjs. If the file is
-genuinely part of the task, widen it first: node .collet/task.mjs widen --add <path>
---why "<reason>". That is allowed and recorded. Otherwise leave it alone and say in your
-summary what you found instead.
+src/checkout.mjs is outside the open task (t1). Writable: src/cart.mjs. Widen the task
+only for a file the stated task needs: node .collet/task.mjs widen --add <path>
+--why "<reason>". If the file goes beyond what the person asked for, ask them first.
+When the file is not needed, or nobody can be asked, leave it alone and name it in your
+summary.
 ```
 
 Closing proves the scope held before it runs the accept command:
@@ -91,7 +92,7 @@ The mount's own writes are not task changes: `.collet/` and the rules block betw
 | Add the optional language checks | Ask `/collet:task-harness` to mount with the checks for tests and verification settings |
 | See the open task and what it may touch | `/collet:task-harness what's the task?`, or `node .collet/task.mjs status` |
 | Open a task | `node .collet/task.mjs add --title "..." --why "..." --scope "src/cart.mjs,test/**"` |
-| Add a file the task genuinely needs | `node .collet/task.mjs widen --add <path> --why "<reason>"` |
+| Add a file the stated task needs; ask the person first for one beyond their request | `node .collet/task.mjs widen --add <path> --why "<reason>"` |
 | Finish one | `node .collet/task.mjs close --left-out "..." --unverified "..."` |
 | Prove the checks still catch what they claim | `node .collet/checks/run.mjs` |
 | Check the working tree against the open task | `node .collet/checks/run.mjs --live` |
