@@ -192,7 +192,11 @@ On Claude Code 2.1.278:
 - Answering No to a permission prompt ends the turn at once, and nothing more runs until you send a message.
 - A manual `/compact` runs the `PreCompact` hook, which writes `.collet/handoff.md`, and then the `SessionStart` hook again. That second start gives the compacted session the open task, its scope with any widening, and the handoff.
 
-Automatic compaction, and compaction on Codex, have not been observed.
+## In a headless Codex session
+
+On Codex CLI 0.155.1, `SessionStart` context is added at the start of every `codex exec` and `codex exec resume` turn. An automatic compaction runs the `PreCompact` hook, which writes `.collet/handoff.md`, and within the same turn the `SessionStart` context reappears with the open task, its scope with any widening, and the handoff. This was observed with a script answering and the context window lowered per run with `-c model_context_window`.
+
+Automatic compaction on Claude Code, and compaction in an interactive Codex session, have not been observed.
 
 ## Limits
 
