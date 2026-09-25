@@ -54,7 +54,7 @@ On Antigravity, give every command the project root the person named as its work
 node "<plugin root>/scripts/audit.js" --root "<repository root>"
 ```
 
-The script prints a summary and writes nothing. Run it again with `--json` when the layout survey needs the full evidence. It needs Node 22 or later; without Node, say so and stop.
+The script prints a summary and writes nothing. Run it again with `--json` when the layout survey needs the full evidence. It needs Node 22 or later; without Node, say so and stop. When Git cannot read an ignore file, such as a global excludes file that a sandbox denies, the script still runs and names that file in a `limitation:` line, `limitations` in the JSON. Report it with the findings; it is not a reason to stop.
 
 ## 2. Report the findings
 

@@ -9,7 +9,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync, execFileSync } = require("node:child_process");
-const { audit } = require("../scripts/audit.js");
+const { audit, limitationFor } = require("../scripts/audit.js");
 
 const CLI = path.join(__dirname, "..", "scripts", "audit.js");
 
@@ -331,6 +331,58 @@ describe("build output", () => {
     assert.deepStrictEqual(finding(both, "build-output-tracked").evidence, ["public/vendor.min.js"]);
     assert.deepStrictEqual(evidence(both, "required-inputs"), ["generated-looking: test/fixtures/ (1 file)"]);
     assertNo(observed({ "test/fixtures/widget.min.js": "", "src/app.js": "" }), "build-output-tracked");
+  });
+
+  test("an unreadable global excludes file is named as a limitation, and the audit still runs", (t) => {
+    const root = repo({ tracked: { "src/app.js": "", ".gitignore": "node_modules/\n" }, untracked: { "dist/app.js": "", "node_modules/x/index.js": "" } });
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-audit-home-"));
+    created.push(home);
+    const excludes = path.join(home, "ignore");
+    fs.writeFileSync(excludes, "dist/\n");
+    fs.writeFileSync(path.join(home, "gitconfig"), `[core]\n\texcludesFile = ${excludes.replace(/\\/g, "/")}\n`);
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: path.join(home, "gitconfig") };
+    const saved = process.env.GIT_CONFIG_GLOBAL;
+    process.env.GIT_CONFIG_GLOBAL = env.GIT_CONFIG_GLOBAL;
+    try {
+      const readable = audit(root);
+      assert.deepStrictEqual(readable.limitations, []);
+      assertNo(readable, "build-output-not-ignored");
+
+      // Deny the read the way a sandbox does: an ACL entry on Windows, mode 000 elsewhere.
+      if (process.platform === "win32") spawnSync("icacls", [excludes, "/deny", `${os.userInfo().username}:(R)`], { stdio: "ignore" });
+      else fs.chmodSync(excludes, 0);
+      try {
+        fs.readFileSync(excludes);
+        return t.skip("this process can still read the excludes file");
+      } catch {}
+
+      const denied = audit(root);
+      assert.strictEqual(denied.limitations.length, 1);
+      assert.match(denied.limitations[0], /Git could not read .*ignore, so untracked files are listed without its ignore rules/);
+      // The project's own .gitignore still applies; only the global rules are missing.
+      assert.deepStrictEqual(finding(denied, "build-output-not-ignored").evidence, ["dist/ (1 file)"]);
+      const summary = spawnSync(process.execPath, [CLI, "--root", root], { encoding: "utf-8", env });
+      assert.strictEqual(summary.status, 0);
+      assert.match(summary.stdout, /^limitation: Git could not read /m);
+    } finally {
+      // Windows refuses to delete a file with a deny entry; the cleanup needs it gone.
+      if (process.platform === "win32") spawnSync("icacls", [excludes, "/reset"], { stdio: "ignore" });
+      if (saved === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = saved;
+    }
+  });
+
+  test("a limitation shortens the home directory to ~, however Git spells it", () => {
+    const home = os.homedir();
+    const expected = "Git could not read ~/.config/git/ignore, so untracked files are listed without its ignore rules";
+    const spellings = [`${home.replace(/\\/g, "/")}/.config/git/ignore`];
+    // Windows compares paths without case, and Git can spell the home with backslashes.
+    if (process.platform === "win32") spellings.push(`${home.toUpperCase()}/.config/git/ignore`);
+    for (const file of spellings) {
+      const line = limitationFor(file);
+      assert.strictEqual(line, expected);
+      assert.ok(!line.toLowerCase().includes(home.replace(/\\/g, "/").toLowerCase()), line);
+    }
   });
 
   test("outside git, the missing ignore rules are the finding", () => {

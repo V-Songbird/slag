@@ -8,7 +8,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { execFileSync } = require("node:child_process");
+const { execFileSync, spawnSync } = require("node:child_process");
 const { observe } = require("./audit-observations.js");
 
 const MAP_FILE_MAX_LINES = 200;
@@ -117,14 +117,41 @@ function listFiles(root) {
   try {
     git(root, ["rev-parse", "--is-inside-work-tree"]);
   } catch {
-    return { isGit: false, tracked: walk(root), untracked: [] };
+    return { isGit: false, tracked: walk(root), untracked: [], limitations: [] };
   }
   const split = (output) => output.split("\0").filter(Boolean);
+  return { isGit: true, tracked: split(git(root, ["ls-files", "-z", "--cached"])), ...untrackedFiles(root, split) };
+}
+
+// A sandbox can deny reading an ignore file, such as the global excludes file.
+// Git then warns and skips it, or, when it can open but not read the file, refuses
+// to list; the retry drops only the global file. Either way the listing lacks those
+// rules, and the report names the file as a limitation instead of stopping.
+function untrackedFiles(root, split) {
+  const list = (config) => spawnSync("git", ["-C", root, ...config, "ls-files", "-z", "--others", "--exclude-standard"], {
+    encoding: "utf8",
+    maxBuffer: 512 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let result = list([]);
+  let warnings = result.stderr || "";
+  if (result.status !== 0 && /cannot use .+ as an exclude file/.test(warnings)) {
+    result = list(["-c", "core.excludesFile="]);
+    warnings += result.stderr || "";
+  }
+  if (result.error || result.status !== 0) throw result.error || new Error(`git ls-files failed: ${result.stderr.trim()}`);
+  const unreadable = [...new Set([...warnings.matchAll(/unable to access '([^']+)'/g)].map((match) => match[1]))];
   return {
-    isGit: true,
-    tracked: split(git(root, ["ls-files", "-z", "--cached"])),
-    untracked: split(git(root, ["ls-files", "-z", "--others", "--exclude-standard"])),
+    untracked: split(result.stdout),
+    limitations: unreadable.map(limitationFor),
   };
+}
+
+// Git names the file by its absolute path, usually under the owner's home: shorten that to ~ with
+// session evidence's home rule. Loaded here, not at the top, because that module requires this one.
+function limitationFor(file) {
+  const { directory } = require("./session-evidence-redaction.js");
+  return `Git could not read ${directory(file)}, so untracked files are listed without its ignore rules`;
 }
 
 function extensionOf(file) {
@@ -503,6 +530,7 @@ function audit(rootArg) {
     schemaVersion: 1,
     root,
     git: listing.isGit,
+    limitations: listing.limitations,
     ecosystems,
     files: { scanned: files.length, code: codeFiles.length },
     mapFiles,
@@ -518,6 +546,7 @@ function formatSummary(report) {
   const lines = [
     `anneal audit: ${report.root}`,
     `${plural(report.files.scanned, "file")} (${report.files.code} code) | git: ${report.git ? "yes" : "no"} | ecosystems: ${report.ecosystems.join(", ") || "none detected"}`,
+    ...report.limitations.map((limitation) => `limitation: ${limitation}`),
     "",
   ];
   if (!report.findings.length) lines.push("No findings.");
@@ -565,6 +594,7 @@ function main(argv) {
   return 0;
 }
 
-if (require.main === module) process.exitCode = main(process.argv);
+// Exported before main runs, so a module main loads lazily sees the whole API.
+module.exports = { HIDDEN_CHARACTERS, audit, formatSummary, limitationFor, main };
 
-module.exports = { HIDDEN_CHARACTERS, audit, formatSummary, main };
+if (require.main === module) process.exitCode = main(process.argv);

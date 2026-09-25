@@ -241,6 +241,7 @@ The hook matches command text, so it cannot see every rewrite, such as git run t
 ## Limits
 
 - The scan is a heuristic. A flagged `index` file may be exactly what your framework expects, which is why nothing moves without your approval.
+- When Git cannot read an ignore file, such as a global excludes file a sandbox denies, the audit lists untracked files without that file's rules and names it in a `limitation:` line. A folder only that file ignores then shows up in `build-output-not-ignored`; a clone never carries the global file, so the finding still holds for the repository.
 - Observations match the paths a map names, not what its sentences mean: a package mentioned without its path, as in "the pricing package", counts as not named. Headings are read in Markdown only, and a section link is checked against GitHub's heading anchors and explicit `id` or `name` anchors.
 - The import fixer rewrites relative `import`, `export … from`, `import()` and `require()` in the JavaScript and TypeScript family. Path aliases, other languages, config files and documents are found by searching, and you see them inside the step.
 - anneal reports code that builds names at runtime. It never rewrites that code.
