@@ -12,6 +12,7 @@ const { test, describe, before, after } = require("node:test");
 const assert = require("node:assert");
 const fs = require("node:fs");
 const os = require("node:os");
+require("./temp-root.js");
 const path = require("node:path");
 const { execFileSync, spawnSync } = require("node:child_process");
 const { readGraders, passes, listRunFiles, createdPaths } = require("./eval-harness");

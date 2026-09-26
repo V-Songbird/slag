@@ -5,7 +5,7 @@
 // Debugging: COLLET_KEEP_FAILED_PROJECTS=1 keeps the projects of a failing test and prints where
 // each one was kept. A passing test's projects are removed either way.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, afterEach, beforeEach } from 'node:test';
@@ -15,6 +15,35 @@ export const PLUGIN = dirname(dirname(fileURLToPath(import.meta.url)));
 export const TEMPLATES = join(PLUGIN, 'templates');
 
 const KEEP_FAILED = process.env.COLLET_KEEP_FAILED_PROJECTS === '1';
+
+// Each test process keeps its temp files, and those of the scripts it runs, under its own root,
+// <tmp>/collet-tests/<pid>-XXXXXX, and removes the root when it exits. A run killed before then
+// leaves its root behind; the next run removes every root whose process is gone. Kept projects
+// stay in the temp directory the run was given.
+if (!KEEP_FAILED) {
+  // Another test process may be removing the same root; the next run retries.
+  const discard = (dir) => {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {}
+  };
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      return error.code === 'EPERM';
+    }
+  };
+  const base = join(tmpdir(), 'collet-tests');
+  mkdirSync(base, { recursive: true });
+  for (const name of readdirSync(base)) {
+    if (!alive(Number.parseInt(name, 10))) discard(join(base, name));
+  }
+  const root = mkdtempSync(join(base, `${process.pid}-`));
+  process.env.TEMP = process.env.TMP = process.env.TMPDIR = root;
+  process.on('exit', () => discard(root));
+}
 // The tests running now, innermost last. A project belongs to the test that created it, so a
 // parent's project outlives the subtests that share it.
 const running = [];

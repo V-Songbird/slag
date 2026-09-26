@@ -7,6 +7,7 @@
 const { after } = require("node:test");
 const fs = require("node:fs");
 const os = require("node:os");
+require("./temp-root.js");
 const path = require("node:path");
 
 // The scripts read the home directory and the OS user name once, when they load, and mask the account name wherever it

@@ -7,6 +7,7 @@ const { test, describe, after } = require("node:test");
 const assert = require("node:assert");
 const fs = require("node:fs");
 const os = require("node:os");
+require("./temp-root.js");
 const path = require("node:path");
 const { spawnSync, execFileSync } = require("node:child_process");
 const { audit, limitationFor } = require("../scripts/audit.js");
