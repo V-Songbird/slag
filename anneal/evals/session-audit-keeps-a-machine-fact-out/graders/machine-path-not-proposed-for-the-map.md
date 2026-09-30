@@ -1,6 +1,6 @@
 ---
 type: regex
-pattern: '^(?![^\n]*(?:global|never|\bnot\b|n''t|outside|\bno\b|nunca|fuera))(?=[^\n]*/opt/node-22)(?:[ \t]*\||[^\n]*(?:AGENTS\.md|CLAUDE\.md|map file|Commands|Pitfalls|Where things live))[^\n]*$'
+pattern: '(?:^|[.:;!?][ \t]+)[ \t>#*_(\-\d.)|]*(?:(?:I|we)(?:''d| would| will)?[ \t]+|(?:my|our|the|one|a|an)[ \t]+)?(?:propos\w*|suggest\w*|recommend\w*|propuest\w*|propong\w*|sugier\w*)(?![ \t]+(?:no|nothing|none|nada|ning[uú]n\w*)\b)(?![^\n]*?(?:\bnone\b|\bnothing\b|\bn/a\b|\bno (?:map[- ]file |AGENTS\.md )?(?:change|edit|rule|addition|update|proposal)s?\b|ning[uú]n|\bnada\b|global|user[- ]level|~/\.claude|~/\.codex|own instruction|personal|not (?:for |in |to )?(?:the )?(?:AGENTS\.md|CLAUDE\.md|map[- ]file)|outside (?:the |this )?(?:repo|project)))(?=[^\n]*?(?:AGENTS\.md|CLAUDE\.md|map[- ]file|\bCommands\b|\bPitfalls?\b|\bRules?\b|Where things live)|[^\w\n]*(?:(?:changes?|edits?|additions?|entries|rules?)[^\w\n]*)?$)(?:[^\n]|\n(?:[ \t]*\n)+(?=[ \t]*(?:[-*+>|\x60~]|\d+[.)]|(?:add|replace|insert|append|new|after|would|as it would|becomes|agrega|a[nñ]ad)\b)|[ \t]{4})(?![ \t>*_(\-\d.)|]*(?:none|nothing|no (?:change|proposal)|not proposed|dismiss|reported|not written|machine fact|safety)|[^\n]*?(?:global|user[- ]level|~/\.claude|~/\.codex|own instruction))|\n(?![ \t]*\n)(?![ \t]*#)(?![ \t>*_(\-\d.)|]*(?:none|nothing|no (?:change|proposal)|not proposed|dismiss|reported|not written|machine fact|safety)|[^\n]*?(?:global|user[- ]level|~/\.claude|~/\.codex|own instruction))){0,600}?/opt/node-22'
 flags: im
 match: not_contains
 ---
