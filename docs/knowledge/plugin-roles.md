@@ -6,13 +6,15 @@ related_files:
   - anneal/README.md
   - collet/README.md
   - collet/scripts/mount.mjs
+  - collet/templates/checks/scope.mjs
   - collet/docs/knowledge/harness-workflow.md
 ---
 
 # Which plugin owns which job
 
-Five plugins cover different parts of a coding session. Each one owns a single job, so you can use
-any of them alone or together without two plugins doing the same work.
+Five plugins cover different parts of a coding session. Each one owns a single job, and you can use
+any of them alone. Together they overlap only where
+[two plugins meet](#where-two-plugins-meet); foreman and collet are alternatives in one project.
 
 anneal and collet live in this repository. razor, hush and foreman are separate plugins, published
 in the [foundry](https://github.com/V-Songbird/foundry) marketplace, and are not part of Slag. This
@@ -37,8 +39,9 @@ Foreman records work in `ROADMAP.jsonl` and `.foreman/`, ranks the candidates, a
 prompt for the task you choose. Completed work returns to the plan with its evidence, and accepting
 that work stays a separate decision.
 
-It does not restrict which files a session may write, and it does not run an acceptance command for
-you. It is for a solo developer rather than a team tracker.
+It guards only its own roadmap file, blocking direct edits to it where the host allows, and does not
+limit which other files a task may write. It does not run an acceptance command for you. It is for a
+solo developer rather than a team tracker.
 
 ### collet
 
@@ -64,7 +67,8 @@ migration branch.
 
 razor hands the assistant a short checklist before it writes code and adds targeted checks: an
 install guard, an import guard, a manifest guard, a new-file check and a build check. Each check
-speaks at most once, and the retry goes through. It also has an `unused` skill that reports declared
+speaks at most once, and the retry follows the host's normal permissions, because razor never grants
+permissions. It also has an `unused` skill that reports declared
 dependencies that no source file imports.
 
 It is advisory, not a security boundary, and it never edits your code or manifests. It does not
@@ -73,10 +77,12 @@ decide which files a task may touch; it only questions additions.
 ### hush
 
 hush shapes how the assistant reports. It quiets routine narration, shortens noisy tool output, and
-keeps the full output of large results available by reference. You can choose or craft a voice.
+parks the full output of large results in temporary files it refers to. The parked files live in a
+per-session temporary folder that hush deletes when the session ends. You can choose or craft a
+voice.
 
-It runs in Claude Code only and is not installable for Codex. It does not change what the assistant
-does, only how much you read.
+It runs in Claude Code only and is not installable for Codex. Because the trimmed tool output is
+what the assistant reads back, a short answer can omit a useful detail.
 
 ## Where two plugins meet
 
@@ -85,7 +91,7 @@ does, only how much you read.
 | foreman and collet | Alternatives in one project, not partners. collet's mount refuses a project that has `.foreman/` or a recognized planning record in `ROADMAP.jsonl` and writes nothing, so one project has one owner of its plan. Choose that owner first. A collet project never enforces a rule against `ROADMAP.jsonl` or `.foreman/`, because its scope check treats both as owned elsewhere. |
 | collet and anneal | collet constrains one planned task; anneal inspects the repository around it. anneal's `session-review` can propose an instruction change after a session, and collet's `check-writer` skill turns a recurring mistake into a machine check. Use the instruction change for guidance, the check for a mistake a script can catch. |
 | razor and collet | Both can push back on an edit, for different reasons. razor questions an addition that may be unnecessary, such as a new package or file. collet refuses a write outside the task's scope. Neither replaces the other. |
-| razor and hush | razor acts before the code exists and hush acts on the message afterwards. Their hooks both run in a Claude Code session. Their combined behavior has not been measured here. |
+| razor and hush | razor questions additions while the code is written and runs its build check when the session stops. hush trims each tool result during the work as well as the final message. Their hooks both run in a Claude Code session. Their combined behavior has not been measured here. |
 | foreman and hush | foreman produces the handoff prompt and hush shapes how the session that runs it reports. Neither depends on the other. |
 | foreman and anneal | foreman decides what to do; anneal reports navigation findings and documentation drift. Neither depends on the other. |
 
