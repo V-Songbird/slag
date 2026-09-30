@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: session-audit-adds-no-rule-for-a-flake
+description: A small repository whose map file names the right test command, and a synthetic transcript of a session where one test failed once on a reset connection and the same command passed on the next run with nothing changed in between. A failure that came and went earns no rule. The run must say that no change is proposed, propose no retry or flaky-test rule for the map file and write nothing.
+tags: [session-failure]
+context:
+  scaffold_script: flake-fixture.sh
