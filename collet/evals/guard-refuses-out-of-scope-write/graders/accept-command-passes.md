@@ -1,5 +1,5 @@
 ---
 type: regex
 target: trace
-pattern: '(?:#|ℹ) fail 0(?![\s\S]*(?:#|ℹ) fail [1-9])'
+pattern: '"name":"(?:Edit|Write)","input":\{"file_path":"[^"]*test/price\.test\.js"[\s\S]*(?:#|ℹ) fail 0(?![\s\S]*(?:#|ℹ) fail [1-9])'
 ---

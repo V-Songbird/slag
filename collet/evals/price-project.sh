@@ -2,7 +2,8 @@
 # Writes and commits a small price-formatting library in the current directory.
 #   plain    the library alone, with one commit
 #   mounted  collet mounted with its config filled in, committed, and no task open
-#   task     mounted, plus an open task whose scope is src/price.js and test/**
+#   task     mounted, plus an open task on src/price.js and test/**, whose scope
+#            task.mjs add closes over imports, so it also holds src/cart.js
 set -euo pipefail
 
 stage="${1:?usage: price-project.sh plain|mounted|task}"
@@ -49,6 +50,25 @@ test('a cart total sums its items', () => {
 JS
 git add package.json AGENTS.md src test
 commit initial
+
+# The harness and its sandbox add these entries to the workspace. git status
+# would list them, and collet's close-time scope check counts every listed
+# change outside the open task.
+cat >> .git/info/exclude <<'EXCLUDE'
+/.bash_profile
+/.bashrc
+/.claude/
+/.eval-artifacts
+/.gitconfig
+/.gitmodules
+/.idea
+/.mcp.json
+/.profile
+/.ripgreprc
+/.vscode
+/.zprofile
+/.zshrc
+EXCLUDE
 [ "$stage" = plain ] && exit 0
 
 node "$plugin/scripts/mount.mjs" . --accept "npm test" > /dev/null
