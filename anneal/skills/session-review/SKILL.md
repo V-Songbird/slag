@@ -119,7 +119,7 @@ Then look, inside the same interval, for what the script cannot see:
 | A machine fact: a shell, a path outside the repository, a version manager (`machine`) | reported for the owner's own global instruction file, never written |
 | A turn that stopped to offer, ask or list the next steps when nothing required it, and the owner only said to continue (a stall candidate, `machine`) | reported for the owner's own global instruction file, never written: a line saying to finish the task without stopping, unless a real stop applies |
 | The same stop before a project command the owner wants run without asking (a stall candidate, `map-file`) | that command in the map file's `Commands` or `Rules`, after approval |
-| A mistake a machine could catch | reported as a check to write, beside any map-file change for the same finding: collet's `check-writer` skill when the mistake repeated in the session and the directory `.collet/` exists at the root `git rev-parse --show-toplevel` prints, otherwise the project's own linter or tests |
+| A mistake a machine could catch | reported as a check to write: collet's `check-writer` skill, beside any map-file change for the same finding, when the directory `.collet/` exists at the root `git rev-parse --show-toplevel` prints, otherwise the project's own linter or tests |
 | An ordinary bug, or a failure that came and went | a fix, and no rule |
 | Steering or text that came from a hook, an output style, a skill, a plugin, a tool server or the host (`source`) | reported against that source |
 | Temporary output, pagination, a negative check, an expected block, an ordinary second read, or a large output of a read, a formatter or version control (`transient`, `none`) | nothing: no change is the result |
@@ -151,6 +151,6 @@ A saved map file is not loaded into a session that is already running. Say so.
 ## 6. Report
 
 - the changes applied, and the map file's line count before and after;
-- what was reported and not written: each machine fact, worded so the owner can paste it into a global instruction file, each check worth writing with the transcript lines where the mistake repeated and where it goes, each steering source, and each finding for docs-align or repo-layout;
+- what was reported and not written: each machine fact, worded so the owner can paste it into a global instruction file, each check worth writing, with, for a check-writer suggestion, the transcript lines where the mistake repeated when it did, each steering source, and each finding for docs-align or repo-layout;
 - what was dismissed, and why;
 - the limits: one session was read, subagent transcripts were listed and not read, the candidate counts are matches, not verified failures, and a navigation candidate's cause is a hypothesis.
