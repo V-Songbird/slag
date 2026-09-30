@@ -304,21 +304,25 @@ test('a project that plans its work in a roadmap still mounts', () => {
 });
 
 // The files a roadmap entry names are that tool's forecast, never collet's scope: only the open
-// task's own list decides what a write may touch.
+// task's own list decides what a write may touch. The planning tool's own files stay writable.
 test("a roadmap entry's planned files are neither read nor enforced", () => {
   const root = project({
     ...TREE,
     'src/auth/login.mjs': 'export const l = 1;\n',
     'ROADMAP.jsonl': '{"id":"002","status":"in_progress","planned_touches":["src/auth/"]}\n',
+    '.foreman/config.json': '{}',
   });
   mount(root);
   writeFileSync(join(root, '.collet', 'config.json'), CONFIG, 'utf8');
   repo(root);
   assert.equal(task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/report.mjs']).status, 0);
   writeFileSync(join(root, 'src', 'auth', 'login.mjs'), 'export const l = 2;\n', 'utf8');
+  writeFileSync(join(root, 'ROADMAP.jsonl'), '{"id":"002","status":"done","planned_touches":["src/auth/"]}\n', 'utf8');
+  writeFileSync(join(root, '.foreman', 'ledger.jsonl'), '{"id":"002"}\n', 'utf8');
   const out = checks(root, ['--live']);
   assert.equal(out.status, 1, out.stdout + out.stderr);
   assert.match(out.stdout, /src\/auth\/login\.mjs/);
+  assert.doesNotMatch(out.stdout, /ROADMAP\.jsonl|\.foreman\//);
 });
 
 // A config the mount cannot read stops it before anything is written. Halfway, it left collet's
