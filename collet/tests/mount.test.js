@@ -6,7 +6,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { git, mount, project, repo, TEMPLATES, TREE } from './temp-project.js';
+import { checks, CONFIG, git, mount, project, repo, task, TEMPLATES, TREE } from './temp-project.js';
 
 test('the rules block reaches every surface an agent reads', () => {
   const root = project({ ...TREE, 'CLAUDE.md': '# House rules\n', '.cursor/rules/.keep': '' });
@@ -286,24 +286,43 @@ test('an ask rule without an ask-first list, a malformed rule or unreadable sett
   }
 });
 
-// The whole of collet's relationship with a project that plans its work elsewhere: it stays out.
-// Mounting would put a second record of the same work on disk, and the files such a roadmap names
-// are a forecast its own tool rewrites rather than a boundary worth refusing a write against.
-// Three signals, because a roadmap written before the format marker existed carries none.
-test('a project that plans its work elsewhere is left alone entirely', () => {
-  const entry = '{"id":"002","status":"in_progress","planned_touches":["src/auth/"]}\n';
+// A planning tool's roadmap and collet's task sit side by side: the roadmap owns the plan, collet
+// owns the session boundary. The mount leaves the roadmap's files as they were.
+test('a project that plans its work in a roadmap still mounts', () => {
   for (const files of [
     { '.foreman/config.json': '{}' },
     { 'ROADMAP.jsonl': '{"foreman_roadmap_format":2}\n' },
-    { 'ROADMAP.jsonl': entry },
+    { 'ROADMAP.jsonl': '{"id":"002","status":"in_progress","planned_touches":["src/auth/"]}\n' },
   ]) {
     const root = project({ ...TREE, ...files });
     const out = mount(root);
-    assert.equal(out.status, 2, JSON.stringify(files));
-    assert.match(out.stderr, /roadmap collet does not own/);
-    assert.equal(existsSync(join(root, '.collet')), false);
-    assert.equal(existsSync(join(root, 'AGENTS.md')), false);
+    assert.equal(out.status, 0, out.stdout + out.stderr);
+    assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /collet:begin/);
+    assert.equal(existsSync(join(root, '.collet', 'config.json')), true);
+    for (const [path, text] of Object.entries(files)) assert.equal(readFileSync(join(root, path), 'utf8'), text);
   }
+});
+
+// The files a roadmap entry names are that tool's forecast, never collet's scope: only the open
+// task's own list decides what a write may touch. The planning tool's own files stay writable.
+test("a roadmap entry's planned files are neither read nor enforced", () => {
+  const root = project({
+    ...TREE,
+    'src/auth/login.mjs': 'export const l = 1;\n',
+    'ROADMAP.jsonl': '{"id":"002","status":"in_progress","planned_touches":["src/auth/"]}\n',
+    '.foreman/config.json': '{}',
+  });
+  mount(root);
+  writeFileSync(join(root, '.collet', 'config.json'), CONFIG, 'utf8');
+  repo(root);
+  assert.equal(task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/report.mjs']).status, 0);
+  writeFileSync(join(root, 'src', 'auth', 'login.mjs'), 'export const l = 2;\n', 'utf8');
+  writeFileSync(join(root, 'ROADMAP.jsonl'), '{"id":"002","status":"done","planned_touches":["src/auth/"]}\n', 'utf8');
+  writeFileSync(join(root, '.foreman', 'ledger.jsonl'), '{"id":"002"}\n', 'utf8');
+  const out = checks(root, ['--live']);
+  assert.equal(out.status, 1, out.stdout + out.stderr);
+  assert.match(out.stdout, /src\/auth\/login\.mjs/);
+  assert.doesNotMatch(out.stdout, /ROADMAP\.jsonl|\.foreman\//);
 });
 
 // A config the mount cannot read stops it before anything is written. Halfway, it left collet's

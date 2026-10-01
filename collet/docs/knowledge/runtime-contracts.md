@@ -12,7 +12,8 @@ related_files:
 # Collet runtime contracts
 
 Collet holds one open task with an explicit writable scope and an acceptance command. It mounts
-only where no other roadmap owns planning. Mounting never installs a Git hook or CI workflow.
+beside a planning tool's `ROADMAP.jsonl` or `.foreman/`: that tool owns the plan, collet enforces
+the session boundary and never reads the roadmap. Mounting never installs a Git hook or CI workflow.
 The delivered project runtime uses .mjs files independently of the target package's module type.
 
 An optional `ask_first` list in `.collet/config.json`, written by `mount.mjs --ask-first`, names

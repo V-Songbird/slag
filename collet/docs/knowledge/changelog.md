@@ -16,6 +16,13 @@ All notable changes to collet are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `mount.mjs` mounts in a project that keeps a `ROADMAP.jsonl` or a `.foreman/` directory, instead
+  of writing nothing and exiting 2. The planning tool owns the plan and collet enforces the session
+  boundary. collet never reads that roadmap, never enforces the files an entry lists, and leaves
+  the roadmap files unchanged.
+
 ## [0.5.0-alpha] — 2026-09-25
 
 ### Added
