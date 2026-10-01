@@ -106,17 +106,17 @@ Add checks between tasks. While a task is open, the guard refuses writes under `
 - **Drift gets refused, not reported.** The guard reads write tools, patches, and the shell forms it can read with certainty. It also reads `rm -rf` on a directory, which is the one command worth catching before it lands.
 - **JavaScript/TypeScript imports expand the list.** Name the module that owns the behaviour, and collet adds its relative imports, with a reason for each addition. For other languages, derive and list the scope by reading the code.
 - **"Covered" means caught.** Every check ships with a planted mistake and a lookalike. A failed pair is reported and never counted as coverage.
-- **It stays out of a project that plans its work elsewhere.** The mount refuses recognized planning records and writes nothing there; see [roadmap detection](#roadmap-detection).
+- **It works beside a planning tool.** A project with a `ROADMAP.jsonl` or `.foreman/` mounts like any other; see [alongside a planning tool](#alongside-a-planning-tool).
 
-### Roadmap detection
+### Alongside a planning tool
 
-The mount refuses when `.foreman` exists, or when parsed `ROADMAP.jsonl` records match either condition:
+A planning tool that keeps `ROADMAP.jsonl` or `.foreman/` owns the plan: which work comes next, the files an entry expects to touch, and when the entry is done.
+collet owns the session boundary: the open task's writable files and the accept command that finishes it.
 
-- The first valid record has a `foreman_roadmap_format` property.
-- A record has an `id` and an array named `planned_touches` or `touches`.
+- The mount writes the same files it writes anywhere else and leaves the roadmap files unchanged.
+- collet never reads the roadmap. The files an entry lists, such as `planned_touches`, are never enforced; only the open collet task's own file list is.
+- The scope check never refuses a write to `ROADMAP.jsonl` or `.foreman/`, so the planning tool keeps updating its own records while a task is open.
 
-An absent, empty, malformed or unrecognized roadmap alone does not trigger this automatic refusal.
-The mounting skill asks who owns the plan before invoking the script.
 See [runtime contracts](runtime-contracts.md) for scope, host context and closure behavior.
 
 ### Optional checks for tests and verification settings
