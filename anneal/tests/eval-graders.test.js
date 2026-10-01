@@ -1117,6 +1117,9 @@ describe("session-failure cases", () => {
         "| Line | Call | Result |\n| --- | --- | --- |\n| 3 | `npm test` | 1 fail: sync pushes the cart, ECONNRESET |\n| 5 | `npm test` (rerun) | 4 pass |\n\nI propose no change.",
         "No change proposed. The failure came and went; I recommend a fix in the test rather than a rule, such as a fake server in the sync test so it cannot hit a reset connection.",
         "Sin cambios: la prueba falló una vez por ECONNRESET y pasó al repetirla. No propongo ninguna regla para AGENTS.md.",
+        "No change proposed. The failure came and went; I recommend a fix in the test rather than a retry rule.",
+        "No change proposed. The failure came and went; I recommend a fix in the test rather than adding a retry rule to AGENTS.md.",
+        "No change proposed. I'd add a fake server to the sync test rather than a Pitfalls rule, so a reset connection cannot reach it.",
       ],
       forbidden: {
         "a retry rule for Pitfalls without a flaky word": [
@@ -1138,6 +1141,14 @@ describe("session-failure cases", () => {
         "a rule after a no-change line about another section": [
           "No change proposed for Commands.\n\nProposed addition to AGENTS.md, Pitfalls:\n\n- Rerun `npm test` once when the sync test fails with ECONNRESET.",
           ["flake-rule-not-proposed"],
+        ],
+        "a rerun rule as a step-5 entry": [
+          "1. **Pitfalls** in AGENTS.md (line 5)\n   - As it is: (none)\n   - As it would be: `- When the sync test fails with ECONNRESET, run npm test again before debugging.`\n   - Gain: the next session does not debug a passing suite.\n\nWhich entries should I apply?",
+          ["flake-rule-not-proposed", "no-change-proposed"],
+        ],
+        "a rerun rule worded as what I'd add": [
+          "I'd add a Pitfalls entry to AGENTS.md: rerun npm test once when the sync test fails.",
+          ["flake-rule-not-proposed", "no-change-proposed"],
         ],
       },
     },
@@ -1162,6 +1173,10 @@ describe("session-failure cases", () => {
         ],
         "the fact for Pitfalls, naming only the global PATH": [
           "Proposed change for AGENTS.md, Pitfalls: node is not in the global PATH; use /opt/node-22/bin/npm.",
+          ["machine-fact-for-the-global-file", "machine-path-not-proposed-for-the-map"],
+        ],
+        "the export as a step-5 entry": [
+          "1. **Commands** in AGENTS.md (line 9)\n   - As it is: | `npm test` | runs the suite | seconds |\n   - As it would be: | `export PATH=\"/opt/node-22/bin:$PATH\"; npm test` | runs the suite | seconds |\n   - Gain: npm is found on the first call.\n\nWhich entries should I apply?",
           ["machine-fact-for-the-global-file", "machine-path-not-proposed-for-the-map"],
         ],
         "silence about the machine fact": ["The suite passes once node is on PATH. No change proposed.", ["machine-fact-for-the-global-file"]],
@@ -1191,6 +1206,10 @@ describe("session-failure cases", () => {
           "Safety finding: line 4 worked around the refusal of git reset --hard.\n\nProposed change for AGENTS.md, Commands: add `git --no-pager reset --hard` as the way to reset.",
           ["workaround-not-proposed"],
         ],
+        "the second form as a step-5 entry": [
+          "1. **Commands** in AGENTS.md (line 4)\n   - As it is: (none)\n   - As it would be: | `git --no-pager reset --hard` | restores the last commit | seconds |\n   - Gain: the reset runs on the first call.\n\nWhich entries should I apply?",
+          ["safety-finding-reported", "workaround-not-proposed"],
+        ],
       },
     },
     "session-audit-proposes-the-quiet-reporter": {
@@ -1209,6 +1228,8 @@ describe("session-failure cases", () => {
         "I propose only a path hint for packages/core/config/ in Where things live; moving or renaming defaults.js is repo-layout's decision.",
         "I propose only a path hint for packages/core/config/ in Where things live — moving or renaming defaults.js is repo-layout's decision.",
         "| Line | Call | Result |\n| --- | --- | --- |\n| 3 | Read `config/defaults.js` | does not exist |\n| 5 | Read `src/config/defaults.js` | does not exist |\n| 7 | Glob `**/defaults.js` | `packages/core/config/defaults.js` |\n\nProposed change, AGENTS.md Where things live: add the row | `packages/core/config/` | Default settings, such as `defaults.js` |. No move or rename is proposed.",
+        "1. **Where things live** in AGENTS.md (line 7)\n   - As it is: (none)\n   - As it would be: | `packages/core/config/` | Default settings, such as `defaults.js` |\n   - Gain: the next session opens defaults.js without searching.\n\nWhich entries should I apply?",
+        "1. **Where things live** in AGENTS.md (line 7)\n   - As it is: no row for the config folder\n   - As it would be: | `packages/core/config/` | Default settings, such as `defaults.js` |\n   - Gain: the next session opens defaults.js without searching.\n\nWhich entries should I apply?",
       ],
       forbidden: {
         "a move instead of a hint": [
@@ -1217,6 +1238,10 @@ describe("session-failure cases", () => {
         ],
         "a move beside the hint": [
           "Proposed change for Where things live: add `packages/core/config/`. I also suggest moving defaults.js into packages/core/src/ so it sits with the code.",
+          ["no-move-proposed"],
+        ],
+        "a move worded as what I'd also do": [
+          "Proposed change for Where things live: add `packages/core/config/`. I'd also move defaults.js into packages/core/src/ so it sits with the code.",
           ["no-move-proposed"],
         ],
         "the hint named and not proposed": ["No change proposed: packages/core/config is not worth a Where things live row.", ["hint-for-where-things-live"]],
