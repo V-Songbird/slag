@@ -1,9 +1,9 @@
 // Where the open task comes from. One definition, read by the task CLI, the check runner and the
 // session hooks, so none of them can disagree about what is open.
 //
-// There is exactly one ledger: .collet/ledger.jsonl, written only by .collet/task.mjs. A project
-// that plans its work somewhere else never gets this far — the mount refuses, so a second ledger
-// beside a working one cannot happen and nothing here has to know about the first.
+// There is exactly one ledger: .collet/ledger.jsonl, written only by .collet/task.mjs. A planning
+// tool's roadmap beside it owns the plan and is never read here; only this ledger decides what is
+// open.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 

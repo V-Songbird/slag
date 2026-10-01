@@ -70,14 +70,14 @@ not an accept command.
 ## Check first: who owns the plan here
 
 Look for a `ROADMAP.jsonl` at the project root or a `.foreman/` directory. If either is there,
-**this project plans its work somewhere collet does not reach, and collet is not mounted here.**
-`mount.mjs` detects it on its own, writes nothing and exits non-zero. Report that and stop; do not
-work around it.
+**a planning tool owns the plan and collet enforces the session boundary.** Mount as usual.
 
-Two records of what a task may touch, with nobody sure which is authoritative, is the outcome this
-refusal exists to avoid. There is also nothing to add: the files such a roadmap names are a
-forecast the owning tool re-reads and rewrites, so refusing a write against them would enforce a
-rule that tool never made.
+The planning tool decides what work comes next, which files an entry expects to touch and when
+the entry is done. collet decides what the open session may write and which command finishes the
+task. Derive the collet task's scope from the code, as above; never copy it from the roadmap
+entry's `planned_touches`, which is that tool's forecast and is never enforced. Do not edit
+`ROADMAP.jsonl` or `.foreman/` from this skill; the scope check never refuses the planning tool's
+own writes to them.
 
 ## Mount
 

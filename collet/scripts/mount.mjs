@@ -92,54 +92,11 @@ try {
   process.exit(2);
 }
 
-/**
- * True when the project already records its work in a roadmap another tool owns.
- *
- * Read from the directory, from the format marker, or from an entry's own shape — a roadmap
- * written before that marker existed carries none, and missing it would mean mounting anyway.
- */
-function plannedElsewhere(dir) {
-  if (existsSync(join(dir, '.foreman'))) return true;
-  let entries = [];
-  try {
-    entries = readFileSync(join(dir, 'ROADMAP.jsonl'), 'utf8')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean);
-  } catch {
-    return false;
-  }
-  if (!entries.length) return false;
-  if (Object.prototype.hasOwnProperty.call(entries[0], 'foreman_roadmap_format')) return true;
-  return entries.some(
-    (entry) => entry.id && (Array.isArray(entry.planned_touches) || Array.isArray(entry.touches))
-  );
-}
-
 /** The ask-first entries worth stating: text, with placeholders left out. */
 function stated(list) {
   return (Array.isArray(list) ? list : [])
     .map((item) => (typeof item === 'string' ? item.trim() : ''))
     .filter((item) => item && !item.startsWith('REPLACE'));
-}
-
-// A project that already plans its work elsewhere is left alone, entirely. collet has one ledger
-// and no way to share one, so mounting here would put a second record of the same work on disk
-// with nobody able to say which is authoritative. It also has nothing to add: the files an entry
-// declares there are a forecast that tool re-reads and rewrites, not a boundary to enforce.
-if (plannedElsewhere(target)) {
-  console.error(`${target} already plans its work in a roadmap collet does not own.`);
-  console.error('Nothing was written. That tool owns the plan, the files an entry names and when');
-  console.error('the entry is done. collet mounts on a project that keeps no such roadmap.');
-  process.exit(2);
 }
 
 // The project's own config is read before anything is written. A mount that stopped on it halfway

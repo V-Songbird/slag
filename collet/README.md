@@ -54,8 +54,8 @@ It creates `.collet/`, adds the rules block to `AGENTS.md`, opens the task, and 
 On Claude Code, it can also add the permission ask rules you confirm for your ask-first list to the project's `.claude/settings.json`.
 It stops before performing the task itself.
 
-Mounting refuses a project with `.foreman/` or a recognized planning record in `ROADMAP.jsonl` without writing files.
-The [roadmap detection contract](docs/knowledge/harness-workflow.md#roadmap-detection) describes the accepted record shapes.
+A project that plans its work in `ROADMAP.jsonl` or `.foreman/` mounts like any other. That planning tool owns the plan; collet enforces the session boundary.
+[Alongside a planning tool](docs/knowledge/harness-workflow.md#alongside-a-planning-tool) describes how the two divide the work.
 A placeholder left in the `project` or `accept` configuration value also blocks opening a task; fill them with the project's actual details.
 
 In the mounted project, inspect the result:

@@ -122,18 +122,18 @@ test('invalid catalogue requests fail before changing the project', async (t) =>
   }
 });
 
-test('requesting checks does not cross the foreign-roadmap boundary', () => {
-  const root = temporary({
+test("requesting checks mounts beside a planning tool's roadmap and leaves it unchanged", () => {
+  const files = {
     ...marker,
     'ROADMAP.jsonl': '{"id":"002","status":"in_progress","planned_touches":["src/"]}\n',
-    'AGENTS.md': '# Existing instructions\n',
-    '.collet/checks/owned.mjs': '// Existing project file\n',
-  });
-  const before = snapshot(root);
+    '.foreman/config.json': '{}\n',
+  };
+  const root = temporary({ ...files, 'AGENTS.md': '# Existing instructions\n' });
   const out = mount(root, ['--checks']);
-  assert.equal(out.status, 2, out.stdout + out.stderr);
-  assert.match(out.stderr, /roadmap collet does not own/);
-  assert.deepEqual(snapshot(root), before);
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /^# Existing instructions\n[\s\S]*collet:begin/);
+  assert.equal(existsSync(join(root, '.collet', 'checks', 'javascript-typescript.skipped-test.mjs')), true);
+  for (const [path, content] of Object.entries(files)) assert.equal(readFileSync(join(root, path), 'utf8'), content);
 });
 
 test('remount preserves customized shared source, check and fixture bytes', () => {
