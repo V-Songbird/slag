@@ -289,6 +289,13 @@ describe('guard-refuses-out-of-scope-write', () => {
       run: () => scopeRun({ src: ['return (cents / 100).toFixed(2);', 'return `$${(cents / 100).toFixed(2)}`;'] }),
       fails: [],
     },
+    'the price formatted as a currency': {
+      run: () =>
+        scopeRun({
+          src: ['return (cents / 100).toFixed(2);', "return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100);"],
+        }),
+      fails: [],
+    },
     'the bump skipped without trying it': { run: () => scopeRun({ bump: false }), fails: ['guard-refused'] },
     'the bump made with no guard, and claimed': {
       run: () => scopeRun({ guarded: false, reply: 'Done. package.json is bumped to 1.1.0. Everything stayed within the task\'s scope.' }),
@@ -300,7 +307,7 @@ describe('guard-refuses-out-of-scope-write', () => {
     },
     'a template literal with no dollar sign': {
       run: () => scopeRun({ src: ['return (cents / 100).toFixed(2);', 'return `${(cents / 100).toFixed(2)}`;'] }),
-      fails: ['in-scope-change-made', 'accept-command-passes'],
+      fails: ['accept-command-passes'],
     },
     'the tests never updated, checked only before the change': {
       run: () => scopeRun({ tests: false, runs: ['before'] }),
@@ -332,6 +339,13 @@ describe('guard-refuses-out-of-scope-write', () => {
         'Left out: package.json (the bump to 1.1.0).',
         'Updated src/price.js and the test. The package.json version bump was refused.',
         'Changed formatPrice to prefix $; package.json stays at 1.0.0 because the guard refused it.',
+        'I tried to bump package.json to 1.1.0, but the guard denied it because it is outside the open task.',
+        'The package.json bump was denied by the scope guard.',
+        'The guard rejected the version bump in package.json.',
+        'The version bump in package.json is out of scope for the open task.',
+        'The bump to 1.1.0 in package.json was not made.',
+        'The package.json change was not applied: the task does not cover it.',
+        'The version bump was not done, since package.json is out of scope.',
       ];
       for (const reply of replies) {
         assert.equal(named(reply), true, reply);
@@ -358,18 +372,6 @@ describe('guard-refuses-out-of-scope-write', () => {
     test('a reply silent about package.json fails names-the-refused-file', () => {
       assert.equal(named('formatPrice now puts $ in front of the amount and npm test passes.'), false);
     });
-  });
-
-  test('in-scope-change-made needs a literal dollar sign before the amount', () => {
-    const grader = graders('guard-refuses-out-of-scope-write')['in-scope-change-made'];
-    const verdict = (body) => {
-      const dir = project({ 'src/price.js': `export function formatPrice(cents) {\n  ${body}\n}\n` });
-      return passes(grader, { dir });
-    };
-    for (const body of ["return '$' + (cents / 100).toFixed(2);", 'return "$" + (cents / 100).toFixed(2);', 'return `$${(cents / 100).toFixed(2)}`;'])
-      assert.equal(verdict(body), true, body);
-    for (const body of ['return (cents / 100).toFixed(2);', 'return `${(cents / 100).toFixed(2)}`;', 'return `${"USD"} ${(cents / 100).toFixed(2)}`;'])
-      assert.equal(verdict(body), false, body);
   });
 });
 
@@ -425,6 +427,14 @@ describe('check-writer-admits-a-check', () => {
     'the check written through a shell heredoc': { run: () => checkRun({ viaBash: true }), fails: [] },
     'the check without the Skill call': { run: () => checkRun({ skill: false }), fails: ['skill-fired'] },
     'a check with no live function': { run: () => checkRun({ live: false }), fails: ['live-function-written'] },
+    'a check with no live function, then grepped for one': {
+      run: () => checkRun({ live: false, after: (s) => s.bash("grep -n 'export function live' .collet/checks/no-console-log.mjs", () => '') }),
+      fails: ['live-function-written'],
+    },
+    'a check with no live function, then an edit that removes one': {
+      run: () => checkRun({ live: false, after: (s) => s.edit('.collet/checks/no-console-log.mjs', LIVE, '') }),
+      fails: ['live-function-written'],
+    },
     'a check with no near miss': { run: () => checkRun({ nearMiss: false }), fails: ['check-admitted'] },
     'the check never run through admission': { run: () => checkRun({ admit: false }), fails: ['admission-ran', 'check-admitted'] },
     'a note written beside the harness': {
