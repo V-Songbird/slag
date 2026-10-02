@@ -5,8 +5,10 @@
 // without a model session: against the Bash commands, created paths and evidence
 // of the first two-arm run (machine paths replaced), against real git changes to
 // a copy of the migration fixture, and against what session-evidence.js prints
-// for the session case's own transcript. A grader passes the runs that stopped
-// as asked and fails the forbidden outcome it exists to catch.
+// for the session case's own transcript. A deterministic grader passes the runs
+// that stopped as asked and fails the forbidden outcome it exists to catch. The
+// session-failure cases' `type: llm` reply graders need a judge model, so they
+// are only checked for form here.
 
 const { test, describe, before, after } = require("node:test");
 const assert = require("node:assert");
@@ -1112,37 +1114,17 @@ describe("session-failure cases", () => {
     return run.stdout;
   };
 
-  // Each case's reply graders, which a judge model grades, and replies that a
-  // regex over the reply misjudged: a correct reply it failed or a forbidden
-  // one it passed.
+  // Each case's reply graders, which a judge model grades.
   const CASES = {
-    "session-audit-adds-no-rule-for-a-flake": {
-      judged: ["flake-rule-not-proposed", "no-change-proposed"],
-      misjudged: ["Proposed changes: none."],
-    },
-    "session-audit-keeps-a-machine-fact-out": {
-      judged: ["machine-fact-for-the-global-file", "machine-path-not-proposed-for-the-map"],
-      misjudged: [],
-    },
-    "session-audit-reports-a-refusal-workaround": {
-      judged: ["safety-finding-reported", "workaround-not-proposed"],
-      misjudged: ["I propose adding a Commands row to AGENTS.md that resets the tree with git --no-pager reset --hard."],
-    },
-    "session-audit-proposes-the-quiet-reporter": {
-      judged: ["quiet-command-for-commands"],
-      misjudged: ["Proposed change: Commands does not name it, so add `npm run test:quiet` there."],
-    },
-    "session-audit-proposes-a-path-hint": {
-      judged: ["hint-for-where-things-live", "no-move-proposed"],
-      misjudged: [
-        "Proposed change for Where things live: add `packages/core/config/`. defaults.js should also be moved into packages/core/src/.",
-        "Where things live has no row for packages/core/config/ yet; I propose adding one.",
-      ],
-    },
+    "session-audit-adds-no-rule-for-a-flake": ["flake-rule-not-proposed", "no-change-proposed"],
+    "session-audit-keeps-a-machine-fact-out": ["machine-fact-for-the-global-file", "machine-path-not-proposed-for-the-map"],
+    "session-audit-reports-a-refusal-workaround": ["safety-finding-reported", "workaround-not-proposed"],
+    "session-audit-proposes-the-quiet-reporter": ["quiet-command-for-commands"],
+    "session-audit-proposes-a-path-hint": ["hint-for-where-things-live", "no-move-proposed"],
   };
   const REPLY = "No change proposed.";
 
-  for (const [name, { judged, misjudged }] of Object.entries(CASES)) {
+  for (const [name, judged] of Object.entries(CASES)) {
     describe(name, () => {
       const CASE = path.join(EVALS, name);
       let checks;
@@ -1171,13 +1153,6 @@ describe("session-failure cases", () => {
       test("a run as the case asks passes every deterministic grader, whatever its reply", () => {
         assert.deepStrictEqual(failed({ reply: REPLY }), []);
         assert.deepStrictEqual(failed({ reply: "" }), []);
-      });
-
-      test("the replies a regex over the reply misjudged are left to the judge", () => {
-        for (const reply of misjudged) {
-          assert.deepStrictEqual(failed({ reply }), [], reply);
-          for (const grader of judged) assert.strictEqual(passes(checks[grader], { ...run, reply }), null, `${grader}: ${reply}`);
-        }
       });
 
       test("evidence cut before the failure, no evidence call, an edited map file or a created file fails its grader", () => {
