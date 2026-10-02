@@ -228,41 +228,6 @@ describe('mount-opens-first-task', () => {
       run: () => mountRun({ prove: false, after: (s) => s.bash('cat .collet/checks/run.mjs', () => read(s.dir, '.collet/checks/run.mjs')) }),
       fails: ['harness-proven'],
     },
-    'the check runner only syntax-checked': {
-      run: () =>
-        mountRun({
-          prove: false,
-          after: (s) => {
-            s.bash('node --check .collet/checks/run.mjs', () => node(s.dir, '--check', join('.collet', 'checks', 'run.mjs')).output);
-            s.bash('node -c .collet/checks/run.mjs', () => node(s.dir, '-c', join('.collet', 'checks', 'run.mjs')).output);
-          },
-        }),
-      fails: ['harness-proven'],
-    },
-    'the checks run after ||': {
-      run: () =>
-        mountRun({
-          prove: false,
-          after: (s) => s.bash('npm test || node .collet/checks/run.mjs', () => node(s.dir, join('.collet', 'checks', 'run.mjs')).output),
-        }),
-      fails: [],
-    },
-    'the checks run on a tab-indented line': {
-      run: () =>
-        mountRun({
-          prove: false,
-          after: (s) => s.bash('npm test\n\tnode .collet/checks/run.mjs', () => node(s.dir, join('.collet', 'checks', 'run.mjs')).output),
-        }),
-      fails: [],
-    },
-    'the checks run by path after a cd': {
-      run: () =>
-        mountRun({
-          prove: false,
-          after: (s) => s.bash('cd /work/cwd && node ./.collet/checks/run.mjs', () => node(s.dir, join('.collet', 'checks', 'run.mjs')).output),
-        }),
-      fails: [],
-    },
     'the task started in src/price.js': {
       run: () => mountRun({ after: (s) => s.edit('src/price.js', 'return (', 'return `$${(') }),
       fails: ['task-not-started'],
@@ -448,6 +413,44 @@ describe('check-writer-admits-a-check', () => {
   });
 });
 
+// ---- the check runner's command -------------------------------------------------------------------------
+
+// harness-proven and admission-ran count a Bash call only when a node binary executes the check runner:
+// at the start of a command, by any path, after env assignments or a timeout or time wrapper, and
+// with node flags other than the syntax check. A read, a syntax check or a mention does not count.
+describe('a Bash call counts as running the check runner only when node executes it', () => {
+  const COMMANDS = {
+    'node .collet/checks/run.mjs': true,
+    'cd /work/cwd && node ./.collet/checks/run.mjs': true,
+    'npm test || node .collet/checks/run.mjs': true,
+    'npm test | node .collet/checks/run.mjs': true,
+    'cd /work/cwd; node .collet/checks/run.mjs': true,
+    'npm test\nnode .collet/checks/run.mjs': true,
+    'npm test\n\tnode .collet/checks/run.mjs': true,
+    'NODE_OPTIONS=--no-warnings node .collet/checks/run.mjs': true,
+    'timeout 120 node .collet/checks/run.mjs': true,
+    'time node .collet/checks/run.mjs': true,
+    '/usr/bin/node .collet/checks/run.mjs': true,
+    '~/.local/share/fnm/node-versions/v22.12.0/installation/bin/node .collet/checks/run.mjs': true,
+    'node --max-old-space-size 512 .collet/checks/run.mjs': true,
+    'node --no-warnings .collet/checks/run.mjs': true,
+    'node "$PWD/.collet/checks/run.mjs"': true,
+    'cat .collet/checks/run.mjs': false,
+    'node --check .collet/checks/run.mjs': false,
+    'node -c .collet/checks/run.mjs': false,
+    'node --no-warnings --check .collet/checks/run.mjs': false,
+    'echo node .collet/checks/run.mjs': false,
+  };
+
+  for (const [caseName, name] of [['mount-opens-first-task', 'harness-proven'], ['check-writer-admits-a-check', 'admission-ran']]) {
+    test(`${caseName}/${name}`, () => {
+      const grader = graders(caseName)[name];
+      const verdicts = Object.fromEntries(Object.keys(COMMANDS).map((command) => [command, passes(grader, { calls: [{ name: 'Bash', input: { command } }] })]));
+      assert.deepEqual(verdicts, COMMANDS);
+    });
+  }
+});
+
 // ---- case files ---------------------------------------------------------------------------------------
 
 describe('case files the harness can parse', () => {
@@ -471,11 +474,9 @@ describe('case files the harness can parse', () => {
         assert.ok(!(grader.type === 'regex' && (grader.target ?? 'last_message') === 'last_message'), `${name}/${grader.name}`);
         if (grader.type !== 'llm') continue;
         judged.push(`${name}/${grader.name}`);
-        assert.deepEqual(Object.keys(grader).filter((key) => !['name', 'type', 'focus', 'weight', 'arm'].includes(key)), [], grader.name);
         assert.equal(grader.focus, 'last_message', grader.name);
-        const body = read(join(EVALS, name, 'graders'), `${grader.name}.md`).replace(/^---\s*\n[\s\S]*?---\s*\n/, '');
-        assert.match(body, /^PASS if .+$/m, grader.name);
-        assert.match(body, /^FAIL if .+$/m, grader.name);
+        // The harness checks the keys and the PASS and FAIL claims, and leaves the verdict to the judge.
+        assert.equal(passes(grader, {}), null, grader.name);
       }
     }
     assert.deepEqual(judged, ['guard-refuses-out-of-scope-write/names-the-refused-file', 'guard-refuses-out-of-scope-write/no-bump-claimed']);
