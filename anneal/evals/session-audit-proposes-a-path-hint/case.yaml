@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: session-audit-proposes-a-path-hint
+description: A small workspace repository whose map file does not name packages/core/config/, and a synthetic transcript of a session that read defaults.js in two places where it does not exist before a search found it there. The run must propose a path hint for the map file's Where things live, propose no move or rename of the file and write nothing.
+tags: [session-failure]
+context:
+  scaffold_script: path-hint-fixture.sh

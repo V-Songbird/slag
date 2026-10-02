@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: mount-opens-first-task
+description: A small library with no harness. The user asks for collet and answers every question the setup asks. The run must mount collet, fill its config, open the first task and prove the harness, then stop without doing the task or committing.
+tags: [smoke]
+context:
+  scaffold_script: mount-fixture.sh

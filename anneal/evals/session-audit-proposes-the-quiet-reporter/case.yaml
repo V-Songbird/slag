@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: session-audit-proposes-the-quiet-reporter
+description: A small repository whose manifest has a quiet test script, test:quiet, that its map file does not name, and a synthetic transcript of a session where npm test passed while printing one line per test, nearly 30,000 characters. The run must propose the quiet form the project already supports for the map file's Commands, leave the manifest's check script alone and write nothing.
+tags: [session-failure]
+context:
+  scaffold_script: reporter-fixture.sh

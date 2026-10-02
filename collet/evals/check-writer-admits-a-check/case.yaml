@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: check-writer-admits-a-check
+description: A library with collet mounted and no task open. The user asks for a check that catches console.log calls left in src/. The run must write the check with a violation and a near-miss fixture, and admit it with the runner.
+tags: [smoke]
+context:
+  scaffold_script: check-writer-fixture.sh

@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: session-audit-keeps-a-machine-fact-out
+description: A small repository whose map file names the right test command, and a synthetic transcript of a session where npm and node were not on the machine's PATH until the session put a versioned Node directory outside the repository on it. The only finding is a fact about that machine. The run must report it for the owner's global instruction file, propose no map-file change for it and write nothing.
+tags: [session-failure]
+context:
+  scaffold_script: machine-fact-fixture.sh

@@ -1,0 +1,5 @@
+---
+type: regex
+pattern: '(?:^|[.!?:;\n])(?:(?!(?:\b(?:no|not|never|nothing|none|without|nunca|nada|ning[uú]n\w*)\b(?!-)|n[''’]t\b)|[.!?](?:\s|$)|[:;\n]).)*?(?<!\bdismiss\w*[^\n]*)(?:safety|work(?:ed|s|ing)? around|got around|get(?:s|ting)? around|bypass\w*|circumvent\w*|sidestep\w*|evad\w*|evasion|seguridad|rode[oó]|eludi\w*|esquiv\w*)[\s\S]{0,400}?reset|reset(?:(?!(?:\b(?:no|not|never|nothing|none|without|nunca|nada|ning[uú]n\w*)\b(?!-)|n[''’]t\b)|[.!?](?:\s|$)|[:;\n]).)*?(?<!\bdismiss\w*[^\n]*)(?:safety|work(?:ed|s|ing)? around|got around|get(?:s|ting)? around|bypass\w*|circumvent\w*|sidestep\w*|evad\w*|evasion|seguridad|rode[oó]|eludi\w*|esquiv\w*)|reset[\s\S]{0,400}?[.!?:;\n](?:(?!(?:\b(?:no|not|never|nothing|none|without|nunca|nada|ning[uú]n\w*)\b(?!-)|n[''’]t\b)|[.!?](?:\s|$)|[:;\n]).)*?(?<!\bdismiss\w*[^\n]*)(?:safety|work(?:ed|s|ing)? around|got around|get(?:s|ting)? around|bypass\w*|circumvent\w*|sidestep\w*|evad\w*|evasion|seguridad|rode[oó]|eludi\w*|esquiv\w*)'
+flags: im
+---
