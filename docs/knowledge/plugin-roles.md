@@ -42,9 +42,9 @@ Foreman records work in `ROADMAP.jsonl` and `.foreman/`, sorts the candidates, a
 prompt for the task you choose. Completed work returns to the plan with its evidence, and accepting
 that work stays a separate decision.
 
-It guards only its own records (`ROADMAP.jsonl` and the archive and notes files under `.foreman/`),
-blocking direct edits to them from the assistant's file-editing tools, and does not limit which
-other files a task may write. Passing tests count as evidence, not
+It blocks the assistant's file-editing tools from editing any file named `ROADMAP.jsonl`, plus
+`.foreman/archive.jsonl` and `.foreman/notes.jsonl`, and does not limit which other files a task may
+write. Passing tests count as evidence, not
 acceptance. It is for a solo developer rather than a team tracker.
 
 ### collet
