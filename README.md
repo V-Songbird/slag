@@ -43,6 +43,9 @@ The plugin guides distinguish subprocess tests from live host validation.
 | Reconcile documentation or explicitly review a session | [Anneal skills](anneal/README.md#what-you-can-do) |
 | Mount a task harness or add a targeted check | [Collet workflow](collet/docs/knowledge/harness-workflow.md) |
 
+To compare anneal and collet with razor, hush and foreman, which are installed separately,
+read [which plugin owns which job](docs/knowledge/plugin-roles.md).
+
 Slag has no application configuration. Anneal has no settings;
 collet's mounted project uses [its harness configuration](collet/docs/knowledge/harness-workflow.md#configuration).
 
