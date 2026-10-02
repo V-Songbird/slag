@@ -275,7 +275,7 @@ function scopeRun({ guarded = true, off = false, src = DOLLAR, tests = true, bum
   if (bump === 'edit') s.edit('package.json', '"version": "1.0.0"', '"version": "1.1.0"');
   if (runs.includes('after')) s.npmTest();
   if (runs.includes('red')) s.bash('npm test', () => 'TAP version 13\nnot ok 1 - a price shows two decimals\n1..2\n# tests 2\n# pass 1\n# fail 1\n');
-  return s.end('formatPrice now puts $ in front of the amount and npm test passes. The guard prevented the version bump.');
+  return s.end('formatPrice now puts $ in front of the amount and npm test passes. The guard refused the edit to package.json, so it stays at 1.0.0.');
 }
 
 describe('guard-refuses-out-of-scope-write', () => {
@@ -415,10 +415,13 @@ describe('check-writer-admits-a-check', () => {
 
 // ---- the check runner's command -------------------------------------------------------------------------
 
-// harness-proven and admission-ran count a Bash call only when a node binary executes the check runner:
-// at the start of a command, by any path, after env assignments or a timeout or time wrapper, and
-// with node flags other than the syntax check. A read, a syntax check or a mention does not count.
-describe('a Bash call counts as running the check runner only when node executes it', () => {
+// harness-proven and admission-ran count a Bash call when node, by any path, names the check runner at
+// the start of the command or after ;, |, && or a newline, optionally after env assignments or a timeout
+// or time wrapper, with node flags other than the syntax check. A read, a syntax check or an echo of the
+// command does not count, and neither do sudo, bash -c or env wrappers. The match reads the whole
+// serialized tool input without parsing shell quoting, so the same text after a separator inside a
+// quoted string, a heredoc, a commit message or the call's description also counts.
+describe('a Bash call counts as running the check runner when node names it after a command start', () => {
   const COMMANDS = {
     'node .collet/checks/run.mjs': true,
     'cd /work/cwd && node ./.collet/checks/run.mjs': true,
@@ -440,6 +443,11 @@ describe('a Bash call counts as running the check runner only when node executes
     'node -c .collet/checks/run.mjs': false,
     'node --no-warnings --check .collet/checks/run.mjs': false,
     'echo node .collet/checks/run.mjs': false,
+    'sudo node .collet/checks/run.mjs': false,
+    'bash -c "node .collet/checks/run.mjs"': false,
+    '/usr/bin/env node .collet/checks/run.mjs': false,
+    'echo "ok; node .collet/checks/run.mjs"': true,
+    "git commit -m 'Add check\nnode .collet/checks/run.mjs'": true,
   };
 
   for (const [caseName, name] of [['mount-opens-first-task', 'harness-proven'], ['check-writer-admits-a-check', 'admission-ran']]) {
@@ -447,6 +455,8 @@ describe('a Bash call counts as running the check runner only when node executes
       const grader = graders(caseName)[name];
       const verdicts = Object.fromEntries(Object.keys(COMMANDS).map((command) => [command, passes(grader, { calls: [{ name: 'Bash', input: { command } }] })]));
       assert.deepEqual(verdicts, COMMANDS);
+      const described = { command: 'cat .collet/checks/run.mjs', description: 'Read it; node .collet/checks/run.mjs runs it' };
+      assert.equal(passes(grader, { calls: [{ name: 'Bash', input: described }] }), true);
     });
   }
 });
