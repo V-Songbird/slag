@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: session-audit-names-no-check-writer-without-collet
+description: A small ES module repository with no .collet/ directory, and a synthetic transcript of a session that made the same mistake twice, a relative import without its .js extension in src/cart.js and then in src/orders.js, each time failing the suite before adding the extension. The mistake has a shape a check can catch, and session-review's own routing table names collet's check-writer for such a mistake, so the skill has to test for .collet/ at the repository root before it names it. Here it is absent, so the run must not name check-writer or collet, may recommend a check in the project's own linter or tests, must run no collet file and must write nothing. Its pair, session-audit-suggests-check-writer-with-collet, differs only in a .collet/ directory, so a run that ignores the condition fails one of the two.
+tags: [session-failure]
+context:
+  scaffold_script: import-fixture.sh

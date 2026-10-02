@@ -1096,15 +1096,18 @@ describe("session-failure cases", () => {
   const CALL = 'node "/plugins/anneal/scripts/session-evidence.js" --session-file session.jsonl --before 2026-09-22T23:59:59.000Z';
   const traceOf = (output) => JSON.stringify({ type: "user", message: { role: "user", content: [{ tool_use_id: "toolu_1", type: "tool_result", content: output, is_error: false }] } });
 
-  // The scaffold without bash: the files its heredocs write and the transcript
-  // its embedded program prints, in a temporary directory.
-  function scaffold(caseDir) {
+  // The scaffold without bash, in a temporary directory: another case's scaffold
+  // it runs first, then the files its heredocs write and the transcript its
+  // embedded program prints.
+  const BASE_SCAFFOLD = /^bash "\$\(dirname "\$0"\)\/\.\.\/([^/"]+)\/([^/"]+)"$/m;
+  function scaffold(caseDir, dir = tempDir("anneal-graders-failure-")) {
     const script = /^ {2}scaffold_script: (\S+)$/m.exec(read(caseDir, "case.yaml"))[1];
     const text = read(caseDir, script);
-    const dir = tempDir("anneal-graders-failure-");
+    const base = BASE_SCAFFOLD.exec(text);
+    if (base) scaffold(path.join(EVALS, base[1]), dir);
     for (const [, file, , content] of text.matchAll(/^cat > (\S+) <<'(\w+)'\n([\s\S]*?)\n\2\n/gm)) write(dir, file, `${content}\n`);
-    const program = /^node - [^\n]*<<'JS'\n([\s\S]*?)\nJS\n/m.exec(text)[1];
-    fs.writeFileSync(path.join(dir, "session.jsonl"), execFileSync(process.execPath, ["-", dir], { input: program, encoding: "utf8" }));
+    const program = /^node - [^\n]*<<'JS'\n([\s\S]*?)\nJS\n/m.exec(text);
+    if (program) fs.writeFileSync(path.join(dir, "session.jsonl"), execFileSync(process.execPath, ["-", dir], { input: program[1], encoding: "utf8" }));
     return dir;
   }
 
@@ -1121,6 +1124,8 @@ describe("session-failure cases", () => {
     "session-audit-reports-a-refusal-workaround": ["safety-finding-reported", "workaround-not-proposed"],
     "session-audit-proposes-the-quiet-reporter": ["quiet-command-for-commands"],
     "session-audit-proposes-a-path-hint": ["hint-for-where-things-live", "no-move-proposed"],
+    "session-audit-names-no-check-writer-without-collet": ["check-writer-not-named"],
+    "session-audit-suggests-check-writer-with-collet": ["check-writer-suggested"],
   };
   const REPLY = "No change proposed.";
 
@@ -1175,4 +1180,89 @@ describe("session-failure cases", () => {
       });
     });
   }
+
+  // A transcript that repeats a mistake a check could catch, once beside a
+  // .collet/ directory and once without one. Only the judge tells which reply
+  // names check-writer; the graders below catch a check written or a collet
+  // file run.
+  describe("the check-writer pair", () => {
+    const WITHOUT = path.join(EVALS, "session-audit-names-no-check-writer-without-collet");
+    const WITH = path.join(EVALS, "session-audit-suggests-check-writer-with-collet");
+    const SHARED = ["check-writer-not-invoked", "evidence-found-the-repeated-mistake", "evidence-ran", "map-file-left-alone", "no-collet-file-run", "no-files-created"];
+    let checks;
+    let without;
+    let withCollet;
+    before(() => {
+      checks = graders(WITH);
+      without = scaffold(WITHOUT);
+      withCollet = scaffold(WITH);
+    });
+
+    test("the scaffold with collet runs the other case's scaffold, then adds only .collet/", () => {
+      const [, caseName, script] = BASE_SCAFFOLD.exec(read(WITH, "collet-fixture.sh"));
+      assert.strictEqual(caseName, path.basename(WITHOUT));
+      assert.match(read(WITHOUT, "case.yaml"), new RegExp(`^ {2}scaffold_script: ${script.replaceAll(".", "\\.")}$`, "m"));
+      assert.strictEqual(fs.existsSync(path.join(without, ".collet")), false);
+      assert.ok(fs.statSync(path.join(withCollet, ".collet")).isDirectory());
+      const files = listRunFiles(withCollet);
+      assert.deepStrictEqual(files.filter((file) => file.startsWith(".collet/")), [".collet/config.json"]);
+      const rest = files.filter((file) => !file.startsWith(".collet/"));
+      assert.deepStrictEqual(rest, listRunFiles(without));
+      for (const file of rest.filter((name) => name !== "session.jsonl")) assert.strictEqual(read(withCollet, file), read(without, file), file);
+    });
+
+    test("both cases share every deterministic grader file, and each has one judge of its own", () => {
+      const own = (dir) => fs.readdirSync(path.join(dir, "graders")).map((file) => path.basename(file, ".md")).filter((name) => !SHARED.includes(name));
+      assert.deepStrictEqual(own(WITHOUT), ["check-writer-not-named"]);
+      assert.deepStrictEqual(own(WITH), ["check-writer-suggested"]);
+      for (const name of SHARED) assert.strictEqual(read(path.join(WITH, "graders"), `${name}.md`), read(path.join(WITHOUT, "graders"), `${name}.md`), name);
+    });
+
+    test("evidence that shows both failed imports passes, and evidence cut after the first fails", () => {
+      const grader = checks["evidence-found-the-repeated-mistake"];
+      assert.strictEqual(passes(grader, { trace: traceOf(evidenceFor(withCollet)) }), true);
+      const first = evidenceFor(withCollet, "2026-01-01T00:00:12.000Z");
+      assert.match(first, /imported from [^"]*\/src\/cart\.js/);
+      assert.doesNotMatch(first, /src\/orders\.js/);
+      assert.strictEqual(passes(grader, { trace: traceOf(first) }), false);
+    });
+
+    test("no-collet-file-run fails a collet file run, and passes looking for the directory", () => {
+      const grader = checks["no-collet-file-run"];
+      assert.deepStrictEqual([grader.type, grader.tool, grader.min, grader.max, grader.arm], ["tool_used", "Bash", "0", "0", undefined]);
+      const run = [
+        "node .collet/checks/run.mjs",
+        "node .collet\\checks\\run.mjs",
+        'node "/work/cwd/.collet/checks/run.mjs"',
+        "node .collet/task.mjs status",
+        "git rev-parse --show-toplevel && node .collet/checks/run.mjs --strict",
+      ];
+      for (const command of run) assert.strictEqual(passes(grader, { calls: bash(command) }), false, command);
+      const allowed = [
+        CALL,
+        "git rev-parse --show-toplevel",
+        'test -d "$(git rev-parse --show-toplevel)/.collet" && echo collet',
+        "ls -a",
+        "ls -d .collet/",
+        "ls .collet/ && cat .collet/config.json",
+      ];
+      for (const command of allowed) assert.strictEqual(passes(grader, { calls: bash(command) }), true, command);
+    });
+
+    test("check-writer-not-invoked fails a check-writer Skill call and passes any other", () => {
+      const grader = checks["check-writer-not-invoked"];
+      assert.deepStrictEqual([grader.type, grader.tool, grader.min, grader.max, grader.arm], ["tool_used", "Skill", "0", "0", undefined]);
+      const skill = (name) => [{ name: "Skill", input: { skill: name } }];
+      assert.strictEqual(passes(grader, { calls: skill("collet:check-writer") }), false);
+      assert.strictEqual(passes(grader, { calls: skill("check-writer") }), false);
+      assert.strictEqual(passes(grader, { calls: skill("anneal:session-review") }), true);
+      assert.strictEqual(passes(grader, { calls: bash(CALL) }), true);
+    });
+
+    test("a check and its fixtures written under .collet/checks fail no-files-created", () => {
+      const written = ".collet/checks/relative-import-extension.mjs\n.collet/checks/relative-import-extension.nearmiss.json\n.collet/checks/relative-import-extension.violation.json";
+      assert.strictEqual(passes(checks["no-files-created"], { created: written }), false);
+      assert.strictEqual(passes(checks["no-files-created"], { created: ".git/config.worktree" }), true);
+    });
+  });
 });
