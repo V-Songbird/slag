@@ -4,7 +4,9 @@
 // model session. A tool_used grader counts the calls to its tool whose input,
 // as JSON text, matches input_match. A regex grader tests its pattern against
 // the run's last reply, its trace, the paths it created or a file in its
-// directory, where a missing file fails.
+// directory, where a missing file fails. An llm grader needs a judge model, so
+// it gets no verdict here: its keys and its PASS and FAIL criteria are checked,
+// and it is skipped.
 
 const assert = require("node:assert");
 const fs = require("node:fs");
@@ -14,8 +16,10 @@ const path = require("node:path");
 // single-quoted string, a flow sequence or mapping of plain words, or a plain
 // scalar. The frontmatter ends where the harness ends it, at the first "---"
 // wherever it stands, so a value that holds "---" is cut short there.
+const HEAD = /^---\s*\n([\s\S]*?)---\s*\n?/;
+
 function frontmatter(file) {
-  const head = /^---\s*\n([\s\S]*?)---\s*\n?/.exec(fs.readFileSync(file, "utf8"));
+  const head = HEAD.exec(fs.readFileSync(file, "utf8"));
   assert.ok(head, `${file} opens with frontmatter`);
   return Object.fromEntries(
     head[1].split("\n").filter((line) => line.trim() !== "").map((line) => {
@@ -33,25 +37,38 @@ function frontmatter(file) {
   );
 }
 
-// A case's graders in file order, each named after its file.
+// A case's graders in file order, each named after its file. The text after
+// the frontmatter is the grader's criteria, which only an llm grader takes.
 function readGraders(caseDir) {
   const folder = path.join(caseDir, "graders");
-  return fs.readdirSync(folder).sort().map((file) => ({ name: path.basename(file, ".md"), ...frontmatter(path.join(folder, file)) }));
+  return fs.readdirSync(folder).sort().map((file) => {
+    const body = fs.readFileSync(path.join(folder, file), "utf8").replace(HEAD, "").trim();
+    return { name: path.basename(file, ".md"), ...frontmatter(path.join(folder, file)), ...(body ? { criteria: body } : {}) };
+  });
 }
 
 // The keys the harness accepts on each grader type.
 const KEYS = {
   tool_used: ["name", "type", "tool", "input_match", "min", "max", "weight", "arm"],
   regex: ["name", "type", "target", "pattern", "flags", "match", "weight", "arm"],
+  llm: ["name", "type", "criteria", "focus", "weight", "arm"],
 };
 
 // A run has its tool calls as { name, input }, its trace as one serialized
 // event per line, its last reply, the paths it created one per line, and its
-// directory.
+// directory. The verdict is true or false, or null for an llm grader, which
+// only the judge decides.
 function passes(grader, run) {
-  assert.ok(KEYS[grader.type], `${grader.name} is a tool_used or regex grader`);
+  assert.ok(KEYS[grader.type], `${grader.name} is a tool_used, regex or llm grader`);
   const unknown = Object.keys(grader).filter((key) => !KEYS[grader.type].includes(key));
   assert.deepStrictEqual(unknown, [], `${grader.name} uses only keys this test evaluates`);
+  if (grader.type === "llm") {
+    assert.match(grader.criteria ?? "", /^PASS if /m, `${grader.name} states when it passes`);
+    assert.match(grader.criteria, /^FAIL if /m, `${grader.name} states when it fails`);
+    const { focus = "last_message" } = grader;
+    assert.ok(["last_message", "trace", "files"].includes(focus) || focus.source === "file", `${grader.name} reads a known focus`);
+    return null;
+  }
   if (grader.type === "tool_used") {
     const count = (run.calls ?? []).filter((call) => call.name === grader.tool && (!grader.input_match || new RegExp(grader.input_match).test(JSON.stringify(call.input)))).length;
     return count >= Number(grader.min ?? 1) && count <= Number(grader.max ?? Infinity);

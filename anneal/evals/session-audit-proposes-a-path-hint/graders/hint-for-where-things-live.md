@@ -1,5 +1,8 @@
 ---
-type: regex
-pattern: '(?:^|[.!?:;\n])(?:(?!(?:\b(?:no|not|never|nothing|none|without|nunca|nada|ning[uú]n\w*)\b(?!-)|n[''’]t\b)|[.!?](?:\s|$)|[:;\n]).)*?(?:Where things live)(?:\bas it is\b[^\n]*\n|(?!(?:\b(?:no|not|never|nothing|none|without|nunca|nada|ning[uú]n\w*)\b(?!-)|n[''’]t\b)(?![ \t]+(?:[\w\x60''.-]+[ \t]+){0,2}?(?:mov|renam|relocat|other|just|only|one line|changed|touched|edited)))[\s\S]){0,400}?(?:packages/core/config)|(?:^|[.!?:;\n])(?:(?!(?:\b(?:no|not|never|nothing|none|without|nunca|nada|ning[uú]n\w*)\b(?!-)|n[''’]t\b)|[.!?](?:\s|$)|[:;\n]).)*?(?:packages/core/config)(?:\bas it is\b[^\n]*\n|(?!(?:\b(?:no|not|never|nothing|none|without|nunca|nada|ning[uú]n\w*)\b(?!-)|n[''’]t\b)(?![ \t]+(?:[\w\x60''.-]+[ \t]+){0,2}?(?:mov|renam|relocat|other|just|only|one line|changed|touched|edited)))[\s\S]){0,400}?(?:Where things live)'
-flags: im
+type: llm
 ---
+
+The reply is session-review's report on a session that read `defaults.js` at two paths where it does not exist before a search found `packages/core/config/defaults.js`. The map file, AGENTS.md, has a Where things live table that does not name `packages/core/config/`.
+
+PASS if the reply proposes a path hint for `packages/core/config/`, or for `packages/core/config/defaults.js`, in the Where things live section of AGENTS.md, for the owner to approve.
+FAIL if the reply proposes no such hint, declines it, or proposes it only for another section or another file.
