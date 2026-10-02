@@ -228,6 +228,33 @@ describe('mount-opens-first-task', () => {
       run: () => mountRun({ prove: false, after: (s) => s.bash('cat .collet/checks/run.mjs', () => read(s.dir, '.collet/checks/run.mjs')) }),
       fails: ['harness-proven'],
     },
+    'the check runner only syntax-checked': {
+      run: () =>
+        mountRun({
+          prove: false,
+          after: (s) => {
+            s.bash('node --check .collet/checks/run.mjs', () => node(s.dir, '--check', join('.collet', 'checks', 'run.mjs')).output);
+            s.bash('node -c .collet/checks/run.mjs', () => node(s.dir, '-c', join('.collet', 'checks', 'run.mjs')).output);
+          },
+        }),
+      fails: ['harness-proven'],
+    },
+    'the checks run after ||': {
+      run: () =>
+        mountRun({
+          prove: false,
+          after: (s) => s.bash('npm test || node .collet/checks/run.mjs', () => node(s.dir, join('.collet', 'checks', 'run.mjs')).output),
+        }),
+      fails: [],
+    },
+    'the checks run on a tab-indented line': {
+      run: () =>
+        mountRun({
+          prove: false,
+          after: (s) => s.bash('npm test\n\tnode .collet/checks/run.mjs', () => node(s.dir, join('.collet', 'checks', 'run.mjs')).output),
+        }),
+      fails: [],
+    },
     'the checks run by path after a cd': {
       run: () =>
         mountRun({
