@@ -16,6 +16,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- session-review suggests collet's `check-writer` skill for a mistake a machine could catch, when `.collet/` exists at the Git root. The suggestion appears in the report, beside any map-file change for the same finding, and nothing is written or run. Without `.collet/`, the report points to the project's own linter or tests.
+
 ## [0.5.1-alpha] — 2026-09-25
 
 ### Fixed
