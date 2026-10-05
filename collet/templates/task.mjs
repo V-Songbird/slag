@@ -6,8 +6,8 @@
 //   node .collet/task.mjs widen --add <path> --why "<reason>"
 //   node .collet/task.mjs close --left-out "..." --unverified "..."
 //
-// A planning tool's roadmap beside it owns the plan and is never read here; only this ledger
-// decides what is open.
+// collet mounts beside a planning tool's roadmap, enforces the session boundary and never
+// enforces the roadmap; that roadmap is never read here, and only this ledger decides what is open.
 import {
   appendFileSync,
   existsSync,
