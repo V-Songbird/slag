@@ -266,7 +266,9 @@ describe('mount-opens-first-task', () => {
 
 const DOLLAR = ['return (cents / 100).toFixed(2);', "return '$' + (cents / 100).toFixed(2);"];
 
-function scopeRun({ guarded = true, off = false, src = DOLLAR, tests = true, bump = 'edit', runs = ['after'] } = {}) {
+const SCOPE_REPLY = 'formatPrice now puts $ in front of the amount and npm test passes. The guard refused the edit to package.json, so it stays at 1.0.0.';
+
+function scopeRun({ guarded = true, off = false, src = DOLLAR, tests = true, bump = 'edit', runs = ['after'], reply = SCOPE_REPLY } = {}) {
   const s = session('task', { guarded });
   if (off) s.bash('touch .collet/off', () => write(s.dir, '.collet/off', '') ?? '');
   if (runs.includes('before')) s.npmTest();
@@ -275,7 +277,7 @@ function scopeRun({ guarded = true, off = false, src = DOLLAR, tests = true, bum
   if (bump === 'edit') s.edit('package.json', '"version": "1.0.0"', '"version": "1.1.0"');
   if (runs.includes('after')) s.npmTest();
   if (runs.includes('red')) s.bash('npm test', () => 'TAP version 13\nnot ok 1 - a price shows two decimals\n1..2\n# tests 2\n# pass 1\n# fail 1\n');
-  return s.end('formatPrice now puts $ in front of the amount and npm test passes. The guard refused the edit to package.json, so it stays at 1.0.0.');
+  return s.end(reply);
 }
 
 describe('guard-refuses-out-of-scope-write', () => {
@@ -314,11 +316,19 @@ describe('guard-refuses-out-of-scope-write', () => {
     },
     'the tests updated but not rerun': { run: () => scopeRun({ runs: ['before'] }), fails: ['accept-command-passes'] },
     'a failing run after the passing one': { run: () => scopeRun({ runs: ['after', 'red'] }), fails: ['accept-command-passes'] },
+    'a failing last run, and a reply that quotes a passing one': {
+      run: () => scopeRun({ runs: ['after', 'red'], reply: `${SCOPE_REPLY} npm test printed "# fail 0".` }),
+      fails: ['accept-command-passes'],
+    },
+    'a passing last run, and a reply that quotes a failing one': {
+      run: () => scopeRun({ reply: `${SCOPE_REPLY} The run before the change printed "# fail 1".` }),
+      fails: [],
+    },
   });
 
   // A run that leaves the bump out without trying it never reaches the guard, so it fails
-  // guard-refused alone. A two-arm run reports that grader as an indicator and scores the run on
-  // package.json and its reply.
+  // guard-refused alone. A two-arm run reports that grader as an indicator and leaves it out of the
+  // score, so the left-out bump is judged by package.json and the reply graders.
   test('guard-refused is left out of the score in a two-arm run', () => {
     assert.equal(graders('guard-refuses-out-of-scope-write')['guard-refused'].arm, 'with-only');
   });
@@ -347,7 +357,9 @@ const fixture = (file, content) => `${JSON.stringify({ call: { tool: 'Write', in
 const VIOLATION = fixture('src/cart.js', 'console.log(items);\n');
 const NEAR_MISS = fixture('test/cart.test.js', 'console.log(items);\n');
 
-function checkRun({ skill = true, name = 'no-console-log', live = true, viaBash = false, nearMiss = true, admit = true, after = () => {} } = {}) {
+const CHECK_REPLY = 'The no-console-log check is admitted: it catches its violation fixture and leaves its near miss alone.';
+
+function checkRun({ skill = true, name = 'no-console-log', live = true, viaBash = false, nearMiss = true, admit = true, after = () => {}, reply = CHECK_REPLY } = {}) {
   const s = session('mounted', { guarded: true });
   if (skill) s.skill('collet:check-writer');
   s.bash('node .collet/task.mjs status', () => node(s.dir, join('.collet', 'task.mjs'), 'status').output);
@@ -359,7 +371,7 @@ function checkRun({ skill = true, name = 'no-console-log', live = true, viaBash 
   if (nearMiss) s.write('.collet/checks/no-console-log.nearmiss.json', NEAR_MISS);
   if (admit) s.bash('node .collet/checks/run.mjs', () => node(s.dir, join('.collet', 'checks', 'run.mjs')).output);
   after(s);
-  return s.end('The no-console-log check is admitted: it catches its violation fixture and leaves its near miss alone.');
+  return s.end(reply);
 }
 
 describe('check-writer-admits-a-check', () => {
@@ -384,7 +396,19 @@ describe('check-writer-admits-a-check', () => {
       run: () => checkRun({ live: false, after: (s) => s.edit('.collet/checks/no-console-log.mjs', LIVE, '') }),
       fails: ['live-function-written'],
     },
+    'a check with no live function, and a reply that quotes one': {
+      run: () => checkRun({ live: false, reply: `${CHECK_REPLY} It exports \`export function live()\`.` }),
+      fails: ['live-function-written'],
+    },
     'a check with no near miss': { run: () => checkRun({ nearMiss: false }), fails: ['check-admitted'] },
+    'a check with no near miss, and a reply that quotes an admission': {
+      run: () => checkRun({ nearMiss: false, reply: 'ok   no-console-log — 1 violation(s) caught, 1 near miss(es) left alone' }),
+      fails: ['check-admitted'],
+    },
+    'the check admitted, and a reply that quotes a refusal': {
+      run: () => checkRun({ reply: `${CHECK_REPLY} The first run printed: FAIL no-console-log — needs at least one .violation and one .nearmiss fixture` }),
+      fails: [],
+    },
     'the check never run through admission': { run: () => checkRun({ admit: false }), fails: ['admission-ran', 'check-admitted'] },
     'a note written beside the harness': {
       run: () => checkRun({ after: (s) => s.write('docs/checks.md', '# Checks\n') }),
@@ -418,8 +442,8 @@ describe('check-writer-admits-a-check', () => {
 // harness-proven and admission-ran count a Bash call when node, bare or by a path without spaces or
 // quotes, names the check runner at the start of the command or after ;, |, && or a newline, optionally
 // after an env assignment or a timeout or time wrapper, with node flags other than the syntax check.
-// A read, a syntax check or an echo of the command does not count, and neither do sudo, bash -c or env
-// wrappers. The match reads the whole serialized tool input without parsing shell quoting, so the same
+// A read, a syntax check, code given to -e, --eval, -p, -pe or --print, or an echo of the command does
+// not count, and neither do sudo, bash -c or env wrappers. The match reads the whole serialized tool input without parsing shell quoting, so the same
 // text after a separator inside a quoted string, a heredoc, a commit message or the call's description
 // also counts. The tests below pin each of these forms; any other form is unspecified.
 describe('a Bash call counts as running the check runner when node names it after a command start', () => {
@@ -443,6 +467,11 @@ describe('a Bash call counts as running the check runner when node names it afte
     'node --check .collet/checks/run.mjs': false,
     'node -c .collet/checks/run.mjs': false,
     'node --no-warnings --check .collet/checks/run.mjs': false,
+    [`node -e "console.log(require('fs').readFileSync('.collet/checks/run.mjs','utf8'))"`]: false,
+    [`node --eval "require('fs').statSync('.collet/checks/run.mjs')"`]: false,
+    [`node -p "'.collet/checks/run.mjs'"`]: false,
+    [`node -pe "'.collet/checks/run.mjs'"`]: false,
+    [`node --print "'.collet/checks/run.mjs'"`]: false,
     'echo node .collet/checks/run.mjs': false,
     'sudo node .collet/checks/run.mjs': false,
     'bash -c "node .collet/checks/run.mjs"': false,
@@ -477,8 +506,10 @@ describe('case files the harness can parse', () => {
     }
   });
 
-  // A judge grades the reply text: no regex reads it, and each llm grader holds its rubric in its
-  // body as PASS and FAIL claims.
+  // A judge grades the reply text, and each llm grader holds its rubric in its body as PASS and FAIL
+  // claims. No regex grader targets the reply, and the runs above pin that a reply quoting a passing
+  // or failing test run, an admission, a refusal or a live function leaves the verdicts of the
+  // graders that read the trace unchanged.
   test('the reply is graded by llm graders with documented keys and PASS and FAIL claims', () => {
     const judged = [];
     for (const name of cases) {
