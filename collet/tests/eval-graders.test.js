@@ -41,6 +41,17 @@ function write(dir, file, content) {
 const graders = (name) =>
   Object.fromEntries(readGraders(join(EVALS, name)).filter((grader) => grader.type !== 'llm').map((grader) => [grader.name, grader]));
 
+// The names of the graders that fail a run, sorted. A grader with no offline
+// verdict (passes() returns null, as for an llm grader) is not a failure.
+const failedGraders = (checks, run) =>
+  Object.values(checks).filter((grader) => passes(grader, run) === false).map((grader) => grader.name).sort();
+
+test('an llm grader has no offline verdict and is not counted as failed', () => {
+  const llm = { name: 'judged', type: 'llm', criteria: 'PASS if the reply is right.\nFAIL if it is not.' };
+  assert.equal(passes(llm, {}), null);
+  assert.deepEqual(failedGraders({ llm }, {}), []);
+});
+
 // ---- the workspaces price-project.sh builds -----------------------------------------------------
 
 // The script's three stages, cut where each one exits.
@@ -189,7 +200,7 @@ function checkRuns(caseName, runs) {
   for (const [name, { run, fails }] of Object.entries(runs)) {
     test(`${name}: ${fails.length ? `fails ${fails.join(', ')}` : 'passes every grader'}`, () => {
       const result = run();
-      const failed = Object.values(checks).filter((grader) => !passes(grader, result)).map((grader) => grader.name).sort();
+      const failed = failedGraders(checks, result);
       assert.deepEqual(failed, [...fails].sort(), `created:\n${result.created}`);
     });
   }
