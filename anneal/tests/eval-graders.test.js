@@ -1159,8 +1159,12 @@ describe("session-failure cases", () => {
 
   // The scaffold without bash, in a temporary directory: another case's scaffold
   // it runs first, then the files its heredocs write and the transcript its
-  // embedded program prints.
+  // embedded program prints. The transcript records SESSION_CWD as its working
+  // directory, not the temporary one: a diagnostic can name that directory twice,
+  // and session-evidence.js cuts each diagnostic at 480 characters, so a long
+  // temporary path would cut the part an evidence grader reads.
   const BASE_SCAFFOLD = /^bash "\$\(dirname "\$0"\)\/\.\.\/([^/"]+)\/([^/"]+)"$/m;
+  const SESSION_CWD = "/work/cwd";
   function scaffold(caseDir, dir = tempDir("anneal-graders-failure-")) {
     const script = /^ {2}scaffold_script: (\S+)$/m.exec(read(caseDir, "case.yaml"))[1];
     const text = read(caseDir, script);
@@ -1168,7 +1172,7 @@ describe("session-failure cases", () => {
     if (base) scaffold(path.join(EVALS, base[1]), dir);
     for (const [, file, , content] of text.matchAll(/^cat > (\S+) <<'(\w+)'\n([\s\S]*?)\n\2\n/gm)) write(dir, file, `${content}\n`);
     const program = /^node - [^\n]*<<'JS'\n([\s\S]*?)\nJS\n/m.exec(text);
-    if (program) fs.writeFileSync(path.join(dir, "session.jsonl"), execFileSync(process.execPath, ["-", dir], { input: program[1], encoding: "utf8" }));
+    if (program) fs.writeFileSync(path.join(dir, "session.jsonl"), execFileSync(process.execPath, ["-", SESSION_CWD], { input: program[1], encoding: "utf8" }));
     return dir;
   }
 
@@ -1300,6 +1304,17 @@ describe("session-failure cases", () => {
       assert.match(first, /imported from [^"]*\/src\/cart\.js/);
       assert.doesNotMatch(first, /src\/orders\.js/);
       assert.strictEqual(passes(grader, { trace: traceOf(first) }), false);
+    });
+
+    test("the evidence grader gives the same verdicts in a long temporary directory", () => {
+      const grader = checks["evidence-found-the-repeated-mistake"];
+      const long = path.join(tempDir("anneal-graders-long-"), "d".repeat(200));
+      fs.mkdirSync(long);
+      for (const caseDir of [WITHOUT, WITH]) {
+        const dir = scaffold(caseDir, long);
+        assert.strictEqual(passes(grader, { trace: traceOf(evidenceFor(dir)) }), true, path.basename(caseDir));
+        assert.strictEqual(passes(grader, { trace: traceOf(evidenceFor(dir, "2026-01-01T00:00:12.000Z")) }), false, path.basename(caseDir));
+      }
     });
 
     test("no-collet-file-run fails a collet file run, and passes looking for the directory", () => {
