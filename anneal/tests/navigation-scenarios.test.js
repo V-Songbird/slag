@@ -269,6 +269,9 @@ describe("snapshots", () => {
   });
 });
 
+// A grader with no offline verdict (passes() returns null) is not a failure.
+const failedGraders = (checks, run) => checks.filter((grader) => passes(grader, run) === false).map((grader) => grader.name);
+
 describe("graders", () => {
   for (const [scenario, solutions] of Object.entries(SOLUTIONS)) {
     test(`${scenario}: a known-good solution passes every grader, a wrong or partial one fails at least one`, () => {
@@ -276,7 +279,7 @@ describe("graders", () => {
         const checks = graders(caseDir(scenario, variant));
         for (const solution of solutions) {
           const run = applySolution(variant, solution);
-          const failed = checks.filter((grader) => passes(grader, run) === false).map((grader) => grader.name);
+          const failed = failedGraders(checks, run);
           if (solution.kind === "good") assert.deepStrictEqual(failed, [], `${variant}, ${solution.name}`);
           else assert.notDeepStrictEqual(failed, [], `${variant}, ${solution.name}: passes every grader`);
           if (BEHAVIOUR[scenario]) assert.strictEqual(behaves(scenario, run.dir), solution.kind === "good", `${variant}, ${solution.name}: behaviour`);
@@ -284,6 +287,12 @@ describe("graders", () => {
       }
     });
   }
+
+  test("an llm grader gives no verdict offline, so it is not counted as a failure", () => {
+    const llm = { name: "judged", type: "llm", criteria: "PASS if the reply is right.\nFAIL if it is not." };
+    assert.strictEqual(passes(llm, { reply: "" }), null);
+    assert.deepStrictEqual(failedGraders([llm], { reply: "" }), []);
+  });
 
   test("known-good changes keep the fixture's own tests passing", () => {
     for (const scenario of Object.keys(BEHAVIOUR)) {
