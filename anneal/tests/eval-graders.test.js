@@ -47,6 +47,16 @@ function write(root, file, content) {
 // A case's graders by name.
 const graders = (caseDir) => Object.fromEntries(readGraders(caseDir).map((grader) => [grader.name, grader]));
 
+// The names of the graders that fail a run, sorted. A grader with no offline
+// verdict (passes() returns null, as for an llm grader) is not a failure.
+const failedGraders = (checks, run) => Object.values(checks).filter((grader) => passes(grader, run) === false).map((grader) => grader.name).sort();
+
+test("an llm grader has no offline verdict and is not counted as failed", () => {
+  const llm = { name: "judged", type: "llm", criteria: "PASS if the reply is right.\nFAIL if it is not." };
+  assert.strictEqual(passes(llm, {}), null);
+  assert.deepStrictEqual(failedGraders({ llm }, {}), []);
+});
+
 const bash = (...commands) => commands.map((command) => ({ name: "Bash", input: { command } }));
 
 // A recorded trace ends with the final reply twice: an assistant text event,
@@ -806,7 +816,7 @@ describe("migration-applies-approved-step", () => {
   for (const [name, { steps, fails }] of Object.entries(RUNS)) {
     test(`${name}: ${fails.length ? `fails ${fails.join(", ")}` : "passes every grader"}`, () => {
       const run = migrate(steps);
-      const failed = Object.values(checks).filter((grader) => !passes(grader, run)).map((grader) => grader.name).sort();
+      const failed = failedGraders(checks, run);
       assert.deepStrictEqual(failed, [...fails].sort(), `created:\n${run.created}`);
       if (!fails.length) assert.strictEqual(check(run.dir).passed, true, "the fixture's check passes after the step");
     });
@@ -1013,7 +1023,7 @@ describe("migration-applies-approved-step", () => {
     for (const [name, { steps, fails }] of Object.entries(NEW_RUNS)) {
       test(`${name}: ${fails.length ? `fails ${fails.join(", ")}` : "passes every grader"}`, () => {
         const run = migrate(steps);
-        const failed = Object.values(newChecks).filter((grader) => !passes(grader, run)).map((grader) => grader.name).sort();
+        const failed = failedGraders(newChecks, run);
         assert.deepStrictEqual(failed, [...fails].sort(), `created:\n${run.created}`);
         if (!fails.length || fails === CHAINED) assert.strictEqual(check(run.dir).passed, true, "the fixture's check passes after the step");
       });
@@ -1190,7 +1200,7 @@ describe("session-failure cases", () => {
         const dir = scaffold(CASE);
         run = { dir, calls: bash(CALL), trace: traceOf(evidenceFor(dir)), created: "" };
       });
-      const failed = (changes) => Object.values(checks).filter((grader) => passes(grader, { ...run, ...changes }) === false).map((grader) => grader.name).sort();
+      const failed = (changes) => failedGraders(checks, { ...run, ...changes });
 
       test("it is tagged session-failure, and its evidence-ran grader is the session case's own", () => {
         assert.match(read(CASE, "case.yaml"), /^tags: \[session-failure\]$/m);
