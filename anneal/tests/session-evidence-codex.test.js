@@ -33,6 +33,23 @@ describe("a Codex rollout", () => {
     assert.deepStrictEqual(failure.nearbyReportedSuccesses.map((s) => s.line), [7]);
   });
 
+  test("a Node import that fails inside a command that ran is that command's failure, not a missing command", () => {
+    const missingImport = "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/work/shop/src/round' imported from /work/shop/src/cart.js\n";
+    const report = analyzeCodex(transcript([
+      meta, started(1),
+      call("c1", "npm test", 2),
+      output("c1", [JSON.stringify({ exit_code: 1, output: missingImport })], 3),
+      call("c2", "npm test 2>&1 | tail -5", 4),
+      output("c2", [JSON.stringify({ exit_code: 0, output: missingImport })], 5),
+      call("c3", "npm tset", 6),
+      output("c3", [JSON.stringify({ exit_code: 127, output: "bash: npm tset: command not found\n" })], 7),
+      started(8),
+    ]));
+    assert.deepStrictEqual(report.candidates.map((c) => [c.callLine, c.exitCode, c.category]), [
+      [3, 1, "nonzero-exit"], [7, 127, "command-not-found"],
+    ]);
+  });
+
   test("a result object is read where it starts, whatever is printed after it or however it is wrapped", () => {
     const pretty = JSON.stringify({ exit_code: 2, output: "a brace } in a string" }, null, 2);
     const report = analyzeCodex(transcript([

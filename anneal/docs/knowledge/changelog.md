@@ -22,7 +22,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Fixed
 
-- The session evidence script no longer labels a command that ran and then failed on a missing Node module (`MODULE_NOT_FOUND` from CommonJS, `ERR_MODULE_NOT_FOUND` from ESM) as `command-not-found`. That failure now gets the same category as any other failed command, such as `nonzero-exit`. A module-not-found failure that is neither reported as an error nor shows an exit code, such as one behind a pipe, is no longer a candidate, like any other failure behind a pipe. A shell's "command not found" and PowerShell's "is not recognized as the name" still get `command-not-found`.
+- The session evidence script no longer labels a command that ran and then failed on a missing Node module (`MODULE_NOT_FOUND` from CommonJS, `ERR_MODULE_NOT_FOUND` from ESM) as `command-not-found`. That failure now gets the same category as any other failed command, such as `nonzero-exit`. A module-not-found failure the host did not report as failed, such as one behind a pipe, is no longer a candidate unless its output names another known diagnostic. A shell's "command not found" and PowerShell's "is not recognized as the name" still get `command-not-found`.
 
 ## [0.5.1-alpha] — 2026-09-25
 

@@ -587,6 +587,19 @@ describe("identity and chronology in a Claude Code transcript", () => {
     assert.deepStrictEqual(report.coverage.operations, { read: 2, search: 1, edit: 0, write: 0, command: 0, mixed: 1, other: 0 });
   });
 
+  test("a Node import that fails behind a pipe is not a candidate unless its output names a known diagnostic", () => {
+    const missingImport = "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/work/shop/src/round' imported from /work/shop/src/cart.js";
+    const report = analyzeClaude(transcript([
+      human("run the suite", 1),
+      use("t1", "Bash", { command: "npm test 2>&1 | tail -5" }, 2),
+      result("t1", missingImport, 3),
+      use("t2", "Bash", { command: "npm test 2>&1 | tail -5" }, 4),
+      result("t2", `${missingImport}\nlisten EADDRINUSE: address already in use :::3000`, 5),
+      human("audit", 6),
+    ]));
+    assert.deepStrictEqual(report.candidates.map((c) => [c.callLine, c.category]), [[4, "port-in-use"]]);
+  });
+
   test("a compound that writes files is still text-matched, so a failure behind its pipe is a candidate", () => {
     const report = analyzeClaude(transcript([
       human("build it", 1),
