@@ -276,7 +276,7 @@ describe("graders", () => {
         const checks = graders(caseDir(scenario, variant));
         for (const solution of solutions) {
           const run = applySolution(variant, solution);
-          const failed = checks.filter((grader) => !passes(grader, run)).map((grader) => grader.name);
+          const failed = checks.filter((grader) => passes(grader, run) === false).map((grader) => grader.name);
           if (solution.kind === "good") assert.deepStrictEqual(failed, [], `${variant}, ${solution.name}`);
           else assert.notDeepStrictEqual(failed, [], `${variant}, ${solution.name}: passes every grader`);
           if (BEHAVIOUR[scenario]) assert.strictEqual(behaves(scenario, run.dir), solution.kind === "good", `${variant}, ${solution.name}: behaviour`);
