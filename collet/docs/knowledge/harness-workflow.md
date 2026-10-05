@@ -188,7 +188,7 @@ ok   scope — 5 violation(s) caught, 6 near miss(es) left alone
 
 ## Running the evals
 
-Three eval cases in [evals](../../evals/) each drive a real Claude Code session in a small price-formatting library and grade what the session did. They have not run in a live session yet. [eval-graders.test.js](../../tests/eval-graders.test.js) replays each case's work without a model and checks that a run done as asked passes every grader and that each forbidden run fails the grader meant for it, so the first live scores are the first evidence about how a model behaves in them. A live run is slow and bills a model session per run.
+Three eval cases in [evals](../../evals/) each drive a real Claude Code session in a small price-formatting library and grade what the session did. They have not run in a live session yet. [eval-graders.test.js](../../tests/eval-graders.test.js) replays each case's work without a model and checks that a run done as asked passes every deterministic grader (it skips the `type: llm` graders, which need a judge) and that each forbidden run fails the grader meant for it, so the first live scores are the first evidence about how a model behaves in them. A live run is slow and bills a model session per run.
 
 | Case | Tag | The session is asked to | A passing run |
 | --- | --- | --- | --- |
@@ -209,7 +209,7 @@ The harness confines the granted shell in a sandbox, and native Windows has none
 
 Two points are specific to collet:
 
-- Every scaffold runs `evals/price-project.sh`, which finds the plugin as the folder above `evals/` and runs its `scripts/mount.mjs`. The target must therefore be the whole `collet/` folder, as in the command above. The stages are `plain` for the library alone, `mounted` for collet mounted and committed with no task open, and `task` for that plus an open task on `src/price.js` and `test/**`; because `task.mjs add` closes the scope over imports, that task's scope also holds `src/cart.js`. Every stage needs `git` on its `PATH`. The `mounted` and `task` stages, which the check-writer and guard cases use, also run `mount.mjs` and need `node`; `plain`, which the mount case uses, does not.
+- Every scaffold runs `evals/price-project.sh`, which finds the plugin as the folder above `evals/` and runs its `scripts/mount.mjs`. The target must therefore be the whole `collet/` folder, as in the command above. The stages are `plain` for the library alone, `mounted` for collet mounted and committed with no task open, and `task` for that plus an open task on `src/price.js` and `test/**`; because `task.mjs add` closes the scope over imports, that task's scope also holds `src/cart.js`. Every stage needs `git` on its `PATH`. The `mounted` and `task` stages, which the check-writer and guard cases use, also run `mount.mjs`. Every case's session needs `node` as well: `harness-proven` and `admission-ran` require a `node` call, and the guard case runs `npm test`.
 - The harness and its sandbox leave 13 untracked entries in the workspace, and collet's close-time scope check counts every listed change outside the open task. `price-project.sh` therefore lists them in `.git/info/exclude`: `.bash_profile`, `.bashrc`, `.claude/`, `.eval-artifacts`, `.gitconfig`, `.gitmodules`, `.idea`, `.mcp.json`, `.profile`, `.ripgreprc`, `.vscode`, `.zprofile` and `.zshrc`. The list has to follow the harness; when a harness version adds an entry, add it there.
 
 ### What the graders check
