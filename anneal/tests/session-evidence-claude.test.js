@@ -74,6 +74,25 @@ describe("a Claude Code transcript", () => {
     assert.deepStrictEqual(failure.laterSameToolSuccesses.map((s) => s.commandOrArguments), ["npm test"]);
   });
 
+  test("a Node import that fails inside a command that ran is that command's failure, not a missing command", () => {
+    const missingImport = "Exit code 1\nnode:internal/modules/esm/resolve:275\n    throw new ERR_MODULE_NOT_FOUND(\n          ^\n\n"
+      + "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/work/shop/src/round' imported from /work/shop/src/cart.js\n"
+      + "Did you mean to import \"./round.js\"?\n# tests 2\n# pass 0\n# fail 2";
+    const report = analyzeClaude(transcript([
+      human("run the suite", 1),
+      use("t1", "Bash", { command: "npm test" }, 2),
+      result("t1", missingImport, 3, true),
+      use("t2", "Bash", { command: "npm tset" }, 4),
+      result("t2", "Exit code 127\nbash: npm tset: command not found", 5, true),
+      use("t3", "PowerShell", { command: "foo" }, 6),
+      result("t3", "Exit code 1\nfoo : The term 'foo' is not recognized as the name of a cmdlet, function, script file, or operable program.", 7, true),
+      human("audit", 8),
+    ]));
+    assert.deepStrictEqual(report.candidates.map((c) => [c.callLine, c.category]), [
+      [2, "nonzero-exit"], [4, "command-not-found"], [6, "command-not-found"],
+    ]);
+  });
+
   test("error text inside a file that was read is not a candidate, and inside shell output it is", () => {
     const report = analyzeClaude(transcript([
       human("look around", 1),
@@ -572,7 +591,7 @@ describe("identity and chronology in a Claude Code transcript", () => {
     const report = analyzeClaude(transcript([
       human("build it", 1),
       use("t1", "Bash", { command: "mkdir -p out && node build.js 2>&1 | tail -3" }, 2),
-      result("t1", "Error: Cannot find module './lib'\n  code: 'MODULE_NOT_FOUND'", 3),
+      result("t1", "sh: node: command not found", 3),
       use("t2", "Bash", { command: "mkdir -p out" }, 4),
       result("t2", "", 5),
       human("audit", 6),

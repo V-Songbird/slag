@@ -20,6 +20,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 - session-review suggests collet's `check-writer` skill for a mistake a machine could catch, when `.collet/` exists at the Git root. The suggestion appears in the report, beside any map-file change for the same finding, and nothing is written or run. Without `.collet/`, the report points to the project's own linter or tests.
 
+### Fixed
+
+- The session evidence script no longer labels a command that ran and then failed on a missing Node module (`ERR_MODULE_NOT_FOUND`) as `command-not-found`. That failure now gets the same category as any other failed command, such as `nonzero-exit`. A shell's "command not found" and Windows' "is not recognized as the name" still get `command-not-found`.
+
 ## [0.5.1-alpha] — 2026-09-25
 
 ### Fixed
