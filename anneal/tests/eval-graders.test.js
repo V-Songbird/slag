@@ -1092,7 +1092,7 @@ describe("migration-applies-approved-step", () => {
       wrongChecks = graders(WRONG);
     });
     // The reply graders a plan fails.
-    const failedBy = (reply) => REPLY_GRADERS.filter((name) => !passes(wrongChecks[name], { reply }));
+    const failedBy = (reply) => failedGraders(Object.fromEntries(REPLY_GRADERS.map((name) => [name, wrongChecks[name]])), { reply });
 
     test("its scaffold runs this case's fixture script, where two files import the file the survey row says one does", () => {
       assert.match(read(WRONG, "case.yaml"), /^ {2}scaffold_script: wrong-count-fixture\.sh$/m);
