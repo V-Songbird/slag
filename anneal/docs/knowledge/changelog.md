@@ -20,6 +20,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 - session-review suggests collet's `check-writer` skill for a mistake a machine could catch, when `.collet/` exists at the Git root. The suggestion appears in the report, beside any map-file change for the same finding, and nothing is written or run. Without `.collet/`, the report points to the project's own linter or tests.
 
+- Seven eval cases tagged `session-failure` give session-review a synthetic transcript of one failure shape, approve nothing and grade what the reply proposes: a one-off flaky failure earns no rule, a machine path goes to the global instruction file, a refusal workaround is a safety finding, the quiet test script and a path hint go to the map file, and `check-writer` is named only when `.collet/` exists. Their eleven reply graders use a judge model; the offline tests check those only for form. The cases have not run in a live session.
+
 ### Fixed
 
 - The session evidence script no longer labels a command that ran and then failed on a missing Node module (`MODULE_NOT_FOUND` from CommonJS, `ERR_MODULE_NOT_FOUND` from ESM) as `command-not-found`. That failure now gets the same category as any other failed command, such as `nonzero-exit`. A module-not-found failure the host did not report as failed, such as one behind a pipe, is no longer a candidate unless its output names another known diagnostic. A shell's "command not found" and PowerShell's "is not recognized as the name" still get `command-not-found`.
