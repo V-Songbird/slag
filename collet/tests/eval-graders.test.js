@@ -439,13 +439,10 @@ describe('check-writer-admits-a-check', () => {
 
 // ---- the check runner's command -------------------------------------------------------------------------
 
-// harness-proven and admission-ran count a Bash call when node, bare or by a path without spaces or
-// quotes, names the check runner at the start of the command or after ;, |, && or a newline, optionally
-// after an env assignment or a timeout or time wrapper, with node flags other than the syntax check.
-// A read, a syntax check, code given to -e, --eval, -p, -pe or --print, or an echo of the command does
-// not count, and neither do sudo, bash -c or env wrappers. The match reads the whole serialized tool input without parsing shell quoting, so the same
-// text after a separator inside a quoted string, a heredoc, a commit message or the call's description
-// also counts. The tests below pin each of these forms; any other form is unspecified.
+// harness-proven and admission-ran count a Bash call as running the check runner for the commands
+// the rows below map to true and not for those they map to false; any other form is unspecified.
+// The match reads the whole serialized tool input without parsing shell quoting, so a counted
+// command inside a quoted string, a heredoc, a commit message or the call's description also counts.
 describe('a Bash call counts as running the check runner when node names it after a command start', () => {
   const COMMANDS = {
     'node .collet/checks/run.mjs': true,
