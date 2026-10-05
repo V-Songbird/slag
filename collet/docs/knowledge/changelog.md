@@ -21,7 +21,7 @@ All notable changes to collet are documented here. The format follows
 - The harness workflow guide has a [Running the evals](harness-workflow.md#running-the-evals)
   section: the command for the three eval cases, the WSL2 or Linux sandbox they need, what each
   case grades, and that the cases have not run in a live session yet. One case grades its reply
-  with judge-model graders, which are billed on every run.
+  with judge-model graders, which are billed on each of that case's runs.
 
 ### Changed
 
