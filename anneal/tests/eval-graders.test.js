@@ -184,8 +184,10 @@ describe("migration workspace graders", () => {
     "src/orders/format.js": "export function formatOrder(order) {\n  return order.id;\n}\n",
   };
   const WORK_IN_PROGRESS = "// work in progress\n";
+  // GIT_CONFIG_NOSYSTEM drops the system core.longpaths that Git for Windows
+  // sets, so the helper restores it for fixtures under a long temporary path.
   const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: "1" };
-  const git = (dir, ...args) => execFileSync("git", ["-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", ...args], { cwd: dir, env: gitEnv, stdio: "pipe" });
+  const git = (dir, ...args) => execFileSync("git", ["-c", "core.longpaths=true", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", ...args], { cwd: dir, env: gitEnv, stdio: "pipe" });
   let fixture;
 
   before(() => {
@@ -613,8 +615,9 @@ describe("migration-applies-approved-step", () => {
   const POSIX_CHECKS = `{ npm test 2>&1; echo "exit $?"; } | awk '{ print } END { print "lines", NR - 1 }'`;
   // The entries the harness and its sandbox add to a run's workspace.
   const ADDED = [".bash_profile", ".bashrc", ".claude/", ".eval-artifacts", ".gitconfig", ".gitmodules", ".idea", ".mcp.json", ".profile", ".ripgreprc", ".vscode", ".zprofile", ".zshrc"];
+  // core.longpaths as in the migration workspace graders' helper.
   const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: "1" };
-  const git = (dir, ...args) => execFileSync("git", ["-c", "user.name=eval", "-c", "user.email=eval@example.invalid", ...args], { cwd: dir, env: gitEnv, encoding: "utf8", stdio: "pipe" });
+  const git = (dir, ...args) => execFileSync("git", ["-c", "core.longpaths=true", "-c", "user.name=eval", "-c", "user.email=eval@example.invalid", ...args], { cwd: dir, env: gitEnv, encoding: "utf8", stdio: "pipe" });
   let fixture;
 
   // The scaffold script's files and git steps, replayed without bash.
