@@ -7,7 +7,7 @@ const { excerpt } = require("./session-evidence-redaction.js");
 
 const BROWSER_MISSING = /(?:Executable doesn't exist|browserType\.launch:.*(?:not found|missing))/i;
 // A command the shell could not find. A Node import that fails inside a command that ran is that command's failure.
-const COMMAND_NOT_FOUND = /(?:is not recognized as (?:a|the) name|command not found)/i;
+const COMMAND_NOT_FOUND = /(?:is not recognized as (?:a|the) name|is not recognized as an internal or external command|command not found)/i;
 // A path that does not exist, as a file tool, a shell, PowerShell, Windows or Node says it. Read only in a failed
 // read, search or edit, since content quotes errors; both the failure and the navigation views name it missing-path.
 const MISSING = /(?:File|Path|Directory) does not exist|No such file or directory|Cannot find path|cannot find the (?:file|path) specified|\bENOENT\b/i;
