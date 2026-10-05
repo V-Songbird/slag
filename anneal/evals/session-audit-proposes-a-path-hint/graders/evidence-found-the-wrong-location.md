@@ -1,5 +1,5 @@
 ---
 type: regex
 target: trace
-pattern: 'kind\W+missing-path\W[\s\S]*?candidateCause\W+wrong-location\W[\s\S]*?scope\W+map-file\W'
+pattern: '(?:^|\n)(?=[^\n]*"type":"tool_result")[^\n]*?kind\W+missing-path\W(?:[\s\S]*?\n(?=[^\n]*"type":"tool_result"))?[^\n]*?candidateCause\W+wrong-location\W(?:[\s\S]*?\n(?=[^\n]*"type":"tool_result"))?[^\n]*?scope\W+map-file\W'
 ---

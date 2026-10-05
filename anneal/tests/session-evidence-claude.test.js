@@ -93,6 +93,16 @@ describe("a Claude Code transcript", () => {
     ]);
   });
 
+  test("a command cmd.exe cannot find is a missing command", () => {
+    const report = analyzeClaude(transcript([
+      human("run it", 1),
+      use("t1", "Bash", { command: "cmd /c foo" }, 2),
+      result("t1", "Exit code 1\n'foo' is not recognized as an internal or external command,\noperable program or batch file.", 3, true),
+      human("audit", 4),
+    ]));
+    assert.deepStrictEqual(report.candidates.map((c) => [c.callLine, c.category]), [[2, "command-not-found"]]);
+  });
+
   test("error text inside a file that was read is not a candidate, and inside shell output it is", () => {
     const report = analyzeClaude(transcript([
       human("look around", 1),

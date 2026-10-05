@@ -1,5 +1,5 @@
 ---
 type: regex
 target: trace
-pattern: 'kind\W+large-output\W[\s\S]*?candidateCause\W+verbose-command\W[\s\S]*?scope\W+reporter\W'
+pattern: '(?:^|\n)(?=[^\n]*"type":"tool_result")[^\n]*?kind\W+large-output\W(?:[\s\S]*?\n(?=[^\n]*"type":"tool_result"))?[^\n]*?candidateCause\W+verbose-command\W(?:[\s\S]*?\n(?=[^\n]*"type":"tool_result"))?[^\n]*?scope\W+reporter\W'
 ---

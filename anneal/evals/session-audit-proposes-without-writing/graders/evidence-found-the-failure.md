@@ -1,5 +1,5 @@
 ---
 type: regex
 target: trace
-pattern: 'commandOrArguments\W+npm test\W[\s\S]*?commandOrArguments\W+npm run check\W'
+pattern: '(?:^|\n)(?=[^\n]*"type":"tool_result")[^\n]*?commandOrArguments\W+npm test\W(?:[\s\S]*?\n(?=[^\n]*"type":"tool_result"))?[^\n]*?commandOrArguments\W+npm run check\W'
 ---
