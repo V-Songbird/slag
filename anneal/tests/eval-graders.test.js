@@ -1230,6 +1230,19 @@ describe("session-failure cases", () => {
         }
         assert.deepStrictEqual(failed({ reply, dir: edited }), editedFails.sort());
       });
+
+      test("its evidence grader reads each part of the evidence from the tool result, whatever the reply quotes", () => {
+        const grader = Object.values(checks).find((check) => check.name.startsWith("evidence-found-"));
+        const full = evidenceFor(run.dir);
+        const lines = full.split("\n");
+        const verdicts = lines.map((_, index) => {
+          const trace = traceOf(lines.slice(0, index + 1).join("\n"));
+          const alone = passes(grader, { ...run, trace });
+          assert.strictEqual(passes(grader, { ...run, trace: withReply(trace, full) }), alone, `tool result cut after line ${index + 1}, reply with the full evidence`);
+          return alone;
+        });
+        assert.deepStrictEqual([verdicts[0], verdicts.at(-1)], [false, true]);
+      });
     });
   }
 
