@@ -50,6 +50,17 @@ describe("a Codex rollout", () => {
     ]);
   });
 
+  test("a command cmd.exe cannot find is a missing command", () => {
+    const missing = "'foo' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n";
+    const report = analyzeCodex(transcript([
+      meta, started(1),
+      call("c1", "cmd /c foo", 2),
+      output("c1", [JSON.stringify({ exit_code: 1, output: missing })], 3),
+      started(4),
+    ]));
+    assert.deepStrictEqual(report.candidates.map((c) => [c.callLine, c.exitCode, c.category]), [[3, 1, "command-not-found"]]);
+  });
+
   test("a result object is read where it starts, whatever is printed after it or however it is wrapped", () => {
     const pretty = JSON.stringify({ exit_code: 2, output: "a brace } in a string" }, null, 2);
     const report = analyzeCodex(transcript([
