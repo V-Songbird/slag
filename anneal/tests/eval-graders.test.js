@@ -49,6 +49,15 @@ const graders = (caseDir) => Object.fromEntries(readGraders(caseDir).map((grader
 
 const bash = (...commands) => commands.map((command) => ({ name: "Bash", input: { command } }));
 
+// A recorded trace ends with the final reply twice: an assistant text event,
+// then a result event whose result field holds the same text. A trace grader
+// reads tool calls and their results, so this tail must not change its verdict.
+const replyEvents = (text) => [
+  { type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] } },
+  { type: "result", subtype: "success", is_error: false, result: text },
+].map((event) => JSON.stringify(event)).join("\n");
+const withReply = (trace, text) => `${trace}\n${replyEvents(text)}`;
+
 describe("no-branch-commit-or-move", () => {
   let grader;
   before(() => {
@@ -307,6 +316,11 @@ describe("evidence-found-the-failure", () => {
     );
     assert.strictEqual(passes(grader, { trace: baseline }), false);
     assert.strictEqual(passes(checks["names-the-working-command"], { reply: "Replace `npm test` with `npm run check` in AGENTS.md." }), true);
+  });
+
+  test("a reply that quotes the full evidence after a cut evidence call fails it", () => {
+    const cut = trace(result(evidence("--before", "2026-01-01T00:00:06.000Z")));
+    assert.strictEqual(passes(grader, { trace: withReply(cut, evidence("--before", "2026-09-22T23:59:59.000Z")) }), false);
   });
 
   test("the evidence as the first two-arm run printed it passes it", () => {
@@ -798,6 +812,25 @@ describe("migration-applies-approved-step", () => {
     });
   }
 
+  // Replies that quote a check summary line the tool results contradict.
+  const QUOTES_PASS = "Moved it with `git mv src/utils.js src/money.js` and reran the checks:\n\n```\n# tests 2\n# pass 2\n# fail 0\n```";
+  const QUOTES_FAIL = "The checks still report a failure from before the move:\n\n```\nℹ tests 2\nℹ pass 1\nℹ fail 1\n```";
+
+  test("checks-pass-after-the-move follows the tool results, whatever summary line the reply quotes", () => {
+    const grader = checks["checks-pass-after-the-move"];
+    const cases = [
+      ["the approved step as the skill applies it", QUOTES_FAIL, true],
+      ["the move without its imports", QUOTES_PASS, false],
+      ["a failing check after the passing one", QUOTES_PASS, false],
+      ["no check after the move", QUOTES_PASS, false],
+      ["no migration", QUOTES_PASS, false],
+    ];
+    for (const [name, text, expected] of cases) {
+      const run = migrate(RUNS[name].steps);
+      assert.strictEqual(passes(grader, { ...run, trace: withReply(run.trace, text) }), expected, name);
+    }
+  });
+
   // The first paired run's calls, in order (plugin root, run directory and home
   // replaced). With the plugin, /anneal:repo-layout expanded without a Skill call.
   const READ = (file) => ({ name: "Read", input: { file_path: file } });
@@ -986,6 +1019,24 @@ describe("migration-applies-approved-step", () => {
       });
     }
 
+    test("checks-pass-after-the-move follows the tool results, whatever summary line the reply quotes", () => {
+      const grader = newChecks["checks-pass-after-the-move"];
+      const quotesPass = QUOTES_PASS.replace("src/money.js", TO);
+      const red = (dir, step) => {
+        newDirectoryStep(dir, step);
+        step("npm test", () => "TAP version 13\nnot ok 1 - a cart total sums the items\n1..1\n# tests 1\n# pass 0\n# fail 1\n");
+      };
+      const cases = [
+        ["the approved step", NEW_RUNS["the approved step as the skill applies it"].steps, QUOTES_FAIL, true],
+        ["a failing check after the passing one", red, quotesPass, false],
+        ["no migration", NEW_RUNS["no migration"].steps, quotesPass, false],
+      ];
+      for (const [name, steps, text, expected] of cases) {
+        const run = migrate(steps);
+        assert.strictEqual(passes(grader, { ...run, trace: withReply(run.trace, text) }), expected, name);
+      }
+    });
+
     test("branch-directory-and-move-alone fails the refused chain of an interactive run and passes each command alone", () => {
       assert.deepStrictEqual([alone.type, alone.tool, alone.min, alone.max, alone.arm], ["tool_used", "Bash", "0", "0", undefined]);
       assert.strictEqual(passes(alone, { calls: bash("git checkout -b anneal/2026-09-22 && mkdir -p src/lib && git mv src/utils.js src/lib/money.js && git status --porcelain") }), false);
@@ -1165,6 +1216,7 @@ describe("session-failure cases", () => {
         const trace = traceOf(evidenceFor(run.dir, "2026-01-01T00:00:02.000Z"));
         const evidenceGrader = Object.keys(checks).find((grader) => grader.startsWith("evidence-found-"));
         assert.deepStrictEqual(failed({ reply, trace }), [evidenceGrader]);
+        assert.deepStrictEqual(failed({ reply, trace: withReply(trace, evidenceFor(run.dir)) }), [evidenceGrader], "the reply quotes the full evidence");
         assert.deepStrictEqual(failed({ reply, trace: traceOf(read(run.dir, "session.jsonl")) }), [evidenceGrader]);
         assert.deepStrictEqual(failed({ reply, calls: bash("cat session.jsonl") }), ["evidence-ran"]);
         assert.deepStrictEqual(failed({ reply, created: "notes/session-review.md" }), ["no-files-created"]);

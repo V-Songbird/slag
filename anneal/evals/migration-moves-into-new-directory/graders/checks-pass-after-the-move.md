@@ -1,5 +1,5 @@
 ---
 type: regex
 target: trace
-pattern: '\bmv(?:\s+-\S+)*\s+\S*src/utils\.js\S*\s+\S*src/lib/money\.js[\s\S]*?(?:#|ℹ) fail 0(?![\s\S]*(?:#|ℹ) fail [1-9])'
+pattern: '(?:^|\n)(?=[^\n]*"type":"tool_use")[^\n]*?\bmv(?:\s+-\S+)*\s+\S*src/utils\.js\S*\s+\S*src/lib/money\.js[\s\S]*?\n(?=[^\n]*"type":"tool_result")[^\n]*?(?:#|ℹ) fail 0(?![^\n]*(?:#|ℹ) fail [1-9]|[\s\S]*?\n(?=[^\n]*"type":"tool_result")[^\n]*?(?:#|ℹ) fail [1-9])'
 ---

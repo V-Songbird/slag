@@ -1,5 +1,5 @@
 ---
 type: regex
 target: trace
-pattern: 'ERR_MODULE_NOT_FOUND\W[^"]*?imported from [^"]*?/src/cart\.js\W[\s\S]*?laterSameToolSuccesses\W[\s\S]*?ERR_MODULE_NOT_FOUND\W[^"]*?imported from [^"]*?/src/orders\.js\W'
+pattern: '(?:^|\n)(?=[^\n]*"type":"tool_result")[^\n]*?ERR_MODULE_NOT_FOUND\W[^"]*?imported from [^"]*?/src/cart\.js\W(?:[\s\S]*?\n(?=[^\n]*"type":"tool_result"))?[^\n]*?laterSameToolSuccesses\W(?:[\s\S]*?\n(?=[^\n]*"type":"tool_result"))?[^\n]*?ERR_MODULE_NOT_FOUND\W[^"]*?imported from [^"]*?/src/orders\.js\W'
 ---
