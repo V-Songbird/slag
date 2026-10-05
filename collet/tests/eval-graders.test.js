@@ -441,8 +441,6 @@ describe('check-writer-admits-a-check', () => {
 
 // harness-proven and admission-ran count a Bash call as running the check runner for the commands
 // the rows below map to true and not for those they map to false; any other form is unspecified.
-// The match reads the whole serialized tool input without parsing shell quoting, so a counted
-// command inside a quoted string, a heredoc, a commit message or the call's description also counts.
 describe('a Bash call counts as running the check runner when node names it after a command start', () => {
   const COMMANDS = {
     'node .collet/checks/run.mjs': true,
