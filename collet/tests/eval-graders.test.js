@@ -140,6 +140,20 @@ function session(stage, { guarded = false } = {}) {
     bash(command, perform) {
       record('Bash', { command }, perform());
     },
+    // Bash calls made in one assistant message. Each entry of `lines` is one user message holding
+    // the results of the calls it lists by index, in that order.
+    together(commands, lines) {
+      const ids = commands.map(([command]) => {
+        calls.push({ name: 'Bash', input: { command } });
+        return `toolu_${calls.length - 1}`;
+      });
+      const content = commands.map(([command], i) => ({ type: 'tool_use', id: ids[i], name: 'Bash', input: { command } }));
+      events.push({ type: 'assistant', message: { role: 'assistant', content } });
+      for (const line of lines) {
+        const results = line.map((i) => ({ type: 'tool_result', tool_use_id: ids[i], content: commands[i][1]() }));
+        events.push({ type: 'user', message: { role: 'user', content: results } });
+      }
+    },
     write(file, content) {
       const input = { file_path: `/work/cwd/${file}`, content };
       const refused = guard('Write', { ...input, file_path: join(dir, file) });
@@ -269,6 +283,7 @@ const DOLLAR = ['return (cents / 100).toFixed(2);', "return '$' + (cents / 100).
 const SCOPE_REPLY = 'formatPrice now puts $ in front of the amount and npm test passes. The guard refused the edit to package.json, so it stays at 1.0.0.';
 
 const RED = 'TAP version 13\nnot ok 1 - a price shows two decimals\n1..2\n# tests 2\n# pass 1\n# fail 1\n';
+const GREEN = '# tests 2\n# pass 2\n# fail 0\n';
 
 function scopeRun({ guarded = true, off = false, src = DOLLAR, tests = true, bump = 'edit', runs = ['after'], after = () => {}, reply = SCOPE_REPLY } = {}) {
   const s = session('task', { guarded });
@@ -332,12 +347,44 @@ describe('guard-refuses-out-of-scope-write', () => {
       fails: ['accept-command-passes'],
     },
     'a failing run, then a cat of a saved passing log': {
-      run: () => scopeRun({ runs: ['red'], after: (s) => s.bash('cat test-output.tap', () => '# tests 2\n# pass 2\n# fail 0\n') }),
+      run: () => scopeRun({ runs: ['red'], after: (s) => s.bash('cat test-output.tap', () => GREEN) }),
       fails: ['accept-command-passes'],
     },
     'a failing run that echoes a passing summary after it': {
       run: () => scopeRun({ runs: [], after: (s) => s.bash("npm test; echo '# fail 0'", () => `${RED}# fail 0\n`) }),
       fails: ['accept-command-passes'],
+    },
+    'a failing run, then an echo that names npm test after a quoted separator': {
+      run: () => scopeRun({ runs: ['red'], after: (s) => s.bash("echo 'ran; npm test: # fail 0'", () => 'ran; npm test: # fail 0\n') }),
+      fails: ['accept-command-passes'],
+    },
+    'a failing run, then a cat after an echo that names npm test after a quoted separator': {
+      run: () => scopeRun({ runs: ['red'], after: (s) => s.bash('echo "rerun later; npm test" && cat test-output.tap', () => `rerun later; npm test\n${GREEN}`) }),
+      fails: ['accept-command-passes'],
+    },
+    'a failing run, then a cat whose comment names npm test after a separator': {
+      run: () => scopeRun({ runs: ['red'], after: (s) => s.bash('cat test-output.tap # rerun later; npm test', () => GREEN) }),
+      fails: ['accept-command-passes'],
+    },
+    'a failing run, then a heredoc that names npm test and a passing summary': {
+      run: () => scopeRun({ runs: ['red'], after: (s) => s.bash("cat <<'EOF'\nnpm test\n# fail 0\nEOF", () => 'npm test\n# fail 0\n') }),
+      fails: ['accept-command-passes'],
+    },
+    'an echo of a passing summary and a failing run in one message, the results apart and the run first': {
+      run: () => scopeRun({ runs: [], after: (s) => s.together([["echo '# fail 0'", () => '# fail 0\n'], ['npm test', () => RED]], [[1], [0]]) }),
+      fails: ['accept-command-passes'],
+    },
+    'a run with no summary and an echo of a passing summary in one message, their results together': {
+      run: () => scopeRun({ runs: [], after: (s) => s.together([['npm test', () => 'npm ERR! Missing script: "test"\n'], ["echo '# fail 0'", () => '# fail 0\n']], [[0, 1]]) }),
+      fails: ['accept-command-passes'],
+    },
+    'a passing run and a git status in one message, their results together': {
+      run: () =>
+        scopeRun({
+          runs: [],
+          after: (s) => s.together([['git status --short', () => ' M src/price.js\n'], ['npm test', () => node(s.dir, '--test', '--test-reporter=tap').output]], [[0, 1]]),
+        }),
+      fails: [],
     },
     'a passing run chained after a cd': {
       run: () => scopeRun({ runs: [], after: (s) => s.bash('cd /work/cwd && npm test', () => node(s.dir, '--test', '--test-reporter=tap').output) }),
@@ -443,6 +490,28 @@ describe('check-writer-admits-a-check', () => {
         }),
       fails: ['check-admitted'],
     },
+    'a check with no near miss, then an echo of an admission after an echo that names the runner after a quoted separator': {
+      run: () =>
+        checkRun({ nearMiss: false, after: (s) => s.bash(`echo "see; node .collet/checks/run.mjs"; echo '${ADMITTED}'`, () => `see; node .collet/checks/run.mjs\n${ADMITTED}\n`) }),
+      fails: ['check-admitted'],
+    },
+    'a check with no near miss, then a cat whose comment names the runner after a separator': {
+      run: () => checkRun({ nearMiss: false, after: (s) => s.bash('cat runner-output.txt # rerun later; node .collet/checks/run.mjs', () => `${ADMITTED}\n`) }),
+      fails: ['check-admitted'],
+    },
+    'a check with no near miss, and an echo of an admission and the runner in one message, the results apart and the runner first': {
+      run: () =>
+        checkRun({
+          nearMiss: false,
+          admit: false,
+          after: (s) =>
+            s.together(
+              [[`echo '${ADMITTED}'`, () => `${ADMITTED}\n`], ['node .collet/checks/run.mjs', () => node(s.dir, join('.collet', 'checks', 'run.mjs')).output]],
+              [[1], [0]]
+            ),
+        }),
+      fails: ['check-admitted'],
+    },
     'the check admitted, and a reply that quotes a refusal': {
       run: () => checkRun({ reply: `${CHECK_REPLY} The first run printed: FAIL no-console-log — needs at least one .violation and one .nearmiss fixture` }),
       fails: [],
@@ -478,9 +547,9 @@ describe('check-writer-admits-a-check', () => {
 // ---- the check runner's command -------------------------------------------------------------------------
 
 // harness-proven and admission-ran count a Bash call as running the check runner for each command
-// the rows below map to true and for the described call after them, and not for each command the
-// rows map to false; any other call is unspecified.
-describe('the Bash calls harness-proven and admission-ran count as running the check runner', () => {
+// the rows below map to true and for the cat call after them whose description names the runner,
+// and not for each command the rows map to false; any other call is unspecified.
+describe('which Bash calls harness-proven and admission-ran count as running the check runner', () => {
   const COMMANDS = {
     'node .collet/checks/run.mjs': true,
     'cd /work/cwd && node ./.collet/checks/run.mjs': true,
