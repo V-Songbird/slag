@@ -6,9 +6,8 @@
 //   node .collet/task.mjs widen --add <path> --why "<reason>"
 //   node .collet/task.mjs close --left-out "..." --unverified "..."
 //
-// On a project whose work is planned elsewhere it writes nothing at all: `status` reads that
-// plan and every mutating subcommand refuses, naming the tool that owns the record. Two ledgers
-// and nobody knowing which is authoritative is worse than no ledger.
+// A planning tool's roadmap beside it owns the plan and is never read here; only this ledger
+// decides what is open.
 import {
   appendFileSync,
   existsSync,
