@@ -85,7 +85,7 @@ export function unseen(field, text) {
   return found.length ? `${field} holds characters that do not show on screen: ${nameHidden(found)}.` : null;
 }
 
-/** The open task, or null. `{ id, title, why, status, scope, accept, widenings }` */
+/** The open task, or null. `{ id, title, foreman, why, status, scope, accept, widenings }` */
 export function openTask(root) {
   const entry = colletLedger(root)
     .filter((item) => item.status === OPEN_STATUS)
@@ -94,6 +94,7 @@ export function openTask(root) {
   return {
     id: entry.id,
     title: entry.title ?? '',
+    foreman: entry.foreman ?? null,
     why: entry.why ?? '',
     status: entry.status,
     scope: entry.scope ?? [],

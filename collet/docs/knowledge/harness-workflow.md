@@ -117,6 +117,7 @@ collet owns the session boundary: the open task's writable files and the accept 
 
 - The mount writes the same files it writes anywhere else and leaves the roadmap files unchanged.
 - collet never reads the roadmap. The files an entry lists, such as `planned_touches`, are never enforced; only the open collet task's own file list is.
+- To tie a task to the Foreman entry it works, open it with `--foreman <id>`, for example `node .collet/task.mjs add --title "..." --why "..." --scope "src/cart.mjs" --foreman 189`. The id is stored on the task and shown by `task.mjs status`. The scope is derived from the code exactly as without the id. If the entry's handoff names a verification command, pass that command as `--accept`, and closing the task runs it.
 - The scope check never refuses a write to `ROADMAP.jsonl` or `.foreman/`, so the planning tool keeps updating its own records while a task is open.
 
 See [runtime contracts](runtime-contracts.md) for scope, host context and closure behavior.
