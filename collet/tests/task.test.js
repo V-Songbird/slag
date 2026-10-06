@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 
 import { CONFIG, git, mount, project, repo, task, TREE } from './temp-project.js';
@@ -208,6 +209,24 @@ test('add --foreman records the entry id, status shows it, and the scope is the 
   assert.deepEqual(withId.scope, without.scope);
   assert.ok(!withId.scope.includes('src/report.mjs'), withId.scope.join(', '));
   assert.equal(withId.accept, 'node -e 0');
+});
+
+test('list shows a linked task\'s Foreman id and state.openTask() returns it; an unlinked task has neither', async () => {
+  const args = ['add', '--title', 'window', '--why', 'w', '--scope', 'test/**,src/cli.mjs', '--accept', 'node -e 0'];
+  const openTaskOf = async (root) => (await import(pathToFileURL(join(root, '.collet', 'state.mjs')).href)).openTask(root);
+  const linked = ready();
+  assert.equal(task(linked, [...args, '--foreman', '189']).status, 0);
+  const listed = task(linked, ['list']);
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.match(listed.stdout, /^ {2}foreman: 189$/m);
+  assert.equal((await openTaskOf(linked)).foreman, '189');
+  const plain = ready();
+  assert.equal(task(plain, args).status, 0);
+  const plainList = task(plain, ['list']);
+  assert.equal(plainList.status, 0, plainList.stderr);
+  assert.match(plainList.stdout, /^task /m);
+  assert.doesNotMatch(plainList.stdout, /foreman/);
+  assert.equal((await openTaskOf(plain)).foreman, null);
 });
 
 // A passing close of a linked task prints the planning tool's status step for the session to run;
