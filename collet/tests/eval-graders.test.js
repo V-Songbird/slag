@@ -554,6 +554,20 @@ describe('check-writer-admits-a-check', () => {
       run: () => checkRun({ after: (s) => s.edit('AGENTS.md', 'Run `npm test` to check a change.', 'Run `npm test` to check a change. No console.log in src/.') }),
       fails: ['agents-md-text-kept'],
     },
+    'a second collet block appended to AGENTS.md': {
+      run: () =>
+        checkRun({
+          after: (s) => {
+            const text = read(s.dir, 'AGENTS.md');
+            s.write('AGENTS.md', `${text}${text.slice(text.indexOf('<!-- collet:begin'))}`);
+          },
+        }),
+      fails: ['agents-md-text-kept'],
+    },
+    'text inserted between the map text and the collet block': {
+      run: () => checkRun({ after: (s) => s.edit('AGENTS.md', '<!-- collet:begin', 'No console.log in src/.\n\n<!-- collet:begin') }),
+      fails: ['agents-md-text-kept'],
+    },
     'a console.log removed from src/price.js': {
       run: () => checkRun({ after: (s) => s.edit('src/price.js', '}\n', '}\n// checked: no console.log\n') }),
       fails: ['price-unchanged'],
