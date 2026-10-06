@@ -866,19 +866,28 @@ describe("migration-applies-approved-step", () => {
     }
   });
 
-  test("checks-pass-after-the-move counts a mv that starts a command, not one an echo prints", () => {
+  // Bash calls that hold the move `mv`, and whether checks-pass-after-the-move
+  // counts it. Any word-start mv counts, an echoed one included; a printed \n
+  // does not start a line.
+  const mvForms = (mv) => [
+    [mv, true],
+    [`git status --short; ${mv}`, true],
+    [`ls src && ${mv} && ls src`, true],
+    [`git switch -c b\n${mv}`, true],
+    [`git switch -c b\n\t${mv}`, true],
+    [`git -C . ${mv}`, true],
+    [`if true; then ${mv}; fi`, true],
+    [`sudo ${mv}`, true],
+    [`\\${mv}`, true],
+    [`echo "${mv}"`, true],
+    [`printf 'a\\n${mv}\\n'`, false],
+  ];
+
+  test("checks-pass-after-the-move counts a mv at any word start or line start of a Bash call", () => {
     const grader = checks["checks-pass-after-the-move"];
-    const MV = "mv src/utils.js src/money.js";
-    const cases = [
-      [MV, true],
-      [`git status --short; ${MV}`, true],
-      [`ls src && ${MV} && ls src`, true],
-      [`echo "${MV}"`, false],
-      [`echo ${MV}`, false],
-      [`echo "git ${MV}"`, false],
-    ];
-    for (const [command, expected] of cases) {
-      const run = migrate((dir, step) => approvedStep(dir, (text, perform) => step(text === MV ? command : text, perform), { plainMove: true }));
+    const mv = "mv src/utils.js src/money.js";
+    for (const [command, expected] of mvForms(mv)) {
+      const run = migrate((dir, step) => approvedStep(dir, (text, perform) => step(text === mv ? command : text, perform), { plainMove: true }));
       assert.strictEqual(passes(grader, run), expected, command);
     }
   });
@@ -1096,6 +1105,15 @@ describe("migration-applies-approved-step", () => {
       for (const [name, steps, text, expected] of cases) {
         const run = migrate(steps);
         assert.strictEqual(passes(grader, { ...run, trace: withReply(run.trace, text) }), expected, name);
+      }
+    });
+
+    test("checks-pass-after-the-move counts a mv at any word start or line start of a Bash call", () => {
+      const grader = newChecks["checks-pass-after-the-move"];
+      const mv = `mv src/utils.js ${TO}`;
+      for (const [command, expected] of mvForms(mv)) {
+        const run = migrate((dir, step) => newDirectoryStep(dir, (text, perform) => step(text === mv ? command : text, perform), { plainMove: true }));
+        assert.strictEqual(passes(grader, run), expected, command);
       }
     });
 
