@@ -30,6 +30,10 @@ All notable changes to collet are documented here. The format follows
   command pass, the Foreman `update-status` step that marks the entry `awaiting_acceptance`, for
   the session to run after committing. collet does not write `ROADMAP.jsonl` or `.foreman/`, and
   the close of a task without the id prints what it printed before.
+- A task opened with `--foreman <id>` keeps what nobody checked in the Foreman entry's
+  `unverified:` note lines. Its passing close prints the `--unverified` text with that pointer
+  instead of adding it to `.collet/unverified.md`, and the session start and the compaction note
+  point to the entry's notes. A task without the id uses `.collet/unverified.md` as before.
 
 ### Changed
 

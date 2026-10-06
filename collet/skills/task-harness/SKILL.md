@@ -78,7 +78,10 @@ task. Derive the collet task's scope from the code, as above; never copy it from
 entry's `planned_touches`, which is that tool's forecast and is never enforced. When the session
 works a Foreman entry, pass its id with `--foreman <id>` on `task.mjs add`: the id is recorded on
 the task and shown by `status`, and it changes nothing about the scope. When the entry's handoff
-names a verification command, it can be the task's `--accept`. Do not edit
+names a verification command, it can be the task's `--accept`. For a task with that id, what
+nobody checked belongs in the entry's `unverified:` note lines: its close prints the
+`--unverified` text with that pointer and does not add it to `.collet/unverified.md`, which stays
+the record for tasks without the id. Do not edit
 `ROADMAP.jsonl` or `.foreman/` from this skill; the scope check never refuses the planning tool's
 own writes to them.
 

@@ -475,7 +475,8 @@ switch (command) {
       console.error('"nothing" is a valid answer for either, and it goes on the record as a claim.');
       process.exit(2);
     }
-    // Both go into the ledger and .collet/unverified.md, which sessions read back.
+    // Both go into the ledger, which sessions read back, and so does .collet/unverified.md for a
+    // task without a Foreman id.
     refuseUnseen(
       [
         ['--left-out', args.leftOut],
@@ -518,13 +519,17 @@ switch (command) {
     entry.closed = new Date().toISOString().slice(0, 10);
     writeLedger(tasks);
 
-    const unverified = join(STATE, 'unverified.md');
-    const header = existsSync(unverified) ? readFileSync(unverified, 'utf8').replace(/\s*$/, '') : '# Not checked\n';
-    writeFileSync(
-      unverified,
-      `${header}\n- ${entry.closed} ${entry.id}: ${args.unverified}\n- ${entry.closed} ${entry.id} left out: ${args.leftOut}\n`,
-      'utf8'
-    );
+    // A linked task's unchecked claims belong in the Foreman entry's `unverified:` note lines, so
+    // they are not kept a second time here.
+    if (!entry.foreman) {
+      const unverified = join(STATE, 'unverified.md');
+      const header = existsSync(unverified) ? readFileSync(unverified, 'utf8').replace(/\s*$/, '') : '# Not checked\n';
+      writeFileSync(
+        unverified,
+        `${header}\n- ${entry.closed} ${entry.id}: ${args.unverified}\n- ${entry.closed} ${entry.id} left out: ${args.leftOut}\n`,
+        'utf8'
+      );
+    }
 
     // The handoff described a task that is now finished. Left behind, it is stated at every
     // future session start as if the work were still open.
@@ -536,6 +541,7 @@ switch (command) {
     if (entry.foreman) {
       const step = JSON.stringify({ id: entry.foreman, status: 'awaiting_acceptance', commit: '<commit sha>' });
       console.log(`Foreman entry ${entry.foreman}: commit this work, then run echo '${step}' | node <Foreman plugin root>/scripts/roadmap.js update-status`);
+      console.log(`What nobody checked belongs in that entry's notes as unverified: lines, not in .collet/unverified.md: ${args.unverified}`);
     }
     break;
   }

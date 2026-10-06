@@ -89,7 +89,13 @@ if (askFirst.length) {
 const conventions = configured('conventions');
 if (conventions.length) lines.push(`Conventions that constrain a change here: ${conventions.join(' ')}`);
 
-if (fileText(dir, 'unverified.md')) lines.push('What nobody has checked yet is in .collet/unverified.md.');
+// A task linked to a Foreman entry keeps its unchecked claims in that entry's notes.
+const foreman = task?.foreman && visible(`the Foreman id of task ${task.id}`, String(task.foreman));
+if (foreman) {
+  lines.push(`What nobody has checked for task ${task.id} belongs in the unverified: lines of Foreman entry ${foreman}'s notes.`);
+} else if (fileText(dir, 'unverified.md')) {
+  lines.push('What nobody has checked yet is in .collet/unverified.md.');
+}
 
 const handoff = fileText(dir, 'handoff.md');
 if (handoff) {
