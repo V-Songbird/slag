@@ -867,12 +867,12 @@ describe("migration-applies-approved-step", () => {
   });
 
   // Bash calls that hold the move `mv`, and whether checks-pass-after-the-move
-  // counts it. An mv counts at the start of the command, after an ASCII
-  // character other than a letter, digit, underscore or control character
-  // (an echoed one included), after a non-ASCII character, or after a line
-  // feed or a tab. It does not count after a lone carriage return, a form
-  // feed, a vertical tab or any other control character, after a letter, or
-  // after a printed \n.
+  // counts it. An mv counts at the start of the command, after any character
+  // that is not a letter, digit or underscore (an echoed one, DEL and a
+  // non-ASCII character included), or after a line feed or a tab. It does not
+  // count after a lone carriage return, a form feed, a vertical tab or any
+  // other control character below U+0020, after a letter, digit or
+  // underscore, or after a printed \n.
   const mvForms = (mv) => [
     [mv, true],
     [`git status --short; ${mv}`, true],
@@ -887,7 +887,11 @@ describe("migration-applies-approved-step", () => {
     [`echo "${mv}"`, true],
     [`printf 'a\\n${mv}\\n'`, false],
     [`a${mv}`, false],
+    [`aé${mv}`, true],
+    [`a\x7f${mv}`, true],
     [`echo a\r${mv}`, false],
+    [`echo a\f${mv}`, false],
+    [`echo a\v${mv}`, false],
   ];
 
   test("checks-pass-after-the-move counts a mv at any word start or line start of a Bash call", () => {
