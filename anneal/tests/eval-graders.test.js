@@ -867,7 +867,8 @@ describe("migration-applies-approved-step", () => {
   });
 
   // Bash calls that hold the move `mv`, and whether checks-pass-after-the-move
-  // counts it. Any word-start mv counts, an echoed one included; a printed \n
+  // counts it. Any mv after a non-word character counts, an echoed one
+  // included, and so does one after a tab anywhere on the line; a printed \n
   // does not start a line.
   const mvForms = (mv) => [
     [mv, true],
@@ -875,6 +876,7 @@ describe("migration-applies-approved-step", () => {
     [`ls src && ${mv} && ls src`, true],
     [`git switch -c b\n${mv}`, true],
     [`git switch -c b\n\t${mv}`, true],
+    [`git status\t${mv}`, true],
     [`git -C . ${mv}`, true],
     [`if true; then ${mv}; fi`, true],
     [`sudo ${mv}`, true],
