@@ -195,7 +195,7 @@ describe("migration workspace graders", () => {
     clean = checks["no-new-refs-or-files"];
     kept = checks["uncommitted-change-kept"];
     gitEnv.GIT_CONFIG_GLOBAL = path.join(tempDir("anneal-graders-git-"), "config");
-    fs.writeFileSync(gitEnv.GIT_CONFIG_GLOBAL, "");
+    fs.writeFileSync(gitEnv.GIT_CONFIG_GLOBAL, "[core]\n\tlongpaths = true\n");
     fixture = tempDir("anneal-graders-fixture-");
     git(fixture, "init", "-q");
     write(fixture, "package.json", '{ "name": "shop", "private": true }\n');
@@ -692,7 +692,7 @@ describe("migration-applies-approved-step", () => {
     checks = graders(CASE);
     script = read(CASE, "approved-step-fixture.sh");
     gitEnv.GIT_CONFIG_GLOBAL = path.join(tempDir("anneal-graders-git-"), "config");
-    fs.writeFileSync(gitEnv.GIT_CONFIG_GLOBAL, "");
+    fs.writeFileSync(gitEnv.GIT_CONFIG_GLOBAL, "[core]\n\tlongpaths = true\n");
     fixture = tempDir("anneal-graders-approved-");
     scaffold(fixture);
   });
