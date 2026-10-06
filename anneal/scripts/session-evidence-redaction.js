@@ -164,14 +164,18 @@ function excerpt(value, size = 480) {
 
 // The start of a Node import error's line, as Node prints it or as the error field of its test runner's TAP report, or
 // -1: the first line with "Cannot find " before " imported from ". It names the workspace path twice and ends with the
-// importing file. Only lines holding " imported from " are tested, each once, so the scan stays linear in the output.
+// importing file. A lone \r starts a line as \n does, so progress text a program rewrote before the error is not part of
+// it. Only lines holding " imported from " are tested, each once, so the scan stays linear in the output.
 function importErrorStart(output) {
   for (let at = output.indexOf(" imported from "); at !== -1;) {
     const start = output.lastIndexOf("\n", at) + 1;
     const end = output.indexOf("\n", at);
-    const line = output.slice(start, end === -1 ? output.length : end);
-    const found = /\bCannot find /.exec(line);
-    if (found && found.index + "Cannot find ".length <= line.lastIndexOf(" imported from ")) return start;
+    let head = start;
+    for (const line of output.slice(start, end === -1 ? output.length : end).split("\r")) {
+      const found = /\bCannot find /.exec(line);
+      if (found && found.index + "Cannot find ".length <= line.lastIndexOf(" imported from ")) return head;
+      head += line.length + 1;
+    }
     if (end === -1) return -1;
     at = output.indexOf(" imported from ", end);
   }
@@ -186,7 +190,7 @@ function failureExcerpt(output, named, size = 480) {
   const imported = named ? -1 : importErrorStart(output);
   if (imported === -1) return excerpt(output.slice(named ? Math.max(0, named.index - 100) : 0), size);
   const text = redact(output.slice(imported));
-  const line = text.split("\n", 1)[0];
+  const line = text.split(/\r?\n|\r/, 1)[0];
   if (line.length <= size) return cut(text, size);
   const file = line.slice(line.lastIndexOf(" imported from ") + " imported from ".length);
   const room = size - 120;

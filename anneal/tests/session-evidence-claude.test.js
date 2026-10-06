@@ -124,6 +124,21 @@ describe("a Claude Code transcript", () => {
     }
   }
 
+  test("a Node import error after progress text rewritten with \\r on its line keeps the error and the importing file", () => {
+    const cwd = `/work/${"deep-folder/".repeat(20)}shop`;
+    const progress = Array.from({ length: 40 }, (_, step) => `compiling ${step + 1}/40`).join("\r");
+    const report = analyzeClaude(transcript([
+      human("run the suite", 1),
+      use("t1", "Bash", { command: "npm test" }, 2),
+      result("t1", `Exit code 1\n${progress}\rError [ERR_MODULE_NOT_FOUND]: Cannot find module '${cwd}/src/round' `
+        + `imported from ${cwd}/src/cart.js\nDid you mean to import "./round.js"?\n# fail 1`, 3, true),
+      human("audit", 4),
+    ]));
+    const [failure] = report.candidates;
+    assert.ok(failure.diagnosticCandidate.startsWith("Error [ERR_MODULE_NOT_FOUND]: Cannot find module "), failure.diagnosticCandidate);
+    assert.ok(failure.diagnosticCandidate.endsWith(`imported from ${cwd}/src/cart.js`), failure.diagnosticCandidate);
+  });
+
   test("a command cmd.exe cannot find is a missing command", () => {
     const report = analyzeClaude(transcript([
       human("run it", 1),
