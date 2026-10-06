@@ -644,9 +644,9 @@ describe("migration-applies-approved-step", () => {
     return { passed: run.status === 0, output: `${run.stdout}${run.stderr}` };
   }
 
-  // A run on a copy of the fixture. Each step is a Bash call and its trace
-  // events, done here for real; the run keeps the calls, the created paths and
-  // the trace.
+  // A run on a copy of the fixture. Each step is a Bash call, or the call a
+  // third argument `{ name, input }` gives instead, plus its trace events, done
+  // here for real; the run keeps the calls, the created paths and the trace.
   function migrate(steps) {
     const dir = tempDir("anneal-graders-approved-run-");
     fs.cpSync(fixture, dir, { recursive: true });
@@ -655,9 +655,9 @@ describe("migration-applies-approved-step", () => {
     // expanded skill reads its conventions before it plans.
     const calls = [{ name: "Read", input: { file_path: "/plugins/anneal/skills/repo-layout/references/conventions.md" } }];
     const events = [];
-    const bashStep = (command, perform) => {
-      calls.push({ name: "Bash", input: { command } });
-      events.push({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: `toolu_${events.length}`, name: "Bash", input: { command } }] } });
+    const bashStep = (command, perform, { name, input } = { name: "Bash", input: { command } }) => {
+      calls.push({ name, input });
+      events.push({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: `toolu_${events.length}`, name, input }] } });
       const output = perform() ?? "";
       events.push({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: `toolu_${events.length - 1}`, content: output }] } });
     };
@@ -668,6 +668,13 @@ describe("migration-applies-approved-step", () => {
   const move = (dir, to) => JSON.stringify(updateImports({ root: dir, from: "src/utils.js", to }));
   const commit = (dir, subject) => git(dir, "commit", "-qm", subject, "-m", "src/utils.js moved; the imports that named it follow.");
   const rename = (dir) => fs.renameSync(path.join(dir, "src/utils.js"), path.join(dir, "src/money.js"));
+  // The move `mv` run from a script: a Write call outside the workspace holds
+  // the command, and the Bash call that runs the script does not name it.
+  const fromScript = (step, mv) => (command, perform) => {
+    if (command !== mv) return step(command, perform);
+    step(null, () => "File created successfully at: /tmp/move.sh", { name: "Write", input: { file_path: "/tmp/move.sh", content: `${mv}\n` } });
+    step("sh /tmp/move.sh", perform);
+  };
 
   // The approved step as the skill applies it. `checks` is the command that
   // reruns the checks after the move.
@@ -717,6 +724,10 @@ describe("migration-applies-approved-step", () => {
     "the approved step with its check output saved to a file": {
       steps: (dir, step) => approvedStep(dir, step, { checks: "npm test > /tmp/checks.out 2>&1; cat /tmp/checks.out; rm -f /tmp/checks.out" }),
       fails: ["checks-run-without-a-file"],
+    },
+    "the move run from a script a Write call holds": {
+      steps: (dir, step) => approvedStep(dir, fromScript(step, "mv src/utils.js src/money.js"), { plainMove: true }),
+      fails: ["checks-pass-after-the-move"],
     },
     "no migration": {
       steps: () => {},
@@ -1012,6 +1023,10 @@ describe("migration-applies-approved-step", () => {
       "the check output saved to a file": {
         steps: (dir, step) => newDirectoryStep(dir, step, { checks: "npm test 2>&1 | tee /tmp/checks.out" }),
         fails: ["checks-run-without-a-file"],
+      },
+      "the move run from a script a Write call holds": {
+        steps: (dir, step) => newDirectoryStep(dir, fromScript(step, `git mv src/utils.js ${TO}`)),
+        fails: ["checks-pass-after-the-move"],
       },
       "the move kept in src, as the other case approves": {
         steps: (dir, step) => approvedStep(dir, step),
