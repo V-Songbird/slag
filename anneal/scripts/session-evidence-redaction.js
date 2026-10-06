@@ -163,8 +163,8 @@ function excerpt(value, size = 480) {
 }
 
 // The start of a Node import error's line, as Node prints it or as the error field of its test runner's TAP report, or
-// -1: the first line with "Cannot find " before " imported from ". It names the workspace path twice and ends with the
-// importing file. A lone \r starts a line as \n does, so progress text a program rewrote before the error is not part of
+// -1: the first line with "Cannot find " before " imported from ". It ends with the importing file; the module form
+// usually names the workspace path twice, while the package form names a package and the workspace path once. A lone \r starts a line as \n does, so progress text a program rewrote before the error is not part of
 // it. Only lines holding " imported from " are tested, each once, so the scan stays linear in the output.
 function importErrorStart(output) {
   for (let at = output.indexOf(" imported from "); at !== -1;) {
@@ -184,8 +184,9 @@ function importErrorStart(output) {
 
 // The excerpt of a failed call's output, from a little before the diagnostic named in it or else from its start. With
 // no diagnostic named, a Node import error's excerpt starts at the error's line, and a line too long for the excerpt
-// loses its middle instead of its end, so the excerpt ends with "imported from" and the importing file. An importing
-// path longer than the excerpt less 120 characters keeps its end; the closing quote of the TAP form is not counted.
+// loses its middle instead of its end, so the excerpt ends with "imported from" and the importing file and holds
+// "imported from" once. An importing path longer than the excerpt less 120 characters keeps its end; the closing quote
+// of the TAP form is not counted.
 function failureExcerpt(output, named, size = 480) {
   const imported = named ? -1 : importErrorStart(output);
   if (imported === -1) return excerpt(output.slice(named ? Math.max(0, named.index - 100) : 0), size);
@@ -193,10 +194,12 @@ function failureExcerpt(output, named, size = 480) {
   const line = text.split(/\r?\n|\r/, 1)[0];
   if (line.length <= size) return cut(text, size);
   const quote = line.endsWith('"') ? '"' : "";
-  const file = line.slice(line.lastIndexOf(" imported from ") + " imported from ".length, line.length - quote.length);
+  const from = line.lastIndexOf(" imported from ");
+  const file = line.slice(from + " imported from ".length, line.length - quote.length);
   const room = size - 120;
   const tail = ` imported from ${file.length > room ? `[excerpt truncated] ${file.slice(-room)}` : file}${quote}`;
-  return `${line.slice(0, size - tail.length)} [excerpt truncated]${tail}`;
+  const kept = Math.min(size - tail.length, from);
+  return `${line.slice(0, kept)}${kept < from ? " [excerpt truncated]" : ""}${tail}`;
 }
 
 // A field that names the session, its model or agent is copied as written, cut to the same bound.

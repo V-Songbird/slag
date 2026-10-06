@@ -81,6 +81,28 @@ describe("a Codex rollout", () => {
     }
   }
 
+  // A missing package and a missing module outside the workspace name the workspace path once, after "imported from".
+  for (const cwd of [40, 60].map((folders) => `/work/${"deep-folder/".repeat(folders)}shop`)) {
+    const errors = {
+      "package, node": `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'left-pad' imported from ${cwd}/src/cart.js\n# fail 1`,
+      "package, tap": `not ok 1 - cart\n  ---\n  error: "Cannot find package 'left-pad' imported from ${cwd}/src/cart.js"\n  ...\n# fail 1`,
+      "outside module, node": `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/opt/lib/round' imported from ${cwd}/src/cart.js\n# fail 1`,
+    };
+    for (const [form, text] of Object.entries(errors)) {
+      test(`a Node import error says "imported from" once in its excerpt with a ${cwd.length}-character workspace path (${form})`, () => {
+        const report = analyzeCodex(transcript([
+          meta, started(1),
+          call("c1", "npm test", 2),
+          output("c1", [JSON.stringify({ exit_code: 1, output: text })], 3),
+          started(4),
+        ]));
+        const [failure] = report.candidates;
+        assert.strictEqual(failure.diagnosticCandidate.split(" imported from ").length, 2, failure.diagnosticCandidate);
+        assert.ok(/cart\.js"?$/.test(failure.diagnosticCandidate), failure.diagnosticCandidate);
+      });
+    }
+  }
+
   test("a Node import error after progress text rewritten with \\r on its line keeps the error and the importing file", () => {
     const cwd = `/work/${"deep-folder/".repeat(20)}shop`;
     const progress = Array.from({ length: 40 }, (_, step) => `compiling ${step + 1}/40`).join("\r");
