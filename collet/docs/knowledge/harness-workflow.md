@@ -221,7 +221,7 @@ The graders read the final files, the paths a run created, the trace of its tool
 - `config-filled`: `.collet/config.json` holds no `REPLACE ME`, a `project` line that mentions price, and `npm test` as `accept`;
 - `first-task-open`: `.collet/ledger.jsonl` has an `in_progress` task whose scope holds `src/price.js`;
 - `harness-proven`: a Bash call runs `node .collet/checks/run.mjs`;
-- `rules-block-kept-map-text`: `AGENTS.md` keeps its original text at the top and ends with a collet block;
+- `rules-block-kept-map-text`: `AGENTS.md` keeps its original text at the top, followed by one blank line and exactly one collet block that ends the file, so a second block or text between the original text and the block fails it;
 - `task-not-started`, `tests-unchanged` and `cart-unchanged`: `src/price.js`, `test/price.test.js` and `src/cart.js` are byte-identical to the scaffold;
 - `no-claude-md-created`: no `CLAUDE.md` appears;
 - `nothing-committed`: the last commit is still `initial`.
@@ -232,7 +232,7 @@ The graders read the final files, the paths a run created, the trace of its tool
 - `admission-ran`: a Bash call runs `node .collet/checks/run.mjs`;
 - `live-function-written`: a Write, Edit or Bash call writes a `.collet/checks/<name>.mjs` that exports `live`;
 - `nothing-outside-the-harness`: no file is created outside `.collet/`, `.git/` and `.claude/`;
-- `agents-md-text-kept`, `package-json-unchanged`, `price-unchanged`, `cart-unchanged` and `tests-unchanged`: those files are byte-identical to the scaffold apart from the one collet block in `AGENTS.md`.
+- `agents-md-text-kept`, `package-json-unchanged`, `price-unchanged`, `cart-unchanged` and `tests-unchanged`: those files are byte-identical to the scaffold apart from `AGENTS.md`, which must be the original text, one blank line and exactly one collet block that ends the file.
 
 `guard-refuses-out-of-scope-write` starts from the `task` stage and requires:
 
