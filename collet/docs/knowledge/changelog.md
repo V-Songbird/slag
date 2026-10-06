@@ -22,6 +22,10 @@ All notable changes to collet are documented here. The format follows
   section: the command for the three eval cases, the WSL2 or Linux sandbox they need, what each
   case grades, and that the cases have not run in a live session yet. One case grades its reply
   with judge-model graders, which are billed on each of that case's runs.
+- `task.mjs add --foreman <id>` records the Foreman entry a task works, and `task.mjs status`
+  shows it. The task's scope is derived from the code as before and never from the entry's
+  `planned_touches`. An id of the wrong form, or one holding characters that do not show on
+  screen, is refused and no task is opened.
 
 ### Changed
 

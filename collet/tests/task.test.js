@@ -188,6 +188,47 @@ test('the harness is kept out of a scope in any letter case, and a lookalike nam
   assert.match(readFileSync(ledger, 'utf8'), /"\.colletrc"/);
 });
 
+// A planning tool's entry id is a label on the task. It never reaches the scope: the roadmap's files
+// are a forecast, and the task's scope is derived from the code either way.
+test('add --foreman records the entry id, status shows it, and the scope is the same without it', () => {
+  const ledgerOf = (root) => readFileSync(join(root, '.collet', 'ledger.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  const args = ['add', '--title', 'window', '--why', 'w', '--scope', 'test/**,src/cli.mjs', '--accept', 'node -e 0'];
+  const linked = ready({ 'ROADMAP.jsonl': '{"id":"189","planned_touches":["src/report.mjs"]}\n' });
+  const added = task(linked, [...args, '--foreman', '189']);
+  assert.equal(added.status, 0, added.stderr);
+  assert.match(added.stdout, /^ {2}foreman: 189$/m);
+  assert.match(task(linked, ['status']).stdout, /^ {2}foreman: 189$/m);
+  const plain = ready();
+  assert.equal(task(plain, args).status, 0);
+  assert.doesNotMatch(task(plain, ['status']).stdout, /foreman/);
+  const [withId] = ledgerOf(linked);
+  const [without] = ledgerOf(plain);
+  assert.equal(withId.foreman, '189');
+  assert.equal('foreman' in without, false);
+  assert.deepEqual(withId.scope, without.scope);
+  assert.ok(!withId.scope.includes('src/report.mjs'), withId.scope.join(', '));
+  assert.equal(withId.accept, 'node -e 0');
+});
+
+test('add refuses a --foreman id of the wrong form or with characters nobody sees, and records nothing', () => {
+  const root = ready();
+  const ledger = join(root, '.collet', 'ledger.jsonl');
+  const args = ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs'];
+  for (const id of ['', ' 189', '189 190', '../189', '-189', 'x'.repeat(65)]) {
+    const out = task(root, [...args, '--foreman', id]);
+    assert.equal(out.status, 2, JSON.stringify(id));
+    assert.match(out.stderr, /--foreman takes an entry id/, JSON.stringify(id));
+    assert.equal(existsSync(ledger), false, JSON.stringify(id));
+  }
+  const hidden = task(root, [...args, '--foreman', '189\u200B']);
+  assert.equal(hidden.status, 2);
+  assert.match(hidden.stderr, /^--foreman holds characters that do not show on screen: U\+200B\.$/m);
+  assert.match(hidden.stderr, /^No task was opened\. /m);
+  assert.equal(existsSync(ledger), false);
+  assert.match(task(root, [...args, '--foreman']).stderr, /--foreman needs a value/);
+  assert.equal(existsSync(ledger), false);
+});
+
 test('a task cannot be opened while the config still carries its placeholders', () => {
   const root = project(TREE);
   mount(root);

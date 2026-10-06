@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The only writer of .collet/ledger.jsonl, and the only thing that runs a task's accept command.
 //
-//   node .collet/task.mjs add --title "..." --why "..." --scope "src/**,test/**" --accept "npm test"
+//   node .collet/task.mjs add --title "..." --why "..." --scope "src/**,test/**" --accept "npm test" [--foreman <id>]
 //   node .collet/task.mjs status | list
 //   node .collet/task.mjs widen --add <path> --why "<reason>"
 //   node .collet/task.mjs close --left-out "..." --unverified "..."
@@ -172,10 +172,14 @@ const VALUE_EXPECTED = {
   '--unverified': 'unverified',
   '--title': 'title',
   '--accept': 'accept',
+  '--foreman': 'foreman',
 };
 
+// A planning tool's entry id: a label only, never looked up, so its form is all there is to check.
+const FOREMAN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
 function flags(argv) {
-  const out = { add: [], scope: [], why: null, leftOut: null, unverified: null, title: null, accept: null };
+  const out = { add: [], scope: [], why: null, leftOut: null, unverified: null, title: null, accept: null, foreman: null };
   for (let i = 0; i < argv.length; i += 1) {
     const key = VALUE_EXPECTED[argv[i]];
     if (!key) continue;
@@ -233,6 +237,7 @@ const pathField = (flag, path) => `${flag} ${JSON.stringify(path.replace(HIDDEN_
 function describe(task) {
   return [
     `task ${task.id} — ${task.title} [${task.status}]`,
+    task.foreman ? `  foreman: ${task.foreman}` : null,
     `  why:    ${task.why ?? ''}`,
     `  scope:  ${(task.scope ?? []).join(', ')}`,
     `  accept: ${task.accept ?? 'none recorded'}`,
@@ -355,9 +360,15 @@ switch (command) {
         ['--why', args.why],
         ...scope.map((path) => [pathField('--scope', path), path]),
         [args.accept ? '--accept' : 'the accept command in .collet/config.json', accept],
+        ...(args.foreman === null ? [] : [['--foreman', args.foreman]]),
       ],
       'No task was opened.'
     );
+    if (args.foreman !== null && !FOREMAN_ID.test(args.foreman)) {
+      console.error('--foreman takes an entry id such as 189: letters, digits, ".", "_" or "-", up to 64');
+      console.error('characters, starting with a letter or digit. No task was opened.');
+      process.exit(2);
+    }
     if (task) {
       console.error(`task ${task.id} is still open. Close it before opening another.`);
       process.exit(2);
@@ -373,6 +384,7 @@ switch (command) {
     const entry = {
       id: nextId(tasks),
       title: args.title,
+      ...(args.foreman === null ? {} : { foreman: args.foreman }),
       why: args.why,
       status: 'in_progress',
       scope: closed,
