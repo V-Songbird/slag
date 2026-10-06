@@ -75,7 +75,10 @@ Look for a `ROADMAP.jsonl` at the project root or a `.foreman/` directory. If ei
 The planning tool decides what work comes next, which files an entry expects to touch and when
 the entry is done. collet decides what the open session may write and which command finishes the
 task. Derive the collet task's scope from the code, as above; never copy it from the roadmap
-entry's `planned_touches`, which is that tool's forecast and is never enforced. Do not edit
+entry's `planned_touches`, which is that tool's forecast and is never enforced. When the session
+works a Foreman entry, pass its id with `--foreman <id>` on `task.mjs add`: the id is recorded on
+the task and shown by `status`, and it changes nothing about the scope. When the entry's handoff
+names a verification command, it can be the task's `--accept`. Do not edit
 `ROADMAP.jsonl` or `.foreman/` from this skill; the scope check never refuses the planning tool's
 own writes to them.
 

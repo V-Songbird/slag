@@ -48,8 +48,8 @@ that held such characters and their code points, counting tags and never decodin
 without them reads exactly as before.
 
 The same characters, with the same exceptions, are refused where that text is written, and a
-refusal writes nothing. `task.mjs add` refuses a title, `--why` reason, scope entry or accept
-command holding one, an accept command taken from the config included; `task.mjs widen` refuses an
+refusal writes nothing. `task.mjs add` refuses a title, `--why` reason, scope entry, accept
+command or `--foreman` id holding one, an accept command taken from the config included; `task.mjs widen` refuses an
 added path or its reason; `task.mjs close` refuses `--left-out` or `--unverified` text before the
 live checks or the accept command run, so the task stays open. `mount.mjs` refuses an
 `--ask-first` value, `--accept` and an `--ask-rule` value, and an `ask_first` entry in
@@ -66,6 +66,12 @@ out as above.
 The task CLI owns its ledger. Opening a task requires filled configuration and resolves supported
 JavaScript/TypeScript imports to include the directly related files. Widening records a reason and
 only expands from the added entries. Other language scopes must be derived from their source.
+
+`task.mjs add --foreman <id>` records a planning tool's entry id as `foreman` on the task, and
+`status` and `list` show it. The id is a label: collet never looks it up, so it must be 1 to 64
+letters, digits, `.`, `_` or `-`, starting with a letter or digit, and is refused otherwise. The
+scope and accept command are the same as for the task opened without it. A task opened without
+the option has no `foreman` field and reads as before.
 
 Scope accepts literal files, folders and supported globs. Reads are allowed outside writable
 scope. Literal shell deletion checks every operand; moving checks source and destination, while
