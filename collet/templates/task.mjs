@@ -532,6 +532,11 @@ switch (command) {
     pruneGuardLog(entry.id);
 
     console.log(`task ${entry.id} closed. Nothing changed outside its files, and the accept command exited 0.`);
+    // Printed for the session to run: the planning tool owns its records, so nothing is written there.
+    if (entry.foreman) {
+      const step = JSON.stringify({ id: entry.foreman, status: 'awaiting_acceptance', commit: '<commit sha>' });
+      console.log(`Foreman entry ${entry.foreman}: commit this work, then run echo '${step}' | node <Foreman plugin root>/scripts/roadmap.js update-status`);
+    }
     break;
   }
 

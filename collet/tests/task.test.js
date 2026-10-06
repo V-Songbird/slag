@@ -210,6 +210,31 @@ test('add --foreman records the entry id, status shows it, and the scope is the 
   assert.equal(withId.accept, 'node -e 0');
 });
 
+// A passing close of a linked task prints the planning tool's status step for the session to run;
+// collet writes nothing of the planning tool's own.
+for (const [name, linked, passes] of [
+  ['a linked passing close prints the Foreman update-status step', true, true],
+  ['a linked failing close prints no Foreman step', true, false],
+  ['an unlinked passing close prints no Foreman step', false, true],
+]) {
+  test(`${name} and leaves ROADMAP.jsonl and .foreman/ unchanged`, () => {
+    const roadmap = '{"id":"190","status":"in_progress"}\n';
+    const root = ready({ 'ROADMAP.jsonl': roadmap, '.foreman/config.json': '{}\n' });
+    repo(root);
+    const accept = passes ? 'node -e 0' : 'node -e "process.exit(3)"';
+    const opened = task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs', '--accept', accept, ...(linked ? ['--foreman', '190'] : [])]);
+    assert.equal(opened.status, 0, opened.stderr);
+    const out = task(root, ['close', '--left-out', 'nothing', '--unverified', 'nothing']);
+    assert.equal(out.status, passes ? 0 : 1, out.stdout + out.stderr);
+    const step = /^Foreman entry 190: commit this work, then run echo '\{"id":"190","status":"awaiting_acceptance","commit":"<commit sha>"\}' \| node <Foreman plugin root>\/scripts\/roadmap\.js update-status\r?$/m;
+    if (linked && passes) assert.match(out.stdout, step);
+    else assert.doesNotMatch(out.stdout + out.stderr, /Foreman|awaiting_acceptance/);
+    assert.equal(readFileSync(join(root, 'ROADMAP.jsonl'), 'utf8'), roadmap);
+    assert.deepEqual(readdirSync(join(root, '.foreman')), ['config.json']);
+    assert.equal(readFileSync(join(root, '.foreman', 'config.json'), 'utf8'), '{}\n');
+  });
+}
+
 test('add refuses a --foreman id of the wrong form or with characters nobody sees, and records nothing', () => {
   const root = ready();
   const ledger = join(root, '.collet', 'ledger.jsonl');
