@@ -644,9 +644,9 @@ describe("migration-applies-approved-step", () => {
     return { passed: run.status === 0, output: `${run.stdout}${run.stderr}` };
   }
 
-  // A run on a copy of the fixture. Each step is a tool call, a Bash call
-  // unless `tool` names another, and its trace events, done here for real; the
-  // run keeps the calls, the created paths and the trace.
+  // A run on a copy of the fixture. Each step is a Bash call, or the call a
+  // third argument `{ name, input }` gives instead, plus its trace events, done
+  // here for real; the run keeps the calls, the created paths and the trace.
   function migrate(steps) {
     const dir = tempDir("anneal-graders-approved-run-");
     fs.cpSync(fixture, dir, { recursive: true });
