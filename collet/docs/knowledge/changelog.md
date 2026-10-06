@@ -26,6 +26,10 @@ All notable changes to collet are documented here. The format follows
   shows it. The task's scope is derived from the code as before and never from the entry's
   `planned_touches`. An id of the wrong form, or one holding characters that do not show on
   screen, is refused and no task is opened.
+- `task.mjs close` of a task opened with `--foreman <id>` prints, when its checks and accept
+  command pass, the Foreman `update-status` step that marks the entry `awaiting_acceptance`, for
+  the session to run after committing. collet does not write `ROADMAP.jsonl` or `.foreman/`, and
+  the close of a task without the id prints what it printed before.
 
 ### Changed
 

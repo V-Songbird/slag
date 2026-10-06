@@ -73,6 +73,13 @@ letters, digits, `.`, `_` or `-`, starting with a letter or digit, and is refuse
 scope and accept command are the same as for the task opened without it. A task opened without
 the option has no `foreman` field and reads as before.
 
+When a task with a `foreman` id closes with its live checks and accept command passing, `close`
+prints one more line after its closing message: the Foreman `update-status` step that moves the
+entry to `awaiting_acceptance`, with `<commit sha>` standing for the commit that lands the work,
+for the session to run once it has committed. collet never runs that step and never writes
+`ROADMAP.jsonl` or `.foreman/`. A failing close and a close of a task without the id print no such
+line.
+
 Scope accepts literal files, folders and supported globs. Reads are allowed outside writable
 scope. Literal shell deletion checks every operand; moving checks source and destination, while
 copy sources remain reads. Patches include every file operation and the Move to destination.
