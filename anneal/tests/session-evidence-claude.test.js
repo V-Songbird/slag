@@ -93,6 +93,52 @@ describe("a Claude Code transcript", () => {
     ]);
   });
 
+  // A failed Node import as Node prints it and as its test runner's TAP report shows it, in a workspace at cwd.
+  const importErrors = (cwd) => ({
+    node: "Exit code 1\nnode:internal/modules/esm/resolve:275\n    throw new ERR_MODULE_NOT_FOUND(\n          ^\n\n"
+      + `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '${cwd}/src/round' imported from ${cwd}/src/cart.js\n`
+      + "Did you mean to import \"./round.js\"?\n# tests 2\n# pass 0\n# fail 2",
+    tap: `Exit code 1\nTAP version 13\n# Subtest: cart\nnot ok 1 - cart\n  ---\n  duration_ms: 4.2\n  location: '${cwd}/test/cart.test.js:3:1'\n`
+      + `  failureType: 'testCodeFailure'\n  error: "Cannot find module '${cwd}/src/round' imported from ${cwd}/src/cart.js"\n`
+      + "  code: 'ERR_MODULE_NOT_FOUND'\n  ...\n1..1\n# fail 1",
+  });
+
+  // The last workspace path makes the importing file exactly 360 characters long.
+  for (const cwd of [...[13, 20, 50].map((folders) => `/work/${"deep-folder/".repeat(folders)}shop`), `/work/${"deep-folder/".repeat(28)}shop-2`]) {
+    for (const [form, output] of Object.entries(importErrors(cwd))) {
+      test(`a Node import error keeps the importing file in its excerpt with a ${cwd.length}-character workspace path (${form})`, () => {
+        const report = analyzeClaude(transcript([
+          human("run the suite", 1),
+          use("t1", "Bash", { command: "npm test" }, 2),
+          result("t1", output, 3, true),
+          human("audit", 4),
+        ]));
+        const [failure] = report.candidates;
+        // The TAP form quotes the message, so its closing quote follows the importing file.
+        const file = `${cwd}/src/cart.js`;
+        const kept = file.length > 360 ? `[excerpt truncated] ${file.slice(-360)}` : file;
+        assert.strictEqual(failure.category, "nonzero-exit");
+        assert.ok(failure.diagnosticCandidate.includes(`imported from ${kept}${form === "tap" ? '"' : ""}`), failure.diagnosticCandidate);
+        assert.ok(failure.diagnosticCandidate.length <= 480 + " [excerpt truncated]".length, failure.diagnosticCandidate);
+      });
+    }
+  }
+
+  test("a Node import error after progress text rewritten with \\r on its line keeps the error and the importing file", () => {
+    const cwd = `/work/${"deep-folder/".repeat(20)}shop`;
+    const progress = Array.from({ length: 40 }, (_, step) => `compiling ${step + 1}/40`).join("\r");
+    const report = analyzeClaude(transcript([
+      human("run the suite", 1),
+      use("t1", "Bash", { command: "npm test" }, 2),
+      result("t1", `Exit code 1\n${progress}\rError [ERR_MODULE_NOT_FOUND]: Cannot find module '${cwd}/src/round' `
+        + `imported from ${cwd}/src/cart.js\nDid you mean to import "./round.js"?\n# fail 1`, 3, true),
+      human("audit", 4),
+    ]));
+    const [failure] = report.candidates;
+    assert.ok(failure.diagnosticCandidate.startsWith("Error [ERR_MODULE_NOT_FOUND]: Cannot find module "), failure.diagnosticCandidate);
+    assert.ok(failure.diagnosticCandidate.endsWith(`imported from ${cwd}/src/cart.js`), failure.diagnosticCandidate);
+  });
+
   test("a command cmd.exe cannot find is a missing command", () => {
     const report = analyzeClaude(transcript([
       human("run it", 1),

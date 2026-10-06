@@ -5,7 +5,7 @@
 // code, or else from the wrapper the host put around a code-mode script's output and what that script calls.
 
 const fs = require("node:fs");
-const { bounded, directory, excerpt, timeOf } = require("./session-evidence-redaction.js");
+const { bounded, directory, excerpt, failureExcerpt, timeOf } = require("./session-evidence-redaction.js");
 const {
   BROWSER_MISSING, COMMAND_NOT_FOUND, MISSING, OPAQUE, boundaryOf, callEntry, coverageOf, cutoffOf, diagnose, issue, keepLargest,
   keepLast, lineOf, missingIn, noCall, noteBounds, records, selects, settle, textBlocks, tracker,
@@ -536,7 +536,7 @@ function analyzeCodex(file, before = null, limit = 6) {
           keepLast(failures, {
             line, timestamp: timeOf(row), ...call, exitCode: code, category,
             evidenceBasis: failed ? "reported-nonzero-exit" : "diagnostic-text-match-only",
-            diagnosticCandidate: excerpt(output.slice(named ? Math.max(0, named.index - 100) : 0)),
+            diagnosticCandidate: failureExcerpt(output, named),
             ...(failed || !note ? {} : { hostRecord: note }),
             nearbyReportedSuccesses: [],
           }, limit);

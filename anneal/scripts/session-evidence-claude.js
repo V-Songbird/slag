@@ -5,7 +5,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { bounded, directory, excerpt, timeOf } = require("./session-evidence-redaction.js");
+const { bounded, directory, excerpt, failureExcerpt, timeOf } = require("./session-evidence-redaction.js");
 const {
   BROWSER_MISSING, COMMAND_NOT_FOUND, MISSING, OPAQUE, boundaryOf, callEntry, coverageOf, cutoffOf, diagnose, issue, keepLargest,
   keepLast, lineOf, missingIn, noCall, noteBounds, records, selects, settle, textBlocks, tracker,
@@ -326,7 +326,7 @@ function analyzeClaude(file, before = null, limit = 6) {
             line, timestamp: timeOf(row), ...call,
             exitCode: exit ? Number(exit[1]) : null, category,
             evidenceBasis: reported ? "reported-error" : "diagnostic-text-match-only",
-            diagnosticCandidate: excerpt(output.slice(named ? Math.max(0, named.index - 100) : 0)),
+            diagnosticCandidate: failureExcerpt(output, named),
             laterSameToolSuccesses: [],
             ...(REFUSED.has(category) ? { retriesAfterRefusal: [] } : {}),
           };
