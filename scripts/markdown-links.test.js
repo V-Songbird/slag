@@ -1,11 +1,15 @@
 'use strict';
 
 // Fails on a relative link or in-page anchor in a tracked public Markdown file whose target is
-// not a tracked file or directory, or whose #anchor names no heading in the target. Anchors use
-// GitHub's heading slugs. Links inside code spans, fenced blocks, HTML comments and leading YAML
-// frontmatter are not links. Files under the private directories are skipped at any depth.
-// Known limits: a link target containing ')' is cut at it, and HTML entities in headings are
-// slugged without decoding.
+// not a tracked file or directory, or whose #anchor names no heading or HTML id in the target.
+// Heading anchors use GitHub's slugs, numbered past slugs already used and matched without case;
+// HTML id and name anchors match with case. Links inside code spans, fenced blocks, HTML comments
+// and leading YAML frontmatter are not links. Files under the private directories are skipped at
+// any depth.
+// Known limits: a link target containing ')' is cut at it; HTML entities in headings are slugged
+// without decoding; headings inside blockquotes or list items get no anchor; relative href and
+// src targets in raw HTML are not checked; indented code blocks and backslash-escaped brackets
+// are read as prose.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
@@ -26,12 +30,17 @@ function trackedFiles(dir) {
 // removed unless keepCode is set.
 function proseLines(text, keepCode = false) {
   let fence = null;
-  const blank = (c) => c.replace(/[^\n]/g, '');
+  let comment = false;
   const lines = text
-    .replace(/^---\r?\n[\s\S]*?\n---[ \t]*(?=\r?\n|$)/, blank)
-    .replace(/<!--[\s\S]*?-->/g, blank)
+    .replace(/^---\r?\n[\s\S]*?\n---[ \t]*(?=\r?\n|$)/, (c) => c.replace(/[^\n]/g, ''))
     .split(/\r?\n/);
   return lines.map((line) => {
+    if (comment) {
+      const end = line.indexOf('-->');
+      if (end < 0) return '';
+      comment = false;
+      line = line.slice(end + 3);
+    }
     const marker = line.match(/^\s*(`{3,}|~{3,})/);
     if (fence) {
       if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !line.trim().slice(marker[1].length).trim()) fence = null;
@@ -41,7 +50,12 @@ function proseLines(text, keepCode = false) {
       fence = marker[1];
       return '';
     }
-    return keepCode ? line : line.replace(/(`+)[\s\S]*?\1(?!`)/g, '');
+    // A code span is kept or removed; a comment is blanked, and one left open continues below.
+    return line.replace(/(`+)[\s\S]*?\1(?!`)|<!--[\s\S]*?(-->|$)/g, (match, ticks, closed) => {
+      if (ticks) return keepCode ? match : '';
+      if (!closed) comment = true;
+      return '';
+    });
   });
 }
 
@@ -49,30 +63,38 @@ function slug(heading) {
   const text = heading
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/<[^>]+>/g, '')
-    .replace(/[*`]/g, '')
+    // Code span text stays as written; underscore emphasis at word boundaries loses its markers.
+    .replace(/(`+)(.*?)\1(?!`)|(^|[^\p{L}\p{N}_])(_+)(?=\S)(.*?\S)\4(?![\p{L}\p{N}_])/gu, (m, ticks, code, before, marks, inner) => (ticks ? code : before + inner))
     .trim()
     .toLowerCase();
   return text.replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '').replace(/ /g, '-');
 }
 
+const ATX = /^ {0,3}#{1,6}\s+(.*?)(?:\s+#+)?\s*$/;
+
+// Heading slugs, numbered as GitHub does, and the HTML id and name anchors of a file.
 function anchors(text) {
-  const found = new Set();
-  const counts = new Map();
+  const headings = new Map();
+  const ids = new Set();
   const prose = proseLines(text);
   const lines = proseLines(text, true);
   lines.forEach((line, index) => {
-    const atx = line.match(/^ {0,3}#{1,6}\s+(.*?)(?:\s+#+)?\s*$/);
-    const setext = !atx && index > 0 && lines[index - 1].trim() && /^ {0,3}(=+|-+)\s*$/.test(line) && !/^\s*([-*+]|\d+[.)])\s/.test(lines[index - 1]);
-    const heading = atx ? atx[1] : setext ? lines[index - 1].trim() : null;
+    const atx = line.match(ATX);
+    const before = index > 0 ? lines[index - 1] : '';
+    const setext = !atx && before.trim() && !ATX.test(before) && /^ {0,3}(=+|-+)\s*$/.test(line) && !/^\s*([-*+]|\d+[.)])\s/.test(before);
+    const heading = atx ? atx[1] : setext ? before.trim() : null;
     if (heading !== null) {
       const base = slug(heading);
-      const seen = counts.get(base) ?? 0;
-      counts.set(base, seen + 1);
-      found.add(seen ? `${base}-${seen}` : base);
+      let anchor = base;
+      while (headings.has(anchor)) {
+        headings.set(base, headings.get(base) + 1);
+        anchor = `${base}-${headings.get(base)}`;
+      }
+      headings.set(anchor, 0);
     }
-    for (const match of prose[index].matchAll(/<a\s[^>]*\b(?:name|id)=["']([^"']+)["']/gi)) found.add(match[1].toLowerCase());
+    for (const match of prose[index].matchAll(/<a\s[^>]*\b(?:name|id)=["']([^"']+)["']/gi)) ids.add(match[1]);
   });
-  return found;
+  return { headings, ids };
 }
 
 function decode(text) {
@@ -109,7 +131,11 @@ function findBrokenLinks(dir) {
         }
         const where = `${file}:${index + 1}: ${link}`;
         if (!files.has(resolved) && !dirs.has(resolved) && resolved !== '.') broken.push(`${where} (no tracked target)`);
-        else if (anchor && resolved.endsWith('.md') && files.has(resolved) && !anchorsOf(resolved).has(decode(anchor).toLowerCase())) broken.push(`${where} (no heading)`);
+        else if (anchor && resolved.endsWith('.md') && files.has(resolved)) {
+          const { headings, ids } = anchorsOf(resolved);
+          const name = decode(anchor);
+          if (!headings.has(name.toLowerCase()) && !ids.has(name)) broken.push(`${where} (no heading)`);
+        }
       }
     });
   }
@@ -122,6 +148,7 @@ test('relative links and anchors in tracked public Markdown resolve', () => {
 
 test('reports a missing file, a missing heading and an untracked target, skipping private notes', async () => {
   const { project, git } = await harness;
+  const privateNotes = ['.private/note.md', 'anneal/docs/tasks/note.md', 'anneal/docs/decisions/adr.md', 'docs/knowledge/private/note.md', 'collet/docs/apis/private/note.md'];
   const fixture = project({
     '.gitignore': 'docs/tasks/\n',
     'README.md': [
@@ -131,8 +158,15 @@ test('reports a missing file, a missing heading and an untracked target, skippin
       'Also [gone](docs/missing.md), [bad anchor](docs/usage.md#nowhere) and [note](docs/tasks/note.md).',
       'Here [self](#not-here), `[code](missing-span.md)` and <https://example.com>.',
       'Then [code](docs/usage.md#use-npm-run-check), [html](docs/usage.md#Foo), [stub](docs/usage.md#use-) and [front](docs/usage.md#title-front).',
+      'Next [note](docs/usage.md#note-on-snake_case), [marks](docs/usage.md#_note_-on-snake_case), [lower](docs/usage.md#foo) and [third](docs/usage.md#a-1-1).',
+      'After [head](docs/usage.md#head), [underline](docs/usage.md#-head) and a span `<!--` before [after](missing-after-span.md).',
       '',
       '<!-- [hidden](missing-comment.md) -->',
+      '<!--',
+      '[hidden](missing-comment.md)',
+      '```',
+      '-->',
+      '[shown](missing-after-comment.md)',
       '```text',
       '[fenced](missing-fence.md) and ](?:[^"]+)',
       '```',
@@ -141,13 +175,17 @@ test('reports a missing file, a missing heading and an untracked target, skippin
       '[web](https://example.com/missing.md) and [mail](mailto:a@example.com)',
       '[^1]: See the notes',
     ].join('\n'),
-    'docs/usage.md': '---\ntitle: Front\n---\n## Run it, now!\n\nSecond\n------\n\n## Use `npm run check`\n\n<a id="Foo"></a>\n',
+    'docs/usage.md': [
+      '---\ntitle: Front\n---\n## Run it, now!\n\nSecond\n------\n\n## Use `npm run check`\n',
+      '## _Note_ on snake_case\n\n## A\n\n## A\n\n## A-1\n\n## Head\n---\n\n<a id="Foo"></a>\n',
+    ].join('\n'),
     'docs/tasks/note.md': '[private](missing-private.md)\n',
-    '.private/note.md': '[private](missing-private.md)\n',
-    'anneal/docs/decisions/adr.md': '[private](missing-private.md)\n',
+    ...Object.fromEntries(privateNotes.map((note) => [note, '[private](missing-private.md)\n'])),
   });
   git(fixture, ['init', '-q']);
   git(fixture, ['add', '-A']);
+  const tracked = trackedFiles(fixture);
+  assert.deepEqual(privateNotes.filter((note) => !tracked.includes(note)), []);
   assert.deepEqual(findBrokenLinks(fixture), [
     'README.md:4: docs/missing.md (no tracked target)',
     'README.md:4: docs/usage.md#nowhere (no heading)',
@@ -155,5 +193,10 @@ test('reports a missing file, a missing heading and an untracked target, skippin
     'README.md:5: #not-here (no heading)',
     'README.md:6: docs/usage.md#use- (no heading)',
     'README.md:6: docs/usage.md#title-front (no heading)',
+    'README.md:7: docs/usage.md#_note_-on-snake_case (no heading)',
+    'README.md:7: docs/usage.md#foo (no heading)',
+    'README.md:8: docs/usage.md#-head (no heading)',
+    'README.md:8: missing-after-span.md (no tracked target)',
+    'README.md:15: missing-after-comment.md (no tracked target)',
   ]);
 });

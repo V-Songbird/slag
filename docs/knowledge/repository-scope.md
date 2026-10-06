@@ -10,6 +10,7 @@ related_files:
   - scripts/plugin-integrity.test.js
   - scripts/ignore-policy.test.js
   - scripts/hidden-characters.test.js
+  - scripts/markdown-links.test.js
   - anneal/
   - collet/
 ---
@@ -43,6 +44,10 @@ fixture strings and must retain their detector coverage.
 scripts/hidden-characters.test.js fails on raw zero-width, bidi-control, tag and misplaced
 byte-order-mark characters in tracked text files, naming file, line and code point; it walks the
 tree instead when there is no Git work tree. Write such characters as escapes (\u200B, \u{E0041}).
+scripts/markdown-links.test.js fails on a relative link or #anchor in a tracked public Markdown
+file whose target is not a tracked file or directory, or whose anchor names no heading or HTML id
+in the target. Heading anchors follow GitHub's slugs; files under the private directories are
+skipped at any depth. Its header comment lists its known limits.
 
 On Node 22 the test runner reports a failed suite without counting a failed test, so a describe
 callback that throws or rejects before it registers a test, or a suite's after hook that throws,

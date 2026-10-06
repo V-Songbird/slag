@@ -21,6 +21,7 @@ Run from the repository root unless a row names another directory.
 | `npm run check` | All plugin and repository tests | Local subprocesses and temporary fixtures; no paid services |
 | `node --test scripts/plugin-integrity.test.js` | Manifest paths and cross-host metadata | Local |
 | `node --test scripts/ignore-policy.test.js` | Documentation visibility contract | Local temporary Git fixtures |
+| `node --test scripts/markdown-links.test.js` | Relative links and anchors in tracked public Markdown | Local temporary Git fixtures |
 | `node --test` from `anneal/` or `collet/` | One plugin's suite, without the suite-failure reporter: a suite that fails outside its tests can still exit 0 | Local temporary fixtures |
 | `node anneal/scripts/audit.js --root .` | Heuristic navigation audit | Read-only, local |
 
