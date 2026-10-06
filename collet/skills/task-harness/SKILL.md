@@ -80,8 +80,9 @@ works a Foreman entry, pass its id with `--foreman <id>` on `task.mjs add`: the 
 the task and shown by `status`, and it changes nothing about the scope. When the entry's handoff
 names a verification command, it can be the task's `--accept`. For a task with that id, what
 nobody checked belongs in the entry's `unverified:` note lines: its close prints the
-`--unverified` text with that pointer and does not add it to `.collet/unverified.md`, which stays
-the record for tasks without the id. Do not edit
+`--unverified` text with that pointer and adds neither that nor the `--left-out` text to
+`.collet/unverified.md`; the task ledger keeps both. A task without the id appends both texts to
+`.collet/unverified.md`. Do not edit
 `ROADMAP.jsonl` or `.foreman/` from this skill; the scope check never refuses the planning tool's
 own writes to them.
 
