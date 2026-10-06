@@ -164,8 +164,9 @@ function excerpt(value, size = 480) {
 
 // The start of a Node import error's line, as Node prints it or as the error field of its test runner's TAP report, or
 // -1: the first line with "Cannot find " before " imported from ". It ends with the importing file; the module form
-// usually names the workspace path twice, while the package form names a package and the workspace path once. A lone \r starts a line as \n does, so progress text a program rewrote before the error is not part of
-// it. Only lines holding " imported from " are tested, each once, so the scan stays linear in the output.
+// usually names the workspace path twice, while the package form names a package and the workspace path once. A lone
+// \r starts a line as \n does, so progress text a program rewrote before the error is not part of it. Only lines
+// holding " imported from " are tested, each once, so the scan stays linear in the output.
 function importErrorStart(output) {
   for (let at = output.indexOf(" imported from "); at !== -1;) {
     const start = output.lastIndexOf("\n", at) + 1;
