@@ -103,8 +103,8 @@ describe("a Claude Code transcript", () => {
       + "  code: 'ERR_MODULE_NOT_FOUND'\n  ...\n1..1\n# fail 1",
   });
 
-  for (const folders of [13, 20, 50]) {
-    const cwd = `/work/${"deep-folder/".repeat(folders)}shop`;
+  // The last workspace path makes the importing file exactly 360 characters long.
+  for (const cwd of [...[13, 20, 50].map((folders) => `/work/${"deep-folder/".repeat(folders)}shop`), `/work/${"deep-folder/".repeat(28)}shop-2`]) {
     for (const [form, output] of Object.entries(importErrors(cwd))) {
       test(`a Node import error keeps the importing file in its excerpt with a ${cwd.length}-character workspace path (${form})`, () => {
         const report = analyzeClaude(transcript([
@@ -115,10 +115,10 @@ describe("a Claude Code transcript", () => {
         ]));
         const [failure] = report.candidates;
         // The TAP form quotes the message, so its closing quote follows the importing file.
-        const file = `${cwd}/src/cart.js${form === "tap" ? '"' : ""}`;
+        const file = `${cwd}/src/cart.js`;
         const kept = file.length > 360 ? `[excerpt truncated] ${file.slice(-360)}` : file;
         assert.strictEqual(failure.category, "nonzero-exit");
-        assert.ok(failure.diagnosticCandidate.includes(`imported from ${kept}`), failure.diagnosticCandidate);
+        assert.ok(failure.diagnosticCandidate.includes(`imported from ${kept}${form === "tap" ? '"' : ""}`), failure.diagnosticCandidate);
         assert.ok(failure.diagnosticCandidate.length <= 480 + " [excerpt truncated]".length, failure.diagnosticCandidate);
       });
     }

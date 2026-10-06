@@ -185,16 +185,17 @@ function importErrorStart(output) {
 // The excerpt of a failed call's output, from a little before the diagnostic named in it or else from its start. With
 // no diagnostic named, a Node import error's excerpt starts at the error's line, and a line too long for the excerpt
 // loses its middle instead of its end, so the excerpt ends with "imported from" and the importing file. An importing
-// path longer than the excerpt less 120 characters keeps its end.
+// path longer than the excerpt less 120 characters keeps its end; the closing quote of the TAP form is not counted.
 function failureExcerpt(output, named, size = 480) {
   const imported = named ? -1 : importErrorStart(output);
   if (imported === -1) return excerpt(output.slice(named ? Math.max(0, named.index - 100) : 0), size);
   const text = redact(output.slice(imported));
   const line = text.split(/\r?\n|\r/, 1)[0];
   if (line.length <= size) return cut(text, size);
-  const file = line.slice(line.lastIndexOf(" imported from ") + " imported from ".length);
+  const quote = line.endsWith('"') ? '"' : "";
+  const file = line.slice(line.lastIndexOf(" imported from ") + " imported from ".length, line.length - quote.length);
   const room = size - 120;
-  const tail = ` imported from ${file.length > room ? `[excerpt truncated] ${file.slice(-room)}` : file}`;
+  const tail = ` imported from ${file.length > room ? `[excerpt truncated] ${file.slice(-room)}` : file}${quote}`;
   return `${line.slice(0, size - tail.length)} [excerpt truncated]${tail}`;
 }
 

@@ -60,8 +60,8 @@ describe("a Codex rollout", () => {
       + "  code: 'ERR_MODULE_NOT_FOUND'\n  ...\n1..1\n# fail 1",
   });
 
-  for (const folders of [13, 50]) {
-    const cwd = `/work/${"deep-folder/".repeat(folders)}shop`;
+  // The last workspace path makes the importing file exactly 360 characters long.
+  for (const cwd of [...[13, 50].map((folders) => `/work/${"deep-folder/".repeat(folders)}shop`), `/work/${"deep-folder/".repeat(28)}shop-2`]) {
     for (const [form, text] of Object.entries(importErrors(cwd))) {
       test(`a Node import error keeps the importing file in its excerpt with a ${cwd.length}-character workspace path (${form})`, () => {
         const report = analyzeCodex(transcript([
@@ -72,14 +72,30 @@ describe("a Codex rollout", () => {
         ]));
         const [failure] = report.candidates;
         // The TAP form quotes the message, so its closing quote follows the importing file.
-        const file = `${cwd}/src/cart.js${form === "tap" ? '"' : ""}`;
+        const file = `${cwd}/src/cart.js`;
         const kept = file.length > 360 ? `[excerpt truncated] ${file.slice(-360)}` : file;
         assert.strictEqual(failure.category, "nonzero-exit");
-        assert.ok(failure.diagnosticCandidate.includes(`imported from ${kept}`), failure.diagnosticCandidate);
+        assert.ok(failure.diagnosticCandidate.includes(`imported from ${kept}${form === "tap" ? '"' : ""}`), failure.diagnosticCandidate);
         assert.ok(failure.diagnosticCandidate.length <= 480 + " [excerpt truncated]".length, failure.diagnosticCandidate);
       });
     }
   }
+
+  test("a Node import error after progress text rewritten with \\r on its line keeps the error and the importing file", () => {
+    const cwd = `/work/${"deep-folder/".repeat(20)}shop`;
+    const progress = Array.from({ length: 40 }, (_, step) => `compiling ${step + 1}/40`).join("\r");
+    const text = `${progress}\rError [ERR_MODULE_NOT_FOUND]: Cannot find module '${cwd}/src/round' `
+      + `imported from ${cwd}/src/cart.js\nDid you mean to import "./round.js"?\n# fail 1`;
+    const report = analyzeCodex(transcript([
+      meta, started(1),
+      call("c1", "npm test", 2),
+      output("c1", [JSON.stringify({ exit_code: 1, output: text })], 3),
+      started(4),
+    ]));
+    const [failure] = report.candidates;
+    assert.ok(failure.diagnosticCandidate.startsWith("Error [ERR_MODULE_NOT_FOUND]: Cannot find module "), failure.diagnosticCandidate);
+    assert.ok(failure.diagnosticCandidate.endsWith(`imported from ${cwd}/src/cart.js`), failure.diagnosticCandidate);
+  });
 
   test("a command cmd.exe cannot find is a missing command", () => {
     const missing = "'foo' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n";
