@@ -25,14 +25,15 @@ Run from the repository root unless a row names another directory.
 | `node anneal/scripts/audit.js --root .` | Heuristic navigation audit | Read-only, local |
 
 The live session evals have separate host, sandbox and service requirements;
-see [eval prerequisites](anneal/docs/knowledge/workflows.md#running-the-evals).
+see the eval prerequisites for [anneal](anneal/docs/knowledge/workflows.md#running-the-evals)
+and [collet](collet/docs/knowledge/harness-workflow.md#running-the-evals).
 
 ## Where things live
 
 | Path | Content |
 | --- | --- |
 | `anneal/` | Navigation and documentation skills, scripts, guard, tests and evals |
-| `collet/` | Harness skills, runtime templates, language catalogues, hooks and tests |
+| `collet/` | Harness skills, runtime templates, language catalogues, hooks, tests and evals |
 | `.claude-plugin/marketplace.json` | Claude marketplace and its plugin versions |
 | `.agents/plugins/marketplace.json` | Codex marketplace with local plugin sources |
 | `scripts/` | Repository integrity tests, the edit hook that reruns the test files reaching an edited plugin file, optional Git gates, and the suite-failure reporter that `npm run check` and the edit hook add |
