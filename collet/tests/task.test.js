@@ -224,11 +224,19 @@ for (const [name, linked, passes] of [
     const accept = passes ? 'node -e 0' : 'node -e "process.exit(3)"';
     const opened = task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs', '--accept', accept, ...(linked ? ['--foreman', '190'] : [])]);
     assert.equal(opened.status, 0, opened.stderr);
-    const out = task(root, ['close', '--left-out', 'nothing', '--unverified', 'nothing']);
+    const unverified = join(root, '.collet', 'unverified.md');
+    const before = readFileSync(unverified, 'utf8');
+    const out = task(root, ['close', '--left-out', 'nothing', '--unverified', 'the window on real data']);
     assert.equal(out.status, passes ? 0 : 1, out.stdout + out.stderr);
     const step = /^Foreman entry 190: commit this work, then run echo '\{"id":"190","status":"awaiting_acceptance","commit":"<commit sha>"\}' \| node <Foreman plugin root>\/scripts\/roadmap\.js update-status\r?$/m;
-    if (linked && passes) assert.match(out.stdout, step);
-    else assert.doesNotMatch(out.stdout + out.stderr, /Foreman|awaiting_acceptance/);
+    const pointer = /^What nobody checked belongs in that entry's notes as unverified: lines, not in \.collet\/unverified\.md: the window on real data\r?$/m;
+    if (linked && passes) {
+      assert.match(out.stdout, step);
+      assert.match(out.stdout, pointer);
+    } else assert.doesNotMatch(out.stdout + out.stderr, /Foreman|awaiting_acceptance|unverified: lines/);
+    // Only an unlinked close that passes records its claims in .collet/unverified.md.
+    if (!linked && passes) assert.match(readFileSync(unverified, 'utf8'), /^- \S+ t1: the window on real data$/m);
+    else assert.equal(readFileSync(unverified, 'utf8'), before);
     assert.equal(readFileSync(join(root, 'ROADMAP.jsonl'), 'utf8'), roadmap);
     assert.deepEqual(readdirSync(join(root, '.foreman')), ['config.json']);
     assert.equal(readFileSync(join(root, '.foreman', 'config.json'), 'utf8'), '{}\n');

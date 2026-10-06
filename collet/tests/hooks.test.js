@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
@@ -125,6 +125,31 @@ test('a handoff for a task that is no longer open is dropped, not read out', () 
   assert.doesNotMatch(context, /something long finished/);
   assert.throws(() => readFileSync(handoff, 'utf8'));
 });
+
+// A task linked to a Foreman entry is pointed at that entry's unverified: note lines; an unlinked
+// one at .collet/unverified.md. Neither hook writes the planning tool's files.
+for (const linked of [true, false]) {
+  test(`session start and handoff point ${linked ? 'a linked' : 'an unlinked'} task at its unverified record`, () => {
+    const roadmap = '{"id":"190","status":"in_progress"}\n';
+    const root = ready({ 'ROADMAP.jsonl': roadmap, '.foreman/config.json': '{}\n' });
+    task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs', ...(linked ? ['--foreman', '190'] : [])]);
+    hook('handoff.js', root, { trigger: 'auto' });
+    const handoff = readFileSync(join(root, '.collet', 'handoff.md'), 'utf8');
+    const context = hookOutput(hook('session-start.js', root)).additionalContext;
+    if (linked) {
+      assert.match(handoff, /^Anything claimed but not yet checked belongs in the `unverified:` lines of Foreman entry 190's notes\.$/m);
+      assert.match(context, /^What nobody has checked for task t1 belongs in the unverified: lines of Foreman entry 190's notes\.$/m);
+      assert.doesNotMatch(context, /unverified\.md/);
+    } else {
+      assert.match(handoff, /^Anything claimed but not yet checked belongs in `\.collet\/unverified\.md`\.$/m);
+      assert.match(context, /^What nobody has checked yet is in \.collet\/unverified\.md\.$/m);
+      assert.doesNotMatch(context, /Foreman/);
+    }
+    assert.equal(readFileSync(join(root, 'ROADMAP.jsonl'), 'utf8'), roadmap);
+    assert.deepEqual(readdirSync(join(root, '.foreman')), ['config.json']);
+    assert.equal(readFileSync(join(root, '.foreman', 'config.json'), 'utf8'), '{}\n');
+  });
+}
 
 test('the compaction note is not written when nothing is open', () => {
   const root = ready();

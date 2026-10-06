@@ -80,6 +80,13 @@ for the session to run once it has committed. collet never runs that step and ne
 `ROADMAP.jsonl` or `.foreman/`. A failing close and a close of a task without the id print no such
 line.
 
+A task with a `foreman` id keeps what nobody checked in that entry's `unverified:` note lines. Its
+passing close prints the `--unverified` text after the step, saying it belongs there and not in
+`.collet/unverified.md`, and leaves `.collet/unverified.md` unchanged; the ledger still records
+both texts. While such a task is open, the session start and the handoff note name the entry's
+notes instead of `.collet/unverified.md`. A task without the id appends both texts to
+`.collet/unverified.md` on close, and the hooks name that file.
+
 Scope accepts literal files, folders and supported globs. Reads are allowed outside writable
 scope. Literal shell deletion checks every operand; moving checks source and destination, while
 copy sources remain reads. Patches include every file operation and the Move to destination.

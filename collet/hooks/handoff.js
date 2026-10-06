@@ -41,7 +41,9 @@ const body = [
   `"${task.title}" is still open. Writable: ${(task.scope ?? []).join(', ') || 'none declared'}.`,
   `It ends when \`${task.accept}\` exits zero, which \`node .collet/task.mjs close\` runs.`,
   'Run `git status` and `git diff` for what has changed so far.',
-  'Anything claimed but not yet checked belongs in `.collet/unverified.md`.',
+  task.foreman
+    ? `Anything claimed but not yet checked belongs in the \`unverified:\` lines of Foreman entry ${task.foreman}'s notes.`
+    : 'Anything claimed but not yet checked belongs in `.collet/unverified.md`.',
   '',
 ].join('\n');
 
