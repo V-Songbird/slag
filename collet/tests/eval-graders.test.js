@@ -273,6 +273,20 @@ describe('mount-opens-first-task', () => {
       run: () => mountRun({ after: (s) => s.edit('AGENTS.md', 'Run `npm test` to check a change.', 'Run `npm test` before every commit.') }),
       fails: ['rules-block-kept-map-text'],
     },
+    'a second collet block appended to AGENTS.md': {
+      run: () =>
+        mountRun({
+          after: (s) => {
+            const text = read(s.dir, 'AGENTS.md');
+            s.write('AGENTS.md', `${text}${text.slice(text.indexOf('<!-- collet:begin'))}`);
+          },
+        }),
+      fails: ['rules-block-kept-map-text'],
+    },
+    'text inserted between the map text and the collet block': {
+      run: () => mountRun({ after: (s) => s.edit('AGENTS.md', '<!-- collet:begin', 'No console.log in src/.\n\n<!-- collet:begin') }),
+      fails: ['rules-block-kept-map-text'],
+    },
     'the mount committed': {
       run: () =>
         mountRun({
