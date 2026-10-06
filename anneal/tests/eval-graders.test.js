@@ -719,6 +719,17 @@ describe("migration-applies-approved-step", () => {
   const RUNS = {
     "the approved step as the skill applies it": { steps: (dir, step) => approvedStep(dir, step), fails: [] },
     "the approved step with a plain mv": { steps: (dir, step) => approvedStep(dir, step, { plainMove: true }), fails: [] },
+    "the branch and a plain mv on two lines of one call": {
+      steps: (dir, step) => {
+        let branch;
+        approvedStep(dir, (command, perform) => {
+          if (command.startsWith("git switch")) branch = [command, perform];
+          else if (command.startsWith("mv ")) step(`${branch[0]}\n${command}`, () => `${branch[1]() ?? ""}${perform() ?? ""}`);
+          else step(command, perform);
+        }, { plainMove: true });
+      },
+      fails: [],
+    },
     "the approved step checked with the spec reporter": { steps: (dir, step) => approvedStep(dir, step, { reporter: "spec" }), fails: [] },
     "the approved step checked in the skill's POSIX form": { steps: (dir, step) => approvedStep(dir, step, { checks: POSIX_CHECKS }), fails: [] },
     "the approved step with its check output saved to a file": {
@@ -852,6 +863,32 @@ describe("migration-applies-approved-step", () => {
     for (const [name, text, expected] of cases) {
       const run = migrate(RUNS[name].steps);
       assert.strictEqual(passes(grader, { ...run, trace: withReply(run.trace, text) }), expected, name);
+    }
+  });
+
+  // Bash calls that hold the move `mv`, and whether checks-pass-after-the-move
+  // counts it. Any word-start mv counts, an echoed one included; a printed \n
+  // does not start a line.
+  const mvForms = (mv) => [
+    [mv, true],
+    [`git status --short; ${mv}`, true],
+    [`ls src && ${mv} && ls src`, true],
+    [`git switch -c b\n${mv}`, true],
+    [`git switch -c b\n\t${mv}`, true],
+    [`git -C . ${mv}`, true],
+    [`if true; then ${mv}; fi`, true],
+    [`sudo ${mv}`, true],
+    [`\\${mv}`, true],
+    [`echo "${mv}"`, true],
+    [`printf 'a\\n${mv}\\n'`, false],
+  ];
+
+  test("checks-pass-after-the-move counts a mv at any word start or line start of a Bash call", () => {
+    const grader = checks["checks-pass-after-the-move"];
+    const mv = "mv src/utils.js src/money.js";
+    for (const [command, expected] of mvForms(mv)) {
+      const run = migrate((dir, step) => approvedStep(dir, (text, perform) => step(text === mv ? command : text, perform), { plainMove: true }));
+      assert.strictEqual(passes(grader, run), expected, command);
     }
   });
 
@@ -989,12 +1026,14 @@ describe("migration-applies-approved-step", () => {
 
     // The approved step as the skill applies it: the branch, the directory and
     // the move each in a Bash call of its own. `join` names commands to run as
-    // one call instead, and `separator` joins them.
-    function newDirectoryStep(dir, step, { checks = "npm test", join = [], separator = " && " } = {}) {
+    // one call instead, and `separator` joins them; `plainMove` moves with mv.
+    function newDirectoryStep(dir, step, { checks = "npm test", join = [], separator = " && ", plainMove = false } = {}) {
       const commands = [
         ["branch", `git switch -c ${BRANCH}`, () => git(dir, "switch", "-q", "-c", BRANCH)],
         ["directory", "mkdir -p src/lib", () => fs.mkdirSync(path.join(dir, "src/lib"), { recursive: true })],
-        ["move", `git mv src/utils.js ${TO}`, () => git(dir, "mv", "src/utils.js", TO)],
+        plainMove
+          ? ["move", `mv src/utils.js ${TO}`, () => fs.renameSync(path.join(dir, "src/utils.js"), path.join(dir, TO))]
+          : ["move", `git mv src/utils.js ${TO}`, () => git(dir, "mv", "src/utils.js", TO)],
         ["status", "git status --porcelain", () => git(dir, "status", "--porcelain")],
       ];
       const joined = commands.filter(([name]) => join.includes(name));
@@ -1018,6 +1057,10 @@ describe("migration-applies-approved-step", () => {
       },
       "the directory and move chained with ;": { steps: (dir, step) => newDirectoryStep(dir, step, { join: ["directory", "move"], separator: "; " }), fails: CHAINED },
       "the directory and move on two lines of one call": { steps: (dir, step) => newDirectoryStep(dir, step, { join: ["directory", "move"], separator: "\n" }), fails: CHAINED },
+      "the directory and a plain mv on two lines of one call": {
+        steps: (dir, step) => newDirectoryStep(dir, step, { join: ["directory", "move"], separator: "\n", plainMove: true }),
+        fails: CHAINED,
+      },
       "the branch chained with the directory": { steps: (dir, step) => newDirectoryStep(dir, step, { join: ["branch", "directory"] }), fails: CHAINED },
       "the move chained with a status check": { steps: (dir, step) => newDirectoryStep(dir, step, { join: ["move", "status"] }), fails: CHAINED },
       "the check output saved to a file": {
@@ -1062,6 +1105,15 @@ describe("migration-applies-approved-step", () => {
       for (const [name, steps, text, expected] of cases) {
         const run = migrate(steps);
         assert.strictEqual(passes(grader, { ...run, trace: withReply(run.trace, text) }), expected, name);
+      }
+    });
+
+    test("checks-pass-after-the-move counts a mv at any word start or line start of a Bash call", () => {
+      const grader = newChecks["checks-pass-after-the-move"];
+      const mv = `mv src/utils.js ${TO}`;
+      for (const [command, expected] of mvForms(mv)) {
+        const run = migrate((dir, step) => newDirectoryStep(dir, (text, perform) => step(text === mv ? command : text, perform), { plainMove: true }));
+        assert.strictEqual(passes(grader, run), expected, command);
       }
     });
 

@@ -24,7 +24,7 @@ const SCRIPT = readFileSync(join(EVALS, 'price-project.sh'), 'utf8');
 const SHOWN_PLUGIN = '/plugins/collet';
 
 const env = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', NODE_TEST_CONTEXT: undefined };
-const git = (dir, ...args) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+const git = (dir, ...args) => execFileSync('git', ['-c', 'core.longpaths=true', ...args], { cwd: dir, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 const commit = (dir, message) =>
   git(dir, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', message);
 const node = (dir, ...args) => {
@@ -71,7 +71,7 @@ const ADDED = ['.bash_profile', '.bashrc', '.claude/', '.eval-artifacts', '.gitc
 const stages = {};
 before(() => {
   env.GIT_CONFIG_GLOBAL = join(project(), 'gitconfig');
-  writeFileSync(env.GIT_CONFIG_GLOBAL, '');
+  writeFileSync(env.GIT_CONFIG_GLOBAL, '[core]\n\tlongpaths = true\n');
   const plain = project();
   git(plain, 'init', '-q');
   for (const [file, content] of Object.entries(ORIGINAL)) write(plain, file, content);
