@@ -24,6 +24,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Fixed
 
+- In a Claude Code session, the session evidence script now starts the excerpt of a failed Node import (`ERR_MODULE_NOT_FOUND`) at the error's own line. The excerpt keeps the "imported from" file even when the workspace path is long, because Node names that path twice in the line.
+
 - The session evidence script no longer labels a command that ran and then failed on a missing Node module (`MODULE_NOT_FOUND` from CommonJS, `ERR_MODULE_NOT_FOUND` from ESM) as `command-not-found`. That failure now gets the same category as any other failed command, such as `nonzero-exit`. A module-not-found failure the host did not report as failed, such as one behind a pipe, is no longer a candidate unless its output names another known diagnostic. A shell's "command not found" and PowerShell's "is not recognized as the name" still get `command-not-found`.
 
 - The session evidence script now labels a failed command that cmd.exe could not find ("is not recognized as an internal or external command") as `command-not-found`, in both Claude Code and Codex sessions. Before, that failure got `nonzero-exit`. The same message in output the host did not report as failed, such as `cmd /c foo` followed by another command that succeeds, is now a `command-not-found` candidate matched on the diagnostic text alone; before, it was no candidate.

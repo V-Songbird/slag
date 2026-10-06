@@ -18,6 +18,9 @@ const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
 const EXIT = /^Exit code (-?\d+)\b/;
 // The Read tool's refusal of a file over its token or size limit.
 const READ_LIMIT = /exceeds maximum allowed (?:tokens|size)\b/;
+// A Node import error's line. It names the workspace path twice, so an excerpt of it starts at that line and keeps
+// the importing file after a long workspace path.
+const IMPORT_ERROR = /^.*\[ERR_MODULE_NOT_FOUND\]: Cannot find .* imported from /m;
 
 // First match wins, so a host's own error text sits above the generic shell ones. A missing path is not listed:
 // it is read from a failed read, search or edit alone, with MISSING.
@@ -326,7 +329,7 @@ function analyzeClaude(file, before = null, limit = 6) {
             line, timestamp: timeOf(row), ...call,
             exitCode: exit ? Number(exit[1]) : null, category,
             evidenceBasis: reported ? "reported-error" : "diagnostic-text-match-only",
-            diagnosticCandidate: excerpt(output.slice(named ? Math.max(0, named.index - 100) : 0)),
+            diagnosticCandidate: excerpt(output.slice(named ? Math.max(0, named.index - 100) : IMPORT_ERROR.exec(output)?.index ?? 0)),
             laterSameToolSuccesses: [],
             ...(REFUSED.has(category) ? { retriesAfterRefusal: [] } : {}),
           };
