@@ -81,7 +81,18 @@ const returned = (id, texts, second) => item(second, {
   type: "function_call_output", call_id: id, output: Array.isArray(texts) ? texts.map((text) => ({ type: "input_text", text })) : texts,
 });
 
+// A failed Node import as Node prints it and as its test runner's TAP report shows it, in a workspace at cwd; each
+// form starts with lead, such as a host's exit-code line.
+const importErrors = (cwd, lead = "") => ({
+  node: `${lead}node:internal/modules/esm/resolve:275\n    throw new ERR_MODULE_NOT_FOUND(\n          ^\n\n`
+    + `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '${cwd}/src/round' imported from ${cwd}/src/cart.js\n`
+    + "Did you mean to import \"./round.js\"?\n# tests 2\n# pass 0\n# fail 2",
+  tap: `${lead}TAP version 13\n# Subtest: cart\nnot ok 1 - cart\n  ---\n  duration_ms: 4.2\n  location: '${cwd}/test/cart.test.js:3:1'\n`
+    + `  failureType: 'testCodeFailure'\n  error: "Cannot find module '${cwd}/src/round' imported from ${cwd}/src/cart.js"\n`
+    + "  code: 'ERR_MODULE_NOT_FOUND'\n  ...\n1..1\n# fail 1",
+});
+
 module.exports = {
   CLI, SESSION, tempDir, transcript, at, truncated, human, use, result, typed, meta, started, turn, item, message, call, output,
-  script, fn, returned,
+  script, fn, returned, importErrors,
 };

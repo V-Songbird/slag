@@ -5,7 +5,9 @@
 
 const { test, describe } = require("node:test");
 const assert = require("node:assert");
-const { transcript, at, truncated, meta, started, turn, item, message, call, output, script, fn, returned } = require("./session-transcripts.js");
+const {
+  transcript, at, truncated, meta, started, turn, item, message, call, output, script, fn, returned, importErrors,
+} = require("./session-transcripts.js");
 const { analyzeCodex } = require("../scripts/session-evidence.js");
 
 describe("a Codex rollout", () => {
@@ -48,16 +50,6 @@ describe("a Codex rollout", () => {
     assert.deepStrictEqual(report.candidates.map((c) => [c.callLine, c.exitCode, c.category]), [
       [3, 1, "nonzero-exit"], [7, 127, "command-not-found"],
     ]);
-  });
-
-  // A failed Node import as Node prints it and as its test runner's TAP report shows it, in a workspace at cwd.
-  const importErrors = (cwd) => ({
-    node: "node:internal/modules/esm/resolve:275\n    throw new ERR_MODULE_NOT_FOUND(\n          ^\n\n"
-      + `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '${cwd}/src/round' imported from ${cwd}/src/cart.js\n`
-      + "Did you mean to import \"./round.js\"?\n# tests 2\n# pass 0\n# fail 2",
-    tap: `TAP version 13\n# Subtest: cart\nnot ok 1 - cart\n  ---\n  duration_ms: 4.2\n  location: '${cwd}/test/cart.test.js:3:1'\n`
-      + `  failureType: 'testCodeFailure'\n  error: "Cannot find module '${cwd}/src/round' imported from ${cwd}/src/cart.js"\n`
-      + "  code: 'ERR_MODULE_NOT_FOUND'\n  ...\n1..1\n# fail 1",
   });
 
   // The last workspace path makes the importing file exactly 360 characters long.
@@ -117,6 +109,37 @@ describe("a Codex rollout", () => {
     const [failure] = report.candidates;
     assert.ok(failure.diagnosticCandidate.startsWith("Error [ERR_MODULE_NOT_FOUND]: Cannot find module "), failure.diagnosticCandidate);
     assert.ok(failure.diagnosticCandidate.endsWith(`imported from ${cwd}/src/cart.js`), failure.diagnosticCandidate);
+  });
+
+  // One failed call's output in a rollout whose cutoff is a later task start.
+  const failed = (text) => analyzeCodex(transcript([
+    meta, started(1),
+    call("c1", "npm test", 2),
+    output("c1", [JSON.stringify({ exit_code: 1, output: text })], 3),
+    started(4),
+  ])).candidates[0];
+
+  test("a long import line followed by a named diagnostic is still categorised by that diagnostic", () => {
+    const cwd = `/work/${"deep-folder/".repeat(50)}shop`;
+    const failure = failed(`Error [ERR_MODULE_NOT_FOUND]: Cannot find module '${cwd}/src/round' imported from ${cwd}/src/cart.js\n`
+      + "Error: listen EADDRINUSE: address already in use :::3000");
+    assert.strictEqual(failure.category, "port-in-use");
+    assert.ok(failure.diagnosticCandidate.includes("EADDRINUSE"), failure.diagnosticCandidate);
+  });
+
+  test("a short import error after short progress text rewritten with \\r starts at the error", () => {
+    const failure = failed("compiling 1/2\rcompiling 2/2\rError [ERR_MODULE_NOT_FOUND]: Cannot find module '/work/shop/src/round' "
+      + "imported from /work/shop/src/cart.js\n# fail 1");
+    assert.strictEqual(failure.diagnosticCandidate,
+      "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/work/shop/src/round' imported from /work/shop/src/cart.js\n# fail 1");
+  });
+
+  test("a long import line whose importing path fits within 360 characters keeps that path whole", () => {
+    const cwd = `/work/${"deep-folder/".repeat(20)}shop`;
+    const file = `${cwd}/src/cart.js`;
+    const failure = failed(importErrors(cwd).node);
+    assert.ok(file.length <= 360, `${file.length}`);
+    assert.ok(failure.diagnosticCandidate.includes(` [excerpt truncated] imported from ${file}`), failure.diagnosticCandidate);
   });
 
   test("a command cmd.exe cannot find is a missing command", () => {
