@@ -78,7 +78,11 @@ task. Derive the collet task's scope from the code, as above; never copy it from
 entry's `planned_touches`, which is that tool's forecast and is never enforced. When the session
 works a Foreman entry, pass its id with `--foreman <id>` on `task.mjs add`: the id is recorded on
 the task and shown by `status`, and it changes nothing about the scope. When the entry's handoff
-names a verification command, it can be the task's `--accept`. For a task with that id, what
+names a verification command, it can be the task's `--accept`. When a task with that id closes
+with its checks passing, `close` prints a Foreman `update-status` step that marks the entry
+`awaiting_acceptance`. Commit the work, replace `<commit sha>` with the new commit's sha and
+`<Foreman plugin root>` with Foreman's plugin root, and run the step; collet does not run it. A
+failing close, or a task without the id, prints no step. For a task with that id, what
 nobody checked belongs in the entry's `unverified:` note lines: its close prints the
 `--unverified` text with that pointer and adds neither that nor the `--left-out` text to
 `.collet/unverified.md`; the task ledger keeps both. A task without the id appends both texts to
