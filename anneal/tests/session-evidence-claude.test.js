@@ -94,8 +94,8 @@ describe("a Claude Code transcript", () => {
   });
 
   test("a Node import error keeps the importing file in its excerpt when the workspace path is long", () => {
-    const cwd = `/work/${"deep-folder/".repeat(12)}shop`;
-    assert.ok(cwd.length >= 150);
+    const cwd = `/work/${"deep-folder/".repeat(20)}shop`;
+    assert.ok(cwd.length >= 240);
     const missingImport = "Exit code 1\nnode:internal/modules/esm/resolve:275\n    throw new ERR_MODULE_NOT_FOUND(\n          ^\n\n"
       + `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '${cwd}/src/round' imported from ${cwd}/src/cart.js\n`
       + "Did you mean to import \"./round.js\"?\n# tests 2\n# pass 0\n# fail 2";
@@ -107,7 +107,9 @@ describe("a Claude Code transcript", () => {
     ]));
     const [failure] = report.candidates;
     assert.strictEqual(failure.category, "nonzero-exit");
-    assert.ok(failure.diagnosticCandidate.includes(`imported from ${cwd}/src/cart.js`), failure.diagnosticCandidate);
+    assert.ok(failure.diagnosticCandidate.startsWith("Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/work/"), failure.diagnosticCandidate);
+    assert.ok(failure.diagnosticCandidate.endsWith(`imported from ${cwd}/src/cart.js`), failure.diagnosticCandidate);
+    assert.ok(failure.diagnosticCandidate.length <= 480 + " [excerpt truncated] ".length, failure.diagnosticCandidate);
   });
 
   test("a command cmd.exe cannot find is a missing command", () => {
