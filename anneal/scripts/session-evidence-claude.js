@@ -5,7 +5,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { bounded, cut, directory, excerpt, redact, timeOf } = require("./session-evidence-redaction.js");
+const { bounded, directory, excerpt, failureExcerpt, timeOf } = require("./session-evidence-redaction.js");
 const {
   BROWSER_MISSING, COMMAND_NOT_FOUND, MISSING, OPAQUE, boundaryOf, callEntry, coverageOf, cutoffOf, diagnose, issue, keepLargest,
   keepLast, lineOf, missingIn, noCall, noteBounds, records, selects, settle, textBlocks, tracker,
@@ -18,9 +18,6 @@ const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
 const EXIT = /^Exit code (-?\d+)\b/;
 // The Read tool's refusal of a file over its token or size limit.
 const READ_LIMIT = /exceeds maximum allowed (?:tokens|size)\b/;
-// A Node import error's line. It names the workspace path twice and ends with the importing file, which importExcerpt
-// keeps.
-const IMPORT_ERROR = /^.*\[ERR_MODULE_NOT_FOUND\]: Cannot find .* imported from /m;
 
 // First match wins, so a host's own error text sits above the generic shell ones. A missing path is not listed:
 // it is read from a failed read, search or edit alone, with MISSING.
@@ -73,16 +70,6 @@ function withoutReminders(text) {
     rest = rest.slice(0, start);
   }
   return rest === text ? text : rest.trimEnd();
-}
-
-// An excerpt from a Node import error's line. A line too long for the excerpt loses its middle instead of its end, so
-// the excerpt ends with the importing file; an importing path longer than the excerpt keeps its end.
-function importExcerpt(text, size = 480) {
-  const redacted = redact(text);
-  const line = redacted.split("\n", 1)[0];
-  if (line.length <= size) return cut(redacted, size);
-  const tail = line.slice(Math.max(line.lastIndexOf(" imported from "), line.length - size + 60));
-  return `${line.slice(0, size - tail.length)} [excerpt truncated] ${tail.trimStart()}`;
 }
 
 // The size of a result the host saved elsewhere, in bytes as it states them.
@@ -331,7 +318,6 @@ function analyzeClaude(file, before = null, limit = 6) {
         });
         if (failed) {
           const named = missingIn(call.operation, output) || diagnostic;
-          const imported = !named && IMPORT_ERROR.exec(output);
           let category = "tool-error";
           if (named) category = named.name;
           else if (exit) category = "nonzero-exit";
@@ -340,8 +326,7 @@ function analyzeClaude(file, before = null, limit = 6) {
             line, timestamp: timeOf(row), ...call,
             exitCode: exit ? Number(exit[1]) : null, category,
             evidenceBasis: reported ? "reported-error" : "diagnostic-text-match-only",
-            diagnosticCandidate: imported ? importExcerpt(output.slice(imported.index))
-              : excerpt(output.slice(named ? Math.max(0, named.index - 100) : 0)),
+            diagnosticCandidate: failureExcerpt(output, named),
             laterSameToolSuccesses: [],
             ...(REFUSED.has(category) ? { retriesAfterRefusal: [] } : {}),
           };

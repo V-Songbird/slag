@@ -162,6 +162,26 @@ function excerpt(value, size = 480) {
   return cut(redact(value), size);
 }
 
+// A Node import error's line, as Node prints it or as the error field of its test runner's TAP report. It names the
+// workspace path twice and ends with the importing file.
+const IMPORT_ERROR = /^.*\bCannot find .* imported from /m;
+
+// The excerpt of a failed call's output, from a little before the diagnostic named in it or else from its start. With
+// no diagnostic named, a Node import error's excerpt starts at the error's line, and a line too long for the excerpt
+// loses its middle instead of its end, so the excerpt ends with "imported from" and the importing file. An importing
+// path longer than the excerpt less 120 characters keeps its end.
+function failureExcerpt(output, named, size = 480) {
+  const imported = !named && IMPORT_ERROR.exec(output);
+  if (!imported) return excerpt(output.slice(named ? Math.max(0, named.index - 100) : 0), size);
+  const text = redact(output.slice(imported.index));
+  const line = text.split("\n", 1)[0];
+  if (line.length <= size) return cut(text, size);
+  const file = line.slice(line.lastIndexOf(" imported from ") + " imported from ".length);
+  const room = size - 120;
+  const tail = ` imported from ${file.length > room ? `[excerpt truncated] ${file.slice(-room)}` : file}`;
+  return `${line.slice(0, size - tail.length)} [excerpt truncated]${tail}`;
+}
+
 // A field that names the session, its model or agent is copied as written, cut to the same bound.
 function bounded(value, size = 120) {
   return value ? cut(String(value), size) : null;
@@ -178,4 +198,4 @@ function timeOf(row) {
   return row.timestamp ? excerpt(row.timestamp, 120) : null;
 }
 
-module.exports = { HOME, bounded, cut, directory, excerpt, redact, timeOf };
+module.exports = { HOME, bounded, cut, directory, excerpt, failureExcerpt, redact, timeOf };
