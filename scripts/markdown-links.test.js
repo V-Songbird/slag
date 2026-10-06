@@ -1,9 +1,9 @@
 'use strict';
 
 // Fails on a relative link or in-page anchor in a tracked public Markdown file whose target is
-// not a tracked file or directory, or whose #anchor names no heading or HTML id in the target.
-// Heading anchors use GitHub's slugs, numbered past slugs already used and matched without case;
-// HTML id and name anchors match with case. Links inside code spans, fenced blocks, HTML comments
+// not a tracked file or directory, or whose #anchor names no heading or <a> id or name in the
+// target. Heading anchors use GitHub's slugs, numbered past slugs already used and matched without
+// case; <a> id and name anchors match with case. Links inside code spans, fenced blocks, HTML comments
 // and leading YAML frontmatter are not links. Files under the private directories are skipped at
 // any depth.
 // Known limits: a link target containing ')' is cut at it; HTML entities in headings are slugged
@@ -59,15 +59,17 @@ function proseLines(text, keepCode = false) {
   });
 }
 
+// Heading text as rendered: code span text stays as written, links keep their label, tags go, and
+// underscore emphasis at word boundaries (not after a backslash) loses its markers.
+function rendered(text) {
+  return text.replace(
+    /(`+)(.*?)\1(?!`)|!?\[([^\]]*)\]\([^)]*\)|<[^>]+>|(^|[^\p{L}\p{N}_\\])(_+)(?=\S)(.*?\S)\5(?![\p{L}\p{N}_])/gu,
+    (m, ticks, code, label, before, marks, inner) => (ticks ? code : label !== undefined ? rendered(label) : before !== undefined ? before + rendered(inner) : ''),
+  );
+}
+
 function slug(heading) {
-  const text = heading
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/<[^>]+>/g, '')
-    // Code span text stays as written; underscore emphasis at word boundaries loses its markers.
-    .replace(/(`+)(.*?)\1(?!`)|(^|[^\p{L}\p{N}_])(_+)(?=\S)(.*?\S)\4(?![\p{L}\p{N}_])/gu, (m, ticks, code, before, marks, inner) => (ticks ? code : before + inner))
-    .trim()
-    .toLowerCase();
-  return text.replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '').replace(/ /g, '-');
+  return rendered(heading).trim().toLowerCase().replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '').replace(/ /g, '-');
 }
 
 const ATX = /^ {0,3}#{1,6}\s+(.*?)(?:\s+#+)?\s*$/;
@@ -148,15 +150,16 @@ test('relative links and anchors in tracked public Markdown resolve', () => {
 
 test('reports a missing file, a missing heading and an untracked target, skipping private notes', async () => {
   const { project, git } = await harness;
-  const privateNotes = ['.private/note.md', 'anneal/docs/tasks/note.md', 'anneal/docs/decisions/adr.md', 'docs/knowledge/private/note.md', 'collet/docs/apis/private/note.md'];
+  const privateNotes = ['.private', 'docs/tasks', 'docs/decisions', 'docs/knowledge/private', 'docs/apis/private'].flatMap((folder) => [`${folder}/kept.md`, `collet/${folder}/kept.md`]);
   const fixture = project({
-    '.gitignore': 'docs/tasks/\n',
+    '.gitignore': 'docs/tasks/note.md\n',
     'README.md': [
       '# Guide',
       '',
       'See [docs](docs/), [usage](docs/usage.md#run-it-now), [top](#guide) and [ref][r].',
       'Also [gone](docs/missing.md), [bad anchor](docs/usage.md#nowhere) and [note](docs/tasks/note.md).',
       'Here [self](#not-here), `[code](missing-span.md)` and <https://example.com>.',
+      'Spans [plugin](docs/usage.md#plugin-folder), [span](docs/usage.md#ab-x) and [escaped](docs/usage.md#_a_-b).',
       'Then [code](docs/usage.md#use-npm-run-check), [html](docs/usage.md#Foo), [stub](docs/usage.md#use-) and [front](docs/usage.md#title-front).',
       'Next [note](docs/usage.md#note-on-snake_case), [marks](docs/usage.md#_note_-on-snake_case), [lower](docs/usage.md#foo) and [third](docs/usage.md#a-1-1).',
       'After [head](docs/usage.md#head), [underline](docs/usage.md#-head) and a span `<!--` before [after](missing-after-span.md).',
@@ -177,7 +180,7 @@ test('reports a missing file, a missing heading and an untracked target, skippin
     ].join('\n'),
     'docs/usage.md': [
       '---\ntitle: Front\n---\n## Run it, now!\n\nSecond\n------\n\n## Use `npm run check`\n',
-      '## _Note_ on snake_case\n\n## A\n\n## A\n\n## A-1\n\n## Head\n---\n\n<a id="Foo"></a>\n',
+      '## _Note_ on snake_case\n\n## A\n\n## A\n\n## A-1\n\n## `<plugin>` folder\n\n## `[a](b)` x\n\n## \\_a\\_ b\n\n## Head\n---\n\n<a id="Foo"></a>\n',
     ].join('\n'),
     'docs/tasks/note.md': '[private](missing-private.md)\n',
     ...Object.fromEntries(privateNotes.map((note) => [note, '[private](missing-private.md)\n'])),
@@ -191,12 +194,12 @@ test('reports a missing file, a missing heading and an untracked target, skippin
     'README.md:4: docs/usage.md#nowhere (no heading)',
     'README.md:4: docs/tasks/note.md (no tracked target)',
     'README.md:5: #not-here (no heading)',
-    'README.md:6: docs/usage.md#use- (no heading)',
-    'README.md:6: docs/usage.md#title-front (no heading)',
-    'README.md:7: docs/usage.md#_note_-on-snake_case (no heading)',
-    'README.md:7: docs/usage.md#foo (no heading)',
-    'README.md:8: docs/usage.md#-head (no heading)',
-    'README.md:8: missing-after-span.md (no tracked target)',
-    'README.md:15: missing-after-comment.md (no tracked target)',
+    'README.md:7: docs/usage.md#use- (no heading)',
+    'README.md:7: docs/usage.md#title-front (no heading)',
+    'README.md:8: docs/usage.md#_note_-on-snake_case (no heading)',
+    'README.md:8: docs/usage.md#foo (no heading)',
+    'README.md:9: docs/usage.md#-head (no heading)',
+    'README.md:9: missing-after-span.md (no tracked target)',
+    'README.md:16: missing-after-comment.md (no tracked target)',
   ]);
 });
