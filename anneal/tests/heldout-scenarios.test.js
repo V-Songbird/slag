@@ -53,7 +53,7 @@ const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: "1" };
 const snapshots = {};
 before(() => {
   gitEnv.GIT_CONFIG_GLOBAL = path.join(tempDir("anneal-heldout-git-"), "config");
-  fs.writeFileSync(gitEnv.GIT_CONFIG_GLOBAL, "");
+  fs.writeFileSync(gitEnv.GIT_CONFIG_GLOBAL, "[core]\n\tlongpaths = true\n");
   for (const variant of VARIANTS) {
     snapshots[variant] = tempDir(`anneal-heldout-${variant}-`);
     execFileSync(process.execPath, [FIXTURE, variant], { cwd: snapshots[variant], env: gitEnv, stdio: "pipe" });
@@ -245,7 +245,7 @@ describe("held-out snapshots", () => {
 
   test("each snapshot is committed and passes its own tests", () => {
     for (const variant of VARIANTS) {
-      assert.strictEqual(execFileSync("git", ["status", "--porcelain"], { cwd: snapshots[variant], env: gitEnv, encoding: "utf8" }), "");
+      assert.strictEqual(execFileSync("git", ["-c", "core.longpaths=true", "status", "--porcelain"], { cwd: snapshots[variant], env: gitEnv, encoding: "utf8" }), "");
       assertOwnTestsPass(snapshots[variant], variant);
     }
   });
