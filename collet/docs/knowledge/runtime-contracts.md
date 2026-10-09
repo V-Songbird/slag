@@ -18,7 +18,8 @@ The delivered project runtime uses .mjs files independently of the target packag
 
 An optional `ask_first` list in `.collet/config.json`, written by `mount.mjs --ask-first`, names
 what must not happen without asking the person. The rules block and the session start state it as
-a fact about the project, never as an order, with a line that every other step goes ahead until
+a fact about the project, never as an order. The rules block always adds a line, and the session
+start adds it only while a task is open, that every other step goes ahead until
 the accept command exits zero, or until a missing input or a broken environment means it cannot
 pass as the task stands, which ends the work as a blocker named in the summary. The session start
 reads the config each time; the rules block states the list from the last mount. Without a list,
@@ -154,7 +155,8 @@ mounted directory, so a mount below the Git root covers only its own directory. 
 itself, apart from the one listing the bundle checks share in a pass: it must work without the
 bundle's `.collet/source.mjs`, and it needs both sides of every move, so a `--live` pass lists
 the changes twice. It does not count the harness's own writes: `.collet/` and the rules block
-between the collet markers in `AGENTS.md`, `CLAUDE.md` or `.cursor/rules/collet.md`. A rules file
+between the collet markers in `AGENTS.md`, `CLAUDE.md` or `.cursor/rules/collet.md`, nor a
+planning tool's `ROADMAP.jsonl` and `.foreman/`. A rules file
 that `HEAD` does not have is compared with an empty file, whether it is untracked or staged. The
 project's text around that block still counts. Missing scope, unavailable Git, skipped required
 checks or invalid results cannot prove completion. A failing stage leaves the task open. A

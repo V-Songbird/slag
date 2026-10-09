@@ -18,10 +18,8 @@ All notable changes to collet are documented here. The format follows
 
 ### Added
 
-- The harness workflow guide has a [Running the evals](harness-workflow.md#running-the-evals)
-  section: the command for the three eval cases, the WSL2 or Linux sandbox they need, what each
-  case grades, and that the cases have not run in a live session yet. One case grades its reply
-  with judge-model graders, which are billed on each of that case's runs.
+- The harness workflow guide explains [how to run collet's evals](harness-workflow.md#running-the-evals),
+  which need a WSL2 or Linux sandbox and bill a model session for each run.
 - `task.mjs add --foreman <id>` records the Foreman entry a task works, and `task.mjs status`
   shows it. The task's scope is derived from the code as before and never from the entry's
   `planned_touches`. An id of the wrong form, or one holding characters that do not show on
@@ -30,11 +28,9 @@ All notable changes to collet are documented here. The format follows
   command pass, the Foreman `update-status` step that marks the entry `awaiting_acceptance`, for
   the session to run after committing. collet does not write `ROADMAP.jsonl` or `.foreman/`, and
   the close of a task without the id prints what it printed before.
-- A task opened with `--foreman <id>` keeps what nobody checked in the Foreman entry's
-  `unverified:` note lines. Its passing close prints the `--unverified` text with that pointer
-  and adds neither the `--unverified` nor the `--left-out` text to `.collet/unverified.md`; the
-  task ledger keeps both. The session start and the compaction note point to the entry's notes.
-  A task without the id appends both texts to `.collet/unverified.md` as before.
+- A task opened with `--foreman <id>` keeps what nobody checked in the Foreman entry's notes
+  instead of `.collet/unverified.md`, and the session start and compaction note point there.
+  A task without the id works as before.
 
 ### Changed
 

@@ -52,7 +52,7 @@ next:
   …
 ```
 
-A second run refreshes collet's own scripts: `task.mjs`, `state.mjs` and the built-in scope checks. Keep your own checks in their own files. Your `config.json` and `unverified.md` are kept.
+A second run refreshes collet's own scripts: `task.mjs`, `state.mjs`, the check runner and the built-in scope check with its examples. Keep your own checks in their own files. Your `config.json` and `unverified.md` are kept.
 
 Generated bundle checks and their examples are also kept. `.collet/source.mjs`, the bundle checks' shared runtime, is refreshed while it still holds what collet wrote; a copy with edits of your own is kept, and the mount says how to take this version's fixes to it: remove it and mount again. After a refresh the mount proves the checks against their examples, as a mount with `--checks` does. The rules block sits between its own markers, so a second run replaces it and leaves your text untouched.
 
@@ -84,7 +84,7 @@ The command checks the changed files against the task scope, runs the configured
 
 Either half failing leaves the task open. Checks that cannot run also prevent closure; the accept command waits until live checks pass.
 
-The mount's own writes are not task changes: `.collet/` and the rules block between its markers in `AGENTS.md`, `CLAUDE.md` or `.cursor/rules/collet.md`. The first task can therefore close before you commit the mount. Any other change outside the scope still keeps the task open, including your own text in those files.
+The mount's own writes are not task changes: `.collet/` and the rules block between its markers in `AGENTS.md`, `CLAUDE.md` or `.cursor/rules/collet.md`. The first task can therefore close before you commit the mount. A planning tool's `ROADMAP.jsonl` and `.foreman/` do not count either. Any other change outside the scope still keeps the task open, including your own text in those files.
 
 ## Commands
 
@@ -155,7 +155,7 @@ A fresh mount without `--checks` adds only scope. A later mount preserves each i
 
 ## Configuration
 
-`.collet/config.json` holds three values, plus up to three optional ones that the mount writes only when asked: `ask_first`, `exclude` and `removed_checks`. A session is told all of them before it reads a file, so a placeholder left in `project` or `accept` blocks `task.mjs add`. A leftover `conventions` placeholder is dropped instead, and an empty list is valid.
+`.collet/config.json` holds three values, plus up to three optional ones that the mount writes only when asked: `ask_first`, `exclude` and `removed_checks`. The session start states `project`, `conventions`, `ask_first` and the open task's accept command before the session reads a file, so a placeholder left in `project` or `accept` blocks `task.mjs add`. A leftover `conventions` placeholder is dropped instead, and an empty list is valid.
 
 | Name | Required | Default | What it does |
 | --- | --- | --- | --- |

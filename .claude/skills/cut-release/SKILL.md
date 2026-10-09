@@ -128,8 +128,9 @@ private blocklist deliberately and say so. Do not bypass with `--no-verify`. The
 when the blocklist is absent, so a clean pass is not proof it ran. See
 `.claude/rules/reference-names.md`.
 
-Nothing here is pre-approved beyond reading and editing: every command in this skill goes through
-the usual permission prompt, and the push is the one you should read before allowing.
+The project's `.claude/settings.json` allows `git push` without a prompt, so the release
+authorization is the user's request, not a prompt. Show the staged diff and the commit before
+pushing; every other command goes through the usual permission prompt.
 
 ## Step 5 — confirm
 

@@ -74,7 +74,7 @@ A migration runs baseline checks, proposes changes, and creates an `anneal/<YYYY
 Each successful step is checked and committed. Session review proposes edits and waits for approval; it commits nothing.
 Documentation cleanup applies authorized corrections. Its `audit` mode reports findings without edits and saves a report only after you say yes to its offer.
 
-The [workflow guide](docs/knowledge/workflows.md) covers every audit finding, approval boundary, map-file format, safety hook, and standalone script.
+The [workflow guide](docs/knowledge/workflows.md) covers every audit finding, approval boundary, map-file format, safety hook, and eval.
 
 ## Configuration
 
@@ -102,7 +102,7 @@ cd anneal
 node --test
 ```
 
-The command reports test results and exits non-zero when a test fails. The suite covers the scripts and safety hook.
+The command reports test results and exits non-zero when a test fails. The suite covers the scripts, the safety hook and the eval graders.
 From the Slag root, `npm run check` runs all repository suites and also exits non-zero when a suite fails outside its tests.
 The [eval instructions](docs/knowledge/workflows.md#running-the-evals) describe the additional sandbox and host requirements for session tests.
 
