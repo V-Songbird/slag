@@ -26,21 +26,5 @@
         ]
       }
     ]
-  },
-  "permissions": {
-    "deny": [
-      "Read(./.env*)",
-      "Read(./dist/**)",
-      "Read(./build/**)",
-      "Read(./node_modules/**)",
-      "Read(**/*.map)",
-      "Read(**/*.log)",
-      "Read(**/*.idea)"
-    ],
-    "allow": [
-      "Bash(git rebase:*)",
-      "Bash(git cherry-pick:*)",
-      "Bash(git push:*)"
-    ]
   }
 }
