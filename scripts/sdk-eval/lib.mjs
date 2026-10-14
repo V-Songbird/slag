@@ -1,0 +1,91 @@
+// The parts of the SDK eval runner that need no model: reading a case, turning
+// the SDK's messages into the run the graders read, and deciding the
+// deterministic verdicts. Verdicts come from anneal's eval-harness.js, the same
+// evaluator the offline grader tests use, so both read a grader the same way.
+
+import fs from "node:fs";
+import path from "node:path";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const harness = require("../../anneal/tests/eval-harness.js");
+export const { listRunFiles, createdPaths } = harness;
+
+const HEAD = /^---\s*\n([\s\S]*?)---\s*\n?/;
+
+// One case folder: its tags and scaffold from case.yaml, its session limits and
+// prompt from prompt.md, and its graders.
+export function readCase(caseDir) {
+  const yaml = fs.readFileSync(path.join(caseDir, "case.yaml"), "utf8");
+  const promptFile = path.join(caseDir, "prompt.md");
+  const head = harness.frontmatter(promptFile);
+  return {
+    name: path.basename(caseDir),
+    dir: caseDir,
+    tags: (/^tags: \[(.*)\]$/m.exec(yaml)?.[1] ?? "").split(",").map((tag) => tag.trim()).filter(Boolean),
+    scaffold: /^ {2}scaffold_script: (\S+)$/m.exec(yaml)?.[1] ?? null,
+    maxTurns: Number(head.max_turns ?? 30),
+    timeoutSeconds: Number(head.timeout_seconds ?? 600),
+    allowedTools: head.allowed_tools ?? [],
+    prompt: fs.readFileSync(promptFile, "utf8").replace(HEAD, "").trim(),
+    graders: harness.readGraders(caseDir),
+  };
+}
+
+// The cases under a plugin's evals/ folder, narrowed by --case and --tag.
+export function selectCases(pluginDir, { names = [], tags = [] } = {}) {
+  const evals = path.join(pluginDir, "evals");
+  return fs.readdirSync(evals, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(evals, entry.name, "case.yaml")))
+    .map((entry) => readCase(path.join(evals, entry.name)))
+    .filter((c) => (names.length === 0 || names.includes(c.name)) && (tags.length === 0 || c.tags.some((tag) => tags.includes(tag))));
+}
+
+// On Windows the file tools take paths like `.collet\checks\x.mjs`, while the
+// graders were written against the POSIX harness and match `.collet/checks/`.
+const PATH_KEYS = new Set(["file_path", "path", "notebook_path"]);
+const posixPaths = (message) => JSON.parse(JSON.stringify(message), (key, value) => (PATH_KEYS.has(key) && typeof value === "string" ? value.replaceAll("\\", "/") : value));
+
+// The run the graders read, from the SDK's messages: every message serialized
+// on its own line, with POSIX path separators in tool inputs, the tool calls,
+// the final reply, and the cost.
+export function runFromMessages(raw) {
+  const messages = raw.map(posixPaths);
+  const calls = [];
+  let reply = "";
+  let result = null;
+  for (const message of messages) {
+    if (message.type === "assistant") {
+      for (const block of message.message?.content ?? []) {
+        if (block.type === "tool_use") calls.push({ name: block.name, input: block.input });
+        if (block.type === "text") reply = block.text;
+      }
+    }
+    if (message.type === "result") result = message;
+  }
+  if (typeof result?.result === "string" && result.result) reply = result.result;
+  return {
+    trace: messages.map((message) => JSON.stringify(message)).join("\n"),
+    calls,
+    reply,
+    costUsd: result?.total_cost_usd ?? null,
+    turns: result?.num_turns ?? null,
+    subtype: result?.subtype ?? "no-result",
+  };
+}
+
+// The graders that apply to an arm: `arm: with-only` skips the run without the plugin.
+export const gradersFor = (graders, arm) => graders.filter((grader) => grader.arm !== "with-only" || arm === "with");
+
+// A deterministic verdict, or null for an llm grader.
+export const verdict = (grader, run) => harness.passes(grader, run);
+
+// The text an llm grader's judge reads.
+export function judgeText(grader, run) {
+  const focus = grader.focus ?? "last_message";
+  if (focus === "last_message") return run.reply ?? "";
+  if (focus === "trace") return run.trace ?? "";
+  if (focus === "files") return run.created ?? "";
+  const file = path.join(run.dir, focus.path);
+  return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "(the file does not exist)";
+}
