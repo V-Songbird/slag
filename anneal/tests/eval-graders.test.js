@@ -57,6 +57,14 @@ test("an llm grader has no offline verdict and is not counted as failed", () => 
   assert.deepStrictEqual(failedGraders({ llm }, {}), []);
 });
 
+test("every skill-fired, audit-ran and evidence-ran grader runs only with the plugin", () => {
+  const found = fs.readdirSync(EVALS, { withFileTypes: true }).filter((entry) => entry.isDirectory())
+    .flatMap((entry) => readGraders(path.join(EVALS, entry.name)))
+    .filter((grader) => ["skill-fired", "audit-ran", "evidence-ran"].includes(grader.name));
+  assert.ok(found.length >= 15, `${found.length} graders found`);
+  assert.deepStrictEqual(found.filter((grader) => grader.arm !== "with-only").map((grader) => grader.name), []);
+});
+
 const bash = (...commands) => commands.map((command) => ({ name: "Bash", input: { command } }));
 
 // A recorded trace ends with the final reply twice: an assistant text event,
