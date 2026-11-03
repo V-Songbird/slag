@@ -178,22 +178,43 @@ export function summarize(records) {
 export const verdict = (grader, run) => harness.passes(grader, run);
 
 // The grades of a finished run: a deterministic verdict, or the judge's for an
-// llm grader. A judge call that throws, such as an API error or a reply that is
-// not JSON, yields the run error "judge failed: <message>" instead of grades.
-// An auth, permission or credit error also sets stop, since every later judge
-// call would fail the same way.
+// llm grader. A grader whose verdict throws, such as an invalid regex, yields
+// the run error "grader <name> failed: <message>" instead of grades. A judge
+// call that throws, such as an API error or a reply that is not JSON, yields
+// "judge failed: <message>"; an auth, permission or credit error also sets
+// stop, since every later judge call would fail the same way.
 export async function gradeRun(graders, run, judge) {
   const grades = {};
-  try {
-    for (const grader of graders) {
-      const fixed = verdict(grader, run);
-      grades[grader.name] = fixed === null ? await judge(grader, run) : { pass: fixed };
+  for (const grader of graders) {
+    let fixed;
+    try {
+      fixed = verdict(grader, run);
+    } catch (error) {
+      return { error: `grader ${grader.name} failed: ${error?.message || String(error)}`, stop: false };
     }
-  } catch (error) {
-    const message = error?.message || String(error);
-    return { error: `judge failed: ${message}`, stop: [401, 403].includes(error?.status) || /credit balance/i.test(message) };
+    if (fixed !== null) {
+      grades[grader.name] = { pass: fixed };
+      continue;
+    }
+    try {
+      grades[grader.name] = await judge(grader, run);
+    } catch (error) {
+      const message = error?.message || String(error);
+      return { error: `judge failed: ${message}`, stop: [401, 403].includes(error?.status) || /credit balance/i.test(message) };
+    }
   }
   return { grades };
+}
+
+// The record of one job: what runJob returns, or, when it throws, such as on a
+// failed file write, a run error "runner failed: <message>" that fails every
+// grader of its arm, so the batch still reaches its summary.
+export async function recordJob(job, runJob) {
+  try {
+    return await runJob(job);
+  } catch (error) {
+    return runRecord(job.c, job.arm, job.n, runFromMessages([]), { seconds: 0, error: `runner failed: ${error?.message || String(error)}` });
+  }
 }
 
 // The text an llm grader's judge reads.

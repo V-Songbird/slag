@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { selectCases, runFromMessages, gradersFor, gradeRun, verdict, judgeText, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, summarize } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, gradeRun, verdict, judgeText, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, summarize } from "./lib.mjs";
 
 const COLLET = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../collet");
 const byName = (cases, name) => cases.find((c) => c.name === name);
@@ -212,6 +212,35 @@ test("a judge auth, permission or credit error stops every run; other judge erro
     assert.strictEqual(graded.error, `judge failed: ${message}`);
     assert.strictEqual(graded.stop, false);
   }
+});
+
+test("a deterministic grader that throws fails its run as that grader's error, not the judge's", async () => {
+  const judged = { name: "judged", type: "llm", criteria: "PASS if the reply says done.\nFAIL if it does not." };
+  const badRegex = { name: "bad-regex", type: "regex", pattern: "(" };
+  let called = false;
+  const judge = async () => { called = true; return { pass: true }; };
+  const graded = await gradeRun([badRegex, judged], runFromMessages(finalReply("Done.")), judge);
+  assert.match(graded.error, /^grader bad-regex failed: Invalid regular expression/);
+  assert.strictEqual(graded.stop, false);
+  assert.strictEqual(called, false);
+});
+
+test("a runJob that throws, such as on a failed file write, still yields an errored record for the summary", async (t) => {
+  const c = byName(selectCases(COLLET), "mount-opens-first-task");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-eval-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  // result.json is a directory, so writing the run's result throws EISDIR.
+  fs.mkdirSync(path.join(dir, "result.json"));
+  const runJob = async () => { fs.writeFileSync(path.join(dir, "result.json"), "{}\n"); };
+  const records = await Promise.all([1, 2].map((n) => recordJob({ c, arm: "with", n }, runJob)));
+  for (const record of records) {
+    assert.match(record.error, /^runner failed: EISDIR/);
+    assert.deepStrictEqual(Object.keys(record.grades), gradersFor(c.graders, "with").map((g) => g.name));
+    assert.ok(Object.values(record.grades).every((g) => !g.pass));
+  }
+  assert.deepStrictEqual(summarize(records).errors.map((e) => e.n), [1, 2]);
+  const ok = { case: c.name, arm: "with", n: 3, grades: {} };
+  assert.strictEqual(await recordJob({ c, arm: "with", n: 3 }, async () => ok), ok);
 });
 
 test("an llm grader has no fixed verdict, and its judge reads the last reply", () => {

@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import Anthropic from "@anthropic-ai/sdk";
-import { selectCases, runFromMessages, gradersFor, gradeRun, judgeText, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, summarize } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, gradeRun, judgeText, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, summarize } from "./lib.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 // USD per million [input, output] tokens, for the judge and for a session that
@@ -189,7 +189,7 @@ async function worker() {
       break;
     }
     const job = jobs[next++];
-    const record = await runJob(job);
+    const record = await recordJob(job, runJob);
     records.push(record);
     const failed = Object.entries(record.grades ?? {}).filter(([, g]) => !g.pass).map(([name]) => name);
     console.log(`${record.case} ${record.arm}-${record.n}: ${record.error ?? `${record.subtype}, $${(record.costUsd ?? 0).toFixed(2)}, failed: ${failed.join(", ") || "none"}`}`);
