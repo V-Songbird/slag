@@ -266,6 +266,57 @@ test("a runJob that throws, such as on a failed file write, still yields an erro
   assert.strictEqual(await recordJob({ c, arm: "with", n: 3 }, async () => ok), ok);
 });
 
+test("a session that ran before a failed write keeps its cost, turns and reply in a saved runner-failed record", async (t) => {
+  const c = byName(selectCases(COLLET), "mount-opens-first-task");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-eval-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  // trace.jsonl is a directory, so the write after the session throws EISDIR.
+  fs.mkdirSync(path.join(dir, "trace.jsonl"));
+  const runJob = async (job) => {
+    const run = runFromMessages(finalReply("Done."));
+    job.session = { subtype: run.subtype, costUsd: run.costUsd, turns: run.turns, reply: run.reply, seconds: 30 };
+    fs.writeFileSync(path.join(dir, "trace.jsonl"), `${run.trace}\n`);
+  };
+  const save = (job, record) => fs.writeFileSync(path.join(dir, "result.json"), JSON.stringify(record));
+  let stopped = false;
+  const record = await recordJob({ c, arm: "with", n: 1 }, runJob, { save, stop: () => { stopped = true; } });
+  assert.match(record.error, /^runner failed: EISDIR/);
+  assert.deepStrictEqual([record.subtype, record.costUsd, record.turns, record.seconds, record.reply], ["success", 0.42, 3, 30, "Done."]);
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")), record);
+  assert.strictEqual(stopped, false);
+  // A save that throws too still returns the record.
+  const unsaved = await recordJob({ c, arm: "with", n: 2 }, runJob, { save: () => { throw new Error("EISDIR"); } });
+  assert.strictEqual(unsaved.costUsd, 0.42);
+});
+
+test("a runner failure stops every run only when its code shows the output cannot be written", async () => {
+  const c = byName(selectCases(COLLET), "mount-opens-first-task");
+  const outcome = async (code) => {
+    let stopped = false;
+    const thrown = Object.assign(new Error(`${code ?? "no code"}: write failed`), code ? { code } : {});
+    const record = await recordJob({ c, arm: "with", n: 1 }, async () => { throw thrown; }, { save: () => { throw thrown; }, stop: () => { stopped = true; } });
+    return { stopped, error: record.error };
+  };
+  for (const code of ["ENOSPC", "EACCES", "EPERM", "EROFS"]) {
+    assert.deepStrictEqual(await outcome(code), { stopped: true, error: `runner failed: ${code}: write failed; stopping every run` }, code);
+  }
+  for (const code of ["EISDIR", "ENOENT", undefined]) assert.strictEqual((await outcome(code)).stopped, false, String(code));
+});
+
+test("an unreadable focus file fails its run as that grader's error, not the judge's", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-eval-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  // The focus path is a directory, so reading it throws EISDIR.
+  fs.mkdirSync(path.join(dir, "notes.md"));
+  const grader = { name: "notes-judged", type: "llm", focus: { source: "file", path: "notes.md" }, criteria: "PASS if the notes name the task.\nFAIL if not." };
+  let called = false;
+  const judge = async () => { called = true; return { pass: true }; };
+  const graded = await gradeRun([grader], { ...runFromMessages(finalReply("Done.")), dir }, judge);
+  assert.match(graded.error, /^grader notes-judged failed: EISDIR/);
+  assert.strictEqual(graded.stop, false);
+  assert.strictEqual(called, false);
+});
+
 test("an llm grader has no fixed verdict, and its judge reads the last reply", () => {
   const grader = byName(selectCases(COLLET), "guard-refuses-out-of-scope-write").graders.find((g) => g.name === "names-the-refused-file");
   const run = runFromMessages(finalReply("package.json stays at 1.0.0."));

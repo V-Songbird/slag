@@ -155,7 +155,7 @@ export function runError(messages, { aborted, timeoutSeconds }) {
 }
 
 // The result.json of one run. A scaffold failure, a runner error or a timeout is
-// a result too: it keeps its turns, seconds and cost, and fails every grader of
+// a result too: it keeps its turns, seconds, cost and reply, and fails every grader of
 // its arm, since a run is correct only when every grader passes.
 export function runRecord(c, arm, n, run, { seconds, error = null, grades = {} }) {
   const record = { case: c.name, arm, n, subtype: run.subtype, costUsd: run.costUsd, turns: run.turns, seconds, reply: run.reply };
@@ -182,17 +182,20 @@ export function summarize(records) {
 export const verdict = (grader, run) => harness.passes(grader, run);
 
 // The grades of a finished run: a deterministic verdict, or the judge's for an
-// llm grader. A grader whose verdict throws, such as an invalid regex, yields
-// the run error "grader <name> failed: <message>" instead of grades. A judge
-// call that throws, such as an API error or a reply that is not JSON, yields
-// "judge failed: <message>"; an auth, permission or credit error also sets
-// stop, since every later judge call would fail the same way.
+// llm grader, which reads the grader's judgeText. A grader whose verdict or
+// judge text throws, such as an invalid regex or an unreadable focus file,
+// yields the run error "grader <name> failed: <message>" instead of grades. A
+// judge call that throws, such as an API error or a reply that is not JSON,
+// yields "judge failed: <message>"; an auth, permission or credit error also
+// sets stop, since every later judge call would fail the same way.
 export async function gradeRun(graders, run, judge) {
   const grades = {};
   for (const grader of graders) {
     let fixed;
+    let text;
     try {
       fixed = verdict(grader, run);
+      if (fixed === null) text = judgeText(grader, run);
     } catch (error) {
       return { error: `grader ${grader.name} failed: ${error?.message || String(error)}`, stop: false };
     }
@@ -201,7 +204,7 @@ export async function gradeRun(graders, run, judge) {
       continue;
     }
     try {
-      grades[grader.name] = await judge(grader, run);
+      grades[grader.name] = await judge(grader, text);
     } catch (error) {
       const message = error?.message || String(error);
       return { error: `judge failed: ${message}`, stop: sharedFailure(error?.status, message) };
@@ -210,14 +213,30 @@ export async function gradeRun(graders, run, judge) {
   return { grades };
 }
 
+// The error codes that show the output location cannot be written, so every
+// later run would fail the same way.
+const UNWRITABLE = new Set(["ENOSPC", "EACCES", "EPERM", "EROFS"]);
+
 // The record of one job: what runJob returns, or, when it throws, such as on a
 // failed file write, a run error "runner failed: <message>" that fails every
-// grader of its arm, so the batch still reaches its summary.
-export async function recordJob(job, runJob) {
+// grader of its arm, so the batch still reaches its summary. A session that
+// ran before the failure keeps its subtype, cost, turns, seconds and reply,
+// which runJob leaves in job.session. The record is passed to save, such as a
+// result.json write, whose own failure is ignored. An error code in UNWRITABLE
+// calls stop, since every later run would fail the same way.
+export async function recordJob(job, runJob, { save = () => {}, stop = () => {} } = {}) {
   try {
     return await runJob(job);
   } catch (error) {
-    return runRecord(job.c, job.arm, job.n, runFromMessages([]), { seconds: 0, error: `runner failed: ${error?.message || String(error)}` });
+    const halts = UNWRITABLE.has(error?.code);
+    if (halts) stop();
+    const message = `runner failed: ${error?.message || String(error)}${halts ? "; stopping every run" : ""}`;
+    const session = job.session ?? { ...runFromMessages([]), seconds: 0 };
+    const record = runRecord(job.c, job.arm, job.n, session, { seconds: session.seconds, error: message });
+    try {
+      save(job, record);
+    } catch {}
+    return record;
   }
 }
 

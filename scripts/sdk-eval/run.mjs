@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import Anthropic from "@anthropic-ai/sdk";
-import { selectCases, runFromMessages, gradersFor, gradeRun, judgeText, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, summarize } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, gradeRun, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, summarize } from "./lib.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 // USD per million [input, output] tokens, for the judge and for a session that
@@ -90,7 +90,7 @@ let spent = 0;
 let stopped = false;
 const judge = new Anthropic(JUDGE_CLIENT);
 
-async function judgeGrader(grader, run) {
+async function judgeGrader(grader, text) {
   const response = await judge.beta.messages.create({
     model: values["judge-model"],
     max_tokens: 2000,
@@ -109,22 +109,26 @@ async function judgeGrader(grader, run) {
       },
     },
     system: "You grade one run of a coding agent against the criteria the user gives. Apply the criteria literally.",
-    messages: [{ role: "user", content: `Criteria:\n${grader.criteria}\n\nText to grade:\n<text>\n${judgeText(grader, run)}\n</text>` }],
+    messages: [{ role: "user", content: `Criteria:\n${grader.criteria}\n\nText to grade:\n<text>\n${text}\n</text>` }],
   });
   const [inPrice, outPrice] = PRICE[values["judge-model"]] ?? [0, 0];
   spent += (response.usage.input_tokens * inPrice + response.usage.output_tokens * outPrice) / 1e6;
   if (response.stop_reason === "refusal") return { pass: false, reason: "judge refused" };
-  const text = response.content.find((block) => block.type === "text")?.text ?? "{}";
-  const parsed = JSON.parse(text);
+  const answer = response.content.find((block) => block.type === "text")?.text ?? "{}";
+  const parsed = JSON.parse(answer);
   return { pass: parsed.verdict === "PASS", reason: parsed.reason };
 }
 
-async function runJob({ c, arm, n }) {
-  const runDir = path.join(outDir, c.name, `${arm}-${n}`);
+const runDirOf = ({ c, arm, n }) => path.join(outDir, c.name, `${arm}-${n}`);
+const saveRecord = (job, record) => fs.writeFileSync(path.join(runDirOf(job), "result.json"), `${JSON.stringify(record, null, 2)}\n`);
+
+async function runJob(job) {
+  const { c, arm, n } = job;
+  const runDir = runDirOf(job);
   const work = path.join(runDir, "work");
   fs.mkdirSync(work, { recursive: true });
   const finish = (record) => {
-    fs.writeFileSync(path.join(runDir, "result.json"), `${JSON.stringify(record, null, 2)}\n`);
+    saveRecord(job, record);
     return record;
   };
   if (c.scaffold) {
@@ -171,6 +175,8 @@ async function runJob({ c, arm, n }) {
   // Count the session's spend before any workspace read that can throw.
   const run = runFromMessages(messages);
   spent += sessionSpend(run, PRICE[values.model] ?? PRICE["claude-opus-5-5"]);
+  // What a runner-failed record keeps if a later step throws.
+  job.session = { subtype: run.subtype, costUsd: run.costUsd, turns: run.turns, reply: run.reply, seconds };
   Object.assign(run, { dir: work, created: createdPaths(before, listRunFiles(work)) });
   fs.writeFileSync(path.join(runDir, "trace.jsonl"), `${run.trace}\n`);
   // A timeout can end the stream quietly as well as throw.
@@ -191,7 +197,7 @@ async function worker() {
       break;
     }
     const job = jobs[next++];
-    const record = await recordJob(job, runJob);
+    const record = await recordJob(job, runJob, { save: saveRecord, stop: () => { stopped = true; } });
     records.push(record);
     const failed = Object.entries(record.grades ?? {}).filter(([, g]) => !g.pass).map(([name]) => name);
     console.log(`${record.case} ${record.arm}-${record.n}: ${record.error ?? `${record.subtype}, $${(record.costUsd ?? 0).toFixed(2)}, failed: ${failed.join(", ") || "none"}`}`);
