@@ -67,6 +67,19 @@ An `audit` run shows the findings, offers to save them and writes a findings, re
 
 Each evidence entry names the file, the line and each code point. Tags are only counted, because their code points spell out the hidden text. The joiner inside an emoji and the tags of a subdivision flag render on screen, so they are not reported. A subdivision flag is a black flag, two lowercase letter tags or three digit tags, one to four more lowercase letter or digit tags, and the cancel tag; tags in any other shape after a black flag are reported. U+FE0E or U+FE0F right after an Extended_Pictographic character, and U+FE0F between 0-9, # or * and the keycap U+20E3, choose how an emoji shows, so they are not reported; every other variation selector is. A zero-width non-joiner in a script that needs it is reported; the owner decides. The finding asks you to inspect the line; repo-layout never removes the characters, decodes them or copies them into a plan.
 
+### What every session loads
+
+The summary ends with a `start context` block: the characters a Claude Code session reads before its first prompt, `startContext` in the JSON. It counts these sources, each as the character length of the whole file:
+
+- the root `CLAUDE.md`, `.claude/CLAUDE.md` and `CLAUDE.local.md`, with every file they import as `@path`, up to five hops, each file once;
+- the `.md` files under `.claude/rules/` without a `paths:` key in their frontmatter, since a rule with one loads only for matching files;
+- each file you pass with `--global <file>`, such as your global `CLAUDE.md`, with its imports;
+- the memory index you pass with `--memory <file>`, counted whole, so the count is an upper bound when the host loads only its start.
+
+The budget is 20,000 characters, the size at which the audit already calls a document long. Each source line shows its characters and its share of that budget. A source that does not exist, an import that does not resolve, and a memory index you did not pass appear as `missing` lines. When the total is over the budget, the last line says by how much and that cuts would start with the largest sources. The audit proposes no edit and changes none of them.
+
+The audit reads nothing outside the repository unless you name it with `--global` or `--memory`. A repository file that imports a path outside the repository gets a `missing` line, and that file is not read. A `SessionStart` command hook in `.claude/settings.json` is listed with its command; the audit never runs it, so its output is not counted. `.claude/settings.local.json` and plugin hook files are not read, because they load only on one machine or with the plugin installed.
+
 ### Where the audit finds a check command
 
 `check-command-missing` fires when there is code and nothing at the repository root runs a check. These count, and the summary's `checks` line lists them:

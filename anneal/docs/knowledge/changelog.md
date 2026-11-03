@@ -18,6 +18,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
+- The audit reports what every Claude Code session loads before its first prompt: the project's instruction files with their `@path` imports, rule files without a `paths:` scope, a global instruction file and a memory index passed with `--global` and `--memory`, and declared `SessionStart` hooks. Each source shows its characters and its share of a 20,000-character budget. The audit proposes no edit and changes nothing.
+
 - session-review suggests collet's `check-writer` skill for a mistake a machine could catch, when `.collet/` exists at the Git root. The suggestion appears in the report, beside any map-file change for the same finding, and nothing is written or run. Without `.collet/`, the report points to the project's own linter or tests.
 
 - Eval cases tagged `session-failure` check what session-review proposes for one failure shape each: no rule for a one-off flaky failure, a machine path kept out of the map file, a refusal workaround reported as a safety finding, and `check-writer` named only when `.collet/` exists. They have not run in a live session yet.

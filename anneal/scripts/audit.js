@@ -7,6 +7,7 @@
 // Outside git it walks the tree and reports that as a finding.
 
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { execFileSync, spawnSync } = require("node:child_process");
 const { observe } = require("./audit-observations.js");
@@ -17,6 +18,14 @@ const INDEX_FILES_MIN = 3;
 const MAX_DIR_DEPTH = 6;
 const MAX_READ_BYTES = 2 * 1024 * 1024;
 const EVIDENCE_LIMIT = 15;
+// What every session loads before its first prompt should cost no more than one
+// long document: the size at which the audit already calls a document long
+// (LONG_DOCUMENT_CHARS in audit-observations.js).
+const START_CONTEXT_BUDGET_CHARS = 20000;
+// The @path rule map-routes follows: Claude Code and Gemini CLI load a file
+// named as @path, five hops deep. Codex does not.
+const START_IMPORT_HOPS = 5;
+const START_IMPORTING = new Set(["CLAUDE.md", "CLAUDE.local.md", "GEMINI.md"]);
 const SEVERITY_ORDER = ["high", "medium", "low"];
 
 const CODE_EXTENSIONS = new Set([
@@ -460,7 +469,106 @@ function scanContents(root, codeFiles) {
   return { large, runtimeNames, defaultExports, reexportFiles };
 }
 
-function audit(rootArg) {
+// A Markdown text's lines past its frontmatter, and whether that frontmatter has a paths: key.
+function bodyOf(text) {
+  const lines = text.replace(/^\uFEFF/, "").split("\n").map((line) => line.replace(/\r$/, ""));
+  const end = lines[0] === "---" ? lines.indexOf("---", 1) : -1;
+  return { lines: lines.slice(end + 1), scoped: lines.slice(1, Math.max(end, 1)).some((line) => /^paths\s*:/.test(line)) };
+}
+
+// The @path targets of a Markdown text, outside code blocks and code spans.
+function importsOf(text) {
+  const targets = [];
+  let fence = null;
+  for (const line of bodyOf(text).lines) {
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !line.slice(marker[0].length).trim()) fence = null;
+    } else if (marker) {
+      fence = marker[1];
+    } else {
+      const prose = line.split("`").filter((_, k) => k % 2 === 0).join(" ");
+      for (const match of prose.matchAll(/(?:^|\s)@([^\s`'"()<>[\]]+)/g)) targets.push(match[1].replace(/[.,:;!?]+$/, ""));
+    }
+  }
+  return targets;
+}
+
+// What a Claude Code session loads before its first prompt: the project's
+// instruction files and their @path imports, rules without a paths: scope, and
+// the global file and memory index the caller names. SessionStart hooks are
+// listed, never run. Outside the root it reads only what the caller names.
+function startContext(root, reader, { global = [], memory } = {}) {
+  const { directory } = require("./session-evidence-redaction.js");
+  const sources = [];
+  const missing = [];
+  const seen = new Set();
+  const inside = (abs) => {
+    const rel = path.relative(root, abs);
+    return rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel.split(path.sep).join("/") : null;
+  };
+  const label = (abs) => inside(abs) ?? directory(abs);
+  // The file's text, null for a file not read as text, undefined when absent.
+  const load = (abs, loads) => {
+    seen.add(abs);
+    const info = fs.statSync(abs, { throwIfNoEntry: false })?.isFile() ? readFile(path.dirname(abs), path.basename(abs)) : null;
+    if (!info) return undefined;
+    const characters = info.text === null ? info.size : info.text.length;
+    const note = info.text === null ? ` (${info.size > MAX_READ_BYTES ? "over 2 MB" : "not text"}, bytes)` : "";
+    sources.push({ file: label(abs), loads: `${loads}${note}`, characters, share: Math.round((characters / START_CONTEXT_BUDGET_CHARS) * 100) });
+    return info.text;
+  };
+  const loaded = [];
+  for (const file of ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"]) {
+    const abs = path.join(root, file);
+    if (fs.existsSync(abs)) loaded.push([abs, load(abs, "project")]);
+  }
+  let rules = [];
+  try {
+    rules = fs.readdirSync(path.join(root, ".claude", "rules"), { recursive: true }).map(String).filter((file) => file.endsWith(".md")).sort();
+  } catch {
+    rules = [];
+  }
+  for (const rule of rules) {
+    const abs = path.join(root, ".claude", "rules", rule);
+    if (!bodyOf(readFile(path.dirname(abs), path.basename(abs))?.text || "").scoped) load(abs, "rule");
+  }
+  for (const file of global) {
+    const abs = path.resolve(file);
+    const text = load(abs, "global");
+    if (text === undefined) missing.push({ source: "global", file: label(abs), reason: "not found" });
+    else loaded.push([abs, text]);
+  }
+  if (!memory) missing.push({ source: "memory index", file: null, reason: "not given; pass --memory <file>" });
+  else if (load(path.resolve(memory), "memory index") === undefined) missing.push({ source: "memory index", file: label(path.resolve(memory)), reason: "not found" });
+
+  // Imports, breadth first. A file outside the root is read only when the caller named its importer.
+  let next = loaded.filter(([abs, text]) => typeof text === "string" && START_IMPORTING.has(path.basename(abs)));
+  for (let hop = 0; hop < START_IMPORT_HOPS && next.length; hop++) {
+    next = next.flatMap(([importer, text]) => importsOf(text).flatMap((target) => {
+      const abs = target.startsWith("~/") ? path.join(os.homedir(), target.slice(2)) : path.resolve(path.dirname(importer), target);
+      if (seen.has(abs)) return [];
+      if (!inside(abs) && inside(importer)) {
+        seen.add(abs);
+        missing.push({ source: "import", file: label(abs), reason: `outside the root, not read; imported by ${label(importer)}` });
+        return [];
+      }
+      const body = load(abs, `import of ${label(importer)}`);
+      if (body === undefined) missing.push({ source: "import", file: label(abs), reason: `not found, imported by ${label(importer)}` });
+      return typeof body === "string" ? [[abs, body]] : [];
+    }));
+  }
+
+  const settings = reader.json(".claude/settings.json");
+  const groups = Array.isArray(settings?.hooks?.SessionStart) ? settings.hooks.SessionStart : [];
+  const hooks = groups.flatMap((group) => (Array.isArray(group?.hooks) ? group.hooks : [])).filter((hook) => hook?.type === "command")
+    .map((hook) => ({ file: ".claude/settings.json", command: [hook.command, ...(Array.isArray(hook.args) ? hook.args : [])].join(" "), note: "output not measured: the audit never runs a hook" }));
+  sources.sort((a, b) => b.characters - a.characters || a.file.localeCompare(b.file));
+  const characters = sources.reduce((sum, source) => sum + source.characters, 0);
+  return { budget: START_CONTEXT_BUDGET_CHARS, characters, sources, missing, hooks };
+}
+
+function audit(rootArg, options = {}) {
   const root = path.resolve(rootArg);
   const listing = listFiles(root);
   const files = [...listing.tracked, ...listing.untracked];
@@ -543,6 +651,7 @@ function audit(rootArg) {
     files: { scanned: files.length, code: codeFiles.length },
     mapFiles,
     checks,
+    startContext: startContext(root, reader, options),
     findings,
     observations: observe(files, reader, facts, shared),
   };
@@ -572,6 +681,17 @@ function formatSummary(report) {
   const note = report.checks.split ? " (no single command runs them all)" : "";
   lines.push("", `map files: ${report.mapFiles.length ? report.mapFiles.join(" | ") : "none"}`);
   lines.push(`checks: ${commands.length ? commands.join(" | ") : "none found"}${note}`);
+  const start = report.startContext;
+  lines.push(
+    "",
+    `start context: ${start.characters} of ${start.budget} characters (${Math.round((start.characters / start.budget) * 100)}% of the budget)`,
+    ...start.sources.map((source) => `  ${source.file} (${source.loads}): ${source.characters} characters, ${source.share}% of the budget`),
+    ...start.missing.map((entry) => `  missing: ${entry.source}${entry.file ? ` ${entry.file}` : ""}: ${entry.reason}`),
+    ...start.hooks.map((hook) => `  hook ${hook.file} SessionStart: ${hook.command}; output not measured`),
+  );
+  if (start.characters > start.budget) {
+    lines.push(`  over budget by ${start.characters - start.budget} characters; cuts would start with the largest sources above. The audit changes none of them.`);
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -579,11 +699,15 @@ function main(argv) {
   const args = argv.slice(2);
   let root = process.cwd();
   let json = false;
+  const global = [];
+  let memory;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--json") json = true;
     else if (args[i] === "--root" && i + 1 < args.length) root = args[++i];
+    else if (args[i] === "--global" && i + 1 < args.length) global.push(path.resolve(args[++i]));
+    else if (args[i] === "--memory" && i + 1 < args.length) memory = path.resolve(args[++i]);
     else {
-      process.stderr.write("usage: audit.js [--root <dir>] [--json]\n");
+      process.stderr.write("usage: audit.js [--root <dir>] [--json] [--global <file>]... [--memory <file>]\n");
       return 2;
     }
   }
@@ -597,7 +721,7 @@ function main(argv) {
     process.stderr.write(`audit.js: not a directory: ${root}\n`);
     return 2;
   }
-  const report = audit(root);
+  const report = audit(root, { global, memory });
   process.stdout.write(json ? `${JSON.stringify(report, null, 2)}\n` : formatSummary(report));
   return 0;
 }

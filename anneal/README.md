@@ -57,7 +57,7 @@ From the Slag repository root, you can also run the scan directly. Replace `<you
 node anneal/scripts/audit.js --root "<your-repository>"
 ```
 
-It prints the findings, discovered map files, and available checks. Add `--json` for the evidence behind each count.
+It prints the findings, discovered map files, available checks, and the characters each session loads before its first prompt. Add `--json` for the evidence behind each count.
 
 ## What you can do
 

@@ -654,6 +654,109 @@ describe("findings a route, a framework or a test explains", () => {
   });
 });
 
+describe("start context", () => {
+  const share = (n) => Math.round((n / 20000) * 100);
+  const rows = (report) => report.startContext.sources.map(({ file, loads }) => [file, loads]);
+
+  test("a CLAUDE.md is counted with the files it imports, each once, up to five hops", () => {
+    const files = {
+      "CLAUDE.md": "@AGENTS.md\n",
+      "AGENTS.md": "# Shop\nSee @docs/a.md and `@docs/b.md`.\n```\n@docs/c.md\n```\n",
+      "docs/a.md": "Back to @../AGENTS.md\n", "docs/b.md": "b\n", "docs/c.md": "c\n",
+    };
+    const root = repo({ tracked: files });
+    const { startContext } = audit(root);
+    assert.deepStrictEqual(rows({ startContext }).sort(), [
+      ["AGENTS.md", "import of CLAUDE.md"], ["CLAUDE.md", "project"], ["docs/a.md", "import of AGENTS.md"],
+    ]);
+    const total = ["CLAUDE.md", "AGENTS.md", "docs/a.md"].reduce((sum, file) => sum + files[file].length, 0);
+    assert.strictEqual(startContext.characters, total);
+    assert.strictEqual(startContext.budget, 20000);
+    for (const source of startContext.sources) assert.strictEqual(source.share, share(source.characters));
+    assert.deepStrictEqual(startContext.sources.map((source) => source.characters), [...startContext.sources.map((source) => source.characters)].sort((a, b) => b - a));
+  });
+
+  test("a chain past five hops stops at five", () => {
+    const tracked = { "CLAUDE.md": "@1.md\n" };
+    for (let i = 1; i <= 6; i++) tracked[`${i}.md`] = `@${i + 1}.md\n`;
+    const files = rows(audit(repo({ tracked }))).map(([file]) => file).sort();
+    assert.deepStrictEqual(files, ["1.md", "2.md", "3.md", "4.md", "5.md", "CLAUDE.md"]);
+  });
+
+  test("a missing import is listed as missing, and the audit still runs", () => {
+    const { startContext } = audit(repo({ tracked: { "CLAUDE.md": "Read @gone.md first.\n" } }));
+    const gone = startContext.missing.find((entry) => entry.file === "gone.md");
+    assert.ok(gone);
+    assert.match(gone.reason, /^not found, imported by CLAUDE\.md$/);
+    assert.deepStrictEqual(rows({ startContext }), [["CLAUDE.md", "project"]]);
+  });
+
+  test("a project file's import outside the root is listed, not read", () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-outside-"));
+    created.push(outside);
+    write(outside, { "notes.md": "outside\n" });
+    const root = repo({ tracked: { "CLAUDE.md": `@${path.join(outside, "notes.md").split(path.sep).join("/")}\n` } });
+    const { startContext } = audit(root);
+    assert.deepStrictEqual(rows({ startContext }), [["CLAUDE.md", "project"]]);
+    assert.match(startContext.missing.find((entry) => entry.source === "import").reason, /^outside the root, not read; imported by CLAUDE\.md$/);
+  });
+
+  test("a memory index that does not exist is reported missing and counts nothing", () => {
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    const absent = path.join(root, "memory", "MEMORY.md");
+    const given = audit(root, { memory: absent }).startContext;
+    assert.deepStrictEqual(given.missing, [{ source: "memory index", file: "memory/MEMORY.md", reason: "not found" }]);
+    assert.strictEqual(given.characters, "# Shop\n".length);
+    const none = audit(root).startContext;
+    assert.match(none.missing.find((entry) => entry.source === "memory index").reason, /^not given/);
+    assert.strictEqual(none.characters, given.characters);
+  });
+
+  test("a memory index and a global file outside the root are counted", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-global-"));
+    created.push(home);
+    write(home, { "CLAUDE.md": "Always @extra.md\n", "extra.md": "extra rules\n", "memory/MEMORY.md": "- one memory\n" });
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    const { startContext } = audit(root, { global: [path.join(home, "CLAUDE.md")], memory: path.join(home, "memory", "MEMORY.md") });
+    const byLoads = Object.fromEntries(startContext.sources.map((source) => [source.loads.replace(/ .*/, ""), source]));
+    assert.strictEqual(byLoads.global.characters, "Always @extra.md\n".length);
+    assert.strictEqual(byLoads.memory.characters, "- one memory\n".length);
+    assert.strictEqual(startContext.sources.find((source) => source.loads.startsWith("import of")).characters, "extra rules\n".length);
+    assert.ok(!byLoads.global.file.startsWith("CLAUDE.md") && byLoads.global.file.endsWith("CLAUDE.md"));
+    assert.strictEqual(startContext.missing.length, 0);
+  });
+
+  test("rules without paths frontmatter load, rules with it do not", () => {
+    const root = repo({ tracked: {
+      ".claude/rules/always.md": "Keep it short.\n",
+      ".claude/rules/sub/scoped.md": "---\npaths:\n  - \"src/**\"\n---\nOnly for src.\n",
+    } });
+    assert.deepStrictEqual(rows(audit(root)), [[".claude/rules/always.md", "rule"]]);
+  });
+
+  test("a SessionStart hook is listed and never run", () => {
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    const marker = path.join(root, "hook-ran.txt");
+    const command = `node -e "require('fs').writeFileSync(${JSON.stringify(marker)}, 'x')"`;
+    write(root, { ".claude/settings.json": JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command }] }] } }) });
+    const { startContext } = audit(root);
+    assert.deepStrictEqual(startContext.hooks, [{ file: ".claude/settings.json", command, note: "output not measured: the audit never runs a hook" }]);
+    assert.strictEqual(fs.existsSync(marker), false);
+    assert.strictEqual(startContext.characters, "# Shop\n".length);
+  });
+
+  test("over budget prints the total, each source's share and a cut proposal", () => {
+    const root = repo({ tracked: { "CLAUDE.md": "x".repeat(25000) } });
+    const { status, stdout } = spawnSync(process.execPath, [CLI, "--root", root], { encoding: "utf-8" });
+    assert.strictEqual(status, 0);
+    assert.match(stdout, /\nchecks: .*\n\nstart context: 25000 of 20000 characters \(125% of the budget\)\n/);
+    assert.match(stdout, /\n {2}CLAUDE\.md \(project\): 25000 characters, 125% of the budget\n/);
+    assert.match(stdout, /\n {2}over budget by 5000 characters; /);
+    const json = spawnSync(process.execPath, [CLI, "--root", root, "--json"], { encoding: "utf-8" });
+    assert.strictEqual(JSON.parse(json.stdout).startContext.budget, 20000);
+  });
+});
+
 describe("CLI", () => {
   test("prints observations after the findings, each with its note", () => {
     const root = repo({ tracked: { "AGENTS.md": "# Shop\n", "src/app.js": "" } });
@@ -675,6 +778,7 @@ describe("CLI", () => {
 
   test("an unknown argument or a missing directory exits 2", () => {
     assert.strictEqual(spawnSync(process.execPath, [CLI, "--bogus"], { encoding: "utf-8" }).status, 2);
+    for (const flag of ["--memory", "--global"]) assert.strictEqual(spawnSync(process.execPath, [CLI, flag], { encoding: "utf-8" }).status, 2);
     const missing = path.join(os.tmpdir(), "anneal-audit-does-not-exist");
     assert.strictEqual(spawnSync(process.execPath, [CLI, "--root", missing], { encoding: "utf-8" }).status, 2);
   });
