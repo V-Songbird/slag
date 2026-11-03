@@ -30,6 +30,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 - `instruction-hidden-characters` now reports variation selectors U+FE00 to U+FE0F and U+E0100 to U+E01EF, naming each code point. U+FE0E or U+FE0F right after an Extended_Pictographic character, and U+FE0F between 0-9, # or * and the keycap U+20E3, are still skipped, since they choose how an emoji shows. Before, every variation selector went unreported.
 
+- `instruction-hidden-characters` now reports the Mongolian free variation selectors U+180B to U+180D and U+180F, except right after a Mongolian letter (U+1820 to U+1878 or U+1880 to U+18AA), where they choose the letter's form. The session evidence script spells them out as code points too, such as `<U+180B>`. Before, they went unreported.
+
 - `instruction-hidden-characters` now reports Unicode tags after a black flag unless they form a subdivision flag: two lowercase letters or three digits, one to four more lowercase letters or digits, then the cancel tag. Before, any tags after a black flag were skipped, so text written as tags behind one went unreported. The session evidence now counts those tags too.
 
 - In Claude Code and Codex sessions, the session evidence script now starts the excerpt of a failed Node import (`ERR_MODULE_NOT_FOUND`) at the error's own line. This also holds after progress text rewritten with a carriage return and in a Node test runner's TAP report. A line too long for the excerpt loses its middle instead of its end, so the excerpt keeps the importing file however long the workspace path is.

@@ -44,7 +44,8 @@ fixture strings and must retain their detector coverage.
 scripts/hidden-characters.test.js fails on raw zero-width, bidi-control, tag, misplaced
 byte-order-mark and variation-selector characters in tracked text files, naming file, line and
 code point. U+FE0E and U+FE0F are allowed right after an Extended_Pictographic character, and
-U+FE0F between 0-9, # or * and the keycap U+20E3. It walks the tree
+U+FE0F between 0-9, # or * and the keycap U+20E3. U+180B-U+180D and U+180F are allowed right
+after a Mongolian letter, U+1820-U+1878 or U+1880-U+18AA, and fail anywhere else. It walks the tree
 instead when there is no Git work tree. Write such characters as escapes (\u200B, \u{E0041}).
 scripts/markdown-links.test.js fails on a relative link or #anchor in a tracked public Markdown
 file whose target is not a tracked file or directory, or whose anchor names no heading or `<a>` id

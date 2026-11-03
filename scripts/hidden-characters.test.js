@@ -1,7 +1,7 @@
 'use strict';
 
 // Fails on raw invisible characters in the repository's text files. Write them as escapes
-// (\u200B, \u{E0041}) instead. The pattern and its emoji exceptions are anneal's audit's own.
+// (\u200B, \u{E0041}) instead. The pattern and its emoji and Mongolian exceptions are anneal's audit's own.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync, readdirSync } = require('node:fs');
@@ -61,8 +61,13 @@ const fixtureFiles = {
     'a\uFE0Fb \u2764\uFE0F\uFE0F c\uFE0E \u2764\uFE00 \u8FBB\u{E0100}\n' +
     '#\uFE0F\u20E3 *\uFE0F\u20E3 0\uFE0F\u20E3 \u00A9\uFE0F \u{1F600}\uFE0F\n' +
     '\uFE0Fstart 1\uFE0F #\uFE0F *\uFE0E 1\uFE0E\u20E3 \u{1F44D}\u{1F3FD}\uFE0F \u{1F1FA}\u{1F1F8}\uFE0F end\uFE0F\n',
+  'mongolian.md': '\u182D\u180B \u1820\u180F\na\u180Bb \u180C \u1810\u180D \u182D\u180B\u180B\n',
 };
 const expected = [
+  'mongolian.md:2: U+180B',
+  'mongolian.md:2: U+180B',
+  'mongolian.md:2: U+180C',
+  'mongolian.md:2: U+180D',
   'selectors.md:2: U+E0100',
   'selectors.md:2: U+FE00',
   'selectors.md:2: U+FE0E',
@@ -80,7 +85,7 @@ const expected = [
   'zero-width.md:2: U+200B',
 ];
 
-test('flags raw characters in a Git work tree and allows emoji joiners, subdivision flags and emoji variation selectors', async () => {
+test('flags raw characters in a Git work tree and allows emoji joiners, subdivision flags, emoji variation selectors and Mongolian letter forms', async () => {
   const { project } = await harness;
   const fixture = project(fixtureFiles);
   for (const args of [['init', '-q'], ['add', '-A']]) {

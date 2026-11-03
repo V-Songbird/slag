@@ -58,6 +58,10 @@ All notable changes to collet are documented here. The format follows
   U+E0100-U+E01EF as hidden, except U+FE0E or U+FE0F right after an Extended_Pictographic
   character and U+FE0F between 0-9, # or * and the keycap U+20E3. Before, every variation selector
   passed. A project mounted by an earlier collet gets this fix only after a remount.
+- `task.mjs`, `mount.mjs` and the session start now treat the Mongolian free variation selectors
+  U+180B-U+180D and U+180F as hidden, except right after a Mongolian letter (U+1820-U+1878 or
+  U+1880-U+18AA), where they choose the letter's form. Before, they passed. A project mounted by
+  an earlier collet gets this fix only after a remount.
 
 ## [0.5.0-alpha] — 2026-09-25
 
