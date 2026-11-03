@@ -47,15 +47,18 @@ function ignored(root, file) {
   return result.status === 0;
 }
 
-// Every Markdown file under a directory named docs, ignored ones included; dot directories and
-// dependencies are skipped.
+// Every Markdown file under a directory named docs, ignored ones included. Dot directories,
+// dependencies and ignored directories outside a docs tree, such as build output, are skipped.
 function docFiles(root) {
+  const listing = git(root, ["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"]);
+  const ignoredDirs = new Set(listing.status === 0 ? listing.stdout.split("\0").filter((p) => p.endsWith("/")) : []);
   const found = [];
   const walk = (dir, inDocs) => {
     for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
       const rel = dir ? `${dir}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
-        if (!SKIP.has(entry.name) && !entry.name.startsWith(".")) walk(rel, inDocs || entry.name === "docs");
+        const skipped = SKIP.has(entry.name) || entry.name.startsWith(".") || (!inDocs && entry.name !== "docs" && ignoredDirs.has(`${rel}/`));
+        if (!skipped) walk(rel, inDocs || entry.name === "docs");
       } else if (inDocs && entry.isFile() && entry.name.toLowerCase().endsWith(".md")) found.push(rel);
     }
   };
@@ -84,6 +87,14 @@ function frontmatter(text) {
     else fields[key] = unquote(value);
   }
   return fields;
+}
+
+// Where a related_files entry may point: from the repository root, or, for a plugin's own docs/,
+// from the directory that holds that docs/.
+function relatedCandidates(file, related) {
+  const docsDir = /(?:^|\/)docs\//.exec(file);
+  const base = docsDir && docsDir.index > 0 ? file.slice(0, docsDir.index + 1) : "";
+  return base ? [related, path.posix.join(base, related)] : [related];
 }
 
 const unquote = (value) => value.trim().replace(/^(["'])(.*)\1$/, "$2");
@@ -155,10 +166,7 @@ function check(directory) {
   for (const file of docs) {
     const text = fs.readFileSync(path.join(root, file), "utf8");
     const name = path.posix.basename(file);
-    const docsDir = /(?:^|\/)docs\/(?:([^/]+)\/)?/.exec(file);
-    const folder = docsDir[1];
-    // A plugin's own docs/ may list related files from the plugin's directory.
-    const docsBase = file.slice(0, docsDir.index + (docsDir[0].startsWith("/") ? 1 : 0));
+    const folder = /(?:^|\/)docs\/([^/]+)\//.exec(file)?.[1];
     const fields = EXEMPT.has(name.toLowerCase()) ? undefined : frontmatter(text);
     const isTask = folder === "tasks" || fields?.type === "task_summary";
 
@@ -186,7 +194,7 @@ function check(directory) {
       }
       for (const related of Array.isArray(fields.related_files) ? fields.related_files : []) {
         if (/[*?[{]/.test(related)) continue;
-        if (!fs.existsSync(path.join(root, related)) && !fs.existsSync(path.join(root, docsBase, related))) add("related-file-missing", "low", file, `related file ${related} does not exist`);
+        if (!relatedCandidates(file, related).some((p) => fs.existsSync(path.join(root, p)))) add("related-file-missing", "low", file, `related file ${related} does not exist`);
       }
     }
     const stem = name.replace(/\.md$/i, "");
@@ -245,6 +253,6 @@ function main(argv) {
   }
 }
 
-module.exports = { check, docFiles, formatSummary, frontmatter, linkTargets, main };
+module.exports = { check, docFiles, formatSummary, frontmatter, linkTargets, main, relatedCandidates };
 
 if (require.main === module) process.exitCode = main(process.argv);

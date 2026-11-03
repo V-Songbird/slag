@@ -7,20 +7,21 @@ description: >-
   agent instructions, host setup and public-repository hygiene. Use for a
   complete documentation cleanup, repository housekeeping or consistency
   audit across Claude Code, Codex and Antigravity. Pass audit to report
-  without edits. For a single README use readme; for code layout use
+  without edits, or maintain for drift and trim proposals that wait for
+  approval. For a single README use readme; for code layout use
   repo-layout; for a session transcript use session-review.
-argument-hint: "[audit] [path or concern]"
+argument-hint: "[audit|maintain] [path or concern]"
 license: MIT
 compatibility: Portable instructions for Claude Code, Codex and Antigravity. The bundled layout audit requires Node 22 or later. Git enables tracked and ignored file checks. Uses the readme skill when available and reports missing dependencies.
 metadata:
-  version: "1.1"
+  version: "1.2"
 ---
 
 # Docs align
 
 Make the maintained documentation agree with what the project actually does, and make its development instructions usable by each intended host. A complete pass accounts for every in-scope document; it does not require changing every file.
 
-Argument: `$ARGUMENTS`. If the host leaves it literal, read the request instead. `audit`, a review request or an explicit no-edit instruction means report only: nothing is written in the project, and a report is saved only as step 4 allows. Otherwise an explicit reconciliation or cleanup request authorizes ordinary in-scope documentation fixes. Resolve an ambiguous request as an audit. A path narrows the pass to that area plus its incoming references; state that boundary.
+Argument: `$ARGUMENTS`. If the host leaves it literal, read the request instead. `audit`, a review request or an explicit no-edit instruction means report only: nothing is written in the project, and a report is saved only as step 4 allows. Otherwise an explicit reconciliation or cleanup request authorizes ordinary in-scope documentation fixes. Resolve an ambiguous request as an audit. `maintain` runs the maintenance step in section 3 first and edits nothing until the owner approves a group of its proposals. A path narrows the pass to that area plus its incoming references; state that boundary.
 
 On Claude Code invoke `/anneal:docs-align`; on Codex use `$docs-align`; on Antigravity use `/docs-align`. Find the plugin files through `${CLAUDE_PLUGIN_ROOT}` on Claude Code, or resolve `../../` from this file on other hosts. Resolve target paths against the project root, never the installed plugin directory.
 
@@ -69,6 +70,22 @@ For commands, inspect what they do before running them. Run safe, bounded docume
 Keep three states distinct: verified, contradicted and unverified. Passing a unit suite proves those assertions; valid JSON proves parsing; neither proves discovery or execution in a host. A failed request to an external link is also not enough to declare the page obsolete. Use official sources for volatile host behavior and label inferred compatibility.
 
 For stale content choose the smallest useful action: correct, consolidate, archive under the project's policy, remove, or defer for a specific missing decision. Before deleting a maintained document, confirm its subject is gone or its useful content has a surviving home, check incoming references and update them. Old dates and zero incoming links alone do not establish irrelevance. Preserve licenses, attribution, provenance and useful decision rationale.
+
+**Maintenance.** In a `maintain` pass, and as stale-content candidates in any full pass, run:
+
+```text
+node "<plugin root>/scripts/docs-maintenance.js" --root "<project root>" --json
+```
+
+Add `--store <file>` for each orphaned knowledge store the owner names: a JSONL file whose records carry a `paths` list. Each proposal is a candidate for the choice above, not a verdict:
+
+- `drift`: a doc's related files were committed after the doc. Read those changes and correct only the claims they broke. `drift-private` is the same for private research, which may be a record of its time and stay as it is.
+- `fold-completed`: a completed task note untouched for more than three days. Move its durable findings into the topic docs its work changed, then delete it.
+- `condense`: an oversized task note or history-like doc. Replace superseded history with its current conclusions, keeping decisions and their reasons.
+- `merge-per-entry`: several docs in one folder, each one roadmap entry's evidence. Merge them into one topic doc and update incoming links.
+- `fold-store`: a store record and the docs whose `related_files` most narrowly list its paths. Write a still-true record as a line in that doc, or as a code comment beside its path when no doc lists it; drop the rest with a reason.
+
+Present the proposals grouped by kind and change nothing in a group until the owner approves it, even in a cleanup: deleting, merging and condensing records are not ordinary fixes. Never write to the store itself; retiring it is the owner's call. In audit mode, report the proposals only.
 
 ## 4. Apply and verify the reconciliation
 

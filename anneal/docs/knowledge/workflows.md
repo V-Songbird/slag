@@ -276,7 +276,22 @@ It reads every Markdown file under a directory named `docs`, at any depth and ig
 | low | `related-file-missing` | A `related_files` entry that exists neither from the repository root nor from the directory that holds the file's `docs/` |
 | low | `filename` | Not kebab-case, a bare id such as `240.md`, or a date; `<id>-<slug>` is allowed |
 
-In the versioned profile, tracked files in the private documentation directories and links to them are not findings. A `README.md`, `AGENTS.md`, `CLAUDE.md` or `SKILL.md` needs no frontmatter. `related_files` entries with glob characters are not checked. The frontmatter reader handles top-level keys and the `related_files` list, not full YAML.
+Ignored directories outside a `docs` tree, such as build output, are skipped. In the versioned profile, tracked files in the private documentation directories and links to them are not findings. A `README.md`, `AGENTS.md`, `CLAUDE.md` or `SKILL.md` needs no frontmatter. `related_files` entries with glob characters are not checked. The frontmatter reader handles top-level keys and the `related_files` list, not full YAML.
+
+### Maintenance proposals
+
+Pass `maintain` to docs-align, as in `/anneal:docs-align maintain`, for proposals that trim documentation. The skill runs `node anneal/scripts/docs-maintenance.js --root <project> [--store <file>]... [--json]`, which changes nothing and exits 0 with or without proposals, and 2 for bad arguments, an unreadable store or a directory outside a Git working tree. The skill then shows the proposals grouped by kind and changes nothing in a group until you approve it.
+
+| Proposal | When |
+| --- | --- |
+| `drift` | A related file or a file below a related directory was committed after the doc. A tracked doc is dated by its last commit, an untracked or ignored one by its file time |
+| `drift-private` | The same, for a private knowledge or API document |
+| `fold-completed` | A task note with `status: completed` untouched for more than three days |
+| `condense` | The documentation check's `task-note-large` or `history-doc-large` |
+| `merge-per-entry` | Three or more docs in one folder that share a name prefix, each with a summary naming a roadmap entry |
+| `fold-store` | A record of a JSONL store passed with `--store` that has a `paths` list, with the docs whose `related_files` entry covering one of those paths is the most specific |
+
+Task notes and decision records describe the past, so later code changes do not make them drift. Uncommitted edits to a tracked doc or its related files are not counted. The three-day trigger rests on one measurement: 96 of 100 task notes that another session ever read were first read within three days of their last write.
 
 ## The safety hook
 

@@ -205,6 +205,15 @@ test("frontmatter, type versus folder, related files and filenames are low findi
   assert.strictEqual(report.counts.high, 0);
 });
 
+test("docs inside ignored build output are skipped, ignored private docs are read", () => {
+  const report = check(repo({
+    ignore: `${IGNORE}out/\n`,
+    files: { "out/run-1/docs/knowledge/Bad.md": "# Copy\n", "docs/knowledge/private/Bad_Name.md": NOTE("knowledge") },
+  }));
+  assert.strictEqual(report.docs, 1);
+  assert.deepStrictEqual(ids(report), ["filename docs/knowledge/private/Bad_Name.md"]);
+});
+
 test("frontmatter and link parsing", () => {
   assert.strictEqual(frontmatter("# Title\n"), null);
   assert.deepStrictEqual(frontmatter("---\r\ntype: adr\r\nrelated_files: [\"a.js\", b.js]\r\n---\r\n"), { type: "adr", related_files: ["a.js", "b.js"] });
