@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import Anthropic from "@anthropic-ai/sdk";
-import { selectCases, runFromMessages, gradersFor, gradeRun, judgeText, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, runError, runRecord, summarize } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, gradeRun, judgeText, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, summarize } from "./lib.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const JUDGE_PRICE = { "claude-sonnet-5-5": [2, 10], "claude-opus-5-5": [4, 20], "claude-haiku-5-5": [0.1, 0.5] };
@@ -136,11 +136,12 @@ async function runJob({ c, arm, n }) {
   const timer = setTimeout(() => abortController.abort(), c.timeoutSeconds * 1000);
   const messages = [];
   const started = Date.now();
+  const options = sessionOptions(c, arm, { pluginDir, model: values.model });
   try {
     for await (const message of query({
       prompt: c.prompt,
       options: {
-        ...sessionOptions(c, arm, { pluginDir, model: values.model }),
+        ...options,
         cwd: work,
         abortController,
         // A fresh home hides installed plugins (~/.claude/plugins), which a run
@@ -154,9 +155,10 @@ async function runJob({ c, arm, n }) {
         throw new Error(`session used ${message.apiKeySource}, not ANTHROPIC_API_KEY; stopping every run`);
       }
       messages.push(message);
-      if (message.type === "result" && (message.is_error || /credit balance/i.test(message.result ?? ""))) {
-        stopped = true;
-        messages.push({ type: "runner_error", message: `session ended in error, stopping every run: ${message.result ?? message.subtype}` });
+      const ended = resultError(message);
+      if (ended) {
+        if (ended.stop) stopped = true;
+        messages.push({ type: "runner_error", message: ended.message });
       }
     }
   } catch (error) {
@@ -166,12 +168,13 @@ async function runJob({ c, arm, n }) {
   }
   const seconds = Math.round((Date.now() - started) / 1000);
   const run = { ...runFromMessages(messages), dir: work, created: createdPaths(before, listRunFiles(work)) };
-  spent += run.costUsd ?? 0;
+  spent += sessionSpend(run, options.maxBudgetUsd);
   fs.writeFileSync(path.join(runDir, "trace.jsonl"), `${run.trace}\n`);
   // A timeout can end the stream quietly as well as throw.
   const error = runError(messages, { aborted: abortController.signal.aborted, timeoutSeconds: c.timeoutSeconds });
   if (error) return finish(runRecord(c, arm, n, run, { seconds, error }));
   const graded = await gradeRun(gradersFor(c.graders, arm), run, judgeGrader);
+  if (graded.stop) stopped = true;
   return finish(runRecord(c, arm, n, run, { seconds, ...graded }));
 }
 

@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { selectCases, runFromMessages, gradersFor, gradeRun, verdict, judgeText, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, runError, runRecord, summarize } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, gradeRun, verdict, judgeText, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, summarize } from "./lib.mjs";
 
 const COLLET = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../collet");
 const byName = (cases, name) => cases.find((c) => c.name === name);
@@ -173,6 +173,40 @@ test("a judge call that throws makes a judge-failed run that still keeps a resul
     assert.deepStrictEqual(summarize([record]).errors, [{ case: c.name, arm: "with", n: 1, error: graded.error }]);
   }
   assert.strictEqual((await gradeRun(graders, run, async () => { throw new Error("529 overloaded"); })).error, "judge failed: 529 overloaded");
+});
+
+test("a timed-out session with no result adds its whole budget to the spend", () => {
+  // An aborted query throws after the session's first tool call, before any result.
+  const run = runFromMessages([bashCall("toolu_1", "ls"), { type: "runner_error", message: "Claude Code process aborted by user" }]);
+  assert.strictEqual(run.costUsd, null);
+  assert.strictEqual(sessionSpend(run, 2), 2);
+  assert.strictEqual(sessionSpend(runFromMessages(finalReply("Done.")), 2), 0.42);
+});
+
+test("a turn or budget limit errors only its run; other error results and a spent credit balance stop every run", () => {
+  // The SDK's limit results: is_error set, an errors list and no result text.
+  const limit = (subtype, errors) => ({ type: "result", subtype, is_error: true, errors, total_cost_usd: 1.1, num_turns: 30 });
+  assert.deepStrictEqual(resultError(limit("error_max_turns", ["Reached maximum number of turns (30)"])), { stop: false, message: "session ended in error_max_turns" });
+  assert.deepStrictEqual(resultError(limit("error_max_budget_usd", ["Exceeded USD budget (2)"])), { stop: false, message: "session ended in error_max_budget_usd" });
+  assert.strictEqual(resultError(limit("error_during_execution", [])).stop, true);
+  assert.strictEqual(resultError({ type: "result", subtype: "success", is_error: true, result: "API Error: 500" }).stop, true);
+  assert.strictEqual(resultError({ type: "result", subtype: "success", is_error: false, result: "Credit balance is too low" }).stop, true);
+  assert.strictEqual(resultError(finalReply("Done.")[1]), null);
+  assert.strictEqual(resultError(bashCall("toolu_1", "ls")), null);
+});
+
+test("a judge auth, permission or credit error stops every run; other judge errors fail only their run", async () => {
+  const grader = { name: "judged", type: "llm", criteria: "PASS if the reply says done.\nFAIL if it does not." };
+  const run = runFromMessages(finalReply("Done."));
+  const failing = (status, message) => async () => { throw Object.assign(new Error(message), { status }); };
+  for (const [status, message] of [[401, "401 authentication_error"], [403, "403 permission_error"], [400, "400 Your credit balance is too low"]]) {
+    assert.strictEqual((await gradeRun([grader], run, failing(status, message))).stop, true, message);
+  }
+  for (const [status, message] of [[529, "529 overloaded"], [undefined, "Unexpected end of JSON input"]]) {
+    const graded = await gradeRun([grader], run, failing(status, message));
+    assert.strictEqual(graded.error, `judge failed: ${message}`);
+    assert.strictEqual(graded.stop, false);
+  }
 });
 
 test("an llm grader has no fixed verdict, and its judge reads the last reply", () => {

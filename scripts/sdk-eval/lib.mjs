@@ -115,6 +115,24 @@ export function runFromMessages(raw) {
 // The graders that apply to an arm: `arm: with-only` skips the run without the plugin.
 export const gradersFor = (graders, arm) => graders.filter((grader) => grader.arm !== "with-only" || arm === "with");
 
+// The result subtypes that end only their own run: the case's turn limit and
+// the session's budget. The SDK marks them is_error like any other error result.
+const RUN_LIMITS = new Set(["error_max_turns", "error_max_budget_usd"]);
+
+// How a session's message ends its run in error, or null: a run limit errors
+// only its run; any other error result, or a reply that the credit balance is
+// too low, stops every run.
+export function resultError(message) {
+  if (message.type !== "result") return null;
+  if (RUN_LIMITS.has(message.subtype)) return { stop: false, message: `session ended in ${message.subtype}` };
+  if (message.is_error || /credit balance/i.test(message.result ?? "")) return { stop: true, message: `session ended in error, stopping every run: ${message.result ?? message.subtype}` };
+  return null;
+}
+
+// The spend a session adds to the batch total: its reported cost, or its whole
+// budget when it ended with no result, as a timed-out session does.
+export const sessionSpend = (run, budgetUsd) => run.costUsd ?? budgetUsd;
+
 // Why a session yields no grades: its timeout, or the runner's own error.
 export function runError(messages, { aborted, timeoutSeconds }) {
   if (aborted) return `timed out after ${timeoutSeconds} seconds`;
@@ -152,6 +170,8 @@ export const verdict = (grader, run) => harness.passes(grader, run);
 // The grades of a finished run: a deterministic verdict, or the judge's for an
 // llm grader. A judge call that throws, such as an API error or a reply that is
 // not JSON, yields the run error "judge failed: <message>" instead of grades.
+// An auth, permission or credit error also sets stop, since every later judge
+// call would fail the same way.
 export async function gradeRun(graders, run, judge) {
   const grades = {};
   try {
@@ -160,7 +180,8 @@ export async function gradeRun(graders, run, judge) {
       grades[grader.name] = fixed === null ? await judge(grader, run) : { pass: fixed };
     }
   } catch (error) {
-    return { error: `judge failed: ${error?.message || String(error)}` };
+    const message = error?.message || String(error);
+    return { error: `judge failed: ${message}`, stop: [401, 403].includes(error?.status) || /credit balance/i.test(message) };
   }
   return { grades };
 }
