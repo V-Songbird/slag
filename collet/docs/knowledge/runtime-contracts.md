@@ -44,7 +44,9 @@ The session start leaves out of what it states every character a model reads and
 not see: U+200B-U+200D, U+2060, U+FEFF past the start, U+202A-U+202E, U+2066-U+2069 and the
 Unicode tags U+E0000-U+E007F. That covers the project line, the `ask_first` list, the conventions,
 the open task's title, scope and accept command, and `.collet/handoff.md`. The joiner inside an
-emoji and the tags of a subdivision flag render, so they stay. A closing line names each field
+emoji and the tags of a subdivision flag render, so they stay: U+1F3F4, two lowercase letter tags
+or three digit tags, one to four lowercase letter or digit tags, then the cancel tag U+E007F. Tags
+behind U+1F3F4 in any other shape are left out. A closing line names each field
 that held such characters and their code points, counting tags and never decoding them. Text
 without them reads exactly as before.
 

@@ -42,6 +42,12 @@ All notable changes to collet are documented here. The format follows
   boundary. collet never reads that roadmap, never enforces the files an entry lists, and leaves
   the roadmap files unchanged.
 
+### Fixed
+
+- `task.mjs`, `mount.mjs` and the session start now treat Unicode tags after a black flag as
+  hidden unless they form a subdivision flag. Before, any tags after a black flag passed, so text
+  written as tags behind one was stored and stated.
+
 ## [0.5.0-alpha] — 2026-09-25
 
 ### Added

@@ -58,10 +58,13 @@ export function filled(value) {
 // Characters a model reads and a person does not see: zero-width characters, the word joiner, a
 // byte order mark, bidi embeddings and isolates, and Unicode tags. Text holding them can carry an
 // order nobody reviewing the file can read. The joiner inside an emoji and the tags of a
-// subdivision flag render, so they are not matched. Copied from anneal's audit, since collet ships
-// alone; this is the one copy the task CLI, the mount and session start all read.
+// subdivision flag render, so they are not matched. A subdivision flag is U+1F3F4, then two
+// lowercase letter tags or three digit tags, one to four lowercase letter or digit tags, and the
+// cancel tag U+E007F; any other tag is matched, including tags behind U+1F3F4 in another shape.
+// Copied from anneal's audit, since collet ships alone; this is the one copy the task CLI, the
+// mount and session start all read.
 export const HIDDEN_CHARACTERS =
-  /(?<!\p{Extended_Pictographic}\uFE0F?|[\u{1F3FB}-\u{1F3FF}])\u200D|[\u200B\u200C\u2060\uFEFF\u202A-\u202E\u2066-\u2069]|(?<!\u{1F3F4}[\u{E0020}-\u{E007E}]*)[\u{E0000}-\u{E007F}]/gu;
+  /(?<!\p{Extended_Pictographic}\uFE0F?|[\u{1F3FB}-\u{1F3FF}])\u200D|[\u200B\u200C\u2060\uFEFF\u202A-\u202E\u2066-\u2069]|(?<!\u{1F3F4}(?=(?:[\u{E0061}-\u{E007A}]{2}|[\u{E0030}-\u{E0039}]{3})[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]{1,4}\u{E007F})[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]*)[\u{E0000}-\u{E007F}]/gu;
 
 /** The code points of `text` that do not show on screen. */
 export const hiddenIn = (text) => [...String(text).matchAll(HIDDEN_CHARACTERS)].map(([char]) => char.codePointAt(0));

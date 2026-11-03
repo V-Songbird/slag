@@ -201,6 +201,16 @@ test('an emoji joined by a joiner and a subdivision flag reach the config and th
   assert.ok(readFileSync(join(root, 'AGENTS.md'), 'utf8').includes(`asked before any of these: ${entry}.`));
 });
 
+test('an ask-first entry written as tags behind a black flag is refused, and nothing is written', () => {
+  const root = project(TREE);
+  const payload = [...'deploy'].map((char) => String.fromCodePoint(0xe0000 + char.codePointAt(0))).join('');
+  const out = mount(root, ['--ask-first', `post to \u{1F3F4}${payload}`]);
+  assert.equal(out.status, 2, out.stderr);
+  assert.match(out.stderr, /^--ask-first "post to \u{1F3F4}" holds characters that do not show on screen: 6 Unicode tag characters\. Nothing was written\.$/mu);
+  assert.doesNotMatch(out.stderr, /[\u{E0000}-\u{E007F}]/u);
+  for (const path of ['.collet', '.claude', 'AGENTS.md']) assert.equal(existsSync(join(root, path)), false, `${path}: ${out.stderr}`);
+});
+
 // An entry edited into the config by hand never passed --ask-first, and a remount renders the list
 // into the rules block, so it is refused there, named by what shows of it.
 test('an ask-first entry edited into the config with characters nobody sees is not rendered, and nothing is written', () => {
