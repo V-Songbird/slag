@@ -450,6 +450,13 @@ The two arms are the snapshots, not the plugin: no case allows a Skill call, and
      --output-dir <results>/01
    ```
 
+   The same run through the Claude Agent SDK, which bills an API key instead of a Claude plan, uses [the SDK runner](../../../scripts/sdk-eval/run.mjs). Pass `--ablation none` there too: without it the runner adds a without-plugin arm and doubles the paid sessions. The runner needs `npm install` in `scripts/sdk-eval/` and `ANTHROPIC_API_KEY` in the env file, runs Bash unconfined, defaults to `--model claude-opus-5-5`, and keeps each run's workspace under `--output-dir`, which stays outside the repository (under 120 characters on Windows). `--concurrency 1` keeps one run at a time:
+
+   ```bash
+   node --env-file=<file> scripts/sdk-eval/run.mjs anneal --case navigation-package-lookup-original \
+     --runs 1 --ablation none --concurrency 1 --model <model-id> --output-dir <results>/01
+   ```
+
 3. Runs 1 to 6 are `package-lookup` original, then oriented; `contract-section` oriented, then original; `explicit-path` original, then oriented. Runs 7 to 12 are the same six in reverse order, so each snapshot goes first once per scenario.
 4. Keep every run. A failed grader, a harness error or a timeout is a result, not a reason to run again. A run is correct when every grader of its case passes.
 5. From each result and trace, record the turns, `duration_seconds` and `cost_usd`; the read and search calls and the characters they returned; and the wrong-path attempts. Those are a read, search or edit under `packages/pricing/`, `packages/quotes/` or `apps/api-v1/` in the package lookup, a page size other than 20 or 100 written in the contract task, and a read or edit of a file other than `AGENTS.md`, `shipping.js` and its test in the control. Mark what a trace does not show as unavailable. Fewer reads or an earlier edit are not success on their own.
@@ -475,7 +482,18 @@ Six more cases, tagged `heldout`, repeat the two route lines on a second reposit
 | `heldout-contract-section` | Make the manifest batch sizes in a named file match the contract | Default 25 and maximum 60 in `limits.js`, from the manifests entry past line 2,000 rather than the general rule of 100 and 500 near the top, with the other limits unchanged |
 | `heldout-explicit-path` | Add Portugal to the EU fee region in a named file | `PT` in the EU region of `fees.js`, with every other region and fee unchanged |
 
-The cases share the navigation protocol: the same first prompt line, `--ablation none`, twelve runs in the same order, and the same measures. [heldout-scenarios.test.js](../../tests/heldout-scenarios.test.js) grades known-good, wrong and partial solutions without a session. It also checks the code's behaviour, that the two repositories share no top-level folder, and that each `Start here` line names only what its destination exports or states.
+The cases share the navigation protocol: the same first prompt line, `--ablation none`, twelve runs in the same order, and the same measures. A held-out run takes the navigation command with a held-out case name, in either form:
+
+```bash
+claude plugin eval ./anneal --case heldout-package-lookup-original --runs 1 --ablation none \
+  --scaffold --no-publish --allow-tools Bash Edit Write --model <model-id> --keep-temp \
+  --output-dir <results>/01
+
+node --env-file=<file> scripts/sdk-eval/run.mjs anneal --case heldout-package-lookup-original \
+  --runs 1 --ablation none --concurrency 1 --model <model-id> --output-dir <results>/01
+```
+
+[heldout-scenarios.test.js](../../tests/heldout-scenarios.test.js) grades known-good, wrong and partial solutions without a session. It also checks the code's behaviour, that the two repositories share no top-level folder, and that each `Start here` line names only what its destination exports or states.
 
 One held-out run with these lines is recorded, on Claude Code 2.1.278 under WSL2 with `claude-opus-5[1m]`. All twelve runs were correct, and all six oriented sessions received the `Start here` lines.
 

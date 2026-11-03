@@ -57,6 +57,17 @@ test("anneal's paired navigation cases are read with their scaffolds and no Skil
   }
 });
 
+test("anneal's held-out cases are read with their scaffolds and no Skill tool", () => {
+  const cases = selectCases(path.join(COLLET, "../anneal"), { tags: ["heldout"] });
+  assert.strictEqual(cases.length, 6);
+  for (const c of cases) {
+    assert.match(c.scaffold, /^heldout-[a-z-]+-(original|oriented)\.sh$/);
+    assert.ok(!c.allowedTools.includes("Skill"));
+    assert.match(c.prompt, /^Before anything else, read `AGENTS\.md`\./);
+    assert.deepStrictEqual(sessionOptions(c, "with", { pluginDir: "anneal", model: "m" }).settingSources, ["user"]);
+  }
+});
+
 test("--ablation none runs only the arm with the plugin, and any other value is refused", () => {
   assert.deepStrictEqual(runArms(undefined), ["with", "without"]);
   assert.deepStrictEqual(runArms("none"), ["with"]);
