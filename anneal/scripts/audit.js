@@ -257,12 +257,14 @@ function mapFileFindings(root, add) {
 // character, and U+FE0F between 0-9, # or * and the keycap U+20E3, choose how
 // an emoji shows, so they are skipped; every other variation selector,
 // U+FE00-U+FE0F and U+E0100-U+E01EF, is matched. The Mongolian free variation
-// selectors U+180B-U+180D and U+180F right after a Mongolian letter,
-// U+1820-U+1878 or U+1880-U+18AA, choose the letter's form, so they are
-// skipped; anywhere else they are matched. The evidence names each line and
-// code point and counts tags, never decoding them.
+// selectors U+180B-U+180D and U+180F and the vowel separator U+180E right after
+// a Mongolian letter, U+1820-U+1878 or U+1880-U+18AA, shape that letter, so
+// they are skipped; anywhere else they are matched. The evidence names each
+// line and code point and counts tags, never decoding them.
+// collet/templates/state.mjs holds an identical copy;
+// scripts/hidden-characters.test.js fails when the two differ.
 const HIDDEN_CHARACTERS =
-  /(?<!\p{Extended_Pictographic}\uFE0F?|[\u{1F3FB}-\u{1F3FF}])\u200D|(?<!\p{Extended_Pictographic}|[#*0-9](?=\uFE0F\u20E3))[\uFE0E\uFE0F]|(?<![\u1820-\u1878\u1880-\u18AA])[\u180B-\u180D\u180F]|[\u200B\u200C\u2060\uFEFF\u202A-\u202E\u2066-\u2069\uFE00-\uFE0D\u{E0100}-\u{E01EF}]|(?<!\u{1F3F4}(?=(?:[\u{E0061}-\u{E007A}]{2}|[\u{E0030}-\u{E0039}]{3})[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]{1,4}\u{E007F})[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]*)[\u{E0000}-\u{E007F}]/gu;
+  /(?<!\p{Extended_Pictographic}\uFE0F?|[\u{1F3FB}-\u{1F3FF}])\u200D|(?<!\p{Extended_Pictographic}|[#*0-9](?=\uFE0F\u20E3))[\uFE0E\uFE0F]|(?<![\u1820-\u1878\u1880-\u18AA])[\u180B-\u180F]|[\u200B\u200C\u2060\uFEFF\u202A-\u202E\u2066-\u2069\uFE00-\uFE0D\u{E0100}-\u{E01EF}]|(?<!\u{1F3F4}(?=(?:[\u{E0061}-\u{E007A}]{2}|[\u{E0030}-\u{E0039}]{3})[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]{1,4}\u{E007F})[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]*)[\u{E0000}-\u{E007F}]/gu;
 const INSTRUCTION_DIRS = [".agents/", ".claude/", ".cursor/rules/", ".gemini/"];
 
 function isInstructionFile(file) {

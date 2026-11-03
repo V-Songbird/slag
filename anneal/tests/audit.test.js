@@ -171,8 +171,8 @@ describe("hidden characters in instruction files", () => {
     );
   });
 
-  test("Mongolian free variation selectors are reported except right after a Mongolian letter", () => {
-    const skipped = "\u182D\u180B \u1820\u180C \u1828\u180D \u1873\u180F \u1887\u180B \u1885\u180C \u18AA\u180D";
+  test("Mongolian free variation selectors and the vowel separator are reported except right after a Mongolian letter", () => {
+    const skipped = "\u182D\u180B \u1820\u180C \u1828\u180D \u1873\u180F \u1887\u180B \u1885\u180C \u18AA\u180D \u1828\u180E\u1820";
     const lines = [
       ["a\u180Bb", "U+180B"],
       ["\u180Cat the start", "U+180C"],
@@ -181,6 +181,8 @@ describe("hidden characters in instruction files", () => {
       ["twice \u182D\u180B\u180B", "U+180B"],
       ["after a Mongolian digit \u1810\u180B", "U+180B"],
       ["after a space \u182D \u180C", "U+180C"],
+      ["vowel separator alone \u180E", "U+180E"],
+      ["vowel separator after a Mongolian digit \u1810\u180E", "U+180E"],
     ];
     const text = ["# map", skipped, ...lines.map(([line]) => line)].join("\n");
     assert.deepStrictEqual(

@@ -11,12 +11,14 @@
 // the same breath.
 //
 // Nor is a character a model reads and a person does not see: zero-width characters, the word
-// joiner, a byte order mark past the start, bidi embeddings and isolates, and Unicode tags. The
-// mount and the task CLI refuse them, but text edited in by hand, or written by an earlier collet,
-// can still carry an order in them that nobody reviewing the file can read, and stating it would
-// deliver that order every session. They are left out, and a closing line names the field that
-// held them and their code points, counting tags and never decoding them. The joiner inside an
-// emoji and the tags of a subdivision flag render, so they stay.
+// joiner, a byte order mark past the start, bidi embeddings and isolates, variation selectors, the
+// Mongolian free variation selectors and vowel separator, and Unicode tags. The mount and the task
+// CLI refuse them, but text edited in by hand, or written by an earlier collet, can still carry an
+// order in them that nobody reviewing the file can read, and stating it would deliver that order
+// every session. They are left out, and a closing line names the field that held them and their
+// code points, counting tags and never decoding them. The joiner inside an emoji, the tags of a
+// subdivision flag, U+FE0E or U+FE0F right after an Extended_Pictographic character, U+FE0F in a
+// keycap, and U+180B-U+180F right after a Mongolian letter render or shape what shows, so they stay.
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 

@@ -1,7 +1,8 @@
 'use strict';
 
 // Fails on raw invisible characters in the repository's text files. Write them as escapes
-// (\u200B, \u{E0041}) instead. The pattern and its emoji and Mongolian exceptions are anneal's audit's own.
+// (\u200B, \u{E0041}) instead. The pattern and its emoji and Mongolian exceptions are anneal's audit's own;
+// a test checks that collet's copy of the pattern is identical to it.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync, readdirSync } = require('node:fs');
@@ -52,6 +53,12 @@ test('tracked text files hold no raw invisible characters', () => {
   assert.deepEqual(findHiddenCharacters(root), []);
 });
 
+test("collet's copy of the hidden-character pattern is identical to anneal's", async () => {
+  const { HIDDEN_CHARACTERS: copy } = await import('../collet/templates/state.mjs');
+  assert.equal(copy.source, HIDDEN_CHARACTERS.source);
+  assert.equal(copy.flags, HIDDEN_CHARACTERS.flags);
+});
+
 const fixtureFiles = {
   'zero-width.md': 'first line\nbad\u200Bword\n',
   'tag.txt': 'plain \u{E0041} tag\n',
@@ -61,13 +68,15 @@ const fixtureFiles = {
     'a\uFE0Fb \u2764\uFE0F\uFE0F c\uFE0E \u2764\uFE00 \u8FBB\u{E0100}\n' +
     '#\uFE0F\u20E3 *\uFE0F\u20E3 0\uFE0F\u20E3 \u00A9\uFE0F \u{1F600}\uFE0F\n' +
     '\uFE0Fstart 1\uFE0F #\uFE0F *\uFE0E 1\uFE0E\u20E3 \u{1F44D}\u{1F3FD}\uFE0F \u{1F1FA}\u{1F1F8}\uFE0F end\uFE0F\n',
-  'mongolian.md': '\u182D\u180B \u1820\u180F\na\u180Bb \u180C \u1810\u180D \u182D\u180B\u180B\n',
+  'mongolian.md': '\u182D\u180B \u1820\u180F \u1828\u180E\u1820\na\u180Bb \u180C \u1810\u180D \u182D\u180B\u180B x\u180E \u1810\u180E\n',
 };
 const expected = [
   'mongolian.md:2: U+180B',
   'mongolian.md:2: U+180B',
   'mongolian.md:2: U+180C',
   'mongolian.md:2: U+180D',
+  'mongolian.md:2: U+180E',
+  'mongolian.md:2: U+180E',
   'selectors.md:2: U+E0100',
   'selectors.md:2: U+FE00',
   'selectors.md:2: U+FE0E',
