@@ -280,18 +280,20 @@ Ignored directories outside a `docs` tree, such as build output, are skipped. In
 
 ### Maintenance proposals
 
-Pass `maintain` to docs-align, as in `/anneal:docs-align maintain`, for proposals that trim documentation. The skill runs `node anneal/scripts/docs-maintenance.js --root <project> [--store <file>]... [--json]`, which changes nothing and exits 0 with or without proposals, and 2 for bad arguments, an unreadable store or a directory outside a Git working tree. The skill then shows the proposals grouped by kind and changes nothing in a group until you approve it.
+Pass `maintain` to docs-align, as in `/anneal:docs-align maintain`, for proposals that trim documentation. The skill runs `node anneal/scripts/docs-maintenance.js --root <project> [--store <file>]... [--transcripts <directory>]... [--json]`, which changes nothing and exits 0 with or without proposals, and 2 for bad arguments, an unreadable store or transcript directory, or a directory outside a Git working tree. The skill then shows the proposals grouped by kind and changes nothing in a group until you approve it.
 
 | Proposal | When |
 | --- | --- |
-| `drift` | A related file or a file below a related directory was committed after the doc. A tracked doc is dated by its last commit, an untracked or ignored one by its file time |
+| `drift` | A related file or a file below a related directory changed after the doc. Each proposal says whether the doc's date came from a commit or a file time |
 | `drift-private` | The same, for a private knowledge or API document |
-| `fold-completed` | A task note with `status: completed` untouched for more than three days |
+| `fold-completed` | A task note with `status: completed` untouched for more than three days. With `--transcripts`, only when no other session read it in the three days after its last write |
 | `condense` | The documentation check's `task-note-large` or `history-doc-large` |
 | `merge-per-entry` | Three or more docs in one folder that share a name prefix, each with a summary naming a roadmap entry |
-| `fold-store` | A record of a JSONL store passed with `--store` that has a `paths` list, with the docs whose `related_files` entry covering one of those paths is the most specific |
+| `fold-store` | A record of a JSONL store passed with `--store` that has a `paths` list, with the docs, task notes aside, whose `related_files` entry covering one of those paths is the most specific |
 
-Task notes and decision records describe the past, so later code changes do not make them drift. Uncommitted edits to a tracked doc or its related files are not counted. The three-day trigger rests on one measurement: 96 of 100 task notes that another session ever read were first read within three days of their last write.
+A tracked file's date is its last commit, or its file time when it has uncommitted changes. An untracked or ignored doc has only its file time, and a copy resets that to the copy's time; that can hide a proposal, never invent one. Task notes and decision records describe the past, so later code changes do not make them drift.
+
+`--transcripts` takes a folder of Claude Code session transcripts, such as the project's folder under `~/.claude/projects/`, once per folder; pass a worktree's folder too. A session reads a note when a tool's file path ends with the note's path or a shell command names it. A session that wrote the note with a file tool, and any call within a minute of its last write, belong to the writer. Without `--transcripts`, the three-day trigger stands alone. It rests on one measurement: 96 of 100 task notes that another session ever read were first read within three days of their last write. Codex and Antigravity transcripts are not read.
 
 ## The safety hook
 

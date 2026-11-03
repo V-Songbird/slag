@@ -72,9 +72,20 @@ test("a doc is drifting when a related file or directory was committed after it"
   }, "2026-10-01");
   commit(root, { "src/a.js": "2", "src/lib/x.js": "2", "pkg/hooks/run.js": "2" }, "2026-10-15");
   assert.deepStrictEqual(of(maintain(root), "drift"), [
-    "docs/knowledge/guide.md last written 2026-10-01; changed since: src/a.js (2026-10-15), src/lib/ (2026-10-15)",
-    "pkg/docs/knowledge/plugin.md last written 2026-10-01; changed since: hooks/run.js (2026-10-15)",
+    "docs/knowledge/guide.md last written 2026-10-01 (commit); changed since: src/a.js (2026-10-15), src/lib/ (2026-10-15)",
+    "pkg/docs/knowledge/plugin.md last written 2026-10-01 (commit); changed since: hooks/run.js (2026-10-15)",
   ]);
+});
+
+test("uncommitted edits count from their file time, for the doc and for its related files", () => {
+  const root = repo();
+  commit(root, { "src/a.js": "1", "src/b.js": "1", "docs/knowledge/edited.md": doc(["src/a.js"]), "docs/knowledge/stale.md": doc(["src/b.js"]) }, "2026-10-01");
+  commit(root, { "src/a.js": "2" }, "2026-10-15");
+  // The doc caught up in the working tree after src/a.js's commit; src/b.js changed and was not committed.
+  write(root, { "docs/knowledge/edited.md": doc(["src/a.js"]) + "\nUpdated.\n", "src/b.js": "2" });
+  const report = maintain(root);
+  assert.deepStrictEqual(of(report, "drift").map((line) => line.split(" ")[0]), ["docs/knowledge/stale.md"]);
+  assert.match(of(report, "drift")[0], new RegExp(`src/b\\.js \\(${new Date().toISOString().slice(0, 10)}\\)`));
 });
 
 test("an ignored doc is dated by its file time", () => {
@@ -97,7 +108,33 @@ test("a completed task note untouched for more than three days is proposed for f
   age(root, "docs/tasks/old-active.md", 30);
   const report = maintain(root);
   assert.deepStrictEqual(report.proposals.map((p) => `${p.id} ${p.path}`), ["fold-completed docs/tasks/old-done.md"]);
-  assert.match(report.proposals[0].detail, /^completed, last written \d{4}-\d\d-\d\d; fold its findings/);
+  assert.match(report.proposals[0].detail, /^completed, last written \d{4}-\d\d-\d\d \(file time\), no transcripts read; fold its findings/);
+});
+
+test("with transcripts, a completed note another session read within three days is kept", () => {
+  const root = repo();
+  write(root, { "docs/tasks/read-later.md": task("completed"), "docs/tasks/unread.md": task("completed"), "docs/tasks/read-too-late.md": task("completed") });
+  for (const file of ["docs/tasks/read-later.md", "docs/tasks/unread.md", "docs/tasks/read-too-late.md"]) age(root, file, 10);
+  const written = Date.now() - 10 * DAY;
+  const at = (ms) => new Date(ms).toISOString();
+  const use = (name, input, ms) => JSON.stringify({ type: "assistant", timestamp: at(ms), message: { content: [{ type: "tool_use", name, input }] } });
+  const abs = (file) => path.join(root, file);
+  const dir = path.join(root, ".private", "transcripts");
+  write(root, {
+    ".private/transcripts/writer.jsonl": [
+      use("Write", { file_path: abs("docs/tasks/read-later.md") }, written),
+      use("Write", { file_path: abs("docs/tasks/unread.md") }, written),
+      use("Read", { file_path: abs("docs/tasks/unread.md") }, written + DAY),
+    ].join("\n"),
+    ".private/transcripts/reader.jsonl": [
+      use("PowerShell", { command: "Get-Content docs\\tasks\\read-later.md" }, written + 2 * DAY),
+      use("Read", { file_path: abs("docs/tasks/read-too-late.md") }, written + 5 * DAY),
+      use("Bash", { command: "echo done >> docs/tasks/unread.md" }, written - 3000),
+    ].join("\n"),
+  });
+  const report = maintain(root, { transcripts: [dir] });
+  assert.deepStrictEqual(report.proposals.map((p) => p.path), ["docs/tasks/read-too-late.md", "docs/tasks/unread.md"]);
+  assert.ok(report.proposals.every((p) => p.detail.includes("no other session read it within 3 days")));
 });
 
 test("oversized history is proposed for condensing and per-entry docs for merging", () => {
@@ -127,6 +164,7 @@ test("each store record with paths goes to the docs that list them", () => {
     "docs/knowledge/guide.md": doc(["src/a.js", "src/lib/"]),
     "docs/knowledge/overview.md": doc(["src/"]),
   }, "2026-10-01");
+  write(root, { "docs/tasks/note.md": task("active").replace("related_files: []", "related_files: [src/a.js]") });
   write(root, {
     ".private/store.jsonl": [
       JSON.stringify({ text: "Covered.", paths: ["src/a.js"] }),
@@ -162,5 +200,6 @@ test("the CLI changes nothing, works before the first commit, and exits 2 on bad
   assert.strictEqual(cli(["--root", root, "--store", "missing.jsonl"]), 2);
   assert.strictEqual(cli([]), 2);
   assert.strictEqual(cli(["--root", root, "--store"]), 2);
+  assert.strictEqual(cli(["--root", root, "--transcripts", path.join(root, "missing")]), 2);
   assert.strictEqual(cli(["--help"]), 0);
 });

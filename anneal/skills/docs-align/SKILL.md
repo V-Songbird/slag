@@ -77,7 +77,7 @@ For stale content choose the smallest useful action: correct, consolidate, archi
 node "<plugin root>/scripts/docs-maintenance.js" --root "<project root>" --json
 ```
 
-Add `--store <file>` for each orphaned knowledge store the owner names: a JSONL file whose records carry a `paths` list. Each proposal is a candidate for the choice above, not a verdict:
+Add `--store <file>` for each orphaned knowledge store the owner names: a JSONL file whose records carry a `paths` list. On Claude Code, add `--transcripts <folder>` for the project's session folder under `~/.claude/projects/` and each of its worktree folders, so a completed note another session still reads is kept; say in the report when no transcripts were read. Each proposal is a candidate for the choice above, not a verdict:
 
 - `drift`: a doc's related files were committed after the doc. Read those changes and correct only the claims they broke. `drift-private` is the same for private research, which may be a record of its time and stay as it is.
 - `fold-completed`: a completed task note untouched for more than three days. Move its durable findings into the topic docs its work changed, then delete it.

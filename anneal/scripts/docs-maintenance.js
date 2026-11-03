@@ -41,15 +41,67 @@ function commitTimes(root) {
 
 const day = (seconds) => new Date(seconds * 1000).toISOString().slice(0, 10);
 
-function maintain(directory, { stores = [], now = Date.now() / 1000 } = {}) {
+// Per session file: when each path was written, and when it was read or named in a command.
+// A path is matched by its repository-relative form at the end of a tool's file path, or inside a
+// shell command, with either slash.
+function transcriptUses(dirs, root, files) {
+  const uses = new Map(files.map((file) => [file, []]));
+  const rootSlash = root.replace(/\\/g, "/").toLowerCase();
+  for (const dir of dirs) {
+    for (const name of fs.readdirSync(dir).filter((n) => n.endsWith(".jsonl"))) {
+      const session = name.slice(0, -".jsonl".length);
+      for (const line of fs.readFileSync(path.join(dir, name), "utf8").split("\n")) {
+        if (!line.includes('"tool_use"')) continue;
+        let record;
+        try {
+          record = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const time = Date.parse(record.timestamp) / 1000;
+        for (const block of Array.isArray(record.message?.content) ? record.message.content : []) {
+          if (block?.type !== "tool_use" || !block.input) continue;
+          const target = String(block.input.file_path ?? block.input.notebook_path ?? block.input.path ?? "").replace(/\\/g, "/").toLowerCase();
+          const command = String(block.input.command ?? "").replace(/\\/g, "/").toLowerCase();
+          const kind = /^(Write|Edit|MultiEdit|NotebookEdit)$/.test(block.name) ? "write" : "read";
+          for (const file of files) {
+            const rel = file.toLowerCase();
+            if (target === `${rootSlash}/${rel}` || target.endsWith(`/${rel}`) || target === rel || command.includes(rel)) {
+              uses.get(file).push({ session, time, kind });
+            }
+          }
+        }
+      }
+    }
+  }
+  return uses;
+}
+
+// Tracked files with uncommitted changes in the working tree or the index.
+function dirtyFiles(root) {
+  const dirty = new Set();
+  for (const entry of git(root, ["status", "--porcelain", "-z", "--untracked-files=no"]).split("\0")) {
+    if (entry.length > 3 && entry[0] !== "D" && entry[1] !== "D") dirty.add(entry.slice(3));
+  }
+  return dirty;
+}
+
+function maintain(directory, { stores = [], transcripts = [], now = Date.now() / 1000 } = {}) {
   const root = path.resolve(directory);
   const top = spawnSync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
   if (top.status !== 0) throw new Error(top.stderr.trim() || "Target is not a Git working tree.");
   const times = commitTimes(root);
   const tracked = new Set(git(root, ["ls-files", "-z"]).split("\0").filter(Boolean));
-  // A tracked doc's time is its last commit; an untracked or ignored one has only its mtime.
-  const written = (file) => (tracked.has(file) && times.has(file) ? times.get(file) : fs.statSync(path.join(root, file)).mtimeMs / 1000);
-  // A related directory counts as changed when any file below it was committed.
+  const mtime = (file) => fs.statSync(path.join(root, file)).mtimeMs / 1000;
+  // An uncommitted edit counts from its file time, so it neither hides nor invents drift.
+  for (const file of dirtyFiles(root)) {
+    if (fs.existsSync(path.join(root, file))) times.set(file, Math.max(times.get(file) ?? 0, mtime(file)));
+  }
+  // A tracked doc's time is its last commit or uncommitted edit; an untracked or ignored one has
+  // only its file time, which a copy resets to the copy's time. That can only hide a proposal.
+  const dated = (file) => (tracked.has(file) && times.has(file) ? "commit" : "file time");
+  const written = (file) => (dated(file) === "commit" ? times.get(file) : mtime(file));
+  // A related directory counts as changed when any file below it changed.
   const changed = (rel) => {
     const clean = rel.replace(/\/+$/, "");
     if (times.has(clean)) return times.get(clean);
@@ -64,17 +116,33 @@ function maintain(directory, { stores = [], now = Date.now() / 1000 } = {}) {
   const fields = new Map(docs.map((file) => [file, frontmatter(fs.readFileSync(path.join(root, file), "utf8"))]));
   const relatedOf = (file) => (Array.isArray(fields.get(file)?.related_files) ? fields.get(file).related_files : []);
 
+  const isTask = (file) => /(^|\/)docs\/tasks\//.test(file) || fields.get(file)?.type === "task_summary";
+  const completed = docs.filter((file) => isTask(file) && fields.get(file)?.status === "completed");
+  const uses = transcripts.length ? transcriptUses(transcripts, root, completed) : null;
+
   for (const file of docs) {
     const meta = fields.get(file);
     if (!meta) continue;
     const docTime = written(file);
-    const isTask = /(^|\/)docs\/tasks\//.test(file) || meta.type === "task_summary";
-    if (isTask && meta.status === "completed") {
-      if (now - docTime > FOLD_AFTER_DAYS * DAY) add("fold-completed", file, `completed, last written ${day(docTime)}; fold its findings into its topic docs and delete it`);
+    if (completed.includes(file)) {
+      if (now - docTime <= FOLD_AFTER_DAYS * DAY) continue;
+      const base = `completed, last written ${day(docTime)} (${dated(file)})`;
+      if (!uses) {
+        add("fold-completed", file, `${base}, no transcripts read; fold its findings into its topic docs and delete it`);
+        continue;
+      }
+      // Another session's read within three days of the last write means the note is in use. A
+      // write through a shell command looks like a read, so a call in the minute around the last
+      // write is the writer's own.
+      const writers = new Set(uses.get(file).filter((u) => u.kind === "write").map((u) => u.session));
+      const readers = new Set(uses.get(file)
+        .filter((u) => u.kind === "read" && !writers.has(u.session) && u.time > docTime + 60 && u.time <= docTime + FOLD_AFTER_DAYS * DAY)
+        .map((u) => u.session));
+      if (!readers.size) add("fold-completed", file, `${base}, no other session read it within ${FOLD_AFTER_DAYS} days; fold its findings into its topic docs and delete it`);
       continue;
     }
     // Task notes and decision records describe the past, so later code changes are not drift.
-    if (isTask || meta.type === "adr" || /(^|\/)docs\/decisions\//.test(file)) continue;
+    if (isTask(file) || meta.type === "adr" || /(^|\/)docs\/decisions\//.test(file)) continue;
     const later = [];
     for (const related of relatedOf(file)) {
       if (/[*?[{]/.test(related)) continue;
@@ -82,7 +150,7 @@ function maintain(directory, { stores = [], now = Date.now() / 1000 } = {}) {
       if (time > docTime) later.push(`${related} (${day(time)})`);
     }
     // Private research is often a record of its time, so its drift is reported apart.
-    if (later.length) add(/(^|\/)docs\/(knowledge|apis)\/private\//.test(file) ? "drift-private" : "drift", file, `last written ${day(docTime)}; changed since: ${later.join(", ")}`);
+    if (later.length) add(/(^|\/)docs\/(knowledge|apis)\/private\//.test(file) ? "drift-private" : "drift", file, `last written ${day(docTime)} (${dated(file)}); changed since: ${later.join(", ")}`);
   }
 
   for (const finding of check(root).findings) {
@@ -113,7 +181,8 @@ function maintain(directory, { stores = [], now = Date.now() / 1000 } = {}) {
       // that lists a whole plugin directory does not collect every record below it.
       let best = 0;
       let homes = [];
-      for (const file of docs) {
+      // Task notes are no home: they are folded and deleted themselves.
+      for (const file of docs.filter((f) => !isTask(f))) {
         let length = 0;
         for (const related of relatedOf(file)) {
           for (const r of relatedCandidates(file, related)) {
@@ -140,15 +209,16 @@ function formatSummary(report) {
   return `${lines.join("\n")}\n`;
 }
 
-const USAGE = "usage: docs-maintenance.js --root <project-directory> [--store <jsonl file>]... [--json]\n";
+const USAGE = "usage: docs-maintenance.js --root <project-directory> [--store <jsonl file>]... [--transcripts <directory>]... [--json]\n";
 
-// Exit 0 with or without proposals, and 2 for bad arguments, an unreadable store or no Git
-// working tree.
+// Exit 0 with or without proposals, and 2 for bad arguments, an unreadable store or transcript
+// directory, or no Git working tree.
 function main(argv) {
   const args = argv.slice(2);
   let root;
   let json = false;
   const stores = [];
+  const transcripts = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--help") {
       process.stdout.write(USAGE);
@@ -157,6 +227,7 @@ function main(argv) {
     if (args[i] === "--json") json = true;
     else if (args[i] === "--root" && !root && i + 1 < args.length && !args[i + 1].startsWith("--")) root = args[++i];
     else if (args[i] === "--store" && i + 1 < args.length && !args[i + 1].startsWith("--")) stores.push(args[++i]);
+    else if (args[i] === "--transcripts" && i + 1 < args.length && !args[i + 1].startsWith("--")) transcripts.push(path.resolve(args[++i]));
     else {
       process.stderr.write(USAGE);
       return 2;
@@ -167,7 +238,7 @@ function main(argv) {
     return 2;
   }
   try {
-    const report = maintain(root, { stores });
+    const report = maintain(root, { stores, transcripts });
     process.stdout.write(json ? `${JSON.stringify(report, null, 2)}\n` : formatSummary(report));
     return 0;
   } catch (error) {
