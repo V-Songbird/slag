@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 
-import { hiddenIn } from '../templates/state.mjs';
+import { hiddenIn, nameHidden } from '../templates/state.mjs';
 import { CONFIG, git, mount, project, repo, task, TREE } from './temp-project.js';
 
 function ready(extra = {}) {
@@ -162,6 +162,33 @@ test('only tags in the shape of a subdivision flag are skipped behind a black fl
   ]) {
     assert.equal(hiddenIn(`team ${text}.`).length, count, what);
   }
+});
+
+// A variation selector is matched unless it chooses how an emoji shows: U+FE0E or U+FE0F after a
+// pictograph, or U+FE0F inside a keycap.
+test('only variation selectors that choose how an emoji shows are skipped', () => {
+  for (const [what, text, named] of [
+    ['emoji presentation', '\u2764\uFE0F', ''],
+    ['text presentation', '\u2764\uFE0E', ''],
+    ['keycaps', '1\uFE0F\u20E3 #\uFE0F\u20E3 *\uFE0F\u20E3', ''],
+    ['joined emoji', '\u{1F3F3}\uFE0F\u200D\u{1F308}', ''],
+    ['after a letter', 'a\uFE0Fb', 'U+FE0F'],
+    ['at the start', '\uFE0Fstart', 'U+FE0F'],
+    ['at the end', 'end\uFE0E', 'U+FE0E'],
+    ['digit without a keycap', '1\uFE0F', 'U+FE0F'],
+    ['hash and star without a keycap', '#\uFE0F *\uFE0F', 'U+FE0F'],
+    ['text keycap', '1\uFE0E\u20E3', 'U+FE0E'],
+    ['after a skin tone', '\u{1F44D}\u{1F3FD}\uFE0F', 'U+FE0F'],
+    ['after a regional flag', '\u{1F1FA}\u{1F1F8}\uFE0F', 'U+FE0F'],
+    ['twice', '\u2764\uFE0F\uFE0F', 'U+FE0F'],
+    ['standardized selector', '\u2764\uFE00', 'U+FE00'],
+    ['supplementary selectors', '\u8FBB\u{E0100}\u{E01EF}', 'U+E0100, U+E01EF'],
+  ]) {
+    assert.equal(nameHidden(hiddenIn(text)), named, what);
+  }
+  const added = task(ready(), ['add', '--title', 'window', '--why', 'for a\uFE0Fb', '--scope', 'src/cli.mjs']);
+  assert.equal(added.status, 2);
+  assert.match(added.stderr, /^--why holds characters that do not show on screen: U\+FE0F\.$/m);
 });
 
 // What close records is read back as the ledger and .collet/unverified.md, so it is refused before

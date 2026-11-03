@@ -144,8 +144,31 @@ describe("hidden characters in instruction files", () => {
       "Pair with \u{1F468}\u200D\u{1F4BB} and \u{1F469}\u{1F3FD}\u200D\u{1F4BB}.",
       "Hot fix \u2764\uFE0F\u200D\u{1F525}.",
       `Team \u{1F3F4}${tags("gbeng")}\u{E007F}.`,
+      "Love \u2764\uFE0F, \u2764\uFE0E, \u00A9\uFE0F, \u{1F3F3}\uFE0F\u200D\u{1F308} and keys 1\uFE0F\u20E3 #\uFE0F\u20E3 *\uFE0F\u20E3",
+      "\u{1F600}\uFE0F",
     ].join("\n");
     assertNo(audit(repo({ tracked: { "CLAUDE.md": text } })), "instruction-hidden-characters");
+  });
+
+  test("variation selectors that do not choose how an emoji shows are reported", () => {
+    const lines = [
+      ["a\uFE0Fb", "U+FE0F"],
+      ["\uFE0Fat the start", "U+FE0F"],
+      ["at the end\uFE0E", "U+FE0E"],
+      ["digit 1\uFE0F", "U+FE0F"],
+      ["hash #\uFE0F and star *\uFE0F", "U+FE0F"],
+      ["text keycap 1\uFE0E\u20E3", "U+FE0E"],
+      ["skin tone \u{1F44D}\u{1F3FD}\uFE0F", "U+FE0F"],
+      ["flag \u{1F1FA}\u{1F1F8}\uFE0F", "U+FE0F"],
+      ["twice \u2764\uFE0F\uFE0F", "U+FE0F"],
+      ["standard \u2764\uFE00", "U+FE00"],
+      ["ideograph \u8FBB\u{E0100}\u{E01EF}", "U+E0100, U+E01EF"],
+    ];
+    const text = ["# map", ...lines.map(([line]) => line)].join("\n");
+    assert.deepStrictEqual(
+      finding(audit(repo({ tracked: { "CLAUDE.md": text } })), "instruction-hidden-characters").evidence,
+      lines.map(([, named], i) => `CLAUDE.md:${i + 2} ${named}`),
+    );
   });
 
   test("an instruction written as tags behind a black flag is reported", () => {

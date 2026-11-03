@@ -41,9 +41,12 @@ user's, not `.claude/settings.local.json`, and nothing for Codex or Antigravity.
 raises, so the host refuses the matching command there.
 
 The session start leaves out of what it states every character a model reads and a person does
-not see: U+200B-U+200D, U+2060, U+FEFF past the start, U+202A-U+202E, U+2066-U+2069 and the
-Unicode tags U+E0000-U+E007F. That covers the project line, the `ask_first` list, the conventions,
-the open task's title, scope and accept command, and `.collet/handoff.md`. The joiner inside an
+not see: U+200B-U+200D, U+2060, U+FEFF past the start, U+202A-U+202E, U+2066-U+2069, the
+variation selectors U+FE00-U+FE0F and U+E0100-U+E01EF, and the Unicode tags U+E0000-U+E007F.
+U+FE0E or U+FE0F right after an Extended_Pictographic character, and U+FE0F between 0-9, # or *
+and the keycap U+20E3, choose how an emoji shows, so they stay. That covers the project line, the
+`ask_first` list, the conventions, the open task's title, scope and accept command, and
+`.collet/handoff.md`. The joiner inside an
 emoji and the tags of a subdivision flag render, so they stay: U+1F3F4, two lowercase letter tags
 or three digit tags, one to four lowercase letter or digit tags, then the cancel tag U+E007F. Tags
 behind U+1F3F4 in any other shape are left out. A closing line names each field

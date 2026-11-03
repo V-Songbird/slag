@@ -238,15 +238,19 @@ function mapFileFindings(root, add) {
 
 // Characters a model reads and a person does not see: zero-width characters,
 // the word joiner, a byte order mark past the start, bidi embeddings and
-// isolates, and Unicode tags. A file an agent loads as instructions can carry
-// an order in them that nobody reviewing the file can read. The joiner inside
-// an emoji and the tags of a subdivision flag render, so they are skipped. A
-// subdivision flag is U+1F3F4, then two lowercase letter tags or three digit
-// tags, one to four lowercase letter or digit tags, and the cancel tag U+E007F;
-// any other tag is matched, including tags behind U+1F3F4 in another shape. The
-// evidence names each line and code point and counts tags, never decoding them.
+// isolates, variation selectors and Unicode tags. A file an agent loads as
+// instructions can carry an order in them that nobody reviewing the file can
+// read. The joiner inside an emoji and the tags of a subdivision flag render,
+// so they are skipped. A subdivision flag is U+1F3F4, then two lowercase letter
+// tags or three digit tags, one to four lowercase letter or digit tags, and the
+// cancel tag U+E007F; any other tag is matched, including tags behind U+1F3F4
+// in another shape. U+FE0E or U+FE0F right after an Extended_Pictographic
+// character, and U+FE0F between 0-9, # or * and the keycap U+20E3, choose how
+// an emoji shows, so they are skipped; every other variation selector,
+// U+FE00-U+FE0F and U+E0100-U+E01EF, is matched. The evidence names each line
+// and code point and counts tags, never decoding them.
 const HIDDEN_CHARACTERS =
-  /(?<!\p{Extended_Pictographic}\uFE0F?|[\u{1F3FB}-\u{1F3FF}])\u200D|[\u200B\u200C\u2060\uFEFF\u202A-\u202E\u2066-\u2069]|(?<!\u{1F3F4}(?=(?:[\u{E0061}-\u{E007A}]{2}|[\u{E0030}-\u{E0039}]{3})[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]{1,4}\u{E007F})[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]*)[\u{E0000}-\u{E007F}]/gu;
+  /(?<!\p{Extended_Pictographic}\uFE0F?|[\u{1F3FB}-\u{1F3FF}])\u200D|(?<!\p{Extended_Pictographic}|[#*0-9](?=\uFE0F\u20E3))[\uFE0E\uFE0F]|[\u200B\u200C\u2060\uFEFF\u202A-\u202E\u2066-\u2069\uFE00-\uFE0D\u{E0100}-\u{E01EF}]|(?<!\u{1F3F4}(?=(?:[\u{E0061}-\u{E007A}]{2}|[\u{E0030}-\u{E0039}]{3})[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]{1,4}\u{E007F})[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]*)[\u{E0000}-\u{E007F}]/gu;
 const INSTRUCTION_DIRS = [".agents/", ".claude/", ".cursor/rules/", ".gemini/"];
 
 function isInstructionFile(file) {
@@ -262,8 +266,9 @@ function hiddenCharacterFindings(root, files, add) {
     text.replace(/^\uFEFF/, "").split("\n").forEach((line, i) => {
       const found = [...line.matchAll(HIDDEN_CHARACTERS)].map(([char]) => char.codePointAt(0));
       if (!found.length) return;
-      const tags = found.filter((code) => code >= 0xe0000).length;
-      const named = [...new Set(found.filter((code) => code < 0xe0000))].map((code) => `U+${code.toString(16).toUpperCase().padStart(4, "0")}`);
+      const isTag = (code) => code >= 0xe0000 && code <= 0xe007f;
+      const tags = found.filter(isTag).length;
+      const named = [...new Set(found.filter((code) => !isTag(code)))].map((code) => `U+${code.toString(16).toUpperCase().padStart(4, "0")}`);
       evidence.push(`${file}:${i + 1} ${[...named, ...(tags ? [plural(tags, "Unicode tag character")] : [])].join(", ")}`);
     });
   }

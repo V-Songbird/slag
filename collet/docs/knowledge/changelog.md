@@ -48,6 +48,10 @@ All notable changes to collet are documented here. The format follows
   hidden unless they form a subdivision flag. Before, any tags after a black flag passed, so text
   written as tags behind one was stored and stated. A project mounted by an earlier collet keeps
   its copied `state.mjs`, so its task CLI gets this fix only after a remount.
+- `task.mjs`, `mount.mjs` and the session start now treat variation selectors U+FE00-U+FE0F and
+  U+E0100-U+E01EF as hidden, except U+FE0E or U+FE0F right after an Extended_Pictographic
+  character and U+FE0F between 0-9, # or * and the keycap U+20E3. Before, every variation selector
+  passed. A project mounted by an earlier collet gets this fix only after a remount.
 
 ## [0.5.0-alpha] — 2026-09-25
 
