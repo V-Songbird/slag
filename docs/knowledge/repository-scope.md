@@ -41,9 +41,10 @@ npm run check runs the plugin suites and repository tests using Node 22 or later
 suite validates marketplace sources, local resource paths, host metadata and version ownership.
 The navigation audit is heuristic; its three runtime-name matches in audit.test.js are intentional
 fixture strings and must retain their detector coverage.
-scripts/hidden-characters.test.js fails on raw zero-width, bidi-control, tag and misplaced
-byte-order-mark characters in tracked text files, naming file, line and code point; it walks the
-tree instead when there is no Git work tree. Write such characters as escapes (\u200B, \u{E0041}).
+scripts/hidden-characters.test.js fails on raw zero-width, bidi-control, tag, misplaced
+byte-order-mark and variation-selector characters in tracked text files, naming file, line and
+code point. U+FE0E and U+FE0F are allowed right after an emoji character. It walks the tree
+instead when there is no Git work tree. Write such characters as escapes (\u200B, \u{E0041}).
 scripts/markdown-links.test.js fails on a relative link or #anchor in a tracked public Markdown
 file whose target is not a tracked file or directory, or whose anchor names no heading or `<a>` id
 or name in the target. Heading anchors follow GitHub's slugs; files under the private directories are
