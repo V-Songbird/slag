@@ -118,7 +118,8 @@ export const gradersFor = (graders, arm) => graders.filter((grader) => grader.ar
 // Why a session yields no grades: its timeout, or the runner's own error.
 export function runError(messages, { aborted, timeoutSeconds }) {
   if (aborted) return `timed out after ${timeoutSeconds} seconds`;
-  return messages.find((message) => message.type === "runner_error")?.message ?? null;
+  const found = messages.find((message) => message.type === "runner_error");
+  return found ? String(found.message || "runner error") : null;
 }
 
 // The result.json of one run. A scaffold failure, a runner error or a timeout is

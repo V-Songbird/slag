@@ -160,7 +160,7 @@ async function runJob({ c, arm, n }) {
       }
     }
   } catch (error) {
-    messages.push({ type: "runner_error", message: error.message });
+    messages.push({ type: "runner_error", message: error?.message || String(error) });
   } finally {
     clearTimeout(timer);
   }

@@ -128,6 +128,9 @@ test("a timed-out, errored or unscaffolded run keeps a result that fails its gra
   const errored = runError(ended, { aborted: false, timeoutSeconds: c.timeoutSeconds });
   assert.strictEqual(errored, "session ended in error");
   assert.strictEqual(runError(finalReply("Done."), { aborted: false, timeoutSeconds: 600 }), null);
+  // A thrown value with no message still errors the run.
+  assert.strictEqual(runError([{ type: "runner_error", message: "" }], { aborted: false, timeoutSeconds: 600 }), "runner error");
+  assert.strictEqual(runError([{ type: "runner_error", message: undefined }], { aborted: false, timeoutSeconds: 600 }), "runner error");
 
   const records = [
     runRecord(c, "with", 1, runFromMessages(aborted), { seconds: 600, error: timedOut }),
