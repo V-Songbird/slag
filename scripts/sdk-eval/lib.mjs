@@ -227,31 +227,36 @@ export async function gradeRun(graders, run, judge) {
 // The error codes of a failed save that show the output location cannot be
 // written, so every later run would fail the same way.
 const UNWRITABLE = new Set(["ENOSPC", "EACCES", "EPERM", "EROFS"]);
+// The syscalls of runJob's own file writes; one of them failing with a code in
+// UNWRITABLE also shows the output location cannot be written.
+const WRITE_SYSCALLS = new Set(["open", "write", "mkdir", "copyfile", "rename"]);
 
 // The record of one job: what runJob returns, or, when it throws, such as on a
 // failed file write, a run error "runner failed: <message>" that fails every
 // grader of its arm, so the batch still reaches its summary. A session that
 // ran before the failure keeps its subtype, cost, turns, seconds and reply,
 // which runJob leaves in job.session. The record is passed to save, such as a
-// result.json write. Only a save that fails with a code in UNWRITABLE calls
-// stop and adds "; stopping every run" to the error; any other save failure is
-// ignored, and so is runJob's own error code, such as an EPERM from a directory
-// read or a file another process holds open.
+// result.json write. A save that fails with a code in UNWRITABLE, or a runJob
+// error with such a code from one of WRITE_SYSCALLS, calls stop and adds
+// "; stopping every run" to the error; any other failure, such as an EPERM from
+// a directory read, fails only its run.
 export async function recordJob(job, runJob, { save = () => {}, stop = () => {} } = {}) {
   try {
     return await runJob(job);
   } catch (error) {
     const session = job.session ?? { ...runFromMessages([]), seconds: 0 };
     const failed = (suffix) => runRecord(job.c, job.arm, job.n, session, { seconds: session.seconds, error: `runner failed: ${error?.message || String(error)}${suffix}` });
-    const record = failed("");
+    const unwritable = UNWRITABLE.has(error?.code) && WRITE_SYSCALLS.has(error?.syscall);
+    const record = failed(unwritable ? "; stopping every run" : "");
     try {
       save(job, record);
     } catch (saveError) {
-      if (UNWRITABLE.has(saveError?.code)) {
+      if (!unwritable && UNWRITABLE.has(saveError?.code)) {
         stop();
         return failed("; stopping every run");
       }
     }
+    if (unwritable) stop();
     return record;
   }
 }

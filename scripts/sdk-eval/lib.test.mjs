@@ -332,6 +332,25 @@ test("a runner failure whose record still saves, such as a directory read denied
   assert.strictEqual(halted.error, "runner failed: EPERM: operation not permitted, scandir 'work/.git'; stopping every run");
 });
 
+test("a runner failure from an unwritable file write stops every run even when its record saves", async () => {
+  const c = { name: "x", graders: [] };
+  const outcome = async (code, syscall) => {
+    let stopped = false;
+    let saved = null;
+    const thrown = Object.assign(new Error(`${code}: ${syscall} failed`), { code, syscall });
+    const record = await recordJob({ c, arm: "with", n: 1 }, async () => { throw thrown; }, { save: (job, r) => { saved = r; }, stop: () => { stopped = true; } });
+    assert.strictEqual(saved, record);
+    return { stopped, error: record.error };
+  };
+  for (const code of ["ENOSPC", "EACCES", "EPERM", "EROFS"]) {
+    for (const syscall of ["open", "write", "mkdir", "copyfile", "rename"]) {
+      assert.deepStrictEqual(await outcome(code, syscall), { stopped: true, error: `runner failed: ${code}: ${syscall} failed; stopping every run` }, `${code} ${syscall}`);
+    }
+  }
+  assert.strictEqual((await outcome("ENOSPC", "scandir")).stopped, false);
+  assert.strictEqual((await outcome("EISDIR", "write")).stopped, false);
+});
+
 test("the batch summary and spend line print even when summary.json cannot be written", (t) => {
   const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-eval-"));
   t.after(() => fs.rmSync(outDir, { recursive: true, force: true }));
