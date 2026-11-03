@@ -83,8 +83,8 @@ line.
 
 A task with a `foreman` id keeps what nobody checked in that entry's `unverified:` note lines. Its
 passing close prints the `--unverified` text after the step, saying it belongs there and not in
-`.collet/unverified.md`, then the `--left-out` text, saying the ledger is the only place that keeps
-it. It leaves `.collet/unverified.md` unchanged; the ledger still records both texts. While such a
+`.collet/unverified.md`, then the `--left-out` text, saying it belongs in the entry's notes too because
+otherwise only the ledger keeps it. It leaves `.collet/unverified.md` unchanged; the ledger still records both texts. While such a
 task is open, the session start and the handoff note name the entry's notes for its claims. The
 session start also names `.collet/unverified.md` when that file holds a list item (a line starting
 with `- ` or `* `), the form an earlier close of a task without the id writes. A task without the id appends both texts to
