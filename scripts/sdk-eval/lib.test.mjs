@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { selectCases, runFromMessages, gradersFor, verdict, judgeText, sessionEnv } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, verdict, judgeText, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions } from "./lib.mjs";
 
 const COLLET = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../collet");
 const byName = (cases, name) => cases.find((c) => c.name === name);
@@ -50,7 +50,37 @@ test("anneal's paired navigation cases are read with their scaffolds and no Skil
     assert.match(c.scaffold, /^[a-z-]+-(original|oriented)\.sh$/);
     assert.ok(!c.allowedTools.includes("Skill"));
     assert.match(c.prompt, /^Before anything else, read `AGENTS\.md`\./);
+    // The map reaches a session only through that read: no fixture CLAUDE.md loads.
+    assert.deepStrictEqual(sessionOptions(c, "with", { pluginDir: "anneal", model: "m" }).settingSources, ["user"]);
   }
+});
+
+test("--ablation none runs only the arm with the plugin, and any other value is refused", () => {
+  assert.deepStrictEqual(runArms(undefined), ["with", "without"]);
+  assert.deepStrictEqual(runArms("none"), ["with"]);
+  assert.throws(() => runArms("all"), /--ablation takes only none\./);
+});
+
+test("a session loads the plugin only in the arm with it", () => {
+  const c = byName(selectCases(COLLET), "mount-opens-first-task");
+  assert.deepStrictEqual(sessionOptions(c, "with", { pluginDir: COLLET, model: "m" }).plugins, [{ type: "local", path: COLLET }]);
+  assert.deepStrictEqual(sessionOptions(c, "without", { pluginDir: COLLET, model: "m" }).plugins, []);
+});
+
+test("the judge client names the API endpoint and no auth token", () => {
+  assert.deepStrictEqual(JUDGE_CLIENT, { baseURL: "https://api.anthropic.com", authToken: null });
+});
+
+test("accept-command-passes reads an SDK trace of the edit and a green npm test, and fails a red one after", () => {
+  const grader = byName(selectCases(COLLET), "guard-refuses-out-of-scope-write").graders.find((g) => g.name === "accept-command-passes");
+  const edit = { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_01E", name: "Edit", input: { file_path: "X:\\work\\test\\price.test.js", old_string: "'2.50'", new_string: "'$2.50'" } }] } };
+  // The SDK repeats a Bash result's output in tool_use_result, after the message.
+  const npmResult = (id, out) => ({ ...toolResult(id, out), parent_tool_use_id: null, tool_use_result: { stdout: out, stderr: "", interrupted: false } });
+  const green = "\u2139 tests 2\n\u2139 pass 2\n\u2139 fail 0\n";
+  const red = "\u2139 tests 2\n\u2139 pass 1\n\u2139 fail 1\n";
+  const passing = [edit, bashCall("toolu_01T", "npm test 2>&1 | tail -5"), npmResult("toolu_01T", green)];
+  assert.strictEqual(verdict(grader, runFromMessages([...passing, ...finalReply("Done.")])), true);
+  assert.strictEqual(verdict(grader, runFromMessages([...passing, bashCall("toolu_01R", "npm test"), npmResult("toolu_01R", red), ...finalReply("Done.")])), false);
 });
 
 test("a run built from SDK messages holds the calls, the reply and the cost", () => {

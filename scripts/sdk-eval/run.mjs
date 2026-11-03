@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import Anthropic from "@anthropic-ai/sdk";
-import { selectCases, runFromMessages, gradersFor, verdict, judgeText, listRunFiles, createdPaths, sessionEnv } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, verdict, judgeText, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions } from "./lib.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const JUDGE_PRICE = { "claude-sonnet-5-5": [2, 10], "claude-opus-5-5": [4, 20], "claude-haiku-5-5": [0.1, 0.5] };
@@ -58,8 +58,12 @@ if (!fromRepo.startsWith("..") && !path.isAbsolute(fromRepo)) fail("--output-dir
 if (process.platform === "win32" && outDir.length > 120) fail(`--output-dir is ${outDir.length} characters; keep it under 120 on Windows.`);
 const runs = Number(values.runs);
 const maxCost = Number(values["max-cost-usd"]);
-if (values.ablation !== undefined && values.ablation !== "none") fail("--ablation takes only none.");
-const arms = values.ablation === "none" ? ["with"] : ["with", "without"];
+let arms;
+try {
+  arms = runArms(values.ablation);
+} catch (error) {
+  fail(error.message);
+}
 
 // The bash that runs scaffolds and the session's Bash tool. On Windows, `bash`
 // on PATH is often the WSL launcher, so use Git's own bash: bin/bash.exe, which
@@ -82,9 +86,7 @@ if (cases.length === 0) fail(`No eval cases selected under ${path.join(pluginDir
 const jobs = cases.flatMap((c) => arms.flatMap((arm) => Array.from({ length: runs }, (_, i) => ({ c, arm, n: i + 1 }))));
 let spent = 0;
 let stopped = false;
-// Explicit options, because the client otherwise reads ANTHROPIC_BASE_URL and
-// ANTHROPIC_AUTH_TOKEN from the environment.
-const judge = new Anthropic({ baseURL: "https://api.anthropic.com", authToken: null });
+const judge = new Anthropic(JUDGE_CLIENT);
 
 async function judgeGrader(grader, run) {
   const response = await judge.beta.messages.create({
@@ -134,19 +136,8 @@ async function runJob({ c, arm, n }) {
     for await (const message of query({
       prompt: c.prompt,
       options: {
+        ...sessionOptions(c, arm, { pluginDir, model: values.model }),
         cwd: work,
-        model: values.model,
-        maxTurns: c.maxTurns,
-        allowedTools: c.allowedTools,
-        // Windows adds a PowerShell tool the POSIX harness never offers; sessions try it and are denied.
-        disallowedTools: ["PowerShell"],
-        permissionMode: "dontAsk",
-        // User settings only, from the empty per-run config dir, as the eval
-        // harness does: a fixture's CLAUDE.md and AGENTS.md do not load, so a
-        // map reaches the session only through a read the prompt asks for.
-        settingSources: ["user"],
-        plugins: arm === "with" ? [{ type: "local", path: pluginDir }] : [],
-        maxBudgetUsd: 2,
         abortController,
         // A fresh home hides installed plugins (~/.claude/plugins), which a run
         // without the plugin otherwise finds and uses. It hides nothing else:

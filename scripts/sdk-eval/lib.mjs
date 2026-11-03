@@ -22,6 +22,35 @@ const HEAD = /^---\s*\n([\s\S]*?)---\s*\n?/;
 // session to another endpoint or model.
 export const sessionEnv = (env) => Object.fromEntries(Object.entries(env).filter(([key]) => !/^CLAUDE/i.test(key) && (!/^ANTHROPIC_/i.test(key) || key === "ANTHROPIC_API_KEY")));
 
+// The judge client's options. Explicit, because the client otherwise reads
+// ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN from the environment.
+export const JUDGE_CLIENT = { baseURL: "https://api.anthropic.com", authToken: null };
+
+// The arms each case runs in: with and without the plugin, or under
+// `--ablation none` only with it, for anneal's paired navigation cases, whose
+// arms are their two snapshots.
+export function runArms(ablation) {
+  if (ablation === undefined) return ["with", "without"];
+  if (ablation === "none") return ["with"];
+  throw new Error("--ablation takes only none.");
+}
+
+// The query options of one session that need no SDK object or per-run path.
+export const sessionOptions = (c, arm, { pluginDir, model }) => ({
+  model,
+  maxTurns: c.maxTurns,
+  allowedTools: c.allowedTools,
+  // Windows adds a PowerShell tool the POSIX harness never offers; sessions try it and are denied.
+  disallowedTools: ["PowerShell"],
+  permissionMode: "dontAsk",
+  // User settings only, from the empty per-run config dir, as the eval harness
+  // does: a fixture's CLAUDE.md and AGENTS.md do not load, so a map reaches the
+  // session only through a read the prompt asks for.
+  settingSources: ["user"],
+  plugins: arm === "with" ? [{ type: "local", path: pluginDir }] : [],
+  maxBudgetUsd: 2,
+});
+
 // One case folder: its tags and scaffold from case.yaml, its session limits and
 // prompt from prompt.md, and its graders.
 export function readCase(caseDir) {
