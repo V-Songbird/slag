@@ -166,7 +166,7 @@ describe("hidden characters in instruction files", () => {
       ["cancel tag alone", flag(""), 1],
       ["tags after a valid flag", `${flag("gbsct")}${tags("rm")}`, 2],
       ["valid flag closed twice", `${flag("gbwls")}\u{E007F}`, 1],
-      ["variation selector before the tags", `\u{1F3F4}️${tags("gbeng")}\u{E007F}`, 6],
+      ["variation selector before the tags", `\u{1F3F4}\uFE0F${tags("gbeng")}\u{E007F}`, 6],
       ["tags without a black flag", `${tags("gbeng")}\u{E007F}`, 6],
       ["white flag base", `\u{1F3F3}${tags("gbeng")}\u{E007F}`, 6],
     ];

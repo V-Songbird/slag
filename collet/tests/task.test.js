@@ -156,7 +156,7 @@ test('only tags in the shape of a subdivision flag are skipped behind a black fl
     ['tags after a valid flag', `${flag('gbsct')}${tags('rm')}`, 2],
     ['valid flag closed twice', `${flag('gbwls')}\u{E007F}`, 1],
     ['two valid flags in a row', `${flag('gbeng')}${flag('gbsct')}`, 0],
-    ['variation selector before the tags', `\u{1F3F4}️${tags('gbeng')}\u{E007F}`, 6],
+    ['variation selector before the tags', `\u{1F3F4}\uFE0F${tags('gbeng')}\u{E007F}`, 6],
     ['tags without a black flag', `${tags('gbeng')}\u{E007F}`, 6],
     ['white flag base', `\u{1F3F3}${tags('gbeng')}\u{E007F}`, 6],
   ]) {

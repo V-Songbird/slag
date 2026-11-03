@@ -1,7 +1,8 @@
 'use strict';
 
 // Fails on raw invisible characters in the repository's text files. Write them as escapes
-// (\u200B, \u{E0041}) instead. The pattern and its emoji exceptions are anneal's audit's own.
+// (\u200B, \u{E0041}) instead. The pattern and its emoji exceptions are anneal's audit's own;
+// variation selectors are flagged too, except U+FE0E or U+FE0F right after an emoji character.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync, readdirSync } = require('node:fs');
@@ -11,6 +12,7 @@ const { HIDDEN_CHARACTERS } = require('../anneal/scripts/audit.js');
 
 const root = path.resolve(__dirname, '..');
 const harness = import('../collet/tests/temp-project.js');
+const VARIATION_SELECTORS = /(?<!\p{Emoji})[\uFE0E\uFE0F]|[\uFE00-\uFE0D\u{E0100}-\u{E01EF}]/gu;
 
 // Tracked files in a Git work tree; every file but .git/ and node_modules/ in an exported tree.
 function listFiles(dir) {
@@ -38,7 +40,7 @@ function findHiddenCharacters(dir) {
     }
     if (buffer.includes(0)) continue; // binary
     buffer.toString('utf8').split('\n').forEach((line, index) => {
-      for (const match of line.matchAll(HIDDEN_CHARACTERS)) {
+      for (const match of [...line.matchAll(HIDDEN_CHARACTERS), ...line.matchAll(VARIATION_SELECTORS)]) {
         if (index === 0 && match.index === 0 && match[0] === '\uFEFF') continue;
         const code = match[0].codePointAt(0).toString(16).toUpperCase().padStart(4, '0');
         found.push(`${file}:${index + 1}: U+${code}`);
@@ -57,10 +59,20 @@ const fixtureFiles = {
   'tag.txt': 'plain \u{E0041} tag\n',
   'allowed.md': '\uFEFFfamily \u{1F468}\u200D\u{1F469}\u200D\u{1F467} and \u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}\n',
   'binary.bin': Buffer.from([0, 0xe2, 0x80, 0x8b]),
+  'selectors.md': 'heart \u2764\uFE0F, flag \u{1F3F3}\uFE0F\u200D\u{1F308}, keycap 1\uFE0F\u20E3, text \u2764\uFE0E\n' +
+    'a\uFE0Fb \u2764\uFE0F\uFE0F c\uFE0E \u2764\uFE00 \u8FBB\u{E0100}\n',
 };
-const expected = ['tag.txt:1: U+E0041', 'zero-width.md:2: U+200B'];
+const expected = [
+  'selectors.md:2: U+E0100',
+  'selectors.md:2: U+FE00',
+  'selectors.md:2: U+FE0E',
+  'selectors.md:2: U+FE0F',
+  'selectors.md:2: U+FE0F',
+  'tag.txt:1: U+E0041',
+  'zero-width.md:2: U+200B',
+];
 
-test('flags raw characters in a Git work tree and allows emoji joiners and subdivision flags', async () => {
+test('flags raw characters in a Git work tree and allows emoji joiners, subdivision flags and emoji variation selectors', async () => {
   const { project } = await harness;
   const fixture = project(fixtureFiles);
   for (const args of [['init', '-q'], ['add', '-A']]) {
