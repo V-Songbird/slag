@@ -123,18 +123,25 @@ export const gradersFor = (graders, arm) => graders.filter((grader) => grader.ar
 // or permission status (401, 403), or a credit balance that is too low.
 const sharedFailure = (status, text) => [401, 403].includes(status) || /credit balance/i.test(text);
 
-// How a session's result message ends its run in error, or null. A shared
-// failure, read from the success arm's api_error_status and the result or
-// errors text, stops every run. Any other error, such as a turn or budget limit,
-// an error during execution or a transient API error like 500 or 529, errors
-// only its run. A session already aborted by its timeout never stops the batch.
+// The result subtypes of a session that reached one of its own limits.
+const RUN_LIMITS = new Set(["error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"]);
+
+// How a session's result message ends its run in error, or null. A result that
+// is not an error never stops the batch, whatever its text, and a run limit
+// errors only its run. A shared failure on an error result, read from the
+// success arm's api_error_status and the result or errors text, stops every
+// run. Any other error, such as an error during execution or a transient API
+// error like 500 or 529, errors only its run; an API error with no text and no
+// status is named by its subtype. A session already aborted by its timeout
+// never stops the batch.
 export function resultError(message, { aborted = false } = {}) {
   if (message.type !== "result") return null;
+  if (RUN_LIMITS.has(message.subtype)) return { stop: false, message: `session ended in ${message.subtype}` };
+  if (!message.is_error && message.subtype === "success") return null;
   const text = [message.result, ...(message.errors ?? [])].filter(Boolean).join(" | ");
-  if (!aborted && sharedFailure(message.api_error_status, text)) return { stop: true, message: `session ended in error, stopping every run: ${text || message.subtype}` };
+  if (message.is_error && !aborted && sharedFailure(message.api_error_status, text)) return { stop: true, message: `session ended in error, stopping every run: ${text || message.subtype}` };
   if (message.subtype !== "success") return { stop: false, message: `session ended in ${message.subtype}` };
-  if (message.is_error) return { stop: false, message: `session ended in API error: ${text || message.api_error_status}` };
-  return null;
+  return { stop: false, message: `session ended in API error: ${text || message.api_error_status || message.subtype}` };
 }
 
 // The spend a session adds to the batch total: its reported cost, or, when it
