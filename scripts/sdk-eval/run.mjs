@@ -168,8 +168,10 @@ async function runJob({ c, arm, n }) {
     clearTimeout(timer);
   }
   const seconds = Math.round((Date.now() - started) / 1000);
-  const run = { ...runFromMessages(messages), dir: work, created: createdPaths(before, listRunFiles(work)) };
+  // Count the session's spend before any workspace read that can throw.
+  const run = runFromMessages(messages);
   spent += sessionSpend(run, PRICE[values.model] ?? PRICE["claude-opus-5-5"]);
+  Object.assign(run, { dir: work, created: createdPaths(before, listRunFiles(work)) });
   fs.writeFileSync(path.join(runDir, "trace.jsonl"), `${run.trace}\n`);
   // A timeout can end the stream quietly as well as throw.
   const error = runError(messages, { aborted: abortController.signal.aborted, timeoutSeconds: c.timeoutSeconds });
