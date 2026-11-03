@@ -132,6 +132,7 @@ export async function prepareCatalogue(target, catalogue, chosen = [], removed =
         optional.push(id);
         continue;
       }
+      // Only the fields named here reach a generated check's spec; a new class field must be added here to reach mounted checks.
       const { title, paths, exclude, patterns, stripComments, stripStrings, perLine, detectors, remedy } = item;
       const spec = { id, title, paths, exclude, patterns, stripComments, stripStrings, perLine, detectors, remedy, commentSyntax: catalogue.commentSyntax };
       for (const { data: fixture, expected } of fixtures) {

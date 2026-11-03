@@ -346,6 +346,9 @@ function checkKind(name) {
   return "types";
 }
 
+// Reads root files and the repository file list. A new check layout is one rule
+// here plus a paired case in the "check layouts outside a root manifest" tests;
+// the map-routes observation reuses the commands found.
 function detectChecks(reader, ecosystems, files) {
   const { has, text, json } = reader;
   const commands = [];

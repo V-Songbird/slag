@@ -120,6 +120,8 @@ export function matchScope(pattern, path) {
   return path === glob || path.startsWith(`${glob}/`);
 }
 
+// shellTargets keeps only targets in this set, so a path the parser builds, such as expanded()'s, stays
+// relative to the call's directory: an absolute one can hold a Windows short name (~1) and be dropped.
 const LITERAL = /^[A-Za-z0-9._/\\: -]+$/;
 // Keep literal quoted arguments together. This deliberately does not evaluate variables,
 // substitutions or nested shell syntax; it only separates simple commands and their operands.
@@ -318,6 +320,8 @@ function commandTargets(tokens, harness, cmdlets) {
   const name = shared || (ALIASES.get(called) ?? called);
   const flags = POSIX.has(called) && !shared ? args : args.flatMap((token) => bound(name, token));
   const { named, positional } = argumentsOf(flags);
+  // bound() has already turned every alias and abbreviation into these names, and nothing here sees a
+  // flag any other way; a branch reads every path parameter PARAMETERS lists for its cmdlet, -LiteralPath included.
   const paths = [...(named.get('-path') ?? []), ...(named.get('-literalpath') ?? [])];
   const destination = named.get('-destination');
   const hits = [];

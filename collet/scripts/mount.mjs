@@ -318,6 +318,8 @@ const block = readFileSync(join(TEMPLATES, 'rules.md'), 'utf8')
     '`node .collet/task.mjs close` checks the working tree against the task, then runs the accept command.'
   )
   // A fact about the project, never an order. Without a list the block reads exactly as before.
+  // The blocker sentence repeats item 2 of templates/rules.md and the line in hooks/session-start.js;
+  // change all three together.
   .replace(
     '{{ASK_FIRST}}',
     asked.length
@@ -368,6 +370,7 @@ if (bundle || refreshed) {
   }
 }
 
+// collet/docs/knowledge/harness-workflow.md quotes these next-step lines; change both together.
 console.log(`
 next:
   1. Fill in .collet/config.json — the project line and the conventions a change must respect.

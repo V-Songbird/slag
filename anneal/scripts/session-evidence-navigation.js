@@ -28,6 +28,8 @@ const SECTION = [
   "Hand the document to docs-align: a descriptive heading or a section link lets one section be read alone. Split only a separable topic.",
   "The next session reaches the section it needs with one ranged read or search.",
 ];
+// A new candidate kind needs a note() call, a judge() branch and an ADVICE row for each kind:cause it
+// can reach. note() also runs judge() to evict settled no-change candidates first.
 const ADVICE = {
   "missing-path:wrong-location": [
     "map-file", "Add a focused path hint for this file to the map file's Where things live, unless it already names the place.",
@@ -254,6 +256,8 @@ function noticed(nav, key, line, banner) {
 }
 
 // The cause the observed facts leave most plausible. It is a hypothesis for the reviewer to verify.
+// A call names its file only through path: a null path is unknown and is never matched through the
+// command or its arguments.
 function judge({ kind, observed, fact, next }) {
   const later = next || [];
   const same = (call) => fact.path !== null && call.path === fact.path && call.outcome === "ok";

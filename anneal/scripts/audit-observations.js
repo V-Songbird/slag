@@ -140,7 +140,8 @@ const tally = (counts, key) => counts.set(key, (counts.get(key) || 0) + 1);
 
 // What the audit can say without a severity. `facts` holds the findings'
 // evidence, so an observation only explains evidence the audit already found;
-// `shared` holds the audit's own limits and path helpers.
+// `shared` holds the audit's own limits and path helpers. This module never
+// requires audit.js, so a helper an observation needs is added to `shared`.
 function observe(files, reader, facts, shared) {
   const { EVIDENCE_LIMIT, OUTPUT_DIRS, ROUTE_NAMES, countLines, dirsOf, extensionOf, inBuildDir, inputDir, isGeneratedPath, nameGroup, plural, sized, stemOf } = shared;
   const observations = [];

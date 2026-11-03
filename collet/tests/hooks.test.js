@@ -766,6 +766,8 @@ test('explicit project context keeps precedence over Antigravity target inferenc
 
 test('Antigravity does not invent project context from relative tool arguments', () => {
   const root = ready();
+  // Not PLUGIN: a checkout that mounts collet holds the plugin too, and its own open task would answer.
+  const elsewhere = project(TREE);
   task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
   const calls = [
     { name: 'write_to_file', args: { TargetFile: 'src/theme.mjs' } },
@@ -775,7 +777,7 @@ test('Antigravity does not invent project context from relative tool arguments',
   ];
   for (const toolCall of calls) {
     const result = hook('guard.js', root, { toolCall, workspacePaths: [] }, {
-      args: ['antigravity'], cwd: PLUGIN, project: null,
+      args: ['antigravity'], cwd: elsewhere, project: null,
     });
     assert.deepEqual(JSON.parse(result.stdout), { decision: 'allow' });
   }
