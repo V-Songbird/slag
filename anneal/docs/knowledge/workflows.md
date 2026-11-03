@@ -297,17 +297,17 @@ A tracked file's date is its last commit, or its file time when it has uncommitt
 
 #### Native memory
 
-Pass `--memory <directory>` for a native memory folder: one Markdown file per memory and a `MEMORY.md` index that links each file. The script reads the folder and never writes to it; a folder without `MEMORY.md` is refused with exit 2. A relative `--memory` folder and the paths memories name resolve against `--root`, so pass the checkout the memories describe as `--root`: a path that is ignored there, such as a `.private/` file, is absent from a worktree and shows up as missing.
+Pass `--memory <directory>` for a native memory folder: one Markdown file per memory and a `MEMORY.md` index that links each file. The script reads the folder and never writes to it; a folder without `MEMORY.md` is refused with exit 2. A relative `--memory` folder and the paths memories name resolve against `--root`, so pass the checkout the memories describe as `--root`: a path that is ignored there, such as a `docs/tasks/` note, is absent from a worktree and shows up as missing.
 
 | Proposal | When |
 | --- | --- |
-| `memory-index-orphan` | A `MEMORY.md` link to a `.md` file, relative to the folder and without its `#anchor`, finds no file |
+| `memory-index-orphan` | A `MEMORY.md` link to a `.md` file, relative to the folder, URL-decoded and without its `#anchor` or `?query`, finds no file |
 | `memory-unindexed` | A memory file in the folder that no `MEMORY.md` link reaches, so no session loads it |
-| `memory-missing-path` | A memory's backticked text names a relative path absent from the project, an `npm run` script missing from the root `package.json`, or a `--flag` that no project file outside the memory folder contains; or a `[[name]]`, `[[name\|label]]` or `[[name#heading]]` link with no `name.md` in the folder |
-
-Flags are checked only in backticked text that names a project path or `npm run`, or that holds nothing but flags, so another tool's flags, as in `git log --oneline`, are left alone.
+| `memory-missing-path` | A memory's backticked text names a relative path absent from the project, an `npm run` script missing from the root `package.json`, or a `--flag` that no project file outside the memory folder contains as a whole token; or a `[[name]]`, `[[name\|label]]` or `[[name#heading]]` link with no `name.md` in the folder |
 | `memory-duplicate` | Two memories share at least 40% of their distinct words of four letters or more (Jaccard similarity) |
 | `memory-stale-state` | A memory last modified more than 14 days ago has a sentence with a word that states a current condition: `still`, `now`, `currently`, `not yet`, `no longer`, `pending`, `deferred`, `unresolved` or `so far` |
+
+Backticked text that starts with another tool's command, as in `git log --oneline anneal/scripts/x.js` or `git branch -D keep/release`, is skipped whole. A path counts only when its first folder exists in the project, so git refs such as `origin/main`, MIME types and other workspaces' files are left alone; a memory naming a folder that was deleted entirely is not flagged. Flags are checked only after the project's script, as in `node <script> --flag` or `npm run <script> -- --flag`, so node's and npm's own flags, as in `node --test`, are left alone.
 
 A memory's date is its frontmatter `modified` field, or its file time when it has none. The 14 days follow two observations: 8 of 20 memories in one project were stale or duplicate three weeks after a cleanup, and one memory was contradicted by the host's own files four weeks after it was written. In one set of 15 hand-consolidated memories no pair shared more than 22% of its words, so 40% leaves room for reworded duplicates without flagging distinct memories.
 

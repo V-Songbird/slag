@@ -112,7 +112,11 @@ function memoryProposals(root, dir, now) {
   fs.readFileSync(indexFile, "utf8").split(/\r?\n/).forEach((line, i) => {
     for (const target of linkTargets(line)) {
       if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("#")) continue;
-      const file = path.posix.normalize(target.split("#")[0]);
+      let file = target.replace(/[#?].*$/, "");
+      try {
+        file = decodeURIComponent(file);
+      } catch {}
+      file = path.posix.normalize(file);
       if (!file.endsWith(".md")) continue;
       indexed.add(file);
       if (!fs.existsSync(path.join(folder, file))) add("memory-index-orphan", `MEMORY.md:${i + 1}`, `links ${target}, which does not exist; drop the line`);
@@ -129,8 +133,14 @@ function memoryProposals(root, dir, now) {
   const inFolder = path.relative(root, folder).replace(/\\/g, "/");
   const exclude = inFolder && !inFolder.startsWith("..") ? [`:(exclude)${inFolder}`] : [];
   const flags = new Map();
+  // A flag counts only as a whole token: `--root` is not found in `--root-dir`.
   const flagExists = (flag) => {
-    if (!flags.has(flag)) flags.set(flag, spawnSync("git", ["-C", root, "grep", "-q", "-F", "--untracked", "-e", flag, "--", ".", ...exclude]).status === 0);
+    if (!flags.has(flag)) {
+      const grep = spawnSync("git", ["-C", root, "grep", "-q", "-E", "--untracked", "-e", `(^|[^A-Za-z0-9_-])${flag}($|[^A-Za-z0-9_-])`, "--", ".", ...exclude], { encoding: "utf8" });
+      if (grep.error) throw grep.error;
+      if (grep.status !== 0 && grep.status !== 1) throw new Error(grep.stderr?.trim() || `git grep for ${flag} failed.`);
+      flags.set(flag, grep.status === 0);
+    }
     return flags.get(flag);
   };
 
@@ -142,16 +152,22 @@ function memoryProposals(root, dir, now) {
     const missing = [];
     for (const [, span] of text.matchAll(/`([^`\n]+)`/g)) {
       const tokens = span.trim().split(/\s+/);
+      // Another tool's command, such as `git branch -D keep/release`, names nothing of the project's.
+      if (tokens.length > 1 && /^[a-z][\w.-]*$/i.test(tokens[0]) && tokens[0] !== "node" && tokens[0] !== "npm") continue;
+      const isPath = (t) => /^[\w.-]+(?:\/[\w.-]+)+\/?$/.test(t);
       const run = /^npm run(?:-script)? ([^\s-]\S*)/.exec(span.trim());
       if (run && !scripts.has(run[1])) missing.push(`npm run ${run[1]}`);
-      const paths = tokens.filter((t) => /^[\w.-]+(?:\/[\w.-]+)+\/?$/.test(t));
-      for (const t of paths) if (!fs.existsSync(path.join(root, t))) missing.push(t);
-      // Flags are checked only for the project's own commands, or when they stand alone.
-      if (run || paths.length || tokens.every((t) => t.startsWith("--"))) {
-        for (const t of tokens) {
-          const flag = /^--[a-z][\w-]*/i.exec(t)?.[0];
-          if (flag && !flagExists(flag)) missing.push(flag);
-        }
+      // A path counts only when its first folder exists, which leaves out git refs such as
+      // `origin/main`, MIME types and other workspaces' files.
+      for (const t of tokens.filter(isPath)) {
+        if (fs.existsSync(path.join(root, t.split("/")[0])) && !fs.existsSync(path.join(root, t))) missing.push(t);
+      }
+      // Flags belong to the project only after its script: `node <script> --flag` or
+      // `npm run <script> -- --flag`, not node's or npm's own.
+      const script = run ? tokens.indexOf("--") : tokens[0] === "node" ? tokens.findIndex(isPath) : -1;
+      for (const t of script < 0 ? [] : tokens.slice(script + 1)) {
+        const flag = /^--[a-z][\w-]*/i.exec(t)?.[0];
+        if (flag && !flagExists(flag)) missing.push(flag);
       }
     }
     for (const [, link] of text.matchAll(/\[\[([^\]]+)\]\]/g)) {

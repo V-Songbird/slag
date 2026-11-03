@@ -206,7 +206,7 @@ test("memory flags: missing named path, command or flag, near-duplicate pair, in
       "- [Eval one](eval-one.md) — eval",
       "- [Eval two](eval-two.md) — eval",
     ].join("\n"),
-    "mem/run.md": memory(fresh, "Run `node scripts/run.js --root .`, not `scripts/old.js` or `node scripts/old.js --gone-flag`; `npm run gone` and `--removed-flag` are gone too, while `git log --oneline` is no project command; see [[eval-one|the eval]] and [[missing-note]]. Paths like `~/.claude/x` and `D:/x/y` are outside the project."),
+    "mem/run.md": memory(fresh, "Run `node scripts/run.js --root .`, not `scripts/old.js` or `node scripts/old.js --gone-flag`; `npm run gone` and `npm run check -- --removed-flag` are gone too, while `git log --oneline` is no project command; see [[eval-one|the eval]] and [[missing-note]]. Paths like `~/.claude/x` and `D:/x/y` are outside the project."),
     "mem/eval-one.md": memory(fresh, "Plugin evals are refused on native Windows; run them from the Ubuntu WSL2 distro with bubblewrap installed."),
     "mem/eval-two.md": memory(fresh, "Plugin evals are refused on native Windows, so run them from the Ubuntu WSL2 distro where bubblewrap is installed."),
     "mem/orphan.md": memory(fresh, "Nothing links this one."),
@@ -223,11 +223,42 @@ test("memory flags: missing named path, command or flag, near-duplicate pair, in
   assert.match(of(report, "memory-duplicate")[0], /with eval-two\.md; merge the two$/);
 });
 
+test("memory spans that name another tool's refs, flags or files are not missing project paths", () => {
+  const root = repo();
+  commit(root, { "anneal/scripts/x.js": "x", "tests/x.test.js": "x", "scripts/run.js": "--root-dir --rooted" }, "2026-10-01");
+  const fresh = "2026-10-30T00:00:00.000Z";
+  write(root, {
+    "mem/MEMORY.md": "- [Steps](steps.md) — owner steps\n- [Logs](logs.md) — evidence names\n- [Refs](refs.md) — other tools\n",
+    "mem/steps.md": memory(fresh, "**Why:** On 2026-09-24 the orchestrator flagged step 9 (accept a `git branch -D keep/release` card if one appears) as outside the brief."),
+    "mem/logs.md": memory(fresh, "**Why:** in 006's Codex run (2026-09-25) `run.sh` wrote `ev/long/run.log`; reading it was refused three times."),
+    "mem/refs.md": memory(fresh, "Compare against `origin/main`, send `application/json`, read `git log --oneline anneal/scripts/x.js` and run `node --test tests/x.test.js`; `node scripts/run.js --root` takes a flag."),
+  });
+  assert.deepStrictEqual(of(maintain(root, { memories: ["mem"], now: NOW }), "memory-missing-path"), [
+    "mem/refs.md names --root, absent from the project or the memory folder",
+  ]);
+});
+
+test("a memory pass leaves the memory folder byte-identical", () => {
+  const root = repo();
+  commit(root, { "scripts/run.js": "--root" }, "2026-10-01");
+  write(root, {
+    "mem/MEMORY.md": "- [Run](run.md) — how to run\n- [Gone](gone.md) — deleted\n",
+    "mem/run.md": memory("2026-09-01T00:00:00.000Z", "Run `node scripts/old.js --gone` while it is still pending."),
+    "mem/orphan.md": memory("2026-09-01T00:00:00.000Z", "Nothing links this one."),
+  });
+  const snapshot = () => Object.fromEntries(fs.readdirSync(path.join(root, "mem")).map((n) => [n, fs.readFileSync(path.join(root, "mem", n))]));
+  const before = snapshot();
+  assert.ok(maintain(root, { memories: ["mem"], now: NOW }).proposals.length >= 4);
+  assert.strictEqual(spawnSync(process.execPath, [CLI, "--root", root, "--memory", "mem"], { encoding: "utf8" }).status, 0);
+  assert.deepStrictEqual(snapshot(), before);
+});
+
 test("a clean memory folder has no memory proposals", () => {
   const root = repo();
   commit(root, { "scripts/run.js": "--root", "package.json": '{"scripts":{"check":"node --test"}}' }, "2026-10-01");
   write(root, {
-    "mem/MEMORY.md": "- [Run](./run.md) — how to run\n- [Login](<login.md#why>) — ask first\n- [Nested](sub/nested.md) — a linked file below the folder\n",
+    "mem/MEMORY.md": "- [Run](./run.md) — how to run\n- [Login](<login.md#why>) — ask first\n- [Nested](sub/nested.md) — a linked file below the folder\n- [Spaced](my%20note.md?plain=1) — an encoded name with a query\n",
+    "mem/my note.md": memory("2026-10-30T00:00:00.000Z", "Linked through an encoded target."),
     // Old, but states no current condition.
     "mem/run.md": memory("2026-09-01T00:00:00.000Z", "Run `node scripts/run.js --root .` or `npm run check` from the repository root; see [[login]], [[login|the login rule]] and [[login#why]]."),
     // States a current condition, but recently.
