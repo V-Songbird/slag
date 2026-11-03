@@ -95,6 +95,10 @@ export function fileText(dir, name) {
   }
 }
 
+// Whether `.collet/unverified.md` still lists a claim: a `-` or `*` list item with text after it.
+// Session start and the handoff use this one test, so they never disagree about the file.
+export const listsClaims = (text) => /^[-*] \S/m.test(text ?? '');
+
 // hooks.json gives the session-start and handoff hooks 10 s, and a host that reaches it stops the
 // hook and drops what it printed. Each run marks itself running in `.collet/<name>.running` and
 // clears the mark when it ends, so a mark older than that is a run the host stopped. A mark that

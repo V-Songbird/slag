@@ -20,7 +20,7 @@
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { COLLET, config, cutShort, emit, fileText, finished, mounted, projectModule, readEvent, root, started } from './lib.js';
+import { COLLET, config, cutShort, emit, fileText, finished, listsClaims, mounted, projectModule, readEvent, root, started } from './lib.js';
 // The plugin's own copy, not the project's: a project mounted by an earlier collet has none.
 import { HIDDEN_CHARACTERS, hiddenIn, nameHidden } from '../templates/state.mjs';
 
@@ -95,7 +95,7 @@ const foreman = task?.foreman && visible(`the Foreman id of task ${task.id}`, St
 const unverified = fileText(dir, 'unverified.md');
 if (foreman) {
   lines.push(`What nobody has checked for task ${task.id} belongs in the unverified: lines of Foreman entry ${foreman}'s notes.`);
-  if (/^[-*] \S/m.test(unverified ?? '')) lines.push('What nobody has checked from earlier tasks is still in .collet/unverified.md.');
+  if (listsClaims(unverified)) lines.push('What nobody has checked from earlier tasks is still in .collet/unverified.md.');
 } else if (unverified) {
   lines.push('What nobody has checked yet is in .collet/unverified.md.');
 }

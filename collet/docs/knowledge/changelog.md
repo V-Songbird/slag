@@ -144,6 +144,8 @@ All notable changes to collet are documented here. The format follows
 
 ### Fixed
 
+- The compaction note reads a task's Foreman id as session start does, without characters that do
+  not show on screen, so a task whose ledger id holds only such characters is unlinked in both.
 - The guard reads `rm`, `rmdir`, `cp`, `mv` and `tee` as the command of the shell that ran them:
   PowerShell's cmdlets under the PowerShell tool, the POSIX commands in a POSIX shell. So
   `cp -Dest .collet/off src/cli.mjs`, which PowerShell runs as a copy onto the kill switch, is refused

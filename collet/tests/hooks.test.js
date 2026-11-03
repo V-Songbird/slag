@@ -174,6 +174,24 @@ test('session start names unverified.md for a linked task when earlier tasks lef
   assert.match(context, /^What nobody has checked from earlier tasks is still in \.collet\/unverified\.md\.$/m);
 });
 
+// A Foreman id made only of characters that do not show on screen links nothing, in either hook.
+test('session start and handoff both read a Foreman id of hidden characters as no link', () => {
+  const root = ready();
+  // The task CLI refuses such an id, so it arrives the way it still can: edited into the ledger.
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs', '--foreman', '190']);
+  const ledger = join(root, '.collet', 'ledger.jsonl');
+  const text = readFileSync(ledger, 'utf8');
+  assert.ok(text.includes('"foreman":"190"'));
+  writeFileSync(ledger, text.replace('"foreman":"190"', '"foreman":"\\u200b"'), 'utf8');
+  hook('handoff.js', root, { trigger: 'auto' });
+  const handoff = readFileSync(join(root, '.collet', 'handoff.md'), 'utf8');
+  const context = hookOutput(hook('session-start.js', root)).additionalContext;
+  assert.match(handoff, /^Anything claimed but not yet checked belongs in `\.collet\/unverified\.md`\.$/m);
+  assert.doesNotMatch(handoff, /Foreman entry/);
+  assert.match(context, /^What nobody has checked yet is in \.collet\/unverified\.md\.$/m);
+  assert.doesNotMatch(context, /Foreman entry/);
+});
+
 // The compaction note of a linked task names .collet/unverified.md only while earlier tasks left
 // list items there.
 for (const earlier of [true, false]) {
