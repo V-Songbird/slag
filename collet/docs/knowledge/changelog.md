@@ -47,7 +47,7 @@ All notable changes to collet are documented here. The format follows
 - `task.mjs`, `mount.mjs` and the session start now treat Unicode tags after a black flag as
   hidden unless they form a subdivision flag. Before, any tags after a black flag passed, so text
   written as tags behind one was stored and stated. A project mounted by an earlier collet keeps
-  its copied `state.mjs`, so its task CLI and mount refusals get this fix only after a remount.
+  its copied `state.mjs`, so its task CLI gets this fix only after a remount.
 
 ## [0.5.0-alpha] — 2026-09-25
 

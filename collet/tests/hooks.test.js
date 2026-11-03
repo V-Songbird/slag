@@ -183,8 +183,6 @@ for (const earlier of [true, false]) {
     if (earlier) {
       task(root, ['add', '--title', 'first', '--why', 'w', '--scope', 'src/cli.mjs']);
       assert.equal(task(root, ['close', '--left-out', 'nothing', '--unverified', 'the window on real data']).status, 0);
-    } else {
-      writeFileSync(join(root, '.collet', 'unverified.md'), '# Not checked\n', 'utf8');
     }
     task(root, ['add', '--title', 'second', '--why', 'w', '--scope', 'src/cli.mjs', '--foreman', '190']);
     hook('handoff.js', root, { trigger: 'auto' });
