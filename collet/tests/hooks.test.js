@@ -7,7 +7,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSyn
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { CONFIG, hook, hookOutput, mount, PLUGIN, project, task, TREE } from './temp-project.js';
+import { CONFIG, hook, hookOutput, mount, PLUGIN, project, repo, task, TREE } from './temp-project.js';
 
 function ready(extra = {}) {
   const root = project({ ...TREE, ...extra });
@@ -150,6 +150,19 @@ for (const linked of [true, false]) {
     assert.equal(readFileSync(join(root, '.foreman', 'config.json'), 'utf8'), '{}\n');
   });
 }
+
+// Claims an earlier unlinked task left in .collet/unverified.md stay there when a linked task opens,
+// so session start still names the file alongside the Foreman entry's notes.
+test('session start names unverified.md for a linked task when earlier tasks left claims there', () => {
+  const root = ready();
+  repo(root);
+  task(root, ['add', '--title', 'first', '--why', 'w', '--scope', 'src/cli.mjs']);
+  assert.equal(task(root, ['close', '--left-out', 'nothing', '--unverified', 'the window on real data']).status, 0);
+  task(root, ['add', '--title', 'second', '--why', 'w', '--scope', 'src/cli.mjs', '--foreman', '190']);
+  const context = hookOutput(hook('session-start.js', root)).additionalContext;
+  assert.match(context, /^What nobody has checked for task t2 belongs in the unverified: lines of Foreman entry 190's notes\.$/m);
+  assert.match(context, /^What nobody has checked from earlier tasks is still in \.collet\/unverified\.md\.$/m);
+});
 
 test('the compaction note is not written when nothing is open', () => {
   const root = ready();

@@ -245,14 +245,17 @@ for (const [name, linked, passes] of [
     assert.equal(opened.status, 0, opened.stderr);
     const unverified = join(root, '.collet', 'unverified.md');
     const before = readFileSync(unverified, 'utf8');
-    const out = task(root, ['close', '--left-out', 'nothing', '--unverified', 'the window on real data']);
+    const out = task(root, ['close', '--left-out', 'the weekly digest', '--unverified', 'the window on real data']);
     assert.equal(out.status, passes ? 0 : 1, out.stdout + out.stderr);
     const step = /^Foreman entry 190: commit this work, then run echo '\{"id":"190","status":"awaiting_acceptance","commit":"<commit sha>"\}' \| node <Foreman plugin root>\/scripts\/roadmap\.js update-status\r?$/m;
     const pointer = /^What nobody checked belongs in that entry's notes as unverified: lines, not in \.collet\/unverified\.md: the window on real data\r?$/m;
+    // The left-out text lands only in the ledger, which the planning tool never reads, so it is echoed.
+    const leftOut = /^What was left out is kept only in the task ledger, which that entry's notes do not see: the weekly digest\r?$/m;
     if (linked && passes) {
       assert.match(out.stdout, step);
       assert.match(out.stdout, pointer);
-    } else assert.doesNotMatch(out.stdout + out.stderr, /Foreman|awaiting_acceptance|unverified: lines/);
+      assert.match(out.stdout, leftOut);
+    } else assert.doesNotMatch(out.stdout + out.stderr, /Foreman|awaiting_acceptance|unverified: lines|left out is kept/);
     // Only an unlinked close that passes records its claims in .collet/unverified.md.
     if (!linked && passes) assert.match(readFileSync(unverified, 'utf8'), /^- \S+ t1: the window on real data$/m);
     else assert.equal(readFileSync(unverified, 'utf8'), before);

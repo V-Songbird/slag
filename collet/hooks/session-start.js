@@ -89,11 +89,14 @@ if (askFirst.length) {
 const conventions = configured('conventions');
 if (conventions.length) lines.push(`Conventions that constrain a change here: ${conventions.join(' ')}`);
 
-// A task linked to a Foreman entry keeps its unchecked claims in that entry's notes.
+// A task linked to a Foreman entry keeps its unchecked claims in that entry's notes. Claims that
+// earlier unlinked tasks listed in .collet/unverified.md stay there, so the file is still named.
 const foreman = task?.foreman && visible(`the Foreman id of task ${task.id}`, String(task.foreman));
+const unverified = fileText(dir, 'unverified.md');
 if (foreman) {
   lines.push(`What nobody has checked for task ${task.id} belongs in the unverified: lines of Foreman entry ${foreman}'s notes.`);
-} else if (fileText(dir, 'unverified.md')) {
+  if (/^[-*] \S/m.test(unverified ?? '')) lines.push('What nobody has checked from earlier tasks is still in .collet/unverified.md.');
+} else if (unverified) {
   lines.push('What nobody has checked yet is in .collet/unverified.md.');
 }
 

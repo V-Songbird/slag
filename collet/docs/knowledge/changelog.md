@@ -31,6 +31,9 @@ All notable changes to collet are documented here. The format follows
 - A task opened with `--foreman <id>` keeps what nobody checked in the Foreman entry's notes
   instead of `.collet/unverified.md`, and the session start and compaction note point there.
   A task without the id works as before.
+- A passing close of a task opened with `--foreman <id>` also prints the `--left-out` text, and
+  while such a task is open the session start still names `.collet/unverified.md` when earlier
+  tasks left claims there.
 
 ### Changed
 

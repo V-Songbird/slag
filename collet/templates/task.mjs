@@ -542,6 +542,7 @@ switch (command) {
       const step = JSON.stringify({ id: entry.foreman, status: 'awaiting_acceptance', commit: '<commit sha>' });
       console.log(`Foreman entry ${entry.foreman}: commit this work, then run echo '${step}' | node <Foreman plugin root>/scripts/roadmap.js update-status`);
       console.log(`What nobody checked belongs in that entry's notes as unverified: lines, not in .collet/unverified.md: ${args.unverified}`);
+      console.log(`What was left out is kept only in the task ledger, which that entry's notes do not see: ${args.leftOut}`);
     }
     break;
   }
