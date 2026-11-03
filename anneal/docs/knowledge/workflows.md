@@ -65,7 +65,7 @@ An `audit` run shows the findings, offers to save them and writes a findings, re
 
 `instruction-hidden-characters` reads every `CLAUDE.md`, `AGENTS.md` and `GEMINI.md` at any depth, and the `.md` and `.mdc` files under `.agents/`, `.claude/`, `.cursor/rules/` and `.gemini/`. It reports zero-width characters U+200B to U+200D, the word joiner U+2060, a byte order mark U+FEFF after the first character, bidi controls U+202A to U+202E and U+2066 to U+2069, and Unicode tags U+E0000 to U+E007F. Text in these characters can carry an instruction that an agent follows and a reviewer never sees.
 
-Each evidence entry names the file, the line and each code point. Tags are only counted, because their code points spell out the hidden text. The joiner inside an emoji and the tags of a subdivision flag render on screen, so they are not reported. A zero-width non-joiner in a script that needs it is reported; the owner decides. The finding asks you to inspect the line; repo-layout never removes the characters, decodes them or copies them into a plan.
+Each evidence entry names the file, the line and each code point. Tags are only counted, because their code points spell out the hidden text. The joiner inside an emoji and the tags of a subdivision flag render on screen, so they are not reported. A subdivision flag is a black flag, two lowercase letter tags or three digit tags, one to four more lowercase letter or digit tags, and the cancel tag; tags in any other shape after a black flag are reported. A zero-width non-joiner in a script that needs it is reported; the owner decides. The finding asks you to inspect the line; repo-layout never removes the characters, decodes them or copies them into a plan.
 
 ### Where the audit finds a check command
 

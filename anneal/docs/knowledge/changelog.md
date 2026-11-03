@@ -24,6 +24,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Fixed
 
+- `instruction-hidden-characters` now reports Unicode tags after a black flag unless they form a subdivision flag: two lowercase letters or three digits, one to four more lowercase letters or digits, then the cancel tag. Before, any tags after a black flag were skipped, so text written as tags behind one went unreported. The session evidence spells out those tags the same way.
+
 - In Claude Code and Codex sessions, the session evidence script now starts the excerpt of a failed Node import (`ERR_MODULE_NOT_FOUND`) at the error's own line. This also holds after progress text rewritten with a carriage return and in a Node test runner's TAP report. A line too long for the excerpt loses its middle instead of its end, so the excerpt keeps the importing file however long the workspace path is.
 
 - The session evidence script no longer labels a command that ran and then failed on a missing Node module (`MODULE_NOT_FOUND` from CommonJS, `ERR_MODULE_NOT_FOUND` from ESM) as `command-not-found`. That failure now gets the same category as any other failed command, such as `nonzero-exit`. A module-not-found failure the host did not report as failed, such as one behind a pipe, is no longer a candidate unless its output names another known diagnostic. A shell's "command not found" and PowerShell's "is not recognized as the name" still get `command-not-found`.
