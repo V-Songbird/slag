@@ -119,17 +119,21 @@ export function runFromMessages(raw) {
 // The graders that apply to an arm: `arm: with-only` skips the run without the plugin.
 export const gradersFor = (graders, arm) => graders.filter((grader) => grader.arm !== "with-only" || arm === "with");
 
-// The result subtypes that end only their own run: the case's turn limit and
-// the session's budget. The SDK marks them is_error like any other error result.
-const RUN_LIMITS = new Set(["error_max_turns", "error_max_budget_usd"]);
+// A failure every later API call would repeat, so it stops every run: an auth
+// or permission status (401, 403), or a credit balance that is too low.
+const sharedFailure = (status, text) => [401, 403].includes(status) || /credit balance/i.test(text);
 
-// How a session's message ends its run in error, or null: a run limit errors
-// only its run; any other error result, or a reply that the credit balance is
-// too low, stops every run.
+// How a session's result message ends its run in error, or null. A shared
+// failure, read from the success arm's api_error_status and the result or
+// errors text, stops every run. Any other error, such as a turn or budget limit,
+// an error during execution or a transient API error like 500 or 529, errors
+// only its run.
 export function resultError(message) {
   if (message.type !== "result") return null;
-  if (RUN_LIMITS.has(message.subtype)) return { stop: false, message: `session ended in ${message.subtype}` };
-  if (message.is_error || /credit balance/i.test(message.result ?? "")) return { stop: true, message: `session ended in error, stopping every run: ${message.result ?? message.subtype}` };
+  const text = [message.result, ...(message.errors ?? [])].filter(Boolean).join(" | ");
+  if (sharedFailure(message.api_error_status, text)) return { stop: true, message: `session ended in error, stopping every run: ${text || message.subtype}` };
+  if (message.subtype !== "success") return { stop: false, message: `session ended in ${message.subtype}` };
+  if (message.is_error) return { stop: false, message: `session ended in API error: ${text || message.api_error_status}` };
   return null;
 }
 
@@ -200,7 +204,7 @@ export async function gradeRun(graders, run, judge) {
       grades[grader.name] = await judge(grader, run);
     } catch (error) {
       const message = error?.message || String(error);
-      return { error: `judge failed: ${message}`, stop: [401, 403].includes(error?.status) || /credit balance/i.test(message) };
+      return { error: `judge failed: ${message}`, stop: sharedFailure(error?.status, message) };
     }
   }
   return { grades };

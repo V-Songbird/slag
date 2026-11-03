@@ -188,13 +188,21 @@ test("a timed-out session with no result adds the priced usage of its assistant 
   assert.strictEqual(sessionSpend(runFromMessages(finalReply("Done.")), [4, 20]), 0.42);
 });
 
-test("a turn or budget limit errors only its run; other error results and a spent credit balance stop every run", () => {
-  // The SDK's limit results: is_error set, an errors list and no result text.
+test("an auth, permission or credit error result stops every run; limits, execution errors and transient API errors fail only their run", () => {
+  // The SDK's error results: is_error set, an errors list and no result text.
   const limit = (subtype, errors) => ({ type: "result", subtype, is_error: true, errors, total_cost_usd: 1.1, num_turns: 30 });
   assert.deepStrictEqual(resultError(limit("error_max_turns", ["Reached maximum number of turns (30)"])), { stop: false, message: "session ended in error_max_turns" });
   assert.deepStrictEqual(resultError(limit("error_max_budget_usd", ["Exceeded USD budget (2)"])), { stop: false, message: "session ended in error_max_budget_usd" });
-  assert.strictEqual(resultError(limit("error_during_execution", [])).stop, true);
-  assert.strictEqual(resultError({ type: "result", subtype: "success", is_error: true, result: "API Error: 500" }).stop, true);
+  assert.strictEqual(resultError(limit("error_during_execution", [])).stop, false);
+  assert.strictEqual(resultError(limit("error_max_structured_output_retries", [])).stop, false);
+  assert.strictEqual(resultError(limit("error_during_execution", ["Credit balance is too low"])).stop, true);
+  // An API error ends the success arm with is_error and api_error_status.
+  const apiError = (status, result) => ({ type: "result", subtype: "success", is_error: true, ...(status === undefined ? {} : { api_error_status: status }), result });
+  for (const [status, result] of [[undefined, "API Error: 500"], [500, "API Error: 500"], [529, "API Error: 529 overloaded"]]) {
+    assert.deepStrictEqual(resultError(apiError(status, result)), { stop: false, message: `session ended in API error: ${result}` }, result);
+  }
+  assert.strictEqual(resultError(apiError(401, "API Error: 401 authentication_error")).stop, true);
+  assert.strictEqual(resultError(apiError(403, "API Error: 403 permission_error")).stop, true);
   assert.strictEqual(resultError({ type: "result", subtype: "success", is_error: false, result: "Credit balance is too low" }).stop, true);
   assert.strictEqual(resultError(finalReply("Done.")[1]), null);
   assert.strictEqual(resultError(bashCall("toolu_1", "ls")), null);
