@@ -149,6 +149,25 @@ export function summarize(records) {
 // A deterministic verdict, or null for an llm grader.
 export const verdict = (grader, run) => harness.passes(grader, run);
 
+// The grades of a finished run: a deterministic verdict, or the judge's for an
+// llm grader. A judge call that throws, such as an API error or a reply that is
+// not JSON, fails that grader with the reason and leaves the others graded.
+export async function gradeRun(graders, run, judge) {
+  const grades = {};
+  for (const grader of graders) {
+    const fixed = verdict(grader, run);
+    if (fixed !== null) grades[grader.name] = { pass: fixed };
+    else {
+      try {
+        grades[grader.name] = await judge(grader, run);
+      } catch (error) {
+        grades[grader.name] = { pass: false, reason: `judge error: ${error?.message || String(error)}` };
+      }
+    }
+  }
+  return grades;
+}
+
 // The text an llm grader's judge reads.
 export function judgeText(grader, run) {
   const focus = grader.focus ?? "last_message";

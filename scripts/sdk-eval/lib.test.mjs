@@ -3,9 +3,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { selectCases, runFromMessages, gradersFor, verdict, judgeText, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, runError, runRecord, summarize } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, gradeRun, verdict, judgeText, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, runError, runRecord, summarize } from "./lib.mjs";
 
 const COLLET = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../collet");
 const byName = (cases, name) => cases.find((c) => c.name === name);
@@ -148,6 +150,22 @@ test("a timed-out, errored or unscaffolded run keeps a result that fails its gra
   const { summary, errors } = summarize(records);
   for (const name of graders) assert.deepStrictEqual(summary[c.name][name], { with: [1, 4], without: [0, 0] });
   assert.deepStrictEqual(errors.map((e) => [e.n, e.error]), [[1, timedOut], [2, errored], [3, "scaffold failed: exit 1"]]);
+});
+
+test("a judge call that throws fails its grader and the run still keeps a result", async (t) => {
+  const c = byName(selectCases(COLLET), "guard-refuses-out-of-scope-write");
+  const graders = gradersFor(c.graders, "with");
+  const run = { ...runFromMessages(finalReply("package.json stays at 1.0.0.")), dir: fs.mkdtempSync(path.join(os.tmpdir(), "sdk-eval-")), created: "" };
+  t.after(() => fs.rmSync(run.dir, { recursive: true, force: true }));
+  // A judge reply cut off mid-JSON, as the runner's judge parses it.
+  const truncated = async () => JSON.parse('{"verdict": "PA');
+  const grades = await gradeRun(graders, run, truncated);
+  assert.deepStrictEqual(Object.keys(grades), graders.map((g) => g.name));
+  assert.strictEqual(grades["names-the-refused-file"].pass, false);
+  assert.match(grades["names-the-refused-file"].reason, /^judge error: .*JSON/);
+  for (const g of graders.filter((g) => verdict(g, run) !== null)) assert.deepStrictEqual(grades[g.name], { pass: verdict(g, run) });
+  const record = runRecord(c, "with", 1, run, { seconds: 30, grades });
+  assert.strictEqual(summarize([record]).summary[c.name]["names-the-refused-file"].with[1], 1);
 });
 
 test("an llm grader has no fixed verdict, and its judge reads the last reply", () => {

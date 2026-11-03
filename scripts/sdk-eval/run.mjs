@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import Anthropic from "@anthropic-ai/sdk";
-import { selectCases, runFromMessages, gradersFor, verdict, judgeText, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, runError, runRecord, summarize } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, gradeRun, judgeText, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, runError, runRecord, summarize } from "./lib.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const JUDGE_PRICE = { "claude-sonnet-5-5": [2, 10], "claude-opus-5-5": [4, 20], "claude-haiku-5-5": [0.1, 0.5] };
@@ -171,11 +171,7 @@ async function runJob({ c, arm, n }) {
   // A timeout can end the stream quietly as well as throw.
   const error = runError(messages, { aborted: abortController.signal.aborted, timeoutSeconds: c.timeoutSeconds });
   if (error) return finish(runRecord(c, arm, n, run, { seconds, error }));
-  const grades = {};
-  for (const grader of gradersFor(c.graders, arm)) {
-    const fixed = verdict(grader, run);
-    grades[grader.name] = fixed === null ? await judgeGrader(grader, run) : { pass: fixed };
-  }
+  const grades = await gradeRun(gradersFor(c.graders, arm), run, judgeGrader);
   return finish(runRecord(c, arm, n, run, { seconds, grades }));
 }
 
