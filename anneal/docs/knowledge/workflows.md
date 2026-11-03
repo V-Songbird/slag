@@ -280,7 +280,7 @@ Ignored directories outside a `docs` tree, such as build output, are skipped. In
 
 ### Maintenance proposals
 
-Pass `maintain` to docs-align, as in `/anneal:docs-align maintain`, for proposals that trim documentation. The skill runs `node anneal/scripts/docs-maintenance.js --root <project> [--store <file>]... [--transcripts <directory>]... [--json]`, which changes nothing and exits 0 with or without proposals, and 2 for bad arguments, an unreadable store or transcript directory, or a directory outside a Git working tree. The skill then shows the proposals grouped by kind and changes nothing in a group until you approve it.
+Pass `maintain` to docs-align, as in `/anneal:docs-align maintain`, for proposals that trim documentation. The skill runs `node anneal/scripts/docs-maintenance.js --root <project> [--store <file>]... [--transcripts <directory>]... [--memory <directory>]... [--json]`, which changes nothing and exits 0 with or without proposals, and 2 for bad arguments, an unreadable store, transcript or memory directory, or a directory outside a Git working tree. The skill then shows the proposals grouped by kind and changes nothing in a group until you approve it.
 
 | Proposal | When |
 | --- | --- |
@@ -294,6 +294,20 @@ Pass `maintain` to docs-align, as in `/anneal:docs-align maintain`, for proposal
 A tracked file's date is its last commit, or its file time when it has uncommitted changes. An untracked or ignored doc has only its file time, and a copy resets that to the copy's time; that can hide a proposal, never invent one. Task notes and decision records describe the past, so later code changes do not make them drift.
 
 `--transcripts` takes a folder of Claude Code session transcripts, such as the project's folder under `~/.claude/projects/`, once per folder; pass a worktree's folder too. A session reads a note when a tool's file path ends with the note's path or a shell command names it. A session that wrote the note with a file tool, and any call within a minute of its last write, belong to the writer. Without `--transcripts`, the three-day trigger stands alone. It rests on one measurement: 96 of 100 task notes that another session ever read were first read within three days of their last write. Codex and Antigravity transcripts are not read.
+
+#### Native memory
+
+Pass `--memory <directory>` for a native memory folder: one Markdown file per memory and a `MEMORY.md` index that links each file. The script reads the folder and never writes to it. Run it from the checkout the memories describe: a path that is ignored there, such as a `.private/` file, is absent from a worktree and shows up as missing.
+
+| Proposal | When |
+| --- | --- |
+| `memory-index-orphan` | A `MEMORY.md` line links a file that does not exist |
+| `memory-unindexed` | A memory file that no `MEMORY.md` line links, so no session loads it |
+| `memory-missing-path` | A memory names a relative path in backticks that is absent from the project, or a `[[name]]` link with no `name.md` in the folder |
+| `memory-duplicate` | Two memories share at least 40% of their distinct words of four letters or more (Jaccard similarity) |
+| `memory-stale-state` | A memory last modified more than 14 days ago has a sentence with a word that states a current condition: `still`, `now`, `currently`, `not yet`, `no longer`, `pending`, `deferred`, `unresolved` or `so far` |
+
+A memory's date is its frontmatter `modified` field, or its file time when it has none. The 14 days follow two observations: 8 of 20 memories in one project were stale or duplicate three weeks after a cleanup, and one memory was contradicted by the host's own files four weeks after it was written. In one set of 15 hand-consolidated memories no pair shared more than 22% of its words, so 40% leaves room for reworded duplicates without flagging distinct memories.
 
 ## The safety hook
 

@@ -4,7 +4,7 @@
 // Proposes documentation maintenance, without changing anything: docs whose related files changed
 // after the doc did, completed task notes to fold and delete, oversized history to condense,
 // per-entry docs to merge, and records of an orphaned knowledge store to fold into the docs that
-// own their paths. docs-align's maintenance mode acts on these proposals after approval.
+// own their paths, and native memories that are stale, duplicated or unindexed. docs-align's maintenance mode acts on these proposals after approval.
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -86,7 +86,73 @@ function dirtyFiles(root) {
   return dirty;
 }
 
-function maintain(directory, { stores = [], transcripts = [], now = Date.now() / 1000 } = {}) {
+// A native memory older than this that states a current condition may no longer hold: 8 of 20
+// memories in one project were stale or duplicate three weeks after a cleanup, and one written
+// four weeks earlier was contradicted by the host's own files.
+const MEMORY_STALE_DAYS = 14;
+// Two memories sharing at least this share of their distinct words of four letters or more
+// (Jaccard similarity) say much the same thing. Among 15 hand-consolidated memories no pair
+// passed 0.22.
+const MEMORY_DUPLICATE = 0.4;
+const CHANGING = /\b(?:still|now|currently|not yet|no longer|pending|deferred|unresolved|so far)\b/i;
+
+// Proposals for a native memory folder: one Markdown file per fact and a MEMORY.md index linking
+// each. Nothing in the folder is written.
+function memoryProposals(root, dir, now) {
+  const folder = path.resolve(root, dir);
+  const label = (name) => `${dir.replace(/\\/g, "/").replace(/\/+$/, "")}/${name}`;
+  const names = fs.readdirSync(folder).filter((n) => n.endsWith(".md") && n !== "MEMORY.md").sort();
+  const proposals = [];
+  const add = (id, name, detail) => proposals.push({ id, path: label(name), detail });
+
+  const indexed = new Set();
+  const indexFile = path.join(folder, "MEMORY.md");
+  const index = fs.existsSync(indexFile) ? fs.readFileSync(indexFile, "utf8").split(/\r?\n/) : [];
+  index.forEach((line, i) => {
+    for (const m of line.matchAll(/\]\(([^)\s]+\.md)\)/g)) {
+      indexed.add(m[1]);
+      if (!names.includes(m[1])) add("memory-index-orphan", `MEMORY.md:${i + 1}`, `links ${m[1]}, which does not exist; drop the line`);
+    }
+  });
+
+  const words = new Map();
+  for (const name of names) {
+    const text = fs.readFileSync(path.join(folder, name), "utf8");
+    if (!indexed.has(name)) add("memory-unindexed", name, "no MEMORY.md line links it, so no session loads it; index it or delete it");
+
+    const missing = [];
+    for (const [, token] of text.matchAll(/`([^`\s]+)`/g)) {
+      if (/^[\w.-]+(?:\/[\w.-]+)+\/?$/.test(token) && !fs.existsSync(path.join(root, token))) missing.push(token);
+    }
+    for (const [, link] of text.matchAll(/\[\[([^\]]+)\]\]/g)) {
+      if (!names.includes(`${link}.md`)) missing.push(`[[${link}]]`);
+    }
+    if (missing.length) add("memory-missing-path", name, `names ${[...new Set(missing)].join(", ")}, absent from the project or the memory folder`);
+
+    const modified = /^\s*modified:\s*["']?([^"'\s]+)/m.exec(text.split(/^---\s*$/m)[1] || "");
+    const stamp = modified && Date.parse(modified[1]);
+    const written = stamp ? stamp / 1000 : fs.statSync(path.join(folder, name)).mtimeMs / 1000;
+    const body = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
+    const sentence = body.split(/(?<=[.!?])\s+|\r?\n/).find((s) => CHANGING.test(s));
+    if (now - written > MEMORY_STALE_DAYS * DAY && sentence) {
+      add("memory-stale-state", name, `last modified ${day(written)} (${stamp ? "modified field" : "file time"}) and states a current condition: "${sentence.trim().slice(0, 160)}"; recheck it, then update or delete it`);
+    }
+    words.set(name, new Set(body.toLowerCase().match(/[a-z0-9]{4,}/g) || []));
+  }
+
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      const [a, b] = [words.get(names[i]), words.get(names[j])];
+      let shared = 0;
+      for (const w of a) if (b.has(w)) shared++;
+      const similarity = shared / (a.size + b.size - shared || 1);
+      if (similarity >= MEMORY_DUPLICATE) add("memory-duplicate", names[i], `shares ${Math.round(similarity * 100)}% of its words with ${names[j]}; merge the two`);
+    }
+  }
+  return proposals;
+}
+
+function maintain(directory, { stores = [], transcripts = [], memories = [], now = Date.now() / 1000 } = {}) {
   const root = path.resolve(directory);
   const top = spawnSync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
   if (top.status !== 0) throw new Error(top.stderr.trim() || "Target is not a Git working tree.");
@@ -197,6 +263,8 @@ function maintain(directory, { stores = [], transcripts = [], now = Date.now() /
     });
   }
 
+  for (const dir of memories) proposals.push(...memoryProposals(root, dir, now));
+
   const counts = {};
   for (const p of proposals) counts[p.id] = (counts[p.id] || 0) + 1;
   return { root, docs: docs.length, counts, proposals };
@@ -209,16 +277,17 @@ function formatSummary(report) {
   return `${lines.join("\n")}\n`;
 }
 
-const USAGE = "usage: docs-maintenance.js --root <project-directory> [--store <jsonl file>]... [--transcripts <directory>]... [--json]\n";
+const USAGE = "usage: docs-maintenance.js --root <project-directory> [--store <jsonl file>]... [--transcripts <directory>]... [--memory <directory>]... [--json]\n";
 
-// Exit 0 with or without proposals, and 2 for bad arguments, an unreadable store or transcript
-// directory, or no Git working tree.
+// Exit 0 with or without proposals, and 2 for bad arguments, an unreadable store, transcript or
+// memory directory, or no Git working tree.
 function main(argv) {
   const args = argv.slice(2);
   let root;
   let json = false;
   const stores = [];
   const transcripts = [];
+  const memories = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--help") {
       process.stdout.write(USAGE);
@@ -228,6 +297,7 @@ function main(argv) {
     else if (args[i] === "--root" && !root && i + 1 < args.length && !args[i + 1].startsWith("--")) root = args[++i];
     else if (args[i] === "--store" && i + 1 < args.length && !args[i + 1].startsWith("--")) stores.push(args[++i]);
     else if (args[i] === "--transcripts" && i + 1 < args.length && !args[i + 1].startsWith("--")) transcripts.push(path.resolve(args[++i]));
+    else if (args[i] === "--memory" && i + 1 < args.length && !args[i + 1].startsWith("--")) memories.push(args[++i]);
     else {
       process.stderr.write(USAGE);
       return 2;
@@ -238,7 +308,7 @@ function main(argv) {
     return 2;
   }
   try {
-    const report = maintain(root, { stores, transcripts });
+    const report = maintain(root, { stores, transcripts, memories });
     process.stdout.write(json ? `${JSON.stringify(report, null, 2)}\n` : formatSummary(report));
     return 0;
   } catch (error) {
