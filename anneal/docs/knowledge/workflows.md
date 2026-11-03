@@ -297,13 +297,15 @@ A tracked file's date is its last commit, or its file time when it has uncommitt
 
 #### Native memory
 
-Pass `--memory <directory>` for a native memory folder: one Markdown file per memory and a `MEMORY.md` index that links each file. The script reads the folder and never writes to it. Run it from the checkout the memories describe: a path that is ignored there, such as a `.private/` file, is absent from a worktree and shows up as missing.
+Pass `--memory <directory>` for a native memory folder: one Markdown file per memory and a `MEMORY.md` index that links each file. The script reads the folder and never writes to it; a folder without `MEMORY.md` is refused with exit 2. A relative `--memory` folder and the paths memories name resolve against `--root`, so pass the checkout the memories describe as `--root`: a path that is ignored there, such as a `.private/` file, is absent from a worktree and shows up as missing.
 
 | Proposal | When |
 | --- | --- |
-| `memory-index-orphan` | A `MEMORY.md` line links a file that does not exist |
-| `memory-unindexed` | A memory file that no `MEMORY.md` line links, so no session loads it |
-| `memory-missing-path` | A memory names a relative path in backticks that is absent from the project, or a `[[name]]` link with no `name.md` in the folder |
+| `memory-index-orphan` | A `MEMORY.md` link to a `.md` file, relative to the folder and without its `#anchor`, finds no file |
+| `memory-unindexed` | A memory file in the folder that no `MEMORY.md` link reaches, so no session loads it |
+| `memory-missing-path` | A memory's backticked text names a relative path absent from the project, an `npm run` script missing from the root `package.json`, or a `--flag` that no project file outside the memory folder contains; or a `[[name]]`, `[[name\|label]]` or `[[name#heading]]` link with no `name.md` in the folder |
+
+Flags are checked only in backticked text that names a project path or `npm run`, or that holds nothing but flags, so another tool's flags, as in `git log --oneline`, are left alone.
 | `memory-duplicate` | Two memories share at least 40% of their distinct words of four letters or more (Jaccard similarity) |
 | `memory-stale-state` | A memory last modified more than 14 days ago has a sentence with a word that states a current condition: `still`, `now`, `currently`, `not yet`, `no longer`, `pending`, `deferred`, `unresolved` or `so far` |
 

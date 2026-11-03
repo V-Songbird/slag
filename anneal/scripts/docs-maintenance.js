@@ -9,7 +9,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { check, docFiles, frontmatter, relatedCandidates } = require("./docs-check.js");
+const { check, docFiles, frontmatter, linkTargets, relatedCandidates } = require("./docs-check.js");
 
 // 96 of 100 task notes that another session ever read were first read within 3 days of their
 // last write, so a completed note untouched for longer is very likely never read again.
@@ -105,15 +105,34 @@ function memoryProposals(root, dir, now) {
   const proposals = [];
   const add = (id, name, detail) => proposals.push({ id, path: label(name), detail });
 
-  const indexed = new Set();
   const indexFile = path.join(folder, "MEMORY.md");
-  const index = fs.existsSync(indexFile) ? fs.readFileSync(indexFile, "utf8").split(/\r?\n/) : [];
-  index.forEach((line, i) => {
-    for (const m of line.matchAll(/\]\(([^)\s]+\.md)\)/g)) {
-      indexed.add(m[1]);
-      if (!names.includes(m[1])) add("memory-index-orphan", `MEMORY.md:${i + 1}`, `links ${m[1]}, which does not exist; drop the line`);
+  // A folder without the index is not a memory folder; reading it would propose deleting its docs.
+  if (!fs.existsSync(indexFile)) throw new Error(`${label("MEMORY.md")} not found; --memory takes the folder that holds the index.`);
+  const indexed = new Set();
+  fs.readFileSync(indexFile, "utf8").split(/\r?\n/).forEach((line, i) => {
+    for (const target of linkTargets(line)) {
+      if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("#")) continue;
+      const file = path.posix.normalize(target.split("#")[0]);
+      if (!file.endsWith(".md")) continue;
+      indexed.add(file);
+      if (!fs.existsSync(path.join(folder, file))) add("memory-index-orphan", `MEMORY.md:${i + 1}`, `links ${target}, which does not exist; drop the line`);
     }
   });
+
+  // Package scripts, and whether a flag appears in any project file outside the memory folder.
+  let scripts;
+  try {
+    scripts = new Set(Object.keys(JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).scripts || {}));
+  } catch {
+    scripts = new Set();
+  }
+  const inFolder = path.relative(root, folder).replace(/\\/g, "/");
+  const exclude = inFolder && !inFolder.startsWith("..") ? [`:(exclude)${inFolder}`] : [];
+  const flags = new Map();
+  const flagExists = (flag) => {
+    if (!flags.has(flag)) flags.set(flag, spawnSync("git", ["-C", root, "grep", "-q", "-F", "--untracked", "-e", flag, "--", ".", ...exclude]).status === 0);
+    return flags.get(flag);
+  };
 
   const words = new Map();
   for (const name of names) {
@@ -121,11 +140,23 @@ function memoryProposals(root, dir, now) {
     if (!indexed.has(name)) add("memory-unindexed", name, "no MEMORY.md line links it, so no session loads it; index it or delete it");
 
     const missing = [];
-    for (const [, token] of text.matchAll(/`([^`\s]+)`/g)) {
-      if (/^[\w.-]+(?:\/[\w.-]+)+\/?$/.test(token) && !fs.existsSync(path.join(root, token))) missing.push(token);
+    for (const [, span] of text.matchAll(/`([^`\n]+)`/g)) {
+      const tokens = span.trim().split(/\s+/);
+      const run = /^npm run(?:-script)? ([^\s-]\S*)/.exec(span.trim());
+      if (run && !scripts.has(run[1])) missing.push(`npm run ${run[1]}`);
+      const paths = tokens.filter((t) => /^[\w.-]+(?:\/[\w.-]+)+\/?$/.test(t));
+      for (const t of paths) if (!fs.existsSync(path.join(root, t))) missing.push(t);
+      // Flags are checked only for the project's own commands, or when they stand alone.
+      if (run || paths.length || tokens.every((t) => t.startsWith("--"))) {
+        for (const t of tokens) {
+          const flag = /^--[a-z][\w-]*/i.exec(t)?.[0];
+          if (flag && !flagExists(flag)) missing.push(flag);
+        }
+      }
     }
     for (const [, link] of text.matchAll(/\[\[([^\]]+)\]\]/g)) {
-      if (!names.includes(`${link}.md`)) missing.push(`[[${link}]]`);
+      const target = link.split(/[|#]/)[0].trim();
+      if (!fs.existsSync(path.join(folder, target.endsWith(".md") ? target : `${target}.md`))) missing.push(`[[${link}]]`);
     }
     if (missing.length) add("memory-missing-path", name, `names ${[...new Set(missing)].join(", ")}, absent from the project or the memory folder`);
 

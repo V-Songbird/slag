@@ -195,18 +195,18 @@ test("a memory written weeks ago that states a current condition is flagged for 
   ]);
 });
 
-test("memory flags: missing named path, near-duplicate pair, index line with no file, file with no index line", () => {
+test("memory flags: missing named path, command or flag, near-duplicate pair, index line with no file, file with no index line", () => {
   const root = repo();
-  commit(root, { "scripts/run.js": "1" }, "2026-10-01");
+  commit(root, { "scripts/run.js": "--root", "package.json": '{"scripts":{"check":"node --test"}}' }, "2026-10-01");
   const fresh = "2026-10-30T00:00:00.000Z";
   write(root, {
     "mem/MEMORY.md": [
       "- [Run](run.md) — how to run",
-      "- [Gone](gone.md) — deleted earlier",
+      "- [Gone](./gone.md#why) — deleted earlier",
       "- [Eval one](eval-one.md) — eval",
       "- [Eval two](eval-two.md) — eval",
     ].join("\n"),
-    "mem/run.md": memory(fresh, "Run `scripts/run.js`, not `scripts/old.js`; see [[eval-one]] and [[missing-note]]. Paths like `~/.claude/x` and `D:/x/y` are outside the project."),
+    "mem/run.md": memory(fresh, "Run `node scripts/run.js --root .`, not `scripts/old.js` or `node scripts/old.js --gone-flag`; `npm run gone` and `--removed-flag` are gone too, while `git log --oneline` is no project command; see [[eval-one|the eval]] and [[missing-note]]. Paths like `~/.claude/x` and `D:/x/y` are outside the project."),
     "mem/eval-one.md": memory(fresh, "Plugin evals are refused on native Windows; run them from the Ubuntu WSL2 distro with bubblewrap installed."),
     "mem/eval-two.md": memory(fresh, "Plugin evals are refused on native Windows, so run them from the Ubuntu WSL2 distro where bubblewrap is installed."),
     "mem/orphan.md": memory(fresh, "Nothing links this one."),
@@ -218,21 +218,30 @@ test("memory flags: missing named path, near-duplicate pair, index line with no 
     "memory-missing-path mem/run.md",
     "memory-duplicate mem/eval-one.md",
   ]);
-  assert.match(of(report, "memory-missing-path")[0], /names scripts\/old\.js, \[\[missing-note\]\], absent/);
+  assert.match(of(report, "memory-missing-path")[0], /names scripts\/old\.js, --gone-flag, npm run gone, --removed-flag, \[\[missing-note\]\], absent/);
+  assert.match(of(report, "memory-index-orphan")[0], /links \.\/gone\.md#why, which does not exist/);
   assert.match(of(report, "memory-duplicate")[0], /with eval-two\.md; merge the two$/);
 });
 
 test("a clean memory folder has no memory proposals", () => {
   const root = repo();
-  commit(root, { "scripts/run.js": "1" }, "2026-10-01");
+  commit(root, { "scripts/run.js": "--root", "package.json": '{"scripts":{"check":"node --test"}}' }, "2026-10-01");
   write(root, {
-    "mem/MEMORY.md": "- [Run](run.md) — how to run\n- [Login](login.md) — ask first\n",
+    "mem/MEMORY.md": "- [Run](./run.md) — how to run\n- [Login](<login.md#why>) — ask first\n- [Nested](sub/nested.md) — a linked file below the folder\n",
     // Old, but states no current condition.
-    "mem/run.md": memory("2026-09-01T00:00:00.000Z", "Run `scripts/run.js` from the repository root; see [[login]]."),
+    "mem/run.md": memory("2026-09-01T00:00:00.000Z", "Run `node scripts/run.js --root .` or `npm run check` from the repository root; see [[login]], [[login|the login rule]] and [[login#why]]."),
     // States a current condition, but recently.
     "mem/login.md": memory("2026-10-30T00:00:00.000Z", "The owner still asks before every account-bound CLI run."),
+    "mem/sub/nested.md": "Linked from the index by its relative path.\n",
   });
   assert.deepStrictEqual(maintain(root, { memories: ["mem"], now: NOW }).proposals, []);
+});
+
+test("a memory folder without MEMORY.md is refused", () => {
+  const root = repo();
+  write(root, { "docs/note.md": "# Note\n" });
+  assert.throws(() => maintain(root, { memories: ["docs"], now: NOW }), /docs\/MEMORY\.md not found/);
+  assert.strictEqual(spawnSync(process.execPath, [CLI, "--root", root, "--memory", "docs"], { encoding: "utf8" }).status, 2);
 });
 
 test("the CLI changes nothing, works before the first commit, and exits 2 on bad input", () => {

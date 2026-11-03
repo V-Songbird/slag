@@ -85,10 +85,10 @@ Add `--store <file>` for each orphaned knowledge store the owner names: a JSONL 
 - `merge-per-entry`: several docs in one folder, each one roadmap entry's evidence. Merge them into one topic doc and update incoming links.
 - `fold-store`: a store record and the docs whose `related_files` most narrowly list its paths. Write a still-true record as a line in that doc, or as a code comment beside its path when no doc lists it; drop the rest with a reason.
 
-Add `--memory <folder>` for the project's native memory folder, the one holding `MEMORY.md`, and run from the checkout the memories describe, not a worktree, so ignored paths they name are present. Its proposals:
+Add `--memory <folder>` for the project's native memory folder, the one holding `MEMORY.md`, and pass the checkout the memories describe as `--root`, not a worktree, so ignored paths they name are present. Its proposals:
 
 - `memory-index-orphan` and `memory-unindexed`: an index line with no file, or a file no index line links. Propose dropping the line, or indexing or deleting the file.
-- `memory-missing-path`: a named path or `[[link]]` that is gone. Check whether the memory still holds before proposing a corrected path or its deletion.
+- `memory-missing-path`: a named path, `npm run` script, project command flag or `[[link]]` that is gone. Check whether the memory still holds before proposing a corrected path or its deletion.
 - `memory-duplicate`: two memories that say much the same. Propose one merged memory and the index line to drop.
 - `memory-stale-state`: a memory older than 14 days that states a current condition. Recheck that condition against the repository or host files and propose an update or deletion with the evidence.
 
