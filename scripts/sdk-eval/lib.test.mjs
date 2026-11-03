@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { selectCases, runFromMessages, gradersFor, gradeRun, verdict, judgeText, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, summarize } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, gradeRun, verdict, judgeText, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, summarize, reportBatch } from "./lib.mjs";
 
 const COLLET = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../collet");
 const byName = (cases, name) => cases.find((c) => c.name === name);
@@ -221,7 +221,11 @@ test("an auth, permission or credit error result stops every run; limits, execut
   assert.strictEqual(resultError(finalReply("I updated the credit balance display.")[1]), null);
   assert.deepStrictEqual(resultError(limit("error_during_execution", ["Cannot read credit balance of undefined"])), { stop: false, message: "session ended in error_during_execution" });
   // A run limit errors only its run, whatever its text.
-  assert.deepStrictEqual(resultError(limit("error_max_turns", ["Your credit balance is too low"])), { stop: false, message: "session ended in error_max_turns" });
+  for (const subtype of ["error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"]) {
+    assert.deepStrictEqual(resultError(limit(subtype, ["Your credit balance is too low"])), { stop: false, message: `session ended in ${subtype}` }, subtype);
+  }
+  // A result that is not an error does not stop on an auth or permission status alone.
+  for (const status of [401, 403]) assert.strictEqual(resultError({ type: "result", subtype: "success", is_error: false, api_error_status: status, result: "Done." }), null, String(status));
   // An API error with no text and no status is named by its subtype.
   assert.deepStrictEqual(resultError({ type: "result", subtype: "success", is_error: true }), { stop: false, message: "session ended in API error: success" });
   // A session its timeout already aborted fails only its own run.
@@ -236,7 +240,7 @@ test("a judge auth, permission or credit error stops every run; other judge erro
   const grader = { name: "judged", type: "llm", criteria: "PASS if the reply says done.\nFAIL if it does not." };
   const run = runFromMessages(finalReply("Done."));
   const failing = (status, message) => async () => { throw Object.assign(new Error(message), { status }); };
-  for (const [status, message] of [[401, "401 authentication_error"], [403, "403 permission_error"], [400, "400 Your credit balance is too low"]]) {
+  for (const [status, message] of [[401, "401 authentication_error"], [403, "403 permission_error"], [400, "400 Your credit balance is too low"], [400, "400 Your credit balance cannot cover this request"]]) {
     assert.strictEqual((await gradeRun([grader], run, failing(status, message))).stop, true, message);
   }
   for (const [status, message] of [[529, "529 overloaded"], [undefined, "Unexpected end of JSON input"]]) {
@@ -310,6 +314,39 @@ test("a runner failure stops every run only when its code shows the output canno
     assert.deepStrictEqual(await outcome(code), { stopped: true, error: `runner failed: ${code}: write failed; stopping every run` }, code);
   }
   for (const code of ["EISDIR", "ENOENT", undefined]) assert.strictEqual((await outcome(code)).stopped, false, String(code));
+});
+
+test("a runner failure whose record still saves, such as a directory read denied with EPERM, fails only its run", async () => {
+  const c = { name: "x", graders: [] };
+  let stopped = false;
+  let saved = null;
+  const thrown = Object.assign(new Error("EPERM: operation not permitted, scandir 'work/.git'"), { code: "EPERM", syscall: "scandir" });
+  const record = await recordJob({ c, arm: "with", n: 1 }, async () => { throw thrown; }, { save: (job, r) => { saved = r; }, stop: () => { stopped = true; } });
+  assert.strictEqual(stopped, false);
+  assert.strictEqual(record.error, "runner failed: EPERM: operation not permitted, scandir 'work/.git'");
+  assert.strictEqual(saved, record);
+  // A save that fails with an unwritable code stops every run, whatever runJob threw.
+  const full = Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+  const halted = await recordJob({ c, arm: "with", n: 2 }, async () => { throw thrown; }, { save: () => { throw full; }, stop: () => { stopped = true; } });
+  assert.strictEqual(stopped, true);
+  assert.strictEqual(halted.error, "runner failed: EPERM: operation not permitted, scandir 'work/.git'; stopping every run");
+});
+
+test("the batch summary and spend line print even when summary.json cannot be written", (t) => {
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-eval-"));
+  t.after(() => fs.rmSync(outDir, { recursive: true, force: true }));
+  const records = [{ case: "x", arm: "with", n: 1, grades: { done: { pass: true } } }, { case: "x", arm: "without", n: 1, grades: { done: { pass: false } } }];
+  const lines = [];
+  assert.strictEqual(reportBatch({ outDir, spent: 1.5, records, total: 2 }, (line) => lines.push(line)), null);
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(outDir, "summary.json"), "utf8")).spentUsd, 1.5);
+  // summary.json is a directory, so its write throws EISDIR.
+  fs.rmSync(path.join(outDir, "summary.json"));
+  fs.mkdirSync(path.join(outDir, "summary.json"));
+  const printed = [];
+  const failure = reportBatch({ outDir, spent: 1.5, records, total: 2 }, (line) => printed.push(line));
+  assert.strictEqual(failure?.code, "EISDIR");
+  assert.deepStrictEqual(printed, lines);
+  assert.deepStrictEqual(printed, ["\nx", `  ${"done".padEnd(30)} with 1/1  without 0/1`, `\n2 of 2 sessions, estimated $1.50. Results in ${outDir}`]);
 });
 
 test("an unreadable focus file fails its run as that grader's error, not the judge's", async (t) => {

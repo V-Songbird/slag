@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import Anthropic from "@anthropic-ai/sdk";
-import { selectCases, runFromMessages, gradersFor, gradeRun, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, summarize } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, gradeRun, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, reportBatch } from "./lib.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 // USD per million [input, output] tokens, for the judge and for a session that
@@ -206,10 +206,8 @@ async function worker() {
 fs.mkdirSync(outDir, { recursive: true });
 await Promise.all(Array.from({ length: Number(values.concurrency) }, worker));
 
-const { summary, errors } = summarize(records);
-fs.writeFileSync(path.join(outDir, "summary.json"), `${JSON.stringify({ spentUsd: spent, sessions: records.length, of: jobs.length, summary, errors }, null, 2)}\n`);
-for (const [name, graders] of Object.entries(summary)) {
-  console.log(`\n${name}`);
-  for (const [grader, { with: w, without: wo }] of Object.entries(graders)) console.log(`  ${grader.padEnd(30)} with ${w[0]}/${w[1]}  without ${wo[1] ? `${wo[0]}/${wo[1]}` : "-"}`);
+const unwritten = reportBatch({ outDir, spent, records, total: jobs.length });
+if (unwritten) {
+  console.error(`summary.json not written: ${unwritten.message}`);
+  process.exitCode = 1;
 }
-console.log(`\n${records.length} of ${jobs.length} sessions, estimated $${spent.toFixed(2)}. Results in ${outDir}`);

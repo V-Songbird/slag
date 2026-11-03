@@ -131,11 +131,12 @@ const RUN_LIMITS = new Set(["error_max_turns", "error_max_budget_usd", "error_ma
 // errors only its run, whatever its text. A shared failure on an error result,
 // read from the success arm's api_error_status and the result or errors text,
 // stops every run, and so does a result that is not an error when its text says
-// the credit balance is too low; any other result that is not an error is null.
-// Any other error, such as an error during execution or a transient API error
-// like 500 or 529, errors only its run; an API error with no text and no status
-// is named by its subtype. A session already aborted by its timeout never stops
-// the batch.
+// the credit balance is too low; any other success result that is not an error
+// is null, whatever its status. Any other subtype, such as an error during
+// execution, errors only its run, named by its subtype, and so does any other
+// API error, such as a transient 500 or 529; an API error with no text and no
+// status is named by its subtype. A session already aborted by its timeout
+// never stops the batch.
 export function resultError(message, { aborted = false } = {}) {
   if (message.type !== "result") return null;
   if (RUN_LIMITS.has(message.subtype)) return { stop: false, message: `session ended in ${message.subtype}` };
@@ -195,8 +196,9 @@ export const verdict = (grader, run) => harness.passes(grader, run);
 // judge text throws, such as an invalid regex or an unreadable focus file,
 // yields the run error "grader <name> failed: <message>" instead of grades. A
 // judge call that throws, such as an API error or a reply that is not JSON,
-// yields "judge failed: <message>"; an auth, permission or credit error also
-// sets stop, since every later judge call would fail the same way.
+// yields "judge failed: <message>"; an auth or permission status (401, 403), or
+// any mention of a credit balance, also sets stop, since every later judge call
+// would fail the same way.
 export async function gradeRun(graders, run, judge) {
   const grades = {};
   for (const grader of graders) {
@@ -216,14 +218,14 @@ export async function gradeRun(graders, run, judge) {
       grades[grader.name] = await judge(grader, text);
     } catch (error) {
       const message = error?.message || String(error);
-      return { error: `judge failed: ${message}`, stop: sharedFailure(error?.status, message) };
+      return { error: `judge failed: ${message}`, stop: [401, 403].includes(error?.status) || /credit balance/i.test(message) };
     }
   }
   return { grades };
 }
 
-// The error codes that show the output location cannot be written, so every
-// later run would fail the same way.
+// The error codes of a failed save that show the output location cannot be
+// written, so every later run would fail the same way.
 const UNWRITABLE = new Set(["ENOSPC", "EACCES", "EPERM", "EROFS"]);
 
 // The record of one job: what runJob returns, or, when it throws, such as on a
@@ -231,22 +233,46 @@ const UNWRITABLE = new Set(["ENOSPC", "EACCES", "EPERM", "EROFS"]);
 // grader of its arm, so the batch still reaches its summary. A session that
 // ran before the failure keeps its subtype, cost, turns, seconds and reply,
 // which runJob leaves in job.session. The record is passed to save, such as a
-// result.json write, whose own failure is ignored. An error code in UNWRITABLE
-// calls stop, since every later run would fail the same way.
+// result.json write. Only a save that fails with a code in UNWRITABLE calls
+// stop and adds "; stopping every run" to the error; any other save failure is
+// ignored, and so is runJob's own error code, such as an EPERM from a directory
+// read or a file another process holds open.
 export async function recordJob(job, runJob, { save = () => {}, stop = () => {} } = {}) {
   try {
     return await runJob(job);
   } catch (error) {
-    const halts = UNWRITABLE.has(error?.code);
-    if (halts) stop();
-    const message = `runner failed: ${error?.message || String(error)}${halts ? "; stopping every run" : ""}`;
     const session = job.session ?? { ...runFromMessages([]), seconds: 0 };
-    const record = runRecord(job.c, job.arm, job.n, session, { seconds: session.seconds, error: message });
+    const failed = (suffix) => runRecord(job.c, job.arm, job.n, session, { seconds: session.seconds, error: `runner failed: ${error?.message || String(error)}${suffix}` });
+    const record = failed("");
     try {
       save(job, record);
-    } catch {}
+    } catch (saveError) {
+      if (UNWRITABLE.has(saveError?.code)) {
+        stop();
+        return failed("; stopping every run");
+      }
+    }
     return record;
   }
+}
+
+// The batch's closing report: writes summary.json to outDir, then logs the pass
+// counts per case and grader and the sessions and spend line. Both print even
+// when the write fails; the write's error, or null, is returned.
+export function reportBatch({ outDir, spent, records, total }, log = console.log) {
+  const { summary, errors } = summarize(records);
+  let failure = null;
+  try {
+    fs.writeFileSync(path.join(outDir, "summary.json"), `${JSON.stringify({ spentUsd: spent, sessions: records.length, of: total, summary, errors }, null, 2)}\n`);
+  } catch (error) {
+    failure = error;
+  }
+  for (const [name, graders] of Object.entries(summary)) {
+    log(`\n${name}`);
+    for (const [grader, { with: w, without: wo }] of Object.entries(graders)) log(`  ${grader.padEnd(30)} with ${w[0]}/${w[1]}  without ${wo[1] ? `${wo[0]}/${wo[1]}` : "-"}`);
+  }
+  log(`\n${records.length} of ${total} sessions, estimated $${spent.toFixed(2)}. Results in ${outDir}`);
+  return failure;
 }
 
 // The text an llm grader's judge reads.
