@@ -175,12 +175,17 @@ test("a judge call that throws makes a judge-failed run that still keeps a resul
   assert.strictEqual((await gradeRun(graders, run, async () => { throw new Error("529 overloaded"); })).error, "judge failed: 529 overloaded");
 });
 
-test("a timed-out session with no result adds its whole budget to the spend", () => {
-  // An aborted query throws after the session's first tool call, before any result.
-  const run = runFromMessages([bashCall("toolu_1", "ls"), { type: "runner_error", message: "Claude Code process aborted by user" }]);
+test("a timed-out session with no result adds the priced usage of its assistant messages to the spend", () => {
+  // The SDK sends one assistant message per content block, each carrying its API message's id and usage.
+  const usage = { input_tokens: 1000, cache_creation_input_tokens: 2000, cache_read_input_tokens: 10000, output_tokens: 500 };
+  const block = (id, toolId) => ({ ...bashCall(toolId, "ls"), message: { ...bashCall(toolId, "ls").message, id, usage } });
+  // An aborted query throws after the session's tool calls, before any result.
+  const run = runFromMessages([block("msg_1", "toolu_1"), block("msg_1", "toolu_2"), block("msg_2", "toolu_3"), { type: "runner_error", message: "Claude Code process aborted by user" }]);
   assert.strictEqual(run.costUsd, null);
-  assert.strictEqual(sessionSpend(run, 2), 2);
-  assert.strictEqual(sessionSpend(runFromMessages(finalReply("Done.")), 2), 0.42);
+  // Two API messages, each (1000 + 1.25 * 2000 + 0.1 * 10000) * $4 + 500 * $20 per million tokens.
+  assert.ok(Math.abs(sessionSpend(run, [4, 20]) - 2 * 0.028) < 1e-12);
+  assert.strictEqual(sessionSpend(runFromMessages([{ type: "runner_error", message: "spawn ENOENT" }]), [4, 20]), 0);
+  assert.strictEqual(sessionSpend(runFromMessages(finalReply("Done.")), [4, 20]), 0.42);
 });
 
 test("a turn or budget limit errors only its run; other error results and a spent credit balance stop every run", () => {

@@ -24,7 +24,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { selectCases, runFromMessages, gradersFor, gradeRun, judgeText, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, summarize } from "./lib.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const JUDGE_PRICE = { "claude-sonnet-5-5": [2, 10], "claude-opus-5-5": [4, 20], "claude-haiku-5-5": [0.1, 0.5] };
+// USD per million [input, output] tokens, for the judge and for a session that
+// ended with no reported cost; an unknown session model is priced as Opus.
+const PRICE = { "claude-sonnet-5-5": [2, 10], "claude-opus-5-5": [4, 20], "claude-haiku-5-5": [0.1, 0.5] };
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -109,7 +111,7 @@ async function judgeGrader(grader, run) {
     system: "You grade one run of a coding agent against the criteria the user gives. Apply the criteria literally.",
     messages: [{ role: "user", content: `Criteria:\n${grader.criteria}\n\nText to grade:\n<text>\n${judgeText(grader, run)}\n</text>` }],
   });
-  const [inPrice, outPrice] = JUDGE_PRICE[values["judge-model"]] ?? [0, 0];
+  const [inPrice, outPrice] = PRICE[values["judge-model"]] ?? [0, 0];
   spent += (response.usage.input_tokens * inPrice + response.usage.output_tokens * outPrice) / 1e6;
   if (response.stop_reason === "refusal") return { pass: false, reason: "judge refused" };
   const text = response.content.find((block) => block.type === "text")?.text ?? "{}";
@@ -136,12 +138,11 @@ async function runJob({ c, arm, n }) {
   const timer = setTimeout(() => abortController.abort(), c.timeoutSeconds * 1000);
   const messages = [];
   const started = Date.now();
-  const options = sessionOptions(c, arm, { pluginDir, model: values.model });
   try {
     for await (const message of query({
       prompt: c.prompt,
       options: {
-        ...options,
+        ...sessionOptions(c, arm, { pluginDir, model: values.model }),
         cwd: work,
         abortController,
         // A fresh home hides installed plugins (~/.claude/plugins), which a run
@@ -168,7 +169,7 @@ async function runJob({ c, arm, n }) {
   }
   const seconds = Math.round((Date.now() - started) / 1000);
   const run = { ...runFromMessages(messages), dir: work, created: createdPaths(before, listRunFiles(work)) };
-  spent += sessionSpend(run, options.maxBudgetUsd);
+  spent += sessionSpend(run, PRICE[values.model] ?? PRICE["claude-opus-5-5"]);
   fs.writeFileSync(path.join(runDir, "trace.jsonl"), `${run.trace}\n`);
   // A timeout can end the stream quietly as well as throw.
   const error = runError(messages, { aborted: abortController.signal.aborted, timeoutSeconds: c.timeoutSeconds });

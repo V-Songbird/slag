@@ -92,8 +92,11 @@ export function runFromMessages(raw) {
   const calls = [];
   let reply = "";
   let result = null;
+  // The SDK repeats one API message's usage on each of its content blocks.
+  const usage = new Map();
   for (const message of messages) {
     if (message.type === "assistant") {
+      if (message.message?.usage) usage.set(message.message.id ?? usage.size, message.message.usage);
       for (const block of message.message?.content ?? []) {
         if (block.type === "tool_use") calls.push({ name: block.name, input: block.input });
         if (block.type === "text") reply = block.text;
@@ -109,6 +112,7 @@ export function runFromMessages(raw) {
     costUsd: result?.total_cost_usd ?? null,
     turns: result?.num_turns ?? null,
     subtype: result?.subtype ?? "no-result",
+    usage: [...usage.values()],
   };
 }
 
@@ -129,9 +133,15 @@ export function resultError(message) {
   return null;
 }
 
-// The spend a session adds to the batch total: its reported cost, or its whole
-// budget when it ended with no result, as a timed-out session does.
-export const sessionSpend = (run, budgetUsd) => run.costUsd ?? budgetUsd;
+// The spend a session adds to the batch total: its reported cost, or, when it
+// ended with no result, as a timed-out session does, an estimate from the usage
+// of its assistant messages at [input, output] USD per million tokens, with
+// cache writes at 1.25 times and cache reads at 0.1 times the input price.
+export function sessionSpend(run, [inPrice, outPrice]) {
+  if (run.costUsd !== null) return run.costUsd;
+  const tokens = (u) => ((u.input_tokens ?? 0) + 1.25 * (u.cache_creation_input_tokens ?? 0) + 0.1 * (u.cache_read_input_tokens ?? 0)) * inPrice + (u.output_tokens ?? 0) * outPrice;
+  return run.usage.reduce((sum, u) => sum + tokens(u), 0) / 1e6;
+}
 
 // Why a session yields no grades: its timeout, or the runner's own error.
 export function runError(messages, { aborted, timeoutSeconds }) {
