@@ -256,6 +256,28 @@ The skill inventories maintained documentation, reviews every in-scope README wi
 
 A cleanup request authorizes ordinary documentation fixes within its scope. Changes to standing instructions need your authorization; runtime, hook, permission and publishing changes are proposed separately unless already authorized. The report distinguishes verified claims from unresolved ones and static host checks from live execution.
 
+### The documentation check
+
+`node anneal/scripts/docs-check.js --root <project> [--json]` reads a Git working tree and reports where its documentation breaks the documentation policy. It changes nothing. It exits 1 when a high finding exists, 0 otherwise, and 2 for bad arguments or a directory outside a Git working tree. No skill or hook runs it yet.
+
+It reads every Markdown file under a directory named `docs`, at any depth and ignored files included, skipping dot directories and `node_modules`. The profile comes from the ignore rules. When `git check-ignore --no-index` ignores any of `docs/tasks/`, `docs/decisions/`, `docs/knowledge/private/` and `docs/apis/private/`, private documentation is ignored. When it ignores none, private documentation is versioned, as in a private repository whose cloud sessions read it. `.private/` must stay ignored in both.
+
+| Severity | Finding | When |
+| --- | --- | --- |
+| high | `private-visible` | `.private/` is not ignored, or some private documentation directories are ignored and others are not |
+| high | `public-ignored` | `docs/README.md`, `docs/knowledge/current-contract.md` or `docs/apis/current-api.md` would be ignored |
+| high | `tracked-private` | A tracked file sits in a private directory at any depth |
+| high | `public-links-private` | A tracked public Markdown file links a private path, outside code spans and fences |
+| medium | `task-note-large` | A task note over 20,000 characters |
+| medium | `history-doc-large` | A private knowledge or API document, or a file named for history, over 50,000 characters |
+| medium | `task-note-completed` | A task note with `status: completed`, to fold into its topic and delete |
+| low | `frontmatter-missing`, `frontmatter-field-missing`, `frontmatter-type-unknown` | No frontmatter, no `type`, `summary` or `related_files`, a task note without a valid `status`, or a type outside `task_summary`, `adr`, `api_spec` and `knowledge` |
+| low | `type-folder-mismatch` | A type that does not match its `docs/` folder |
+| low | `related-file-missing` | A `related_files` entry that exists neither from the repository root nor from the directory that holds the file's `docs/` |
+| low | `filename` | Not kebab-case, a bare id such as `240.md`, or a date; `<id>-<slug>` is allowed |
+
+In the versioned profile, tracked files in the private documentation directories and links to them are not findings. A `README.md`, `AGENTS.md`, `CLAUDE.md` or `SKILL.md` needs no frontmatter. `related_files` entries with glob characters are not checked. The frontmatter reader handles top-level keys and the `related_files` list, not full YAML.
+
 ## The safety hook
 
 While a branch named `anneal/<YYYY-MM-DD>` or one of its set-aside branches is checked out, a hook refuses the git commands that would throw away the commits the migration had already made, or the working tree they were checked against:

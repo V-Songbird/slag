@@ -18,6 +18,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
+- `anneal/scripts/docs-check.js` reports where a project's documentation breaks the documentation policy, without changing anything. High findings cover the public/private boundary: ignore rules, tracked files in private directories and public pages that link private ones. Medium findings cover oversized task notes and history-like documents and completed task notes. Low findings cover frontmatter, type versus folder, `related_files` and filenames. Whether private documentation is ignored or versioned comes from the project's ignore rules. The ignore probes, the tracked-file check and their tests moved here from a standalone gitignore skill's `check-ignore.mjs`.
+
 - The audit reports what every Claude Code session loads before its first prompt: the project's instruction files with their `@path` imports, rule files without a `paths:` scope, a global instruction file and a memory index passed with `--global` and `--memory`, and declared `SessionStart` hooks. Each source shows its characters and its share of a 20,000-character budget. The audit proposes no edit and changes nothing.
 
 - session-review suggests collet's `check-writer` skill for a mistake a machine could catch, when `.collet/` exists at the Git root. The suggestion appears in the report, beside any map-file change for the same finding, and nothing is written or run. Without `.collet/`, the report points to the project's own linter or tests.
