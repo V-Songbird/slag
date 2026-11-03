@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { selectCases, runFromMessages, gradersFor, verdict, judgeText, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, verdict, judgeText, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, runError, runRecord, summarize } from "./lib.mjs";
 
 const COLLET = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../collet");
 const byName = (cases, name) => cases.find((c) => c.name === name);
@@ -115,6 +115,36 @@ test("with-only graders are left out of the run without the plugin", () => {
   const graders = byName(selectCases(COLLET), "mount-opens-first-task").graders;
   assert.ok(gradersFor(graders, "with").some((g) => g.name === "skill-fired"));
   assert.ok(!gradersFor(graders, "without").some((g) => g.name === "skill-fired"));
+});
+
+test("a timed-out, errored or unscaffolded run keeps a result that fails its graders and counts in the summary", () => {
+  const c = byName(selectCases(COLLET), "mount-opens-first-task");
+  const graders = gradersFor(c.graders, "with").map((g) => g.name);
+  // An aborted query throws after the session's first tool call.
+  const aborted = [bashCall("toolu_1", "ls"), { type: "runner_error", message: "Claude Code process aborted by user" }];
+  const timedOut = runError(aborted, { aborted: true, timeoutSeconds: c.timeoutSeconds });
+  assert.strictEqual(timedOut, "timed out after 600 seconds");
+  const ended = [bashCall("toolu_1", "ls"), { type: "result", subtype: "error_during_execution", is_error: true, total_cost_usd: 0.3, num_turns: 4 }, { type: "runner_error", message: "session ended in error" }];
+  const errored = runError(ended, { aborted: false, timeoutSeconds: c.timeoutSeconds });
+  assert.strictEqual(errored, "session ended in error");
+  assert.strictEqual(runError(finalReply("Done."), { aborted: false, timeoutSeconds: 600 }), null);
+
+  const records = [
+    runRecord(c, "with", 1, runFromMessages(aborted), { seconds: 600, error: timedOut }),
+    runRecord(c, "with", 2, runFromMessages(ended), { seconds: 41, error: errored }),
+    runRecord(c, "with", 3, runFromMessages([]), { seconds: 0, error: "scaffold failed: exit 1" }),
+    runRecord(c, "with", 4, runFromMessages(finalReply("Done.")), { seconds: 30, grades: Object.fromEntries(graders.map((name) => [name, { pass: true }])) }),
+  ];
+  assert.deepStrictEqual(Object.keys(records[0]), ["case", "arm", "n", "subtype", "costUsd", "turns", "seconds", "reply", "error", "grades"]);
+  assert.strictEqual(records[0].seconds, 600);
+  assert.strictEqual(records[0].turns, null);
+  assert.deepStrictEqual([records[1].costUsd, records[1].turns, records[1].subtype], [0.3, 4, "error_during_execution"]);
+  for (const record of records.slice(0, 3)) assert.deepStrictEqual(Object.keys(record.grades), graders);
+  assert.deepStrictEqual(records[0].grades[graders[0]], { pass: false, reason: "not graded: timed out after 600 seconds" });
+
+  const { summary, errors } = summarize(records);
+  for (const name of graders) assert.deepStrictEqual(summary[c.name][name], { with: [1, 4], without: [0, 0] });
+  assert.deepStrictEqual(errors.map((e) => [e.n, e.error]), [[1, timedOut], [2, errored], [3, "scaffold failed: exit 1"]]);
 });
 
 test("an llm grader has no fixed verdict, and its judge reads the last reply", () => {

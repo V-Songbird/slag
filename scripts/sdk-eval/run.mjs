@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import Anthropic from "@anthropic-ai/sdk";
-import { selectCases, runFromMessages, gradersFor, verdict, judgeText, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, verdict, judgeText, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, runError, runRecord, summarize } from "./lib.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const JUDGE_PRICE = { "claude-sonnet-5-5": [2, 10], "claude-opus-5-5": [4, 20], "claude-haiku-5-5": [0.1, 0.5] };
@@ -121,9 +121,13 @@ async function runJob({ c, arm, n }) {
   const runDir = path.join(outDir, c.name, `${arm}-${n}`);
   const work = path.join(runDir, "work");
   fs.mkdirSync(work, { recursive: true });
+  const finish = (record) => {
+    fs.writeFileSync(path.join(runDir, "result.json"), `${JSON.stringify(record, null, 2)}\n`);
+    return record;
+  };
   if (c.scaffold) {
     const scaffold = spawnSync(BASH, [path.join(c.dir, c.scaffold).split(path.sep).join("/")], { cwd: work, encoding: "utf8" });
-    if (scaffold.status !== 0) return { case: c.name, arm, n, error: `scaffold failed: ${scaffold.error?.message ?? scaffold.stderr.trim().split("\n").slice(-3).join(" | ")}` };
+    if (scaffold.status !== 0) return finish(runRecord(c, arm, n, runFromMessages([]), { seconds: 0, error: `scaffold failed: ${scaffold.error?.message ?? scaffold.stderr.trim().split("\n").slice(-3).join(" | ")}` }));
   }
   const before = listRunFiles(work);
   const home = path.join(runDir, "home");
@@ -160,19 +164,19 @@ async function runJob({ c, arm, n }) {
   } finally {
     clearTimeout(timer);
   }
+  const seconds = Math.round((Date.now() - started) / 1000);
   const run = { ...runFromMessages(messages), dir: work, created: createdPaths(before, listRunFiles(work)) };
   spent += run.costUsd ?? 0;
   fs.writeFileSync(path.join(runDir, "trace.jsonl"), `${run.trace}\n`);
-  const runnerError = messages.find((message) => message.type === "runner_error");
-  if (runnerError) return { case: c.name, arm, n, costUsd: run.costUsd, error: runnerError.message };
+  // A timeout can end the stream quietly as well as throw.
+  const error = runError(messages, { aborted: abortController.signal.aborted, timeoutSeconds: c.timeoutSeconds });
+  if (error) return finish(runRecord(c, arm, n, run, { seconds, error }));
   const grades = {};
   for (const grader of gradersFor(c.graders, arm)) {
     const fixed = verdict(grader, run);
     grades[grader.name] = fixed === null ? await judgeGrader(grader, run) : { pass: fixed };
   }
-  const record = { case: c.name, arm, n, subtype: run.subtype, costUsd: run.costUsd, turns: run.turns, seconds: Math.round((Date.now() - started) / 1000), reply: run.reply, grades };
-  fs.writeFileSync(path.join(runDir, "result.json"), `${JSON.stringify(record, null, 2)}\n`);
-  return record;
+  return finish(runRecord(c, arm, n, run, { seconds, grades }));
 }
 
 const records = [];
@@ -194,16 +198,8 @@ async function worker() {
 fs.mkdirSync(outDir, { recursive: true });
 await Promise.all(Array.from({ length: Number(values.concurrency) }, worker));
 
-// Pass counts per case, grader and arm.
-const summary = {};
-for (const record of records) {
-  for (const [name, grade] of Object.entries(record.grades ?? {})) {
-    const row = ((summary[record.case] ??= {})[name] ??= { with: [0, 0], without: [0, 0] });
-    row[record.arm][1]++;
-    if (grade.pass) row[record.arm][0]++;
-  }
-}
-fs.writeFileSync(path.join(outDir, "summary.json"), `${JSON.stringify({ spentUsd: spent, sessions: records.length, of: jobs.length, summary }, null, 2)}\n`);
+const { summary, errors } = summarize(records);
+fs.writeFileSync(path.join(outDir, "summary.json"), `${JSON.stringify({ spentUsd: spent, sessions: records.length, of: jobs.length, summary, errors }, null, 2)}\n`);
 for (const [name, graders] of Object.entries(summary)) {
   console.log(`\n${name}`);
   for (const [grader, { with: w, without: wo }] of Object.entries(graders)) console.log(`  ${grader.padEnd(30)} with ${w[0]}/${w[1]}  without ${wo[1] ? `${wo[0]}/${wo[1]}` : "-"}`);

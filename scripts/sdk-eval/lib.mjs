@@ -115,6 +115,36 @@ export function runFromMessages(raw) {
 // The graders that apply to an arm: `arm: with-only` skips the run without the plugin.
 export const gradersFor = (graders, arm) => graders.filter((grader) => grader.arm !== "with-only" || arm === "with");
 
+// Why a session yields no grades: its timeout, or the runner's own error.
+export function runError(messages, { aborted, timeoutSeconds }) {
+  if (aborted) return `timed out after ${timeoutSeconds} seconds`;
+  return messages.find((message) => message.type === "runner_error")?.message ?? null;
+}
+
+// The result.json of one run. A scaffold failure, a runner error or a timeout is
+// a result too: it keeps its turns, seconds and cost, and fails every grader of
+// its arm, since a run is correct only when every grader passes.
+export function runRecord(c, arm, n, run, { seconds, error = null, grades = {} }) {
+  const record = { case: c.name, arm, n, subtype: run.subtype, costUsd: run.costUsd, turns: run.turns, seconds, reply: run.reply };
+  if (error === null) return { ...record, grades };
+  const failed = Object.fromEntries(gradersFor(c.graders, arm).map((grader) => [grader.name, { pass: false, reason: `not graded: ${error}` }]));
+  return { ...record, error, grades: failed };
+}
+
+// Pass counts per case, grader and arm, and the runs that errored or timed out.
+export function summarize(records) {
+  const summary = {};
+  for (const record of records) {
+    for (const [name, grade] of Object.entries(record.grades)) {
+      const row = ((summary[record.case] ??= {})[name] ??= { with: [0, 0], without: [0, 0] });
+      row[record.arm][1]++;
+      if (grade.pass) row[record.arm][0]++;
+    }
+  }
+  const errors = records.filter((record) => record.error).map(({ case: name, arm, n, error }) => ({ case: name, arm, n, error }));
+  return { summary, errors };
+}
+
 // A deterministic verdict, or null for an llm grader.
 export const verdict = (grader, run) => harness.passes(grader, run);
 
