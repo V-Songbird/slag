@@ -174,6 +174,26 @@ test('session start names unverified.md for a linked task when earlier tasks lef
   assert.match(context, /^What nobody has checked from earlier tasks is still in \.collet\/unverified\.md\.$/m);
 });
 
+// The compaction note of a linked task names .collet/unverified.md only while earlier tasks left
+// list items there.
+for (const earlier of [true, false]) {
+  test(`the compaction note of a linked task ${earlier ? 'names' : 'does not name'} unverified.md when earlier tasks ${earlier ? 'left' : 'left no'} claims there`, () => {
+    const root = ready();
+    repo(root);
+    if (earlier) {
+      task(root, ['add', '--title', 'first', '--why', 'w', '--scope', 'src/cli.mjs']);
+      assert.equal(task(root, ['close', '--left-out', 'nothing', '--unverified', 'the window on real data']).status, 0);
+    } else {
+      writeFileSync(join(root, '.collet', 'unverified.md'), '# Not checked\n', 'utf8');
+    }
+    task(root, ['add', '--title', 'second', '--why', 'w', '--scope', 'src/cli.mjs', '--foreman', '190']);
+    hook('handoff.js', root, { trigger: 'auto' });
+    const handoff = readFileSync(join(root, '.collet', 'handoff.md'), 'utf8');
+    assert.match(handoff, /^Anything claimed but not yet checked belongs in the `unverified:` lines of Foreman entry 190's notes\.$/m);
+    (earlier ? assert.match : assert.doesNotMatch)(handoff, /^What earlier tasks left unchecked is still in `\.collet\/unverified\.md`\.$/m);
+  });
+}
+
 test('the compaction note is not written when nothing is open', () => {
   const root = ready();
   writeFileSync(join(root, '.collet', 'handoff.md'), '# Handoff\n\ntask: t9\n', 'utf8');

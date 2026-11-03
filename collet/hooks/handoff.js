@@ -8,7 +8,7 @@
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { COLLET, finished, mounted, projectModule, readEvent, root, started } from './lib.js';
+import { COLLET, fileText, finished, mounted, projectModule, readEvent, root, started } from './lib.js';
 
 const event = readEvent();
 const dir = root(event);
@@ -44,6 +44,10 @@ const body = [
   task.foreman
     ? `Anything claimed but not yet checked belongs in the \`unverified:\` lines of Foreman entry ${task.foreman}'s notes.`
     : 'Anything claimed but not yet checked belongs in `.collet/unverified.md`.',
+  // Claims earlier unlinked tasks listed there stay there; the same list-item test as session start.
+  ...(task.foreman && /^[-*] \S/m.test(fileText(dir, 'unverified.md') ?? '')
+    ? ['What earlier tasks left unchecked is still in `.collet/unverified.md`.']
+    : []),
   '',
 ].join('\n');
 

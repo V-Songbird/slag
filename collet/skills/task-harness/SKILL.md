@@ -83,9 +83,10 @@ with its checks passing, `close` prints a Foreman `update-status` step that mark
 `awaiting_acceptance`. Commit the work, replace `<commit sha>` with the new commit's sha and
 `<Foreman plugin root>` with Foreman's plugin root, and run the step; collet does not run it. A
 failing close, or a task without the id, prints no step. For a task with that id, what
-nobody checked belongs in the entry's `unverified:` note lines: its close prints the
-`--unverified` text with that pointer and adds neither that nor the `--left-out` text to
-`.collet/unverified.md`; the task ledger keeps both. A task without the id appends both texts to
+nobody checked belongs in the entry's `unverified:` note lines: a passing close prints the
+`--unverified` and `--left-out` texts for the entry's notes and adds neither to
+`.collet/unverified.md`; the task ledger keeps both. While such a task is open, the session start
+and the compaction note still name `.collet/unverified.md` when earlier tasks left claims there. A task without the id appends both texts to
 `.collet/unverified.md`. Do not edit
 `ROADMAP.jsonl` or `.foreman/` from this skill; the scope check never refuses the planning tool's
 own writes to them.
