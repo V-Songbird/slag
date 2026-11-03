@@ -51,7 +51,9 @@ emoji and the tags of a subdivision flag render, so they stay: U+1F3F4, two lowe
 or three digit tags, one to four lowercase letter or digit tags, then the cancel tag U+E007F. Tags
 behind U+1F3F4 in any other shape are left out. A closing line names each field
 that held such characters and their code points, counting tags and never decoding them. Text
-without them reads exactly as before.
+without them reads exactly as before. The handoff hook writes the open task's title, scope, accept
+command and Foreman id into `.collet/handoff.md` without them, and ends the note with the same
+closing line for the fields that held them.
 
 The same characters, with the same exceptions, are refused where that text is written, and a
 refusal writes nothing. `task.mjs add` refuses a title, `--why` reason, scope entry, accept

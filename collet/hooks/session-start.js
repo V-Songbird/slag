@@ -20,9 +20,7 @@
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { COLLET, config, cutShort, emit, fileText, finished, listsClaims, mounted, projectModule, readEvent, root, started } from './lib.js';
-// The plugin's own copy, not the project's: a project mounted by an earlier collet has none.
-import { HIDDEN_CHARACTERS, hiddenIn, nameHidden } from '../templates/state.mjs';
+import { COLLET, config, cutShort, emit, fileText, finished, listsClaims, mounted, projectModule, readEvent, root, started, withoutHidden } from './lib.js';
 
 const dir = root(readEvent());
 if (!mounted(dir)) process.exit(0); // not a collet project, or switched off: stay out of the way
@@ -42,15 +40,7 @@ const settings = config(dir);
 const filled = state.filled;
 const lines = [];
 
-const hidden = new Map(); // field → the code points left out of it
-
-function visible(field, text) {
-  if (typeof text !== 'string') return text;
-  const found = hiddenIn(text);
-  if (!found.length) return text;
-  hidden.set(field, [...(hidden.get(field) ?? []), ...found]);
-  return text.replace(HIDDEN_CHARACTERS, '');
-}
+const visible = withoutHidden();
 
 const configured = (field) =>
   (Array.isArray(settings[field]) ? settings[field] : [])
@@ -111,10 +101,8 @@ if (handoff) {
   }
 }
 
-if (hidden.size) {
-  const held = [...hidden].map(([field, found]) => `${field} held ${nameHidden(found)}`);
-  lines.push(`Characters that do not show on screen were left out of what is stated here: ${held.join('; ')}.`);
-}
+const left = visible.report();
+if (left) lines.push(left);
 
 if (lastHandoff) {
   lines.push(

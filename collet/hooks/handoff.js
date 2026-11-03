@@ -8,9 +8,7 @@
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { COLLET, fileText, finished, listsClaims, mounted, projectModule, readEvent, root, started } from './lib.js';
-// The plugin's own copy, as session start reads it: a project mounted by an earlier collet has none.
-import { HIDDEN_CHARACTERS } from '../templates/state.mjs';
+import { COLLET, fileText, finished, listsClaims, mounted, projectModule, readEvent, root, started, withoutHidden } from './lib.js';
 
 const event = readEvent();
 const dir = root(event);
@@ -34,9 +32,14 @@ if (!task) {
   done();
 }
 
-// The Foreman id as session start reads it: without characters that do not show on screen, so an id
-// made only of them leaves the task unlinked in both hooks.
-const foreman = task.foreman && String(task.foreman).replace(HIDDEN_CHARACTERS, '');
+// Each field as session start reads it: without characters that do not show on screen, and with a
+// closing line naming the fields that held them. An id made only of them leaves the task unlinked
+// in both hooks.
+const visible = withoutHidden();
+const title = visible(`the title of task ${task.id}`, task.title);
+const scope = (task.scope ?? []).map((entry) => visible(`the scope of task ${task.id}`, entry));
+const accept = visible(`the accept command of task ${task.id}`, task.accept);
+const foreman = task.foreman && visible(`the Foreman id of task ${task.id}`, String(task.foreman));
 
 const body = [
   '# Handoff',
@@ -44,8 +47,8 @@ const body = [
   `task: ${task.id}`,
   `Written ${new Date().toISOString()}${event.trigger ? ` (context ${event.trigger})` : ''}.`,
   '',
-  `"${task.title}" is still open. Writable: ${(task.scope ?? []).join(', ') || 'none declared'}.`,
-  `It ends when \`${task.accept}\` exits zero, which \`node .collet/task.mjs close\` runs.`,
+  `"${title}" is still open. Writable: ${scope.join(', ') || 'none declared'}.`,
+  `It ends when \`${accept}\` exits zero, which \`node .collet/task.mjs close\` runs.`,
   'Run `git status` and `git diff` for what has changed so far.',
   foreman
     ? `Anything claimed but not yet checked belongs in the \`unverified:\` lines of Foreman entry ${foreman}'s notes.`
@@ -54,6 +57,7 @@ const body = [
   ...(foreman && listsClaims(fileText(dir, 'unverified.md'))
     ? ['What earlier tasks left unchecked is still in `.collet/unverified.md`.']
     : []),
+  ...[visible.report()].filter(Boolean),
   '',
 ].join('\n');
 

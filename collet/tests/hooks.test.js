@@ -89,6 +89,8 @@ test('session start leaves out characters nobody sees and names the fields that 
   const ledger = join(root, '.collet', 'ledger.jsonl');
   writeFileSync(ledger, readFileSync(ledger, 'utf8').replace('window the digest', 'window the\u200B digest'), 'utf8');
   hook('handoff.js', root, { trigger: 'auto' });
+  // The handoff writes none, so one arrives the way it still can: edited into the note by hand.
+  appendFileSync(join(root, '.collet', 'handoff.md'), `edited${String.fromCodePoint(0x200b)} by hand\n`, 'utf8');
 
   const context = hookOutput(hook('session-start.js', root)).additionalContext;
   assert.match(context, /^A digest CLI\.$/m);
@@ -98,6 +100,35 @@ test('session start leaves out characters nobody sees and names the fields that 
   assert.match(
     context,
     /^Characters that do not show on screen were left out of what is stated here: project in \.collet\/config\.json held 16 Unicode tag characters; the title of task t1 held U\+200B; \.collet\/handoff\.md held U\+200B\.$/m
+  );
+});
+
+// The note on disk holds only what shows on screen, and names the fields that held anything else
+// in the words session start uses, so the next session still learns of them.
+test('the handoff writes the task without characters nobody sees and names the fields that held them', () => {
+  const root = ready();
+  const zwsp = String.fromCodePoint(0x200b);
+  task(root, ['add', '--title', 'window the digest', '--why', 'w', '--scope', 'src/cli.mjs', '--foreman', '266']);
+  const ledger = join(root, '.collet', 'ledger.jsonl');
+  writeFileSync(
+    ledger,
+    readFileSync(ledger, 'utf8')
+      .replace('window the digest', `window the${zwsp} digest`)
+      .replace('src/cli.mjs', `src/cli${zwsp}.mjs`)
+      .replace('node -e 0', `node -e${zwsp} 0`)
+      .replace('"266"', `"26${zwsp}6"`),
+    'utf8'
+  );
+  hook('handoff.js', root, { trigger: 'auto' });
+
+  const note = readFileSync(join(root, '.collet', 'handoff.md'), 'utf8');
+  assert.ok(!note.includes(zwsp));
+  assert.match(note, /^"window the digest" is still open\. Writable: src\/cli\.mjs, src\/digest\.mjs\.$/m);
+  assert.match(note, /^It ends when `node -e 0` exits zero/m);
+  assert.match(note, /Foreman entry 266's notes/);
+  assert.match(
+    note,
+    /^Characters that do not show on screen were left out of what is stated here: the title of task t1 held U\+200B; the scope of task t1 held U\+200B; the accept command of task t1 held U\+200B; the Foreman id of task t1 held U\+200B\.$/m
   );
 });
 

@@ -8,6 +8,9 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+// The plugin's own copy, not the project's: a project mounted by an earlier collet has none.
+import { HIDDEN_CHARACTERS, hiddenIn, nameHidden } from '../templates/state.mjs';
+
 export const COLLET = '.collet';
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -98,6 +101,29 @@ export function fileText(dir, name) {
 // Whether `.collet/unverified.md` still lists a claim: a `-` or `*` list item with text after it.
 // Session start and the handoff use this one test, so they never disagree about the file.
 export const listsClaims = (text) => /^[-*] \S/m.test(text ?? '');
+
+/**
+ * What a hook states, without the characters a model reads and a person does not see. The returned
+ * `visible(field, text)` gives `text` without them and remembers the field that held them;
+ * `visible.report()` is the closing line naming each such field and its code points, or null.
+ * Session start and the handoff use this one rule, so they never disagree about what is hidden.
+ */
+export function withoutHidden() {
+  const hidden = new Map(); // field → the code points left out of it
+  const visible = (field, text) => {
+    if (typeof text !== 'string') return text;
+    const found = hiddenIn(text);
+    if (!found.length) return text;
+    hidden.set(field, [...(hidden.get(field) ?? []), ...found]);
+    return text.replace(HIDDEN_CHARACTERS, '');
+  };
+  visible.report = () => {
+    if (!hidden.size) return null;
+    const held = [...hidden].map(([field, found]) => `${field} held ${nameHidden(found)}`);
+    return `Characters that do not show on screen were left out of what is stated here: ${held.join('; ')}.`;
+  };
+  return visible;
+}
 
 // hooks.json gives the session-start and handoff hooks 10 s, and a host that reaches it stops the
 // hook and drops what it printed. Each run marks itself running in `.collet/<name>.running` and

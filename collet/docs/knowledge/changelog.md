@@ -44,6 +44,9 @@ All notable changes to collet are documented here. The format follows
 
 ### Fixed
 
+- The handoff hook leaves hidden characters out of the task title, scope, accept command and
+  Foreman id it writes into `.collet/handoff.md`, and names each field that held them in the note.
+  Before, the note on disk kept them.
 - `task.mjs`, `mount.mjs` and the session start now treat Unicode tags after a black flag as
   hidden unless they form a subdivision flag. Before, any tags after a black flag passed, so text
   written as tags behind one was stored and stated. A project mounted by an earlier collet keeps
