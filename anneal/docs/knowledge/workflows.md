@@ -76,7 +76,7 @@ The summary ends with a `start context` block: the characters a Claude Code sess
 - each file you pass with `--global <file>`, such as your global `CLAUDE.md`, with its imports;
 - the memory index you pass with `--memory <file>`, counted whole, so the count is an upper bound when the host loads only its start.
 
-The budget is 20,000 characters, the size at which the audit already calls a document long. Each source line shows its characters and its share of that budget. A source that does not exist, an import that does not resolve, and a memory index you did not pass appear as `missing` lines. When the total is over the budget, the last line says by how much and that cuts would start with the largest sources. The audit proposes no edit and changes none of them.
+The budget is 20,000 characters, the size at which the audit already calls a document long. Each source line shows its characters and its share of that budget. A `--global` or `--memory` file that does not exist, an import that does not resolve, and a memory index you did not pass appear as `missing` lines. When the total is over the budget, the last line says by how much and that cuts would start with the largest sources. The audit proposes no edit and changes none of them.
 
 The audit reads nothing outside the repository unless you name it with `--global` or `--memory`. A repository file that imports a path outside the repository gets a `missing` line, and that file is not read. A `SessionStart` command hook in `.claude/settings.json` is listed with its command; the audit never runs it, so its output is not counted. `.claude/settings.local.json` and plugin hook files are not read, because they load only on one machine or with the plugin installed.
 
