@@ -117,7 +117,7 @@ function visible(text) {
       flush();
       shown += text.slice(last, match.index);
     }
-    if (code >= 0xe0000) tags++;
+    if (code >= 0xe0000 && code <= 0xe007f) tags++;
     else {
       flush();
       shown += `<U+${code.toString(16).toUpperCase().padStart(4, "0")}>`;
