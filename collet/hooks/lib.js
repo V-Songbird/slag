@@ -108,6 +108,8 @@ export const listsClaims = (text) => /^[-*] \S/m.test(text ?? '');
  * `visible.report()` is the closing line naming each such field and its code points, or null.
  * Session start and the handoff use this one rule, so they never disagree about what is hidden.
  */
+export const HIDDEN_REPORT = 'Characters that do not show on screen were left out of what is stated here: ';
+
 export function withoutHidden() {
   const hidden = new Map(); // field → the code points left out of it
   const visible = (field, text) => {
@@ -120,7 +122,7 @@ export function withoutHidden() {
   visible.report = () => {
     if (!hidden.size) return null;
     const held = [...hidden].map(([field, found]) => `${field} held ${nameHidden(found)}`);
-    return `Characters that do not show on screen were left out of what is stated here: ${held.join('; ')}.`;
+    return `${HIDDEN_REPORT}${held.join('; ')}.`;
   };
   return visible;
 }

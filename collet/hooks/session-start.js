@@ -20,7 +20,7 @@
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { COLLET, config, cutShort, emit, fileText, finished, listsClaims, mounted, projectModule, readEvent, root, started, withoutHidden } from './lib.js';
+import { COLLET, config, cutShort, emit, fileText, finished, HIDDEN_REPORT, listsClaims, mounted, projectModule, readEvent, root, started, withoutHidden } from './lib.js';
 
 const dir = root(readEvent());
 if (!mounted(dir)) process.exit(0); // not a collet project, or switched off: stay out of the way
@@ -51,11 +51,12 @@ const project = visible('project in .collet/config.json', filled(settings.projec
 if (project) lines.push(project);
 
 const task = state.openTask(dir);
-const accept = task && visible(`the accept command of task ${task.id}`, task.accept);
+const id = task && visible('the id of the open task', String(task.id));
+const accept = task && visible(`the accept command of task ${id}`, task.accept);
 if (task) {
-  const scope = (task.scope ?? []).map((path) => visible(`the scope of task ${task.id}`, path));
+  const scope = (task.scope ?? []).map((path) => visible(`the scope of task ${id}`, path));
   lines.push(
-    `The open task is ${task.id} — "${visible(`the title of task ${task.id}`, task.title)}" (status ${task.status}).` +
+    `The open task is ${id} — "${visible(`the title of task ${id}`, task.title)}" (status ${task.status}).` +
       ` Writable files: ${scope.join(', ') || 'none declared'}.` +
       ` Writes outside that list are refused. \`node .collet/task.mjs widen --add <path> --why "<reason>"\` extends it for a file the stated task needs; a file beyond what the person asked for needs their yes first.` +
       ` The task ends when \`${accept}\` exits zero, which \`node .collet/task.mjs close\` runs after checking that nothing landed outside the list.`
@@ -81,10 +82,10 @@ if (conventions.length) lines.push(`Conventions that constrain a change here: ${
 
 // A task linked to a Foreman entry keeps its unchecked claims in that entry's notes. Claims that
 // earlier unlinked tasks listed in .collet/unverified.md stay there, so the file is still named.
-const foreman = task?.foreman && visible(`the Foreman id of task ${task.id}`, String(task.foreman));
+const foreman = task?.foreman && visible(`the Foreman id of task ${id}`, String(task.foreman));
 const unverified = fileText(dir, 'unverified.md');
 if (foreman) {
-  lines.push(`What nobody has checked for task ${task.id} belongs in the unverified: lines of Foreman entry ${foreman}'s notes.`);
+  lines.push(`What nobody has checked for task ${id} belongs in the unverified: lines of Foreman entry ${foreman}'s notes.`);
   if (listsClaims(unverified)) lines.push('What nobody has checked from earlier tasks is still in .collet/unverified.md.');
 } else if (unverified) {
   lines.push('What nobody has checked yet is in .collet/unverified.md.');
@@ -93,8 +94,11 @@ if (foreman) {
 const handoff = fileText(dir, 'handoff.md');
 if (handoff) {
   const stamped = /^task:\s*(\S+)/m.exec(handoff);
-  if (task && stamped && stamped[1] === String(task.id)) {
-    lines.push(`State carried over from the previous session:\n${visible('.collet/handoff.md', handoff)}`);
+  if (task && stamped && stamped[1] === id) {
+    // The note's own report line names fields of the same ledger task, which this hook has just read
+    // and reports itself, so it is left out rather than stated twice.
+    const carried = handoff.split('\n').filter((line) => !line.startsWith(HIDDEN_REPORT)).join('\n');
+    lines.push(`State carried over from the previous session:\n${visible('.collet/handoff.md', carried)}`);
   } else {
     // It describes work that is finished or replaced. Saying it would contradict the line above.
     rmSync(join(dir, COLLET, 'handoff.md'), { force: true });

@@ -34,17 +34,18 @@ if (!task) {
 
 // Each field as session start reads it: without characters that do not show on screen, and with a
 // closing line naming the fields that held them. An id made only of them leaves the task unlinked
-// in both hooks.
+// in both hooks. The id is stamped as session start matches it: stripped the same way.
 const visible = withoutHidden();
-const title = visible(`the title of task ${task.id}`, task.title);
-const scope = (task.scope ?? []).map((entry) => visible(`the scope of task ${task.id}`, entry));
-const accept = visible(`the accept command of task ${task.id}`, task.accept);
-const foreman = task.foreman && visible(`the Foreman id of task ${task.id}`, String(task.foreman));
+const id = visible('the id of the open task', String(task.id));
+const title = visible(`the title of task ${id}`, task.title);
+const scope = (task.scope ?? []).map((entry) => visible(`the scope of task ${id}`, entry));
+const accept = visible(`the accept command of task ${id}`, task.accept);
+const foreman = task.foreman && visible(`the Foreman id of task ${id}`, String(task.foreman));
 
 const body = [
   '# Handoff',
   '',
-  `task: ${task.id}`,
+  `task: ${id}`,
   `Written ${new Date().toISOString()}${event.trigger ? ` (context ${event.trigger})` : ''}.`,
   '',
   `"${title}" is still open. Writable: ${scope.join(', ') || 'none declared'}.`,
