@@ -215,8 +215,11 @@ test("an auth, permission or credit error result stops every run; limits, execut
   assert.strictEqual(resultError(apiError(401, "API Error: 401 authentication_error")).stop, true);
   assert.strictEqual(resultError(apiError(403, "API Error: 403 permission_error")).stop, true);
   assert.strictEqual(resultError({ type: "result", subtype: "success", is_error: true, result: "Credit balance is too low" }).stop, true);
-  // A successful reply that mentions a credit balance is not an error.
+  // A credit refusal stops every run even when its result is not an error.
+  assert.strictEqual(resultError({ type: "result", subtype: "success", is_error: false, result: "Credit balance is too low" }).stop, true);
+  // A reply or an execution error that only mentions a credit balance does not stop the batch.
   assert.strictEqual(resultError(finalReply("I updated the credit balance display.")[1]), null);
+  assert.deepStrictEqual(resultError(limit("error_during_execution", ["Cannot read credit balance of undefined"])), { stop: false, message: "session ended in error_during_execution" });
   // A run limit errors only its run, whatever its text.
   assert.deepStrictEqual(resultError(limit("error_max_turns", ["Your credit balance is too low"])), { stop: false, message: "session ended in error_max_turns" });
   // An API error with no text and no status is named by its subtype.
