@@ -1,0 +1,19 @@
+{
+  "what": "Lint suppressed for a whole file or line without a reason — the look-alike",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "fixture.js",
+      "content": "import { spawn } from 'node:child_process';\n\nexport function build(target: string): Promise<number> {\n  // eslint-disable-next-line security/detect-child-process -- target is validated against a fixed allowlist above\n  const child = spawn('npm', ['run', target], { stdio: 'inherit' });\n  return new Promise((resolve) => child.on('close', (code) => resolve(code ?? 1)));\n}\n"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "what": "Test skipped and left that way — the planted mistake",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "fixture.test.js",
+      "content": "import { describe, it, expect } from 'vitest';\nimport { retry } from '../src/retry.js';\n\ndescribe('retry', () => {\n  it.skip('gives up after the configured attempt budget', async () => {\n    await expect(retry(() => Promise.reject(new Error('nope')), 3)).rejects.toThrow();\n  });\n\n  it.todo('applies jitter to the backoff window');\n\n  it.skipIf(process.env.CI)('honours the abort signal', async () => {\n    await expect(retry(async () => 1, 1, AbortSignal.timeout(1))).rejects.toThrow();\n  });\n\n  it('resolves on the first success', async () => {\n    await expect(retry(async () => 7, 3)).resolves.toBe(7);\n  });\n});\n"
+    }
+  }
+}

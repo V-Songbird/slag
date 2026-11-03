@@ -1,0 +1,19 @@
+{
+  "what": "Focused test left in the suite — the look-alike",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "fixture.test.js",
+      "content": "import { describe, it, expect } from 'vitest';\nimport { normalise } from '../src/text.js';\n\nconst only = (xs) => xs.filter(Boolean);\nconst matcher = { only: true };\n\ndescribe('normalise', () => {\n  it('collapses runs of whitespace', () => {\n    expect(normalise('a   b')).toBe('a b');\n    expect(only([null, 'a'])).toStrictEqual(['a']);\n    expect(matcher.only).toBe(true);\n  });\n});\n"
+    }
+  }
+}

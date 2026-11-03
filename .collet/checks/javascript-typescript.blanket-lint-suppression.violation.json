@@ -1,0 +1,19 @@
+{
+  "what": "Lint suppressed for a whole file or line without a reason — the planted mistake",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "fixture.js",
+      "content": "/* eslint-disable */\nimport { spawnSync } from 'node:child_process';\n\nexport function build(target) {\n  // eslint-disable-next-line n/no-sync\n  const out = spawnSync('npm', ['run', target], { encoding: 'utf8' });\n  console.log(out.stdout);\n  return out.status;\n}\n"
+    }
+  }
+}

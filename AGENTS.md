@@ -63,3 +63,29 @@ The repository release entry points share the [release procedure](.claude/skills
 - **Isolated Git config drops long paths on Windows.** A test helper that sets `GIT_CONFIG_NOSYSTEM` loses Git for Windows' `core.longpaths`; pass `-c core.longpaths=true` and write it into the isolated `GIT_CONFIG_GLOBAL`, as `anneal/tests/eval-graders.test.js` does.
 - **Invisible characters fail the check.** `scripts/hidden-characters.test.js` rejects raw zero-width, bidi and tag characters, and variation selectors other than U+FE0E or U+FE0F right after an Extended_Pictographic character, U+FE0F in a keycap, or U+180B-U+180F right after a Mongolian letter, in tracked text; write them as escapes. Some agent write tools turn a four-digit `\u` escape back into the raw character, so rerun that test after writing one.
 - **Passing subprocess tests does not prove installed-host behavior.** Hook discovery, trust and interactive execution require host validation.
+
+<!-- collet:begin — this block is written by the collet plugin; edit inside the markers, not around them -->
+## How work happens here
+
+`.collet/` holds this project's harness. The open task, the files it may touch and the command that
+ends it are printed by `node .collet/task.mjs status`, and a new session is told them before it
+reads anything.
+
+In this project the person is asked before any of these: git push, Corridas SDK pagadas, Releases, Cambiar hooks o settings. Every other step goes ahead until the open task's accept command exits zero, or until a missing input or a broken environment means it cannot pass as the task stands: then the work ends as a blocker named in the summary.
+
+1. **Change only the files the open task lists.** If the stated task needs another one, widen the
+   list first — `node .collet/task.mjs widen --add <path> --why "<reason>"`. If the file goes beyond what the person asked for, ask them first; with
+   nobody to ask, leave it and name it in your summary. Working around the list is not a widen.
+2. **Finished means the accept command exited zero.** `node .collet/task.mjs close` checks the working tree against the task, then runs the accept command. Run it as you go, not only at the
+   end. A task that was not closed did not finish, whatever the summary says. When a missing input
+   or a broken environment means the accept command cannot pass as the task stands, the work ends
+   as a blocker named in the summary and the task stays open.
+3. **Facts come from this repository.** Quote the file a fact came from. If the repository does not
+   answer a question, say so rather than choosing a plausible default and stating it as fact.
+4. **Deliver what the task asks for, in full, and nothing beside it.** What it names is yours to do
+   properly; what it does not name is off limits, and anything odd you notice gets reported in your
+   summary instead of fixed.
+5. **Say what you did not check.** The closing answer is a claim, not a formality.
+
+`node .collet/checks/run.mjs` runs this repository's own checks, and needs nothing but node.
+<!-- collet:end -->

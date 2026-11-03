@@ -1,0 +1,19 @@
+{
+  "what": "Test body emptied instead of fixed — the look-alike",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "fixture.test.js",
+      "content": "import { describe, it, expect, beforeEach } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\nconst test = () => ({ minute: '0' });\n\ndescribe('parseCron', () => {\n  beforeEach(() => {});\n\n  it('rejects a six-field expression with a bad day-of-week', () => {\n    expect(() => parseCron('0 0 0 0 0 9')).toThrow(/day-of-week/);\n  });\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *')).toStrictEqual(test());\n  });\n});\n"
+    }
+  }
+}

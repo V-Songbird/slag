@@ -1,0 +1,19 @@
+{
+  "what": "Focused test left in the suite — the planted mistake",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "fixture.test.js",
+      "content": "import { describe, it, expect } from 'vitest';\nimport { normalise } from '../src/text.js';\n\ndescribe('normalise', () => {\n  it.only('collapses runs of whitespace', () => {\n    expect(normalise('a   b')).toBe('a b');\n  });\n\n  it.concurrent.only('trims the ends', () => {\n    expect(normalise('  a  ')).toBe('a');\n  });\n\n  it('strips zero-width joiners', () => {\n    expect(normalise('a\\u200db')).toBe('ab');\n  });\n});\n"
+    }
+  }
+}

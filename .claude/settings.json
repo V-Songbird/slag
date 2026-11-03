@@ -26,5 +26,13 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "ask": [
+      "Bash(git push *)",
+      "PowerShell(git push *)",
+      "Bash(node *scripts/sdk-eval/run.mjs*)",
+      "PowerShell(node *scripts/sdk-eval/run.mjs*)"
+    ]
   }
 }

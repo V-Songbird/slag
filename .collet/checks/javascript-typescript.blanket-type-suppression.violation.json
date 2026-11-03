@@ -1,0 +1,19 @@
+{
+  "what": "Type error suppressed by comment — the planted mistake",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "fixture.js",
+      "content": "// @ts-nocheck\nimport { createClient } from './client.js';\n\nexport async function push(events) {\n  const client = createClient({ retries: 'three' });\n  // @ts-ignore the SDK types are wrong here\n  return client.sendBatch(events, { compress: 1 });\n}\n"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "what": "Test skipped and left that way — the look-alike",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "fixture.test.js",
+      "content": "import { describe, it, expect } from 'vitest';\nimport { paginate } from '../src/paginate.js';\n\ndescribe('paginate', () => {\n  it('honours the skip and take arguments', () => {\n    const page = paginate({ skip: 20, take: 10 });\n    expect(page.skip).toBe(20);\n    expect(page.cursor.skip).toBe(20);\n  });\n\n  it('treats a todo list as ordinary data', () => {\n    expect(paginate({ skip: 0, take: 1 }).items).toHaveLength(1);\n  });\n});\n"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "what": "Type error suppressed by comment — the look-alike",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "fixture.js",
+      "content": "import { createClient } from './client.js';\n\nexport async function push(events: readonly unknown[]) {\n  const client = createClient({ retries: 3 });\n  // @ts-expect-error upstream types omit the compress option; tracked in vendor#412\n  return client.sendBatch(events, { compress: true });\n}\n"
+    }
+  }
+}

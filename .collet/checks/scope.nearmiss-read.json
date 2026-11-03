@@ -1,0 +1,30 @@
+{
+  "what": "sed reading a file outside the task; the same command name also has a write mode",
+  "setup": {
+    "src/cli.mjs": "import { build } from './digest.mjs';\nexport const run = () => build();\n",
+    "src/digest.mjs": "export const build = () => 1;\n",
+    "src/other.mjs": "export const other = () => 2;\n",
+    "tools/build.sh": "echo building\n",
+    "notes.txt": "notes\n",
+    "ROADMAP.jsonl": "{\"id\":\"001\",\"status\":\"planned\",\"planned_touches\":[]}\n",
+    "test/a.test.mjs": "ok\n"
+  },
+  "task": {
+    "id": "t1",
+    "title": "add a window to the digest",
+    "status": "in_progress",
+    "scope": [
+      "src/cli.mjs",
+      "src/digest.mjs",
+      "test/**"
+    ],
+    "accept": "npm test",
+    "owner": "collet"
+  },
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "sed -n '1,5p' src/other.mjs"
+    }
+  }
+}

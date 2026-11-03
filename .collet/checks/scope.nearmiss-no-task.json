@@ -1,0 +1,19 @@
+{
+  "what": "no task open — the documented hole, and it must stay open rather than fail closed",
+  "setup": {
+    "src/cli.mjs": "import { build } from './digest.mjs';\nexport const run = () => build();\n",
+    "src/digest.mjs": "export const build = () => 1;\n",
+    "src/other.mjs": "export const other = () => 2;\n",
+    "tools/build.sh": "echo building\n",
+    "notes.txt": "notes\n",
+    "ROADMAP.jsonl": "{\"id\":\"001\",\"status\":\"planned\",\"planned_touches\":[]}\n",
+    "test/a.test.mjs": "ok\n"
+  },
+  "task": null,
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "src/other.mjs"
+    }
+  }
+}

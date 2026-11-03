@@ -1,0 +1,19 @@
+{
+  "what": "Test body emptied instead of fixed — the planted mistake",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "fixture.test.js",
+      "content": "import { describe, it, expect } from 'vitest';\nimport { parseCron } from '../src/cron.js';\n\ndescribe('parseCron', () => {\n  it('rejects a six-field expression with a bad day-of-week', () => {});\n\n  it('normalises @daily to the five-field form', function () {});\n\n  it('accepts the standard five-field form', () => {\n    expect(parseCron('*/5 * * * *').minute).toBe('*/5');\n  });\n});\n"
+    }
+  }
+}

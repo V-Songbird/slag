@@ -1,0 +1,19 @@
+{
+  "what": "Type laundered through a double cast — the look-alike",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "fixture.ts",
+      "content": "import type { Account, LedgerEntry } from './domain.js';\n\nconst DEFAULTS = { id: 'acc_1', balance: 0, currency: 'EUR' } as const;\n\nexport function fixtureAccount(overrides: Partial<Account>): Account {\n  return { ...DEFAULTS, ...overrides } satisfies Account;\n}\n\nexport function coerceEntry(row: Record<string, string>): LedgerEntry {\n  const amount = Number(row['amount']);\n  if (Number.isNaN(amount)) throw new TypeError('amount is not numeric');\n  const unknownSource: unknown = row;\n  void unknownSource;\n  return { id: String(row['id']), amount };\n}\n"
+    }
+  }
+}

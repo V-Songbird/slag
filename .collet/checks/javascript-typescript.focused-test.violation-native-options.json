@@ -1,0 +1,19 @@
+{
+  "what": "Focused test left in the suite — the planted mistake",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "native.test.mjs",
+      "content": "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\n\n// With --test-only, the unfocused regression is omitted.\ntest('unfocused regression', () => {\n  throw new Error('the regression must fail when the full suite runs');\n});\n\ntest('selected passing case', { only: true }, () => {\n  assert.equal(1 + 1, 2);\n});\n"
+    }
+  }
+}

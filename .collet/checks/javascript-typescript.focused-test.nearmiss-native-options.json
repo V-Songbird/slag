@@ -1,0 +1,19 @@
+{
+  "what": "Focused test left in the suite — the look-alike",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "native.test.mjs",
+      "content": "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\n\nconst optionsForOrdinaryData = { only: true };\n\ntest('checks option-shaped data', { only: false }, () => {\n  const payload = { only: true };\n  assert.equal(payload.only, optionsForOrdinaryData.only);\n});\n\ntest('checks another payload', () => {\n  const payload = { only: true };\n  assert.equal(payload.only, true);\n});\n"
+    }
+  }
+}

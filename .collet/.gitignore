@@ -1,0 +1,8 @@
+guard-log.jsonl
+handoff.md
+checks/discarded.json
+off
+*.running
+# Task text mirrors the private roadmap; keep it local.
+ledger.jsonl
+unverified.md

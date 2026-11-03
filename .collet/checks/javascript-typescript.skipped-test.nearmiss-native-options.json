@@ -1,0 +1,19 @@
+{
+  "what": "Test skipped and left that way — the look-alike",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "native.test.mjs",
+      "content": "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\n\nconst optionsForOrdinaryData = { skip: true };\n\ntest('checks option-shaped data', { skip: false }, () => {\n  const payload = { skip: true };\n  assert.equal(payload.skip, optionsForOrdinaryData.skip);\n});\n\ntest('checks another payload', () => {\n  const payload = { skip: true };\n  assert.equal(payload.skip, true);\n});\n"
+    }
+  }
+}

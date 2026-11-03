@@ -1,0 +1,19 @@
+{
+  "what": "Type laundered through a double cast — the look-alike",
+  "setup": {},
+  "task": {
+    "id": "t1",
+    "status": "in_progress",
+    "scope": [
+      "**"
+    ],
+    "accept": "node -e 0"
+  },
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "src/__tests__/fixture.test.ts",
+      "content": "import type { Account, LedgerEntry } from './domain.js';\n\nexport function fixtureAccount(overrides: Partial<Account>): Account {\n  return { id: 'acc_1', ...overrides } as unknown as Account;\n}\n\nexport function coerceEntry(row: Record<string, string>): LedgerEntry {\n  const entry = row as unknown as LedgerEntry;\n  return entry;\n}\n"
+    }
+  }
+}

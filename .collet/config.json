@@ -1,0 +1,16 @@
+{
+  "project": "Slag holds the experimental anneal and collet plugins for Claude Code, Codex and Antigravity; Node 22 or later, no dependency installation or build step.",
+  "conventions": [
+    "Root JavaScript uses CommonJS; collet/package.json selects ESM inside collet.",
+    "Host discovery files and executable skill resources stay with their plugin.",
+    "Public records never name another project except where it was measured.",
+    "Tracked text writes zero-width, bidi, tag and stray variation-selector characters as escapes, never raw."
+  ],
+  "accept": "npm run check",
+  "ask_first": [
+    "git push",
+    "Corridas SDK pagadas",
+    "Releases",
+    "Cambiar hooks o settings"
+  ]
+}
