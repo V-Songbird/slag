@@ -2,13 +2,17 @@
 // `claude plugin eval`, so the sessions bill an API key rather than a Claude
 // plan. Each case runs in two arms, with the plugin and without it, in a fresh
 // workspace built by its scaffold_script; the graders then score the run.
+// `--ablation none` runs only the arm with the plugin, for anneal's paired
+// navigation cases, whose arms are their two snapshots.
 //
 //   node --env-file=<.env with ANTHROPIC_API_KEY> scripts/sdk-eval/run.mjs <plugin-dir> \
 //     --output-dir <outside the repo> [--case <name>]... [--tag <tag>]... [--runs 3]
-//     [--concurrency 3] [--max-cost-usd 5] [--model claude-opus-5-5] [--judge-model claude-sonnet-5-5]
+//     [--ablation none] [--concurrency 3] [--max-cost-usd 5] [--model claude-opus-5-5]
+//     [--judge-model claude-sonnet-5-5]
 //
 // Bash runs unconfined: no sandbox wraps the session. Each workspace sits under
-// --output-dir and is kept for inspection.
+// --output-dir and is kept for inspection. Sessions and the judge always call
+// https://api.anthropic.com; a base URL set in the environment is ignored.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -17,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import Anthropic from "@anthropic-ai/sdk";
-import { selectCases, runFromMessages, gradersFor, verdict, judgeText, listRunFiles, createdPaths } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, verdict, judgeText, listRunFiles, createdPaths, sessionEnv } from "./lib.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const JUDGE_PRICE = { "claude-sonnet-5-5": [2, 10], "claude-opus-5-5": [4, 20], "claude-haiku-5-5": [0.1, 0.5] };
@@ -29,6 +33,7 @@ const { values, positionals } = parseArgs({
     case: { type: "string", multiple: true, default: [] },
     tag: { type: "string", multiple: true, default: [] },
     runs: { type: "string", default: "3" },
+    ablation: { type: "string" },
     concurrency: { type: "string", default: "3" },
     "max-cost-usd": { type: "string", default: "5" },
     model: { type: "string", default: "claude-opus-5-5" },
@@ -53,6 +58,8 @@ if (!fromRepo.startsWith("..") && !path.isAbsolute(fromRepo)) fail("--output-dir
 if (process.platform === "win32" && outDir.length > 120) fail(`--output-dir is ${outDir.length} characters; keep it under 120 on Windows.`);
 const runs = Number(values.runs);
 const maxCost = Number(values["max-cost-usd"]);
+if (values.ablation !== undefined && values.ablation !== "none") fail("--ablation takes only none.");
+const arms = values.ablation === "none" ? ["with"] : ["with", "without"];
 
 // The bash that runs scaffolds and the session's Bash tool. On Windows, `bash`
 // on PATH is often the WSL launcher, so use Git's own bash: bin/bash.exe, which
@@ -67,19 +74,17 @@ function findBash() {
 }
 const BASH = findBash();
 
-// A runner started from inside a Claude Code session inherits that session's
-// CLAUDE* variables. CLAUDE_CODE_ENTRYPOINT among them makes each eval session
-// identify as Claude Code, which the API credit refuses ("Credit balance is too
-// low"), so none reach the sessions; the SDK then sets its own entrypoint.
-const SESSION_ENV = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^CLAUDE/i.test(key)));
+const SESSION_ENV = sessionEnv(process.env);
 
 const cases = selectCases(pluginDir, { names: values.case, tags: values.tag });
 if (cases.length === 0) fail(`No eval cases selected under ${path.join(pluginDir, "evals")}.`);
 
-const jobs = cases.flatMap((c) => ["with", "without"].flatMap((arm) => Array.from({ length: runs }, (_, i) => ({ c, arm, n: i + 1 }))));
+const jobs = cases.flatMap((c) => arms.flatMap((arm) => Array.from({ length: runs }, (_, i) => ({ c, arm, n: i + 1 }))));
 let spent = 0;
 let stopped = false;
-const judge = new Anthropic();
+// Explicit options, because the client otherwise reads ANTHROPIC_BASE_URL and
+// ANTHROPIC_AUTH_TOKEN from the environment.
+const judge = new Anthropic({ baseURL: "https://api.anthropic.com", authToken: null });
 
 async function judgeGrader(grader, run) {
   const response = await judge.beta.messages.create({
@@ -136,7 +141,10 @@ async function runJob({ c, arm, n }) {
         // Windows adds a PowerShell tool the POSIX harness never offers; sessions try it and are denied.
         disallowedTools: ["PowerShell"],
         permissionMode: "dontAsk",
-        settingSources: ["project"],
+        // User settings only, from the empty per-run config dir, as the eval
+        // harness does: a fixture's CLAUDE.md and AGENTS.md do not load, so a
+        // map reaches the session only through a read the prompt asks for.
+        settingSources: ["user"],
         plugins: arm === "with" ? [{ type: "local", path: pluginDir }] : [],
         maxBudgetUsd: 2,
         abortController,

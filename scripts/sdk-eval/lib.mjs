@@ -13,6 +13,15 @@ export const { listRunFiles, createdPaths } = harness;
 
 const HEAD = /^---\s*\n([\s\S]*?)---\s*\n?/;
 
+// The environment an eval session gets. A runner started from inside a Claude
+// Code session inherits that session's CLAUDE* variables; CLAUDE_CODE_ENTRYPOINT
+// among them makes each eval session identify as Claude Code, which the API
+// credit refuses ("Credit balance is too low"), so none reach the sessions and
+// the SDK sets its own entrypoint. Every ANTHROPIC_* variable but the API key is
+// dropped too, so a base URL, token or model set on the machine cannot send a
+// session to another endpoint or model.
+export const sessionEnv = (env) => Object.fromEntries(Object.entries(env).filter(([key]) => !/^CLAUDE/i.test(key) && (!/^ANTHROPIC_/i.test(key) || key === "ANTHROPIC_API_KEY")));
+
 // One case folder: its tags and scaffold from case.yaml, its session limits and
 // prompt from prompt.md, and its graders.
 export function readCase(caseDir) {

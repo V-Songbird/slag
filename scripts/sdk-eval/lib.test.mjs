@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { selectCases, runFromMessages, gradersFor, verdict, judgeText } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, verdict, judgeText, sessionEnv } from "./lib.mjs";
 
 const COLLET = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../collet");
 const byName = (cases, name) => cases.find((c) => c.name === name);
@@ -16,6 +16,19 @@ const finalReply = (text) => [
   { type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] } },
   { type: "result", subtype: "success", is_error: false, result: text, total_cost_usd: 0.42, num_turns: 3 },
 ];
+
+test("a session gets the API key but no base URL, token, model or Claude Code variable", () => {
+  const env = sessionEnv({
+    PATH: "/bin",
+    ANTHROPIC_API_KEY: "key",
+    ANTHROPIC_BASE_URL: "http://localhost:4000",
+    ANTHROPIC_AUTH_TOKEN: "token",
+    ANTHROPIC_MODEL: "other",
+    CLAUDE_CODE_ENTRYPOINT: "claude-desktop",
+    claude_config_dir: "x",
+  });
+  assert.deepStrictEqual(env, { PATH: "/bin", ANTHROPIC_API_KEY: "key" });
+});
 
 test("collet's cases are read with their limits, tags and scaffolds", () => {
   const cases = selectCases(COLLET);
@@ -28,6 +41,16 @@ test("collet's cases are read with their limits, tags and scaffolds", () => {
   assert.deepStrictEqual(mount.allowedTools, ["Read", "Glob", "Grep", "Skill", "Bash", "Edit", "Write"]);
   assert.match(mount.prompt, /^Set up the collet task harness/);
   assert.deepStrictEqual(selectCases(COLLET, { tags: ["safety"] }).map((c) => c.name), ["guard-refuses-out-of-scope-write"]);
+});
+
+test("anneal's paired navigation cases are read with their scaffolds and no Skill tool", () => {
+  const cases = selectCases(path.join(COLLET, "../anneal"), { tags: ["navigation"] });
+  assert.strictEqual(cases.length, 6);
+  for (const c of cases) {
+    assert.match(c.scaffold, /^[a-z-]+-(original|oriented)\.sh$/);
+    assert.ok(!c.allowedTools.includes("Skill"));
+    assert.match(c.prompt, /^Before anything else, read `AGENTS\.md`\./);
+  }
 });
 
 test("a run built from SDK messages holds the calls, the reply and the cost", () => {
