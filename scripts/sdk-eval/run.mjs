@@ -120,7 +120,12 @@ async function judgeGrader(grader, text) {
 }
 
 const runDirOf = ({ c, arm, n }) => path.join(outDir, c.name, `${arm}-${n}`);
-const saveRecord = (job, record) => fs.writeFileSync(path.join(runDirOf(job), "result.json"), `${JSON.stringify(record, null, 2)}\n`);
+// Creates the run folder too, so a save after a failed mkdirSync in runJob
+// fails with the code that shows why the output cannot be written.
+const saveRecord = (job, record) => {
+  fs.mkdirSync(runDirOf(job), { recursive: true });
+  fs.writeFileSync(path.join(runDirOf(job), "result.json"), `${JSON.stringify(record, null, 2)}\n`);
+};
 
 async function runJob(job) {
   const { c, arm, n } = job;
