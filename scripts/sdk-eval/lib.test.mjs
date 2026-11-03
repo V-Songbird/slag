@@ -152,20 +152,27 @@ test("a timed-out, errored or unscaffolded run keeps a result that fails its gra
   assert.deepStrictEqual(errors.map((e) => [e.n, e.error]), [[1, timedOut], [2, errored], [3, "scaffold failed: exit 1"]]);
 });
 
-test("a judge call that throws fails its grader and the run still keeps a result", async (t) => {
+test("a judge call that throws makes a judge-failed run that still keeps a result", async (t) => {
   const c = byName(selectCases(COLLET), "guard-refuses-out-of-scope-write");
   const graders = gradersFor(c.graders, "with");
   const run = { ...runFromMessages(finalReply("package.json stays at 1.0.0.")), dir: fs.mkdtempSync(path.join(os.tmpdir(), "sdk-eval-")), created: "" };
   t.after(() => fs.rmSync(run.dir, { recursive: true, force: true }));
-  // A judge reply cut off mid-JSON, as the runner's judge parses it.
-  const truncated = async () => JSON.parse('{"verdict": "PA');
-  const grades = await gradeRun(graders, run, truncated);
-  assert.deepStrictEqual(Object.keys(grades), graders.map((g) => g.name));
-  assert.strictEqual(grades["names-the-refused-file"].pass, false);
-  assert.match(grades["names-the-refused-file"].reason, /^judge error: .*JSON/);
-  for (const g of graders.filter((g) => verdict(g, run) !== null)) assert.deepStrictEqual(grades[g.name], { pass: verdict(g, run) });
-  const record = runRecord(c, "with", 1, run, { seconds: 30, grades });
-  assert.strictEqual(summarize([record]).summary[c.name]["names-the-refused-file"].with[1], 1);
+  const pass = async () => ({ pass: true });
+  assert.deepStrictEqual(Object.keys((await gradeRun(graders, run, pass)).grades), graders.map((g) => g.name));
+  for (const judge of [
+    async () => JSON.parse('{"verdict": "PA'), // a judge reply cut off mid-JSON
+    async () => { throw new Error("529 overloaded"); },
+  ]) {
+    const graded = await gradeRun(graders, run, judge);
+    assert.match(graded.error, /^judge failed: /);
+    assert.strictEqual(graded.grades, undefined);
+    const record = runRecord(c, "with", 1, run, { seconds: 30, ...graded });
+    assert.strictEqual(record.error, graded.error);
+    assert.deepStrictEqual(Object.keys(record.grades), graders.map((g) => g.name));
+    assert.ok(Object.values(record.grades).every((g) => !g.pass && g.reason === `not graded: ${graded.error}`));
+    assert.deepStrictEqual(summarize([record]).errors, [{ case: c.name, arm: "with", n: 1, error: graded.error }]);
+  }
+  assert.strictEqual((await gradeRun(graders, run, async () => { throw new Error("529 overloaded"); })).error, "judge failed: 529 overloaded");
 });
 
 test("an llm grader has no fixed verdict, and its judge reads the last reply", () => {

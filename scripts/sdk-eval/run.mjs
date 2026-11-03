@@ -171,8 +171,8 @@ async function runJob({ c, arm, n }) {
   // A timeout can end the stream quietly as well as throw.
   const error = runError(messages, { aborted: abortController.signal.aborted, timeoutSeconds: c.timeoutSeconds });
   if (error) return finish(runRecord(c, arm, n, run, { seconds, error }));
-  const grades = await gradeRun(gradersFor(c.graders, arm), run, judgeGrader);
-  return finish(runRecord(c, arm, n, run, { seconds, grades }));
+  const graded = await gradeRun(gradersFor(c.graders, arm), run, judgeGrader);
+  return finish(runRecord(c, arm, n, run, { seconds, ...graded }));
 }
 
 const records = [];
