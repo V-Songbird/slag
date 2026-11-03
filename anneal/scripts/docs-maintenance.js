@@ -4,7 +4,8 @@
 // Proposes documentation maintenance, without changing anything: docs whose related files changed
 // after the doc did, completed task notes to fold and delete, oversized history to condense,
 // per-entry docs to merge, and records of an orphaned knowledge store to fold into the docs that
-// own their paths, and native memories that are stale, duplicated or unindexed. docs-align's maintenance mode acts on these proposals after approval.
+// own their paths, and native memories that are stale, duplicated or unindexed. docs-align's
+// maintenance mode acts on these proposals after approval.
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -132,17 +133,9 @@ function memoryProposals(root, dir, now) {
   }
   const inFolder = path.relative(root, folder).replace(/\\/g, "/");
   const exclude = inFolder && !inFolder.startsWith("..") ? [`:(exclude)${inFolder}`] : [];
-  const flags = new Map();
-  // A flag counts only as a whole token: `--root` is not found in `--root-dir`.
-  const flagExists = (flag) => {
-    if (!flags.has(flag)) {
-      const grep = spawnSync("git", ["-C", root, "grep", "-q", "-E", "--untracked", "-e", `(^|[^A-Za-z0-9_-])${flag}($|[^A-Za-z0-9_-])`, "--", ".", ...exclude], { encoding: "utf8" });
-      if (grep.error) throw grep.error;
-      if (grep.status !== 0 && grep.status !== 1) throw new Error(grep.stderr?.trim() || `git grep for ${flag} failed.`);
-      flags.set(flag, grep.status === 0);
-    }
-    return flags.get(flag);
-  };
+  // The flags every memory names, looked up in one git grep after all memories are read.
+  const flags = new Set();
+  const pending = [];
 
   const words = new Map();
   for (const name of names) {
@@ -167,14 +160,17 @@ function memoryProposals(root, dir, now) {
       const script = run ? tokens.indexOf("--") : tokens[0] === "node" ? tokens.findIndex(isPath) : -1;
       for (const t of script < 0 ? [] : tokens.slice(script + 1)) {
         const flag = /^--[a-z][\w-]*/i.exec(t)?.[0];
-        if (flag && !flagExists(flag)) missing.push(flag);
+        if (flag) {
+          flags.add(flag);
+          missing.push(flag);
+        }
       }
     }
     for (const [, link] of text.matchAll(/\[\[([^\]]+)\]\]/g)) {
       const target = link.split(/[|#]/)[0].trim();
       if (!fs.existsSync(path.join(folder, target.endsWith(".md") ? target : `${target}.md`))) missing.push(`[[${link}]]`);
     }
-    if (missing.length) add("memory-missing-path", name, `names ${[...new Set(missing)].join(", ")}, absent from the project or the memory folder`);
+    pending.push([name, missing]);
 
     const modified = /^\s*modified:\s*["']?([^"'\s]+)/m.exec(text.split(/^---\s*$/m)[1] || "");
     const stamp = modified && Date.parse(modified[1]);
@@ -185,6 +181,21 @@ function memoryProposals(root, dir, now) {
       add("memory-stale-state", name, `last modified ${day(written)} (${stamp ? "modified field" : "file time"}) and states a current condition: "${sentence.trim().slice(0, 160)}"; recheck it, then update or delete it`);
     }
     words.set(name, new Set(body.toLowerCase().match(/[a-z0-9]{4,}/g) || []));
+  }
+
+  // A flag counts only as a whole token in a project file: `--root` is not found in `--root-dir`.
+  const found = new Set();
+  if (flags.size) {
+    const grep = spawnSync("git", ["-C", root, "grep", "-h", "-F", "--untracked", ...[...flags].flatMap((f) => ["-e", f]), "--", ".", ...exclude], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+    if (grep.error) throw grep.error;
+    if (grep.status !== 0 && grep.status !== 1) throw new Error(grep.stderr.trim() || "git grep failed.");
+    for (const flag of flags) {
+      if (new RegExp(`(^|[^A-Za-z0-9_-])${flag}($|[^A-Za-z0-9_-])`, "m").test(grep.stdout)) found.add(flag);
+    }
+  }
+  for (const [name, missing] of pending) {
+    const absent = [...new Set(missing)].filter((m) => !found.has(m));
+    if (absent.length) add("memory-missing-path", name, `names ${absent.join(", ")}, absent from the project or the memory folder`);
   }
 
   for (let i = 0; i < names.length; i++) {
