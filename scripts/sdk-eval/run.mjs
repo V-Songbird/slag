@@ -156,7 +156,7 @@ async function runJob({ c, arm, n }) {
         throw new Error(`session used ${message.apiKeySource}, not ANTHROPIC_API_KEY; stopping every run`);
       }
       messages.push(message);
-      const ended = resultError(message);
+      const ended = resultError(message, { aborted: abortController.signal.aborted });
       if (ended) {
         if (ended.stop) stopped = true;
         messages.push({ type: "runner_error", message: ended.message });

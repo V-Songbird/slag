@@ -204,6 +204,10 @@ test("an auth, permission or credit error result stops every run; limits, execut
   assert.strictEqual(resultError(apiError(401, "API Error: 401 authentication_error")).stop, true);
   assert.strictEqual(resultError(apiError(403, "API Error: 403 permission_error")).stop, true);
   assert.strictEqual(resultError({ type: "result", subtype: "success", is_error: false, result: "Credit balance is too low" }).stop, true);
+  // A session its timeout already aborted fails only its own run.
+  assert.strictEqual(resultError(apiError(401, "API Error: 401 authentication_error"), { aborted: true }).stop, false);
+  assert.strictEqual(resultError(limit("error_during_execution", ["Credit balance is too low"]), { aborted: true }).stop, false);
+  assert.strictEqual(resultError(apiError(401, "API Error: 401 authentication_error"), { aborted: false }).stop, true);
   assert.strictEqual(resultError(finalReply("Done.")[1]), null);
   assert.strictEqual(resultError(bashCall("toolu_1", "ls")), null);
 });

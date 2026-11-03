@@ -127,11 +127,11 @@ const sharedFailure = (status, text) => [401, 403].includes(status) || /credit b
 // failure, read from the success arm's api_error_status and the result or
 // errors text, stops every run. Any other error, such as a turn or budget limit,
 // an error during execution or a transient API error like 500 or 529, errors
-// only its run.
-export function resultError(message) {
+// only its run. A session already aborted by its timeout never stops the batch.
+export function resultError(message, { aborted = false } = {}) {
   if (message.type !== "result") return null;
   const text = [message.result, ...(message.errors ?? [])].filter(Boolean).join(" | ");
-  if (sharedFailure(message.api_error_status, text)) return { stop: true, message: `session ended in error, stopping every run: ${text || message.subtype}` };
+  if (!aborted && sharedFailure(message.api_error_status, text)) return { stop: true, message: `session ended in error, stopping every run: ${text || message.subtype}` };
   if (message.subtype !== "success") return { stop: false, message: `session ended in ${message.subtype}` };
   if (message.is_error) return { stop: false, message: `session ended in API error: ${text || message.api_error_status}` };
   return null;
