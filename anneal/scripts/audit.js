@@ -586,6 +586,46 @@ function startContext(root, reader, { global = [], codex = [], memory } = {}) {
   return { budget: START_CONTEXT_BUDGET_CHARS, characters, sources, others, missing, hooks };
 }
 
+// A bullet that names a host or its instruction file is expected to differ between hosts.
+const HOST_NAME = /\b(?:claude|codex|antigravity|gemini|cursor|agents\.md)\b/i;
+
+// The list items of a Markdown text outside code blocks, each with its indented continuation
+// lines joined and its whitespace collapsed.
+function bulletsOf(text) {
+  const bullets = [];
+  let fence = null;
+  let open = false;
+  for (const line of bodyOf(text).lines) {
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence || marker) {
+      if (!fence) fence = marker[1];
+      else if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !line.slice(marker[0].length).trim()) fence = null;
+      open = false;
+      continue;
+    }
+    const item = /^\s*(?:[-*+]|\d+[.)])\s+(.*)$/.exec(line);
+    if (item) {
+      bullets.push(item[1]);
+      open = true;
+    } else if (open && /^\s+\S/.test(line)) bullets[bullets.length - 1] += ` ${line}`;
+    else open = false;
+  }
+  return bullets.map((bullet) => bullet.replace(/\s+/g, " ").trim()).filter(Boolean);
+}
+
+// The bullets of each global instruction file that no other one has, leaving out bullets that
+// name a host. It reports only; which copy is right is the owner's call.
+function instructionDrift(files) {
+  const { excerpt } = require("./session-evidence-redaction.js");
+  const read = [...new Set(files.map((file) => path.resolve(file)))].flatMap((abs) => {
+    const info = fs.statSync(abs, { throwIfNoEntry: false })?.isFile() ? readFile(path.dirname(abs), path.basename(abs)) : null;
+    return typeof info?.text === "string" ? [{ file: excerpt(abs), bullets: new Set(bulletsOf(info.text).filter((bullet) => !HOST_NAME.test(bullet))) }] : [];
+  });
+  if (read.length < 2) return { files: read.map((entry) => entry.file), onlyIn: [] };
+  const onlyIn = read.map(({ file, bullets }, i) => ({ file, bullets: [...bullets].filter((bullet) => read.every((other, j) => j === i || !other.bullets.has(bullet))) }));
+  return { files: read.map((entry) => entry.file), onlyIn: onlyIn.filter((entry) => entry.bullets.length) };
+}
+
 function audit(rootArg, options = {}) {
   const root = path.resolve(rootArg);
   const listing = listFiles(root);
@@ -670,6 +710,7 @@ function audit(rootArg, options = {}) {
     mapFiles,
     checks,
     startContext: startContext(root, reader, options),
+    instructionDrift: instructionDrift([...(options.global || []), ...(options.codex || [])]),
     findings,
     observations: observe(files, reader, facts, shared),
   };
@@ -710,6 +751,13 @@ function formatSummary(report) {
   );
   if (start.characters > start.budget) {
     lines.push(`  over budget by ${start.characters - start.budget} characters; cuts would start with the largest sources above. The audit changes none of them.`);
+  }
+  const drift = report.instructionDrift;
+  if (drift.files.length < 2) lines.push("", `instruction drift: ${plural(drift.files.length, "global instruction file")} read; nothing to compare`);
+  else {
+    const count = drift.onlyIn.reduce((sum, entry) => sum + entry.bullets.length, 0);
+    lines.push("", `instruction drift: ${plural(count, "bullet")} in only one of ${drift.files.join(", ")}; bullets that name a host left out. Which copy is right is yours to decide.`);
+    for (const entry of drift.onlyIn) lines.push(`  only in ${entry.file}:`, ...entry.bullets.map((bullet) => `    - ${bullet}`));
   }
   return `${lines.join("\n")}\n`;
 }

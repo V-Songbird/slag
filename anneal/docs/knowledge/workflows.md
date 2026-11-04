@@ -97,6 +97,12 @@ The budget is 20,000 characters, the size at which the audit already calls a doc
 
 Outside the repository, the audit reads only the global files, the memory index and the `settings.json` above, with the imports of the global files. It shows their paths with your home as `~` and your account name masked. A repository file that imports a path outside the repository gets a `missing` line, and that file is not read. A `SessionStart` command hook in `.claude/settings.json` is listed with its command; the audit never runs it, so its output is not counted. With no such hook, a `hook:` line says so. Hooks in `.claude/settings.local.json` and plugin hook files are not read, because they load only on one machine or with the plugin installed; `.claude/settings.local.json` is read only for `autoMemoryDirectory`.
 
+### Whether your hosts' global files agree
+
+When you keep a global instruction file for more than one host, the copies drift apart. After the start context, an `instruction drift` block compares the global files above, `instructionDrift` in the JSON: your Claude Code and Codex files, or every file you pass with `--global`. It splits each file into its list items, outside code blocks, and lists under `only in <file>` each item that no other file has. An item that names a host, such as Claude, Codex, Antigravity, Gemini, Cursor or `AGENTS.md`, is left out, since those are meant to differ. Items match when their text is the same after runs of spaces and line breaks are made one space. The files' imports are not compared.
+
+The block only reports. Which copy is right is yours to decide, and the audit edits neither file. With fewer than two files to read, the block says there is nothing to compare.
+
 ### Where the audit finds a check command
 
 `check-command-missing` fires when there is code and nothing at the repository root runs a check. These count, and the summary's `checks` line lists them:

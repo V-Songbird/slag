@@ -43,4 +43,6 @@ Every mode reads the Invariants section of [the documentation contract](referenc
 | A request to write, edit or review a page people read, other than a README, including one never named as documentation work | Read [the writing reference](references/writing.md) and follow it; it skips the inventory and the layout audit |
 | `readme`, or a request to write, review, score, improve, edit or translate one README | Read [the README reference](references/readme.md) and follow its mode table; it skips the inventory and the layout audit |
 
+The layout audit's `instructionDrift` lists the bullets that only one host's global instruction file has, found as the audit finds those files or from each `--global <file>` the owner names. Report them as drift between hosts; never decide which copy is right or edit either file.
+
 Read these only when the file above sends you to them: [the README templates](references/readme-templates.md) and [the review rubric](references/readme-review.md) from the README reference, and [the review checklist](references/review-checklist.md) from the reconciliation.

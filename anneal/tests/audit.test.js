@@ -10,7 +10,7 @@ const os = require("node:os");
 require("./temp-root.js");
 const path = require("node:path");
 const { spawnSync, execFileSync } = require("node:child_process");
-const { audit, hostDefaults, limitationFor } = require("../scripts/audit.js");
+const { audit, formatSummary, hostDefaults, limitationFor } = require("../scripts/audit.js");
 
 const CLI = path.join(__dirname, "..", "scripts", "audit.js");
 
@@ -749,6 +749,25 @@ describe("start context", () => {
     assert.strictEqual(startContext.missing.length, 0);
   });
 
+  test("instruction drift lists the bullets only one global file has, leaving out bullets that name a host", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-drift-"));
+    created.push(home);
+    write(home, {
+      "a.md": "# Rules\n\n- Shared rule.\n- Reply   in Spanish,\n  with technical terms in English.\n- Only in a.\n- Use Claude Code's native tools.\n\n```\n- not a bullet\n```\n",
+      "b.md": "- Shared rule.\n* Reply in Spanish, with technical terms in English.\n1. Only in b.\n- Use Codex's native tools.\n",
+    });
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    const report = audit(root, { global: [path.join(home, "a.md")], codex: [path.join(home, "b.md")] });
+    assert.deepStrictEqual(report.instructionDrift.onlyIn.map((entry) => [path.basename(entry.file), entry.bullets]), [["a.md", ["Only in a."]], ["b.md", ["Only in b."]]]);
+    const summary = formatSummary(report);
+    assert.match(summary, /\ninstruction drift: 2 bullets in only one of .*a\.md, .*b\.md;/);
+    assert.match(summary, /\n {2}only in .*a\.md:\n {4}- Only in a\.\n/);
+    // One file, or a file named twice, leaves nothing to compare.
+    const single = audit(root, { global: [path.join(home, "a.md"), path.join(home, "a.md")] });
+    assert.deepStrictEqual(single.instructionDrift.onlyIn, []);
+    assert.match(formatSummary(single), /\ninstruction drift: 1 global instruction file read; nothing to compare\n/);
+  });
+
   test("the project folder key is the root's path with each character outside [A-Za-z0-9] a hyphen", () => {
     const home = path.join(os.tmpdir(), "fake-claude");
     const [root, key] = process.platform === "win32" ? ["D:\\a.b\\c d", "D--a-b-c-d"] : ["/a.b/c d", "-a-b-c-d"];
@@ -799,6 +818,9 @@ describe("start context", () => {
     assert.deepStrictEqual(start.others.map((source) => [source.loads, source.characters]), [["global, Codex; not in the Claude Code total", "codex rules\n".length]]);
     assert.strictEqual(start.characters, ["claude rules\n", "- one memory\n", "# Shop\n"].join("").length);
     assert.deepStrictEqual(start.missing, []);
+    // The detected hosts' global files are compared.
+    assert.deepStrictEqual(JSON.parse(derived.stdout).instructionDrift.onlyIn.map((entry) => entry.bullets), []);
+    assert.strictEqual(JSON.parse(derived.stdout).instructionDrift.files.length, 2);
     // A flag replaces its default.
     const named = run("--global", path.join(homes, "other.md"), "--memory", path.join(homes, "other.md"));
     assert.deepStrictEqual(loads(named), [["global", "named\n".length], ["memory index", "named\n".length], ["project", "# Shop\n".length]]);
