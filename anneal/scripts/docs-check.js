@@ -50,7 +50,8 @@ function ignored(root, file) {
 // Ignored by a .gitignore in the working tree, which every clone carries. core.excludesFile and
 // .git/info/exclude stay on this machine: Git prints them as an absolute path or under .git/, while
 // a .gitignore source is relative to the top level. A negated pattern leaves the path visible. The
-// global file is dropped so its rule on a parent directory cannot mask a committed rule.
+// global file is dropped so its rule on a parent directory cannot mask a committed rule; a
+// .git/info/exclude rule on a parent directory still masks it, and the path reads as not covered.
 function committedIgnored(root, file) {
   const result = spawnSync("git", ["-C", root, "-c", "core.excludesFile=", "check-ignore", "--no-index", "-v", "-z", "--stdin"], { encoding: "utf8", input: `${file}\0` });
   if (result.error) throw result.error;
