@@ -88,7 +88,7 @@ Add `--store <file>` for each orphaned knowledge store the owner names: a JSONL 
 Add `--memory <folder>` for the project's native memory folder, the one holding `MEMORY.md`, and pass the checkout the memories describe as `--root`, not a worktree, so ignored paths they name are present. Its proposals:
 
 - `memory-index-orphan` and `memory-unindexed`: an index line with no file, or a file no index line links. Propose dropping the line, or indexing or deleting the file.
-- `memory-missing-path`: a named project path, `npm run` script, flag passed to a project script or `[[link]]` that is gone; another tool's commands, refs and flags are skipped. Check whether the memory still holds before proposing a corrected path or its deletion.
+- `memory-missing-path`: a named project path, `npm run` script, flag passed to a project script or `[[link]]` that is gone; git refs, MIME types, other workspaces' paths and other tools' flags are skipped. Check whether the memory still holds before proposing a corrected path or its deletion.
 - `memory-duplicate`: two memories that say much the same. Propose one merged memory and the index line to drop.
 - `memory-stale-state`: a memory older than 14 days that states a current condition. Recheck that condition against the repository or host files and propose an update or deletion with the evidence.
 

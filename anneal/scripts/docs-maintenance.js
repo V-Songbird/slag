@@ -95,7 +95,9 @@ const MEMORY_STALE_DAYS = 14;
 // (Jaccard similarity) say much the same thing. Among 15 hand-consolidated memories no pair
 // passed 0.22.
 const MEMORY_DUPLICATE = 0.4;
-const CHANGING = /\b(?:still|now|currently|not yet|no longer|pending|deferred|unresolved|so far)\b/i;
+// Node options whose next token is their value, not the script.
+const NODE_VALUE_OPTION = /^(?:-r|--require|--import|--loader|--experimental-loader|--env-file|--env-file-if-exists|-C|--conditions)$/;
+const CHANGING =/\b(?:still|now|currently|not yet|no longer|pending|deferred|unresolved|so far)\b/i;
 
 // Proposals for a native memory folder: one Markdown file per fact and a MEMORY.md index linking
 // each. Nothing in the folder is written.
@@ -145,19 +147,24 @@ function memoryProposals(root, dir, now) {
     const missing = [];
     for (const [, span] of text.matchAll(/`([^`\n]+)`/g)) {
       const tokens = span.trim().split(/\s+/);
-      // Another tool's command, such as `git branch -D keep/release`, names nothing of the project's.
-      if (tokens.length > 1 && /^[a-z][\w.-]*$/i.test(tokens[0]) && tokens[0] !== "node" && tokens[0] !== "npm") continue;
       const isPath = (t) => /^[\w.-]+(?:\/[\w.-]+)+\/?$/.test(t);
       const run = /^npm run(?:-script)? ([^\s-]\S*)/.exec(span.trim());
       if (run && !scripts.has(run[1])) missing.push(`npm run ${run[1]}`);
-      // A path counts only when its first folder exists, which leaves out git refs such as
-      // `origin/main`, MIME types and other workspaces' files.
+      // A path counts only when its first folder, after any leading `./`, exists in the project,
+      // which leaves out git refs such as `origin/main`, MIME types, `../` paths into other
+      // workspaces and paths under a deleted top folder.
       for (const t of tokens.filter(isPath)) {
-        if (fs.existsSync(path.join(root, t.split("/")[0])) && !fs.existsSync(path.join(root, t))) missing.push(t);
+        const rel = t.replace(/^(?:\.\/)+/, "");
+        if (!rel.startsWith("../") && fs.existsSync(path.join(root, rel.split("/")[0])) && !fs.existsSync(path.join(root, rel))) missing.push(t);
       }
       // Flags belong to the project only after its script: `node <script> --flag` or
-      // `npm run <script> -- --flag`, not node's or npm's own.
-      const script = run ? tokens.indexOf("--") : tokens[0] === "node" ? tokens.findIndex(isPath) : -1;
+      // `npm run <script> -- --flag`, not node's or npm's own. A path that is the value of a node
+      // option, as in `node --import ./setup.js <script>`, is not the script.
+      const script = run
+        ? tokens.indexOf("--")
+        : tokens[0] === "node"
+          ? tokens.findIndex((t, i) => isPath(t) && !NODE_VALUE_OPTION.test(tokens[i - 1]))
+          : -1;
       for (const t of script < 0 ? [] : tokens.slice(script + 1)) {
         const flag = /^--[a-z][\w-]*/i.exec(t)?.[0];
         if (flag) {
