@@ -55,9 +55,15 @@ All notable changes to collet are documented here. The format follows
 
 ### Fixed
 
-- The mount leaves a `CLAUDE.md` with an `@AGENTS.md` import line without its own rules block,
-  and empties a block an earlier mount left there down to its markers, so the host loads the block
-  once, from `AGENTS.md`, and the first task after the remount still closes.
+- The mount leaves a `CLAUDE.md` that imports `AGENTS.md` without its own rules block, and
+  empties a block an earlier mount left there down to its markers, so the host loads the block
+  once, from `AGENTS.md`, and the first task after the remount still closes. An `@AGENTS.md` or
+  `@./AGENTS.md` anywhere outside a code block or code span counts as the import, and a name in
+  another case counts where the filesystem resolves it to `AGENTS.md`. The mount prints a `kept`
+  line for such a file, and leaves its empty markers alone after Git turns them into CRLF.
+- A remount over a rules surface with a collet end marker above the block replaces only the
+  block. Before, it copied the text between that marker and the block a second time, and the scope
+  check counted the mount's write as a task change.
 - The handoff hook leaves hidden characters out of the task title, scope, accept command and
   Foreman id it writes into `.collet/handoff.md`, and names each field that held them in the note.
   Before, the note on disk kept them.

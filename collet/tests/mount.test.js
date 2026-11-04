@@ -2,7 +2,7 @@
 // about what mounting does is checked here rather than trusted.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
@@ -34,7 +34,79 @@ test('a CLAUDE.md that imports AGENTS.md is left without its own block', () => {
   const out = mount(root);
   assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /collet:begin/);
   assert.equal(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n');
-  assert.doesNotMatch(out.stdout, /CLAUDE\.md/);
+  assert.match(out.stdout, /kept {5}CLAUDE\.md \(it imports AGENTS\.md/);
+});
+
+test('an import anywhere in the text of CLAUDE.md counts, and one inside code does not', () => {
+  const inline = project({ ...TREE, 'CLAUDE.md': '# Notes\n\nRead @./AGENTS.md first.\n' });
+  mount(inline);
+  assert.equal(readFileSync(join(inline, 'CLAUDE.md'), 'utf8'), '# Notes\n\nRead @./AGENTS.md first.\n');
+  for (const text of ['# Notes\n\n```\n@AGENTS.md\n```\n', '# Notes\n\n~~~~md\n@AGENTS.md\n~~~~\n', 'Run `cat @AGENTS.md` to see it.\n']) {
+    const root = project({ ...TREE, 'CLAUDE.md': text });
+    mount(root);
+    assert.match(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), /Change only the files/, JSON.stringify(text));
+  }
+});
+
+// `@agents.md` loads AGENTS.md only where the filesystem resolves both names to one file.
+test('an import that differs from AGENTS.md in case counts only where it names the same file', () => {
+  const root = project({ ...TREE, 'CLAUDE.md': '@agents.md\n' });
+  mount(root);
+  const same = (() => {
+    try {
+      const [a, b] = ['AGENTS.md', 'agents.md'].map((name) => statSync(join(root, name), { bigint: true }));
+      return a.ino !== 0n && a.dev === b.dev && a.ino === b.ino;
+    } catch {
+      return false;
+    }
+  })();
+  const claude = readFileSync(join(root, 'CLAUDE.md'), 'utf8');
+  if (same) assert.equal(claude, '@agents.md\n');
+  else assert.match(claude, /Change only the files/);
+});
+
+// Git can turn the empty marker pair into CRLF on checkout; the remount reads it as the same pair.
+test('a remount leaves an empty marker pair that has CRLF line endings as it is', () => {
+  const text = '@AGENTS.md\r\n\r\n<!-- collet:begin — the rules load from the imported AGENTS.md -->\r\n<!-- collet:end -->\r\n';
+  const root = project({ ...TREE, 'CLAUDE.md': text });
+  const out = mount(root);
+  assert.equal(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), text);
+  assert.doesNotMatch(out.stdout, /wrote {4}CLAUDE\.md/);
+});
+
+test('the mount writes the block markers the scope check reads', async () => {
+  const { BLOCK_BEGIN, BLOCK_END } = await import(new URL('../templates/checks/scope.mjs', import.meta.url).href);
+  const root = project({ ...TREE, 'CLAUDE.md': '@AGENTS.md\n\n<!-- collet:begin -->\nold\n<!-- collet:end -->\n' });
+  mount(root);
+  for (const surface of ['AGENTS.md', 'CLAUDE.md']) {
+    const text = readFileSync(join(root, surface), 'utf8');
+    assert.ok(text.includes(BLOCK_BEGIN) && text.indexOf(BLOCK_END) > text.indexOf(BLOCK_BEGIN), surface);
+  }
+});
+
+// An end marker above the block, such as one quoted in the project's notes, is not the block's end.
+test('an end marker above the block is left where it is on every remount', () => {
+  const notes = '# Notes\n\nA stray <!-- collet:end --> here.\n\n';
+  const root = project({ ...TREE, 'AGENTS.md': `${notes}<!-- collet:begin -->\nold\n<!-- collet:end -->\n` });
+  mount(root);
+  const once = readFileSync(join(root, 'AGENTS.md'), 'utf8');
+  mount(root);
+  assert.equal(readFileSync(join(root, 'AGENTS.md'), 'utf8'), once);
+  assert.ok(once.startsWith(`${notes}<!-- collet:begin`), once);
+  assert.equal(once.split('collet:begin').length - 1, 1);
+  assert.doesNotMatch(once, /\nold\n/);
+});
+
+test('the first task closes after a remount over an end marker above the block', () => {
+  const notes = '# Notes\n\nA stray <!-- collet:end --> here.\n\n';
+  const root = project({ ...TREE, 'AGENTS.md': `${notes}<!-- collet:begin -->\nold\n<!-- collet:end -->\n` });
+  repo(root);
+  mount(root);
+  writeFileSync(join(root, '.collet', 'config.json'), CONFIG, 'utf8');
+  assert.equal(task(root, ['add', '--title', 'w', '--why', 'w', '--scope', 'src/cli.mjs']).status, 0);
+  writeFileSync(join(root, 'src', 'cli.mjs'), "import { build } from './digest.mjs';\nexport const run = () => build() + 1;\n", 'utf8');
+  const out = task(root, ['close', '--left-out', 'nothing', '--unverified', 'nothing']);
+  assert.equal(out.status, 0, out.stdout + out.stderr);
 });
 
 test('a remount empties the copy an earlier mount left in a CLAUDE.md that imports AGENTS.md', () => {
@@ -46,7 +118,7 @@ test('a remount empties the copy an earlier mount left in a CLAUDE.md that impor
   assert.doesNotMatch(claude, /old rules|Change only the files/);
   assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /Change only the files/);
   assert.match(out.stdout, /CLAUDE\.md \(block emptied/);
-  assert.doesNotMatch(mount(root).stdout, /CLAUDE\.md/);
+  assert.match(mount(root).stdout, /kept {5}CLAUDE\.md \(it imports AGENTS\.md/);
 });
 
 // The mount's own change to a rules surface must not hold up the first task's close.

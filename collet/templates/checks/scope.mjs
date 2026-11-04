@@ -30,16 +30,17 @@ const NEVER_WRITABLE = ['.collet/'];
 const ALWAYS_WRITABLE = ['.collet/unverified.md'];
 const OWNED_ELSEWHERE = ['ROADMAP.jsonl', '.foreman/'];
 // The files the mount writes its rules block into. Only the block between the markers is the
-// harness's own; the rest of each file is the project's.
+// harness's own; the rest of each file is the project's. The mount writes these same markers.
 const RULES_SURFACES = ['AGENTS.md', 'CLAUDE.md', '.cursor/rules/collet.md'];
-const BLOCK_BEGIN = '<!-- collet:begin';
-const BLOCK_END = '<!-- collet:end -->';
+export const BLOCK_BEGIN = '<!-- collet:begin';
+export const BLOCK_END = '<!-- collet:end -->';
 
 /** The text with the rules block cut out, or null when it holds no complete block. */
 function withoutBlock(text) {
   const start = text.indexOf(BLOCK_BEGIN);
-  const end = text.indexOf(BLOCK_END);
-  if (start === -1 || end < start) return null;
+  // An end marker above the block is the project's text, as the mount reads it.
+  const end = start === -1 ? -1 : text.indexOf(BLOCK_END, start);
+  if (end === -1) return null;
   return text.slice(0, start) + text.slice(end + BLOCK_END.length);
 }
 

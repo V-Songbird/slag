@@ -52,6 +52,7 @@ Ask the session to mount the harness using your host's invocation:
 The skill establishes your project details, first task, scope, and real acceptance command before mounting.
 It creates `.collet/`, adds the rules block to `AGENTS.md`, opens the task, and reports the fixture check results.
 The rules block also goes into `CLAUDE.md` and `.cursor/rules/collet.md` when the project already has `CLAUDE.md` or a `.cursor` folder.
+A `CLAUDE.md` that imports `AGENTS.md`, such as with an `@AGENTS.md` line, keeps only an empty pair of collet markers, because it already loads the rules from `AGENTS.md`.
 On Claude Code, it can also add the permission ask rules you confirm for your ask-first list to the project's `.claude/settings.json`.
 It stops before performing the task itself.
 
