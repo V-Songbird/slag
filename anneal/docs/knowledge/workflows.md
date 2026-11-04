@@ -9,6 +9,7 @@ related_files:
   - anneal/skills/repo-docs/references/policy.md
   - anneal/skills/repo-docs/references/reconcile.md
   - anneal/skills/repo-docs/references/readme.md
+  - anneal/skills/repo-docs/references/writing.md
   - anneal/scripts/readme-check.js
   - anneal/tests/readme-check.test.js
   - anneal/templates/gitignore
@@ -313,7 +314,7 @@ A cleanup request authorizes ordinary documentation fixes within its scope. Chan
 
 ### README work
 
-Ask for one README with the `readme` argument, as in `/anneal:repo-docs readme`, `$repo-docs readme` or `/repo-docs readme`, or describe the job in your own words: "review and score the README", "add a quick start", "nobody can work out how to install this". The skill then reads its `references/readme.md` and works on that README alone, without the inventory or the layout audit.
+Ask for one README with the `readme` argument, as in `/anneal:repo-docs readme`, `$repo-docs readme` or `/repo-docs readme`, or describe the job in your own words: "review and score the README", "add a quick start", "nobody can work out how to install this". The skill then reads its `references/readme.md` and works on that README alone, without the inventory or the layout audit. The README reference applies the writing rules of [pages for people](#pages-for-people) and adds the rules only a README needs.
 
 | Mode | Request | What changes |
 | --- | --- | --- |
@@ -356,6 +357,21 @@ It exits 1 while findings remain, 0 at `0 findings`, and 2 for bad arguments, an
 | `over-budget` | With `--tier`, more than 400, 900 or 1200 words of prose |
 
 Prose is every line outside a fence that is not blank, a heading, a badge or a table row. The rules judge no meaning, so the reference's verification pass still applies. [readme-check.test.js](../../tests/readme-check.test.js) pins a trigger and a near miss for each rule, and the exit codes.
+
+### Pages for people
+
+Ask to write, edit or review a page that people read, such as a help page, guide, how-to, FAQ, troubleshooting page, changelog or contributing guide. You do not need to name the skill or any writing rules: "add a help page for people who keep asking how to remove empty rows" is enough. The skill reads its `references/writing.md` and works on that page alone, without the inventory or the layout audit.
+
+Before writing, the skill settles six facts and labels any it had to assume:
+
+1. **Reader.** Who arrives at the page, and what they already know.
+2. **Task.** The one thing the reader is trying to do or know.
+3. **Entry point.** How readers reach the page, so it makes sense without its parent page.
+4. **Product truth.** The labels, commands, limits and messages, checked against the code or the running product.
+5. **Language and locale.** The page's language, register and market.
+6. **House style.** The project's own style guide or glossary, which wins over the reference's defaults.
+
+The reference keeps tutorials, how-to guides, reference pages, explanations and troubleshooting pages apart, and gives a task page its order: title, outcome, prerequisites, numbered steps, success check, recovery. It closes with a review checklist answered Yes, No or N/A. The report names the reader and task it wrote for, every label or limit it could not check against the product, and says that the page has not been tested with real readers.
 
 ### Adopting the documentation contract
 
@@ -458,7 +474,7 @@ The audits and session review have run from the published package in Claude Code
 
 ## Running the evals
 
-Thirty eval cases live in [evals](../../evals/). Three check skill discovery, audit mode leaving files unchanged, migration stopping on a dirty tree, and session proposals waiting for approval; [two](#a-migration-on-a-clean-tree) apply an approved migration step on a clean tree, one of them into a new directory, [one](#a-plan-from-a-wrong-survey-row) shows a plan from a layout survey row whose importer count is wrong, [one](#an-unreadable-transcript) gives session review a transcript its evidence script refuses, [seven](#session-failure-checks) give session review a transcript of one failure shape and grade what its reply proposes, [two](#readme-cases) review and repair one README, [two](#reader-only-map-checks) ask a reader what the map alone answers, the six navigation cases have their own [paired protocol](#paired-navigation-runs), and six [held-out cases](#held-out-checks) repeat it on a second repository. Each run drives a real session, so it is slow. The three build their fixtures with a `scaffold_script` and grade Bash calls, so a run needs `--scaffold` and a tool grant.
+Thirty-two eval cases live in [evals](../../evals/). Three check skill discovery, audit mode leaving files unchanged, migration stopping on a dirty tree, and session proposals waiting for approval; [two](#a-migration-on-a-clean-tree) apply an approved migration step on a clean tree, one of them into a new directory, [one](#a-plan-from-a-wrong-survey-row) shows a plan from a layout survey row whose importer count is wrong, [one](#an-unreadable-transcript) gives session review a transcript its evidence script refuses, [seven](#session-failure-checks) give session review a transcript of one failure shape and grade what its reply proposes, [two](#readme-cases) review and repair one README, [two](#writing-cases) write and review a page for people, [two](#reader-only-map-checks) ask a reader what the map alone answers, the six navigation cases have their own [paired protocol](#paired-navigation-runs), and six [held-out cases](#held-out-checks) repeat it on a second repository. Each run drives a real session, so it is slow. The three build their fixtures with a `scaffold_script` and grade Bash calls, so a run needs `--scaffold` and a tool grant.
 
 The harness confines the granted shell in a sandbox, and native Windows has none. There it refuses the run: `A shell tool (Bash or PowerShell) was granted but this machine cannot confine it`. Run it under WSL2 or Linux, with `bubblewrap` and `socat` installed. With no terminal, add `--trust-plugin`, or the harness refuses an untrusted plugin directory.
 
@@ -469,9 +485,9 @@ claude plugin eval ./anneal --tag smoke --tag safety --scaffold --no-publish \
   --allow-tools Bash Edit Write --output-dir <results>
 ```
 
-`--tag smoke --tag safety` selects the three. Without it the clean-tree migrations, the plan from a wrong survey row, the unreadable transcript, the seven session-failure cases, the two `readme` cases, the reader-only map checks, the navigation cases and the held-out cases run too, the last two in both arms, which their protocol does not use. Without `--output-dir` the harness writes `aggregate-result.json` and the HTML report under `anneal/evals/results/`, which git does not ignore. Each run's trace stays in its temporary directory as `out/trace.jsonl`. `--keep-temp` keeps that directory; in 2.1.278 it also seals the run's home and workspace under `sealed/` at mode 000 and asks that no git command run in the kept copy.
+`--tag smoke --tag safety` selects the three. Without it the clean-tree migrations, the plan from a wrong survey row, the unreadable transcript, the seven session-failure cases, the two `readme` cases, the two `writing` cases, the reader-only map checks, the navigation cases and the held-out cases run too, the last two in both arms, which their protocol does not use. Without `--output-dir` the harness writes `aggregate-result.json` and the HTML report under `anneal/evals/results/`, which git does not ignore. Each run's trace stays in its temporary directory as `out/trace.jsonl`. `--keep-temp` keeps that directory; in 2.1.278 it also seals the run's home and workspace under `sealed/` at mode 000 and asks that no git command run in the kept copy.
 
-With `--scaffold`, the harness runs each case's `scaffold_script` with bash from that case's folder in the target, as you and outside the sandbox, in the run's new workspace and with the `PATH` the harness started with. A script can therefore reach other files of the target through its own path: each navigation scaffold runs `../navigation-fixture.js`, which reads its contract from `navigation-partner-api.md` beside it, so a copy of `anneal/` used as the target has to keep both files in `evals/`. In the same way, `migration-moves-into-new-directory` and `plan-flags-a-wrong-importer-count` run the fixture script of `migration-applies-approved-step`, and `readme-repair-without-the-word` runs the fixture script of `readme-review-reports-without-changes`. A scaffold that fails ends its run before the session starts, at no cost, and the run's error quotes the end of the script's error output. The harness keeps a failed run's temporary directory even without `--keep-temp`, unless `--json` is passed.
+With `--scaffold`, the harness runs each case's `scaffold_script` with bash from that case's folder in the target, as you and outside the sandbox, in the run's new workspace and with the `PATH` the harness started with. A script can therefore reach other files of the target through its own path: each navigation scaffold runs `../navigation-fixture.js`, which reads its contract from `navigation-partner-api.md` beside it, so a copy of `anneal/` used as the target has to keep both files in `evals/`. In the same way, `migration-moves-into-new-directory` and `plan-flags-a-wrong-importer-count` run the fixture script of `migration-applies-approved-step`, and `readme-repair-without-the-word`, `writing-page-without-the-word` and `writing-review-reports-without-changes` run the fixture script of `readme-review-reports-without-changes`. A scaffold that fails ends its run before the session starts, at no cost, and the run's error quotes the end of the script's error output. The harness keeps a failed run's temporary directory even without `--keep-temp`, unless `--json` is passed.
 
 Inside the sandbox:
 
@@ -590,10 +606,24 @@ Two cases, tagged `readme`, scaffold the same small package, `csv-tidy`. Its REA
 
 In both, `skill-fired` requires a Skill call of `repo-docs` and `checker-ran` a Bash call of `readme-check.js`. Both are indicators that run only with the plugin. [eval-graders.test.js](../../tests/eval-graders.test.js) replays the scaffolds without bash and checks the seven findings. A run as each case asks passes every grader. A layout audit, an edited README, a created file, a reply that misses a planted problem and each README problem left unrepaired fail the grader meant for it, and a repaired README passes every grader with no checker finding. Neither case has run in a session yet.
 
-Eval sessions load your user skills. Before a run, remove or disable any other README skill installed for your user; otherwise a README request can route to it, and `skill-fired` fails for a reason outside anneal. Run them from the repository root:
+Eval sessions load your user skills. Before a run, remove or disable any other README or documentation-writing skill installed for your user; otherwise a README request can route to it, and `skill-fired` fails for a reason outside anneal. Run them from the repository root:
 
 ```bash
 claude plugin eval ./anneal --tag readme --scaffold --no-publish \
+  --allow-tools Bash Edit Write --output-dir <results>
+```
+
+### Writing cases
+
+Two cases, tagged `writing`, scaffold the `csv-tidy` package of the [README cases](#readme-cases). Neither prompt names the skill or any writing rules.
+
+- `writing-page-without-the-word` asks for a help page at `docs/remove-empty-rows.md` for people who want the empty rows gone from a CSV export. It allows Read, Glob, Grep, Skill, Bash, Edit and Write, for 30 turns and 600 seconds. On that page, `numbered-steps` requires a numbered list, `no-filler` fails "simply", "just", "easy", "easily", "obviously" or "of course", `no-click-here` fails a link label that names no destination, `node-before-install` requires Node 22 before the first `npm install` or `npx`, and `shows-result` requires the `Removed <n> empty rows` line that `bin/csv-tidy.js` prints. `only-the-page` fails any created file other than that page. A missing page fails every grader that reads it.
+- `writing-review-reports-without-changes` also commits a help page at that path. The page has a vague title, the filler words "easy" and "Simply", unnumbered steps, the overwrite warning after the command that overwrites, a bare "should", "e.g.", a "click here" link, no Node 22 line and no success check. The case asks for a review and says not to change any file. It allows Read, Glob, Grep, Skill and Bash, for 25 turns and 600 seconds. `names-overwrite-order` requires the reply to put "overwrite" and "before" near each other, which the page itself never does, and `names-unnumbered-steps` requires it to mention numbered steps. `page-unchanged` requires the page to match the scaffold byte for byte. `no-layout-audit` and `no-files-created` are the README review's.
+
+In both, `skill-fired` requires a Skill call of `repo-docs` and `writing-read` a Read of `skills/repo-docs/references/writing.md`. Both are indicators that run only with the plugin. [eval-graders.test.js](../../tests/eval-graders.test.js) replays the scaffolds without bash. A run as the review asks passes every grader, and a layout audit, an edited page, a created file or a reply that misses a planted problem fails the grader meant for it. A written page passes every grader, and each fault planted in it fails only its own grader. Neither case has run in a session yet.
+
+```bash
+claude plugin eval ./anneal --tag writing --scaffold --no-publish \
   --allow-tools Bash Edit Write --output-dir <results>
 ```
 

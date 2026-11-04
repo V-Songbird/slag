@@ -1,6 +1,6 @@
 interface:
   display_name: "Repo docs"
-  short_description: "Verify docs, instructions, READMEs and repository hygiene"
+  short_description: "Write user docs; verify docs, instructions, READMEs and hygiene"
   default_prompt: "Use $repo-docs to reconcile this project's documentation and non-code development files with its current behavior."
   icon_small: "./assets/icon.png"
   icon_large: "./assets/icon.png"

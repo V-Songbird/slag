@@ -23,6 +23,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - `session-review` shows a one-line menu description. It runs only when you invoke it, so the longer trigger text was never read.
 - `repo-docs` has a shorter description that puts its trigger phrases first. It links every reference file from the skill itself, and its README reference opens with a contents list.
 - `repo-layout` and `session-review` open with a checklist of their steps for the session to copy and tick.
+- `repo-docs`' description now leads with writing pages people read, and no longer excludes tutorials, changelogs or CONTRIBUTING files.
 
 ### Added
 
@@ -35,6 +36,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - `anneal/scripts/readme-check.js` checks one README and writes nothing: unclosed fences, the H1 count, badges above the description, fences with no language, a `$` prompt in a copyable block, no shown result, leftover placeholders, link text that names no destination or repeats its URL, filler words, long sentences and, with `--tier`, a prose budget. It needs only Node and exits 2 for an unknown tier.
 
 - Eval cases tagged `readme` check a README review that changes nothing and a README repair asked for without the word README. They have not run in a live session yet.
+
+- repo-docs writes and reviews pages people read, such as help pages, guides, how-tos, FAQs, troubleshooting, changelogs and contributing guides, through its `references/writing.md`, even when the request never names writing rules. The README reference links the same writing rules instead of repeating them.
+
+- Eval cases tagged `writing` check a help page written without naming the skill and a page review that changes nothing. They have not run in a live session yet.
 
 - repo-docs takes `maintain` for proposals that trim documentation: docs whose related files changed after them, completed task notes to fold and delete, oversized history to condense, per-roadmap-entry docs to merge, and records of an orphaned knowledge store to fold into the docs that own their paths. `anneal/scripts/docs-maintenance.js` finds them and changes nothing; the skill acts on a group only after you approve it. Uncommitted edits count toward drift, and `--transcripts` keeps a completed note that another Claude Code session read within three days of its last write.
 

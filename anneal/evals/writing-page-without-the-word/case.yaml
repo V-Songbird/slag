@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: writing-page-without-the-word
+description: "The package and README of readme-review-reports-without-changes. The user asks for a help page on removing empty rows from a CSV export, without naming the skill or any writing rules. The run must route to repo-docs, read its writing reference and write only that page, with numbered steps, the Node 22 requirement before the install command, the output that shows it worked, no filler and no click-here link."
+tags: [writing]
+context:
+  scaffold_script: writing-page-fixture.sh

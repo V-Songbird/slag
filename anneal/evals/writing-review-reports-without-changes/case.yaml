@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: writing-review-reports-without-changes
+description: "The package and README of readme-review-reports-without-changes, plus a committed help page with a vague title, filler words, unnumbered steps, an overwrite warning after the command that overwrites, a bare should, e.g., a click-here link, no Node 22 line and no success check. The user asks for a review and says not to change any files."
+tags: [writing]
+context:
+  scaffold_script: writing-review-fixture.sh

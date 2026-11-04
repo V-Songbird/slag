@@ -1446,24 +1446,26 @@ describe("session-failure cases", () => {
   });
 });
 
+// A readme or writing case's scaffold without bash: the other case's script it runs first, then
+// the files its heredocs write.
+function replay(caseDir, dir = tempDir("anneal-graders-readme-")) {
+  const script = /^ {2}scaffold_script: (\S+)$/m.exec(read(caseDir, "case.yaml"))[1];
+  const text = read(caseDir, script);
+  const base = /^bash "\$\(dirname "\$0"\)\/\.\.\/([^/"]+)\/([^/"]+)"$/m.exec(text);
+  if (base) replay(path.join(EVALS, base[1]), dir);
+  for (const [, file, , content] of text.matchAll(/^cat > (\S+) <<'(\w+)'\n([\s\S]*?)\n\2\n/gm)) write(dir, file, `${content}\n`);
+  return dir;
+}
+
+const SKILL = { name: "Skill", input: { skill: "anneal:repo-docs" } };
+
 // The README cases: one review that must change nothing, and one repair asked for without the
 // word README. Both scaffold the same package, whose README plants what the checker reports.
 describe("readme cases", () => {
   const { checkReadme } = require("../scripts/readme-check.js");
   const REVIEW = path.join(EVALS, "readme-review-reports-without-changes");
   const REPAIR = path.join(EVALS, "readme-repair-without-the-word");
-  const SKILL = { name: "Skill", input: { skill: "anneal:repo-docs" } };
   const CHECK = 'node "/plugins/anneal/scripts/readme-check.js" README.md';
-
-  // The scaffold without bash: the other case's script it runs first, then the files its heredocs write.
-  function replay(caseDir, dir = tempDir("anneal-graders-readme-")) {
-    const script = /^ {2}scaffold_script: (\S+)$/m.exec(read(caseDir, "case.yaml"))[1];
-    const text = read(caseDir, script);
-    const base = /^bash "\$\(dirname "\$0"\)\/\.\.\/([^/"]+)\/([^/"]+)"$/m.exec(text);
-    if (base) replay(path.join(EVALS, base[1]), dir);
-    for (const [, file, , content] of text.matchAll(/^cat > (\S+) <<'(\w+)'\n([\s\S]*?)\n\2\n/gm)) write(dir, file, `${content}\n`);
-    return dir;
-  }
 
   test("both cases are tagged readme, and the repair scaffold runs the review's", () => {
     for (const caseDir of [REVIEW, REPAIR]) assert.match(read(caseDir, "case.yaml"), /^tags: \[readme\]$/m);
@@ -1579,6 +1581,121 @@ describe("readme cases", () => {
         write(dir, "README.md", text);
         assert.notStrictEqual(text, FIXED, grader);
         assert.strictEqual(passes(checks[grader], { dir }), false, grader);
+      }
+    });
+  });
+});
+
+// The writing cases: a help page asked for without naming the skill, and a page review that must
+// change nothing. Both scaffold the README cases' package; the review adds a planted help page.
+describe("writing cases", () => {
+  const README_REVIEW = path.join(EVALS, "readme-review-reports-without-changes");
+  const REVIEW = path.join(EVALS, "writing-review-reports-without-changes");
+  const WRITE = path.join(EVALS, "writing-page-without-the-word");
+  const PAGE = "docs/remove-empty-rows.md";
+  const WRITING_READ = { name: "Read", input: { file_path: "/plugins/anneal/skills/repo-docs/references/writing.md" } };
+
+  test("both cases are tagged writing, and only the review scaffold plants the page", () => {
+    for (const caseDir of [REVIEW, WRITE]) assert.match(read(caseDir, "case.yaml"), /^tags: \[writing\]$/m);
+    assert.deepStrictEqual(listRunFiles(replay(REVIEW)).sort(), ["README.md", "bin/csv-tidy.js", PAGE, "package.json"]);
+    assert.deepStrictEqual(listRunFiles(replay(WRITE)).sort(), ["README.md", "bin/csv-tidy.js", "package.json"]);
+  });
+
+  describe("writing-review-reports-without-changes", () => {
+    let checks;
+    let run;
+    before(() => {
+      checks = graders(REVIEW);
+      const reply = "The steps are bullets, not numbered. The note that --output overwrites the file comes after the command; put it before the step. 'Simply' and 'easy' add nothing, and the link says click here.";
+      run = { dir: replay(REVIEW), calls: [SKILL, WRITING_READ], reply, created: "" };
+    });
+    const failed = (changes) => failedGraders(checks, { ...run, ...changes });
+
+    test("a run as the case asks passes every grader, and the shared graders are the README review's", () => {
+      assert.deepStrictEqual(failed({}), []);
+      assert.deepStrictEqual([checks["skill-fired"].arm, checks["writing-read"].arm], ["with-only", "with-only"]);
+      for (const name of ["skill-fired", "no-files-created", "no-layout-audit"]) assert.deepStrictEqual(checks[name], graders(README_REVIEW)[name], name);
+    });
+
+    test("a layout audit, an edited page, a created file, a reply that misses a planted problem or no skill fails its grader", () => {
+      assert.deepStrictEqual(failed({ calls: [...run.calls, ...bash('node "/plugins/anneal/scripts/audit.js" --root .')] }), ["no-layout-audit"]);
+      const edited = tempDir("anneal-graders-writing-edit-");
+      fs.cpSync(run.dir, edited, { recursive: true });
+      write(edited, PAGE, read(edited, PAGE).replace("Simply ", ""));
+      assert.deepStrictEqual(failed({ dir: edited }), ["page-unchanged"]);
+      assert.deepStrictEqual(failed({ created: "review.md" }), ["no-files-created"]);
+      assert.deepStrictEqual(failed({ reply: "The title is vague." }), ["names-overwrite-order", "names-unnumbered-steps"]);
+      assert.deepStrictEqual(failed({ calls: bash(`cat ${PAGE}`) }), ["skill-fired", "writing-read"]);
+    });
+  });
+
+  describe("writing-page-without-the-word", () => {
+    const PAGE_GRADERS = ["no-click-here", "no-filler", "node-before-install", "numbered-steps", "shows-result"];
+    const FIXED = [
+      "# Remove empty rows from a CSV export",
+      "",
+      "csv-tidy deletes the empty rows from a CSV file and writes the rest to a new file.",
+      "",
+      "You need Node 22 or later.",
+      "",
+      "1. Install csv-tidy:",
+      "",
+      "   ```bash",
+      "   npm install -g csv-tidy",
+      "   ```",
+      "",
+      "2. Clean your export:",
+      "",
+      "   ```bash",
+      "   csv-tidy export.csv --output clean.csv",
+      "   ```",
+      "",
+      "   When it worked, you see:",
+      "",
+      "   ```text",
+      "   Removed 2 empty rows",
+      "   Wrote clean.csv",
+      "   ```",
+      "",
+      "Every option is in the [csv-tidy documentation](https://example.com/docs).",
+      "",
+    ].join("\n");
+    let checks;
+    let run;
+    before(() => {
+      checks = graders(WRITE);
+      run = { dir: replay(WRITE), calls: [SKILL, WRITING_READ], reply: "", created: "" };
+    });
+    const failed = (changes) => failedGraders(checks, { ...run, ...changes });
+
+    test("with no page written, every page grader fails and the rest pass", () => {
+      assert.deepStrictEqual(failed({}), PAGE_GRADERS);
+      assert.deepStrictEqual(checks["skill-fired"], graders(README_REVIEW)["skill-fired"]);
+      assert.strictEqual(checks["writing-read"].arm, "with-only");
+    });
+
+    test("a written page passes every grader, and another created file fails only-the-page", () => {
+      const fixed = tempDir("anneal-graders-writing-fixed-");
+      fs.cpSync(run.dir, fixed, { recursive: true });
+      write(fixed, PAGE, FIXED);
+      assert.deepStrictEqual(failed({ dir: fixed, created: PAGE }), []);
+      assert.deepStrictEqual(failed({ dir: fixed, created: `LICENSE\n${PAGE}` }), ["only-the-page"]);
+    });
+
+    test("each page grader fails the one fault it exists for", () => {
+      const variants = {
+        "no-filler": FIXED.replace("Clean your export:", "Simply clean your export:"),
+        "no-click-here": FIXED.replace("the [csv-tidy documentation]", "[click here]"),
+        "numbered-steps": FIXED.replace("1. Install", "- Install").replace("2. Clean", "- Clean"),
+        "node-before-install": FIXED.replace("You need Node 22 or later.\n\n", "").replace("   npm install -g csv-tidy\n   ```\n", "   npm install -g csv-tidy\n   ```\n\n   You need Node 22 or later.\n"),
+        "shows-result": FIXED.replace("   Removed 2 empty rows\n", ""),
+      };
+      for (const [grader, text] of Object.entries(variants)) {
+        const dir = tempDir("anneal-graders-writing-variant-");
+        write(dir, PAGE, text);
+        assert.notStrictEqual(text, FIXED, grader);
+        assert.strictEqual(passes(checks[grader], { dir }), false, grader);
+        assert.deepStrictEqual(failedGraders(Object.fromEntries(PAGE_GRADERS.map((name) => [name, checks[name]])), { dir }), [grader], grader);
       }
     });
   });

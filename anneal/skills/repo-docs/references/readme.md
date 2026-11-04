@@ -39,7 +39,7 @@ Platform behaviours named here are GitHub's. On another host, check the equivale
 | No README, or a new one is wanted | Write | Steps 1 to 5 |
 | Review, audit or score a README | Review | Follow [the review rubric](readme-review.md); change no file unless asked |
 | Improve, rewrite or shorten a README | Improve | Review first, then Steps 1 to 5 |
-| One targeted change, such as a new flag | Edit | Change that part only, apply the writing rules to it, verify what you changed |
+| One targeted change, such as a new flag | Edit | Change that part only, apply [the writing rules](#writing-rules) to it, verify what you changed |
 
 A README request on its own skips the reconciliation's inventory and the layout audit. When improving, keep what is already correct, and keep heading text that other pages link to, because renaming a heading changes its anchor. Move content into new files, such as a `docs/` folder, only with the user's approval.
 
@@ -108,22 +108,11 @@ A small project can merge items 4 to 6 into one Quick start. Status, limitations
 
 ## Writing rules
 
-These are the rules that decide whether a reader understands the page on the first pass. Apply them to every line you write.
+Apply [the writing rules](writing.md) to every line you write: its Language, Tone, Structure and accessibility sections and its wording flags. A README adds these:
 
-- One idea per sentence. Keep sentences under about 25 words, and split a sentence that stacks conditions or actions. Keep a longer one only when it states one clear relationship that splitting would break.
-- At most three sentences per paragraph. A paragraph longer than four lines on a narrow screen is a list that has not been written yet.
-- Active voice, second person, imperative for steps. "Run the migration", not "the migration should then be run".
-- One term per concept, everywhere, including headings and code comments. Never introduce a synonym for variety.
-- Expand an acronym the first time it appears, unless it is the project's own name.
-- No idioms, no metaphors, no humour that needs a culture. Many readers use a translation tool.
-- Cut filler: "it should be noted that", "we will now", "simply", "just", "obviously", "easy", "powerful". Write "use", not "utilize".
-- Link text names its destination: "read the installation guide", never "click here", "here", "read more" or the URL itself. Write `[API reference](https://example.com/retry)`, not `[example.com/retry](https://example.com/retry)`.
 - Link every destination whose address you have. When you do not have it, keep the sentence and name the destination anyway, then list the missing address in the report. Dropping the route is worse than an unlinked one.
 - Use one H1 and a regular H2/H3 hierarchy, so every task can be found by its heading. GitHub builds an outline from headings, so add a manual table of contents only when the README is long, is read mostly outside GitHub, or needs visible in-page navigation.
-- Give informative images alt text that carries their information: `![Request flow: client to API to queue to worker](docs/architecture.png)`, not `![diagram](docs/architecture.png)`. Never let a screenshot be the only place a command, error or setting appears.
-- A status shown by an emoji, icon or colour also carries a word ("Supported", "No"), because screen readers and plain-text views lose the glyph's meaning.
 - Keep diagrams to a handful of boxes. GitHub renders diagrams written as text in a code block, and that text is reviewed with the code. Link a full architecture document for the rest.
-- Prefer lists and subsections to wide tables of prose, which break on narrow screens.
 - Keep one source of truth for versions and other facts that change. Link it instead of copying it.
 
 ## Commands, code and results
