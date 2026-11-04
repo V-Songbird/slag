@@ -73,12 +73,13 @@ function closeout(file, root) {
     const message = row.message || {};
     if (typed.has(line) || !turn) {
       turn = { promptLine: typed.has(line) ? line : null, prompt: typed.has(line) ? excerpt(textBlocks(message.content).join("\n"), 240) : null,
-        endingLine: null, ending: null, wrote: new Set() };
+        textLines: [], endingLine: null, ending: null, wrote: new Set() };
       turns.push(turn);
     }
     for (const block of Array.isArray(message.content) ? message.content : []) {
       if (!block || typeof block !== "object") continue;
       if (row.type === "assistant" && block.type === "text" && typeof block.text === "string" && block.text.trim()) {
+        if (turn.textLines.at(-1) !== line) turn.textLines.push(line);
         Object.assign(turn, { endingLine: line, ending: excerpt(block.text, 480) });
       } else if (block.type === "tool_use" && CONTENT_TOOLS.has(block.name)) {
         const shape = claudeShape(block.name, block.input && typeof block.input === "object" ? block.input : {}, cwd);
@@ -115,7 +116,8 @@ function closeout(file, root) {
     warnings: [...warnings].sort(),
     limits: "Claude Code only. A change is a call of Edit, MultiEdit, NotebookEdit or Write that reported no error; a shell "
       + "command that changed files is not listed. A turn counts as in a file when it changed any tracked or ignored file, "
-      + "even an unrelated one, and as transcript-only otherwise, including a turn of questions or status. A file edited "
+      + "even an unrelated one, and as transcript-only otherwise, including a turn of questions or status. Only a turn's "
+      + "last text is copied; textLines names every line where the turn wrote text. A file edited "
       + "and later reverted still counts as tracked. Subagent records, subagent transcripts and saved outputs were counted, "
       + "not read. Redaction is best effort.",
   };

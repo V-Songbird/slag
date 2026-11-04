@@ -275,11 +275,13 @@ The script `anneal/scripts/session-closeout.js` reads the whole transcript with 
   | `outside` | The file is outside the repository. | No |
   | `missing` | The file is gone and Git never held it, so only the transcript keeps its content. | Yes |
 
-- A `turn` is the last text the assistant wrote after one of your prompts. It counts as in a `file` when that turn wrote a tracked or ignored file, and as `transcript-only` otherwise. A `transcript-only` turn is at risk.
+- A `turn` is the text the assistant wrote after one of your prompts. `ending` copies the last text, and `textLines` names every transcript line where the turn wrote text, since a decision can come before a closing "Done.". The turn counts as in a `file` when it wrote a tracked or ignored file, and as `transcript-only` otherwise. A `transcript-only` turn is at risk.
 
 `verdict` is `safe-to-delete` when nothing is at risk, and `would-lose` otherwise, with `wouldLose` naming each item at risk by its line or path. `alsoDeleted` counts the subagent transcripts and saved tool outputs in the session's own folder: they go with the session and were not read.
 
-Most turns that end in a question or a status line are `transcript-only`, so the script alone often says `would-lose`. The skill therefore reads each at-risk turn's line. It drops pure status, such as "Done." or a test count, with a reason. For a decision, a finding or a plan, it searches the repository and its ignored records for the key terms, and counts the text as held by a file only when it can cite the file and line. It then gives one verdict line: `Safe to delete.`, or `Deleting it would lose:` followed by each remaining item.
+The skill first checks that the session's `context.cwd` is the repository root. When the session ran in another checkout, it runs the script again with that checkout as the root; when it ran in another project, it says so and stops.
+
+Most turns that end in a question or a status line are `transcript-only`, so the script alone often says `would-lose`. The skill therefore reads every text line of each at-risk turn. It drops a turn, with a reason, only when none of those lines holds more than status, such as "Done." or a test count. For a decision, a finding or a plan, it searches the repository and its ignored records for the key terms, and counts the text as held by a file only when it can cite the file and line. It then gives one verdict line: `Safe to delete.`, or `Deleting it would lose:` followed by each remaining item.
 
 Limits of the close-out:
 

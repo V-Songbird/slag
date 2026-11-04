@@ -97,6 +97,20 @@ describe("the verdict", () => {
     assert.deepStrictEqual({ location: change.location, uncommitted: change.uncommitted, atRisk: change.atRisk },
       { location: "tracked", uncommitted: true, atRisk: false });
   });
+
+  test("a decision stated before the turn's last text is named by its line", () => {
+    const dir = repository();
+    const file = transcript([
+      { ...human("pick the rounding and run the tests", 1), cwd: dir },
+      say("s1", "Decision: round half-up at checkout", 2),
+      use("b1", "Bash", { command: "npm test" }, 3),
+      result("b1", "1 passing", 4),
+      say("s2", "Done.", 5),
+    ]);
+    const [turn] = closeout(file, dir).items;
+    assert.deepStrictEqual({ textLines: turn.textLines, endingLine: turn.endingLine, ending: turn.ending, atRisk: turn.atRisk },
+      { textLines: [2, 5], endingLine: 5, ending: "Done.", atRisk: true });
+  });
 });
 
 describe("where a change lives", () => {

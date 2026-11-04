@@ -87,7 +87,7 @@ anneal has no settings. Choose a skill and its mode.
 - Findings are heuristics; framework conventions and project instructions take precedence.
 - Import rewriting covers relative JavaScript and TypeScript imports. Other references need review.
 - Session review reads one transcript. Redaction is best effort; inspect excerpts before sharing them.
-- Transcript parsing depends on the formats covered by tests. Antigravity requires an explicit transcript file.
+- Transcript parsing depends on the formats covered by tests. Antigravity requires an explicit transcript file. The close-out check reads Claude Code transcripts only.
 - Documentation checks cover the stated evidence and do not scan Git history by default.
 - A complete migration, with the Git guard's refusal on its branch, has been observed in Claude Code, Codex CLI and the Antigravity IDE. On Codex it only changed the map file, so a migration that moves files is unverified there.
 - The audits and session review have run in Claude Code and in headless Codex and Antigravity CLI sessions. In the Antigravity IDE, flows other than the repo-layout audit and a migration are unverified.
