@@ -231,6 +231,22 @@ describe("a Codex rollout", () => {
     assert.deepStrictEqual([report.coverage.operations.edit, report.coverage.readOnly], [1, false]);
   });
 
+  test("a tool that is not a shell is no command, though its arguments carry cmd or command", () => {
+    const item = (second, payload) => ({ timestamp: at(second), type: "response_item", payload });
+    const report = analyzeCodex(transcript([
+      meta, started(1), turn(1),
+      item(2, { type: "function_call", call_id: "c1", name: "mcp__files__read", arguments: JSON.stringify({ command: ["cat", "missing.md"], workdir: "/work/shop/docs" }) }),
+      item(3, { type: "function_call_output", call_id: "c1", output: "Process exited with code 1\ncat: missing.md: No such file or directory" }),
+      item(4, { type: "function_call", call_id: "c2", name: "shell_command", arguments: JSON.stringify({ command: "cat missing.md", workdir: "/work/shop/docs" }) }),
+      item(5, { type: "function_call_output", call_id: "c2", output: "Process exited with code 1\ncat: missing.md: No such file or directory" }),
+      started(6),
+    ]));
+    assert.deepStrictEqual(report.candidates.map((c) => [c.callLine, c.operation, c.path]), [
+      [4, "other", null],
+      [6, "read", "/work/shop/docs/missing.md"],
+    ]);
+  });
+
   test("a prompt recorded only as a user message is the prompt, and injected context is not", () => {
     const report = analyzeCodex(transcript([
       meta, started(1), turn(1),

@@ -288,6 +288,10 @@ function recordNote({ commands, tools }) {
   return `For this call the host recorded ${seen.join(" and ")}.`;
 }
 
+// The tools that run a shell command: a call to any other tool, a server's included, is no command even when its
+// arguments carry `cmd` or `command`.
+const SHELL_TOOLS = new Set(["exec_command", "shell_command", "shell", "exec"]);
+
 // Codex runs shell commands through exec_command {cmd} and shell_command {command}, called directly or
 // from a code-mode exec script; apply_patch edits.
 function codexShape(payload, input, cwd) {
@@ -299,7 +303,7 @@ function codexShape(payload, input, cwd) {
   } catch {
     args = null;
   }
-  const shape = args && typeof args === "object" ? commandShape(args, cwd) : null;
+  const shape = args && typeof args === "object" && SHELL_TOOLS.has(payload.name) ? commandShape(args, cwd) : null;
   return shape || { operation: "other", path: null, opaque: OPAQUE.test(String(payload.name)) };
 }
 
