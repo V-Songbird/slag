@@ -119,13 +119,15 @@ function prefixPattern(paths) {
   return new RegExp(String.raw`(?:${body})(?=[\\/"'\s;|&)]|$)`, WINDOWS ? "gi" : "g");
 }
 
-// A path token under the temporary directory, or in a tmp, temp or scratchpad folder, as <temp>/<its name>.
+// A path token under the temporary directory, or in a tmp, temp or scratchpad folder, as <temp>/<its name>. A
+// redirect such as 2> before the path keeps its place.
 function withoutTemp(text) {
   const temp = slashes(os.tmpdir()).toLowerCase();
-  return text.replace(/[^\s"'`=;|&()<>][^\s"'`=;|&()<>]*/g, (token) => {
-    const forward = slashes(token);
+  return text.replace(/[^\s"'`=;|&()<>][^\s"'`=;|&()]*/g, (token) => {
+    const [, redirect = "", rest] = /^(\d*[<>]+)?(.*)$/s.exec(token);
+    const forward = slashes(rest);
     const under = TEMP_FOLDER.test(forward) || (temp.length > 3 && forward.toLowerCase().startsWith(`${temp}/`));
-    return under ? `<temp>/${forward.split("/").filter(Boolean).pop()}` : token;
+    return under ? `${redirect}<temp>/${forward.split("/").filter(Boolean).pop()}` : token;
   });
 }
 

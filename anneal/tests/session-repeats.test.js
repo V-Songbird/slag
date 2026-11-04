@@ -187,6 +187,8 @@ describe("normalized steps", () => {
     assert.strictEqual(normalize("npm test 2>/tmp/run-1/err.txt"), "npm test 2><temp>/err.txt");
     assert.strictEqual(normalize("npm test >/tmp/run-1/out.txt <C:/Temp/in.txt"), "npm test ><temp>/out.txt <<temp>/in.txt");
     assert.strictEqual(normalize("npm test /tmp/run-1/err.txt"), "npm test <temp>/err.txt");
+    // The account placeholder the redaction writes inside a path leaves the path whole.
+    assert.strictEqual(normalize("cat /mnt/c/Users/<user>/AppData/Local/Temp/run/in.txt"), "cat <temp>/in.txt");
   });
 
   test("Edit and Write are no steps; a read of the same path in 3 sessions is a lookup with a root-relative path", () => {
