@@ -25,14 +25,20 @@ after(() => {
   for (const dir of created) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function repo() {
+function repo(gitignore = GITIGNORE) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-repo-docs-templates-"));
   created.push(root);
   execFileSync("git", ["-C", root, "init", "-q"]);
   fs.writeFileSync(path.join(root, ".git", "empty-excludes"), "");
   execFileSync("git", ["-C", root, "config", "core.excludesFile", path.join(root, ".git", "empty-excludes")]);
-  fs.writeFileSync(path.join(root, ".gitignore"), GITIGNORE);
+  fs.writeFileSync(path.join(root, ".gitignore"), gitignore);
   return root;
+}
+
+function ignored(root, file) {
+  const result = spawnSync("git", ["-C", root, "check-ignore", "--no-index", "-q", "--", file], { encoding: "utf8" });
+  assert.ok([0, 1].includes(result.status), result.stderr);
+  return result.status === 0;
 }
 
 const section = (text, heading) => text.split(/^## /m).find((part) => part.startsWith(heading)) ?? "";
@@ -51,11 +57,24 @@ test("the ignore template hides private records and leaves public product files 
     [".claude/rules/documentation.md", false], [".claude/settings.json", false], [".claude/skills/x/SKILL.md", false],
     ["src/main.js", false], [".env.example", false],
   ];
-  for (const [file, expected] of cases) {
-    const result = spawnSync("git", ["-C", root, "check-ignore", "--no-index", "-q", "--", file], { encoding: "utf8" });
-    assert.ok([0, 1].includes(result.status), result.stderr);
-    assert.strictEqual(result.status === 0, expected, file);
-  }
+  for (const [file, expected] of cases) assert.strictEqual(ignored(root, file), expected, file);
+});
+
+test("a root-only ignore file leaves nested private docs committable until the nested rule is appended", () => {
+  // The case adopt's append step probes: root rules present, no nested rule, and a root negation
+  // that the template's **/ form would override. The nested-only form it appends instead keeps
+  // the negation and hides the nested directory.
+  const rootOnly = "docs/tasks/*\n!docs/tasks/README.md\ndocs/decisions/\ndocs/knowledge/private/\ndocs/apis/private/\n.private/\n";
+  const before = repo(rootOnly);
+  assert.strictEqual(ignored(before, "docs/tasks/probe.md"), true);
+  assert.strictEqual(ignored(before, "docs/tasks/README.md"), false);
+  assert.strictEqual(ignored(before, "pkg/docs/tasks/probe.md"), false);
+  const after = repo(`${rootOnly}*/**/docs/tasks/\n`);
+  assert.strictEqual(ignored(after, "pkg/docs/tasks/probe.md"), true);
+  assert.strictEqual(ignored(after, "a/b/docs/tasks/probe.md"), true);
+  assert.strictEqual(ignored(after, "docs/tasks/README.md"), false);
+  const overridden = repo(`${rootOnly}**/docs/tasks/\n`);
+  assert.strictEqual(ignored(overridden, "docs/tasks/README.md"), true, "**/ reaches the root and overrides the negation");
 });
 
 test("docs-check reads the template as the ignored profile with no high finding", () => {
@@ -89,4 +108,7 @@ test("the adopt procedure never untracks and names the files it writes", () => {
   assert.ok(adopt.includes(".claude/rules/documentation.md"));
   assert.ok(adopt.includes("templates/gitignore"));
   assert.ok(adopt.includes("templates/docs-rule.md"));
+  // The append step and the final probes reach a nested package root, not only the repository root.
+  assert.strictEqual((adopt.match(/pkg\/docs\/tasks\/probe\.md/g) ?? []).length, 2, "nested probe in the append step and in the verification");
+  assert.ok(adopt.includes("`*/**/docs/tasks/`"), "the nested-only rule that spares a root negation");
 });

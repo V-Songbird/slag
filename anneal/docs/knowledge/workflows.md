@@ -269,7 +269,7 @@ Adopt never untracks a file and never ignores all of `docs/`, `docs/knowledge/` 
 
 ### The documentation check
 
-`node anneal/scripts/docs-check.js --root <project> [--json]` reads a Git working tree and reports where its documentation breaks the documentation policy. It changes nothing. It exits 1 when a high finding exists, 0 otherwise, and 2 for bad arguments or a directory outside a Git working tree. No skill or hook runs it yet.
+`node anneal/scripts/docs-check.js --root <project> [--json]` reads a Git working tree and reports where its documentation breaks the documentation policy. It changes nothing. It exits 1 when a high finding exists, 0 otherwise, and 2 for bad arguments or a directory outside a Git working tree. repo-docs' adopt mode runs it before and after writing a project's files, so its exit codes and output are part of adopt's procedure.
 
 It reads every Markdown file under a directory named `docs`, at any depth and ignored files included, skipping dot directories and `node_modules`. The profile comes from the ignore rules. When `git check-ignore --no-index` ignores any of `docs/tasks/`, `docs/decisions/`, `docs/knowledge/private/` and `docs/apis/private/`, private documentation is ignored. When it ignores none, private documentation is versioned, as in a private repository whose cloud sessions read it. `.private/` must stay ignored in both.
 
