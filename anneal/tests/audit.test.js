@@ -771,6 +771,22 @@ describe("start context", () => {
     assert.match(formatSummary(single), /\ninstruction drift: 1 global instruction file read; nothing to compare\n/);
   });
 
+  // Bullets are compared before redaction: two that differ only in what redaction masks still differ.
+  for (const [what, a, b, shown] of [
+    ["a secret", "token: abcdefgh12345678", "token: zzzzzzzz99999999", "token: [REDACTED]"],
+    ["the account name", `Notes live in /srv/${path.basename(HOME)}/notes.`, "Notes live in /srv/<user>/notes.", "Notes live in /srv/<user>/notes."],
+  ]) {
+    test(`instruction drift counts two bullets that differ only in ${what}, and shows them redacted`, () => {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-drift-"));
+      created.push(home);
+      write(home, { "a.md": `- Shared rule.\n- ${a}\n`, "b.md": `- Shared rule.\n- ${b}\n` });
+      const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+      const report = audit(root, { global: [path.join(home, "a.md")], codex: [path.join(home, "b.md")] });
+      assert.deepStrictEqual(report.instructionDrift.onlyIn.map((entry) => [path.basename(entry.file), entry.bullets]), [["a.md", [shown]], ["b.md", [shown]]]);
+      assert.ok(!JSON.stringify(report.instructionDrift).includes("abcdefgh12345678"));
+    });
+  }
+
   test("the project folder key is the root's path with each character outside [A-Za-z0-9] a hyphen", () => {
     const home = path.join(os.tmpdir(), "fake-claude");
     const [root, key] = process.platform === "win32" ? ["D:\\a.b\\c d", "D--a-b-c-d"] : ["/a.b/c d", "-a-b-c-d"];

@@ -619,11 +619,12 @@ function instructionDrift(files) {
   const { excerpt, redact } = require("./session-evidence-redaction.js");
   const read = [...new Set(files.map((file) => path.resolve(file)))].flatMap((abs) => {
     const info = fs.statSync(abs, { throwIfNoEntry: false })?.isFile() ? readFile(path.dirname(abs), path.basename(abs)) : null;
-    // Bullets come from files outside the root, so they are redacted as session evidence is.
-    return typeof info?.text === "string" ? [{ file: excerpt(abs), bullets: new Set(bulletsOf(info.text).filter((bullet) => !HOST_NAME.test(bullet)).map(redact)) }] : [];
+    return typeof info?.text === "string" ? [{ file: excerpt(abs), bullets: new Set(bulletsOf(info.text).filter((bullet) => !HOST_NAME.test(bullet))) }] : [];
   });
   if (read.length < 2) return { files: read.map((entry) => entry.file), onlyIn: [] };
-  const onlyIn = read.map(({ file, bullets }, i) => ({ file, bullets: [...bullets].filter((bullet) => read.every((other, j) => j === i || !other.bullets.has(bullet))) }));
+  // Bullets are compared as written, so a difference only in a secret or the account name still counts. Those reported
+  // come from files outside the root, so they are redacted as session evidence is.
+  const onlyIn = read.map(({ file, bullets }, i) => ({ file, bullets: [...bullets].filter((bullet) => read.every((other, j) => j === i || !other.bullets.has(bullet))).map(redact) }));
   return { files: read.map((entry) => entry.file), onlyIn: onlyIn.filter((entry) => entry.bullets.length) };
 }
 
