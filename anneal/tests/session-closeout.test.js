@@ -219,6 +219,54 @@ describe("where a change lives", () => {
   });
 });
 
+describe("the cleanup flag", () => {
+  test("a session that stopped what it started and listed ignored files after its last change closed clean", () => {
+    const dir = repository();
+    const file = transcript([
+      ...fixTurn(dir),
+      use("b1", "Bash", { command: "npm run dev", run_in_background: true }, 5),
+      result("b1", "Command running in background with ID: bg1. Output is being written to: /work/shop/bg1.output", 6),
+      use("p1", "mcp__Claude_Browser__preview_start", { name: "shop" }, 7),
+      result("p1", "{\"serverId\": \"srv-1\", \"port\": 3000}", 8),
+      use("b2", "Bash", { command: "npm test -- --watch", run_in_background: true }, 9),
+      result("b2", "Command running in background with ID: bg2. Output is being written to: /work/shop/bg2.output", 10),
+      use("k1", "KillShell", { shell_id: "bg1" }, 11),
+      result("k1", "Shell bg1 killed.", 12),
+      use("p2", "mcp__Claude_Browser__preview_stop", { serverId: "srv-1" }, 13),
+      result("p2", "Stopped.", 14),
+      { type: "attachment", timestamp: "2026-01-01T00:00:15.000Z", attachment: { type: "queued_command", commandMode: "task-notification",
+        prompt: "<task-notification><task-id>bg2</task-id><status>completed</status></task-notification>" } },
+      use("g1", "Bash", { command: "git status --short --ignored" }, 16),
+      result("g1", "!! notes/", 17),
+      say("s2", "Closed.", 18),
+    ]);
+    const { cleanup, verdict } = closeout(file, dir);
+    assert.deepStrictEqual({ flag: cleanup.flag, ignoredStatusLine: cleanup.ignoredStatusLine, leftovers: cleanup.leftovers },
+      { flag: "clean", ignoredStatusLine: 16, leftovers: [] });
+    assert.strictEqual(verdict, "safe-to-delete");
+  });
+
+  test("a preview server never stopped and no ignored-file listing after the last change need cleanup", () => {
+    const dir = repository();
+    const file = transcript([
+      { ...human("start the shop", 1), cwd: dir },
+      use("g1", "Bash", { command: "git status --short --ignored" }, 2),
+      result("g1", "", 3),
+      use("p1", "mcp__Claude_Browser__preview_start", { name: "shop" }, 4),
+      result("p1", "{\"serverId\": \"srv-1\", \"port\": 3000}", 5),
+      use("p2", "mcp__Claude_Browser__preview_stop", { serverId: "srv-9" }, 6),
+      result("p2", "No such server.", 7, true),
+      use("e1", "Edit", { file_path: "src/cart.js", old_string: "cents / 100", new_string: "Math.round(cents) / 100" }, 8),
+      result("e1", "The file has been updated.", 9),
+      say("s1", "Fixed it; the shop runs on port 3000.", 10),
+    ]);
+    const { cleanup } = closeout(file, dir);
+    assert.deepStrictEqual(cleanup.flag, "needs-cleanup");
+    assert.strictEqual(cleanup.ignoredStatusLine, null);
+    assert.deepStrictEqual(cleanup.leftovers, [{ kind: "preview-server", id: "srv-1", callLine: 4, command: "shop" }]);
+  });
+});
+
 describe("the command line", () => {
   const run = (args) => spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8" });
 

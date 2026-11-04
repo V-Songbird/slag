@@ -283,6 +283,13 @@ The script `anneal/scripts/session-closeout.js` reads the whole transcript with 
 
 `verdict` is `safe-to-delete` when nothing is at risk, and `would-lose` otherwise, with `wouldLose` naming each item at risk by its line or path. `alsoDeleted` counts the subagent transcripts and saved tool outputs in the session's own folder: they go with the session and were not read.
 
+`cleanup` flags what the session may have left behind, apart from the verdict. Its `flag` is `clean` when both hold, and `needs-cleanup` otherwise:
+
+- `ignoredStatusLine` is the line of a successful `git status` call with `--ignored`, in Bash or PowerShell, after the session's last change, or null when none ran.
+- `leftovers` lists each background command (`run_in_background`) and preview server (`preview_start`) the session started and never saw end, with its `kind`, `id`, `callLine` and `command`. A start counts as ended after a successful `KillShell`, `TaskStop` or `preview_stop` naming its id, or a task notification for that id with a status other than `running`.
+
+The flag only reports from the transcript: it checks no running process and stops nothing.
+
 The skill first checks that the session's `context.cwd` is the repository root. When the session ran in another checkout, it runs the script again with that checkout as the root; when it ran in another project, it says so and stops.
 
 Most turns that end in a question or a status line are `transcript-only`, and most sessions leave throwaway helpers in a scratch folder, so the script alone often says `would-lose`. For each at-risk change, the skill reads the calls that wrote it and drops it, with a reason, only when it is a throwaway helper such as a probe script or an arguments file. A plan, notes or a decision stays. The skill also reads every text line of each at-risk turn. It drops a turn, with a reason, only when none of those lines holds more than status, such as "Done." or a test count. For a decision, a finding or a plan, it searches the repository and its ignored records for the key terms, and counts the text as held by a file only when it can cite the file and line. It then gives one verdict line: `Safe to delete.`, or `Deleting it would lose:` followed by each remaining item.
@@ -294,6 +301,7 @@ Limits of the close-out:
 - A shell command that changed files is not listed, and a file edited and later reverted still counts as tracked.
 - Subagent records in the transcript, subagent transcripts and saved outputs are counted, not read.
 - Redaction of the copied text is best effort, as in the session evidence.
+- The cleanup flag does not see a process started another way, such as with `&` inside a shell command, or one that ended without a notification.
 
 ## How documentation reconciliation runs
 

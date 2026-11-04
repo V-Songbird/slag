@@ -3,7 +3,8 @@
 
 // anneal's session close-out: what deleting one finished Claude Code session would lose. Reads the whole
 // transcript with the session-evidence parser, finds where each file the session changed lives now, and prints
-// JSON: one item per changed file, one per turn that ended in text, and a verdict. It writes, moves and deletes
+// JSON: one item per changed file, one per turn that ended in text, a verdict, and a cleanup flag that names leftover
+// processes and a missing listing of ignored files. It stops no process, and writes, moves and deletes
 // nothing; its Git queries take no optional locks.
 
 const fs = require("node:fs");
@@ -20,6 +21,15 @@ const CONTENT_TOOLS = new Set(["Edit", "MultiEdit", "NotebookEdit", "Write"]);
 // Where a changed file lives now. Deleting the session loses the content of a file that is gone and that Git never held.
 const KEPT = new Set(["tracked", "ignored"]);
 const AT_RISK = new Set(["missing", "outside-missing", "unresolved"]);
+// The cleanup flag: whether the session listed its ignored files after its last change, and which processes it
+// started and never saw end.
+const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
+const IGNORED_STATUS = /\bgit\b[^;&|\n]*\bstatus\b[^;&|\n]*--ignored\b/;
+const STOP_TOOLS = new Set(["KillShell", "TaskStop"]);
+const BACKGROUND_ID = /running in background with ID: ([\w-]+)/i;
+const SERVER_ID = /serverId["']?\s*[:=]\s*["']?([\w-]+)/i;
+const NOTIFICATION = /<task-notification>([\s\S]*?)<\/task-notification>/g;
+const tagOf = (text, tag) => (new RegExp(`<${tag}>\\s*([^<]*?)\\s*</${tag}>`).exec(text) || [])[1];
 
 function git(root, args) {
   return spawnSync("git", ["-C", root, ...args], { encoding: "utf8", env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } });
@@ -68,6 +78,11 @@ function closeout(file, root) {
   const changes = new Map();
   const unresolved = new Set();
   const pending = new Map();
+  const processCalls = new Map();
+  const started = [];
+  const stopped = new Set();
+  let stoppedUnnamed = 0;
+  let ignoredStatusLine = null;
   let cwd = null;
   let sidechain = 0;
   let turn = null;
@@ -78,6 +93,14 @@ function closeout(file, root) {
     }
     if (row.cwd) cwd = row.cwd;
     const message = row.message || {};
+    // A background command that ended, however it ended, says so in a notification.
+    const notices = row.type === "user" || row.type === "attachment"
+      ? textBlocks(row.type === "user" ? message.content : (row.attachment || {}).prompt).join("\n") : "";
+    for (const [, body] of notices.matchAll(NOTIFICATION)) {
+      const id = tagOf(body, "task-id");
+      const status = tagOf(body, "status");
+      if (id && status && status !== "running") stopped.add(id);
+    }
     const queued = isQueuedPrompt(row);
     if (typed.has(line) || queued || !turn) {
       const starts = typed.has(line) || queued;
@@ -97,6 +120,26 @@ function closeout(file, root) {
         // The tool takes its path literally. One the script cannot resolve, such as `~/plan.md`, is kept as written.
         const resolved = named && normalizePath(named, cwd, true);
         if (named) pending.set(block.id, { path: resolved || named, resolved: Boolean(resolved), line, turn });
+      } else if (block.type === "tool_use" && (SHELL_TOOLS.has(block.name) || STOP_TOOLS.has(block.name)
+        || /preview_st(?:art|op)$/.test(block.name))) {
+        processCalls.set(block.id, { tool: block.name, input: block.input && typeof block.input === "object" ? block.input : {}, line });
+      } else if (block.type === "tool_result" && processCalls.has(block.tool_use_id)) {
+        const { tool, input, line: callLine } = processCalls.get(block.tool_use_id);
+        processCalls.delete(block.tool_use_id);
+        if (block.is_error) continue;
+        const output = textBlocks(block.content).join("\n");
+        const command = typeof input.command === "string" ? input.command : "";
+        if (SHELL_TOOLS.has(tool) && input.run_in_background === true) {
+          started.push({ kind: "background-command", id: (BACKGROUND_ID.exec(output) || [])[1] || null, callLine, command: excerpt(command, 240) });
+        } else if (SHELL_TOOLS.has(tool)) {
+          if (IGNORED_STATUS.test(command)) ignoredStatusLine = callLine;
+        } else if (tool.endsWith("preview_start")) {
+          started.push({ kind: "preview-server", id: (SERVER_ID.exec(output) || [])[1] || null, callLine, command: excerpt(String(input.name || input.url || ""), 240) });
+        } else {
+          const id = input.serverId ?? input.task_id ?? input.shell_id ?? input.bash_id;
+          if (typeof id === "string" && started.some((each) => each.id === id)) stopped.add(id);
+          else stoppedUnnamed += 1;
+        }
       } else if (block.type === "tool_result" && pending.has(block.tool_use_id)) {
         const call = pending.get(block.tool_use_id);
         pending.delete(block.tool_use_id);
@@ -123,11 +166,23 @@ function closeout(file, root) {
   }
   const wouldLose = items.filter((item) => item.atRisk)
     .map((item) => (item.kind === "turn" ? { kind: "turn", endingLine: item.endingLine } : { kind: "change", path: item.path }));
+  const lastChangeLine = Math.max(0, ...[...changes.values()].flat());
+  const statusAfterChanges = ignoredStatusLine !== null && ignoredStatusLine > lastChangeLine ? ignoredStatusLine : null;
+  // A stop that names no started id ends the oldest start whose id the script could not read.
+  const leftovers = started.filter((each) => (each.id === null ? stoppedUnnamed-- <= 0 : !stopped.has(each.id)));
   const folder = path.join(path.dirname(file), path.basename(file, ".jsonl"));
   return {
     sessionFile: file, sessionId, context: { cwd: directory(cwd) }, root: directory(root),
     verdict: wouldLose.length ? "would-lose" : "safe-to-delete", wouldLose, items,
     alsoDeleted: { folder: directory(folder), subagentTranscripts: subagentTranscripts(file).length, savedOutputs: countFiles(path.join(folder, "tool-results")) },
+    cleanup: {
+      flag: statusAfterChanges !== null && !leftovers.length ? "clean" : "needs-cleanup",
+      ignoredStatusLine: statusAfterChanges, leftovers,
+      limits: "Reported from the transcript only; no process or file was checked. The ignored-file listing is a successful "
+        + "Bash or PowerShell call of git status with --ignored after the session's last change. A leftover is a background "
+        + "command or preview server the session started and never saw stopped or ended; a process started any other way, "
+        + "such as with & in a shell command, is not listed.",
+    },
     warnings: [...warnings].sort(),
     limits: "Claude Code only. A change is a call of Edit, MultiEdit, NotebookEdit or Write that reported no error; a shell "
       + "command that changed files is not listed. A path the script cannot resolve, such as one starting with ~, is "
