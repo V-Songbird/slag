@@ -1559,6 +1559,14 @@ describe("readme cases", () => {
       assert.deepStrictEqual(failed({ dir: fixed, created: "LICENSE" }), ["no-files-created"]);
     });
 
+    test("the Node requirement passes in each common wording", () => {
+      for (const wording of ["Requires Node.js v22 or later.", "Needs Node v22+", "Needs Node.js >= 22."]) {
+        const dir = tempDir("anneal-graders-readme-wording-");
+        write(dir, "README.md", FIXED.replace("Requires Node 22 or later.", wording));
+        assert.strictEqual(passes(checks["node-before-install"], { dir }), true, wording);
+      }
+    });
+
     test("each README grader fails the one repair it exists for", () => {
       const variants = {
         "badge-after-description": FIXED.replace("# csv-tidy\n\n", "[![CI](ci.svg)](ci)\n# csv-tidy\n\n"),
