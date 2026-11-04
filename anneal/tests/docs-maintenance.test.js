@@ -238,18 +238,20 @@ test("memory spans that name another tool's refs, flags or files are not missing
   ]);
 });
 
-test("memory paths run by another interpreter are checked, other workspaces and node option values are not", () => {
+test("memory paths run by another interpreter are checked, their flags, other workspaces and node option values are not", () => {
   const root = repo();
   commit(root, { "scripts/run.js": "--root", "tools/keep.py": "x" }, "2026-10-01");
   const fresh = "2026-10-30T00:00:00.000Z";
   write(root, {
     "mem/MEMORY.md": "- [Tools](tools.md) — other interpreters\n- [Away](away.md) — elsewhere\n- [Preload](preload.md) — node options\n",
-    "mem/tools.md": memory(fresh, "Run `bash scripts/gone.sh` or `py tools/gone.py`; `./scripts/old.js` is gone too."),
+    // Flags are checked only in `node <dir>/<script>` and `npm run <script> --`; a ref whose first
+    // segment is a project folder still reads as a path.
+    "mem/tools.md": memory(fresh, "Run `bash scripts/gone.sh --gone-sh` or `py tools/gone.py --gone-py` or `node run.js --gone-root`; `git checkout scripts/hotfix` is a ref and `./scripts/old.js` is gone too."),
     "mem/away.md": memory(fresh, "The sibling checkout has `../other-repo/src/x.js`; `./gone/x.js` sat under a removed folder."),
     "mem/preload.md": memory(fresh, "Debug with `node --import ./scripts/run.js --inspect scripts/run.js --root`."),
   });
   assert.deepStrictEqual(of(maintain(root, { memories: ["mem"], now: NOW }), "memory-missing-path"), [
-    "mem/tools.md names scripts/gone.sh, tools/gone.py, ./scripts/old.js, absent from the project or the memory folder",
+    "mem/tools.md names scripts/gone.sh, tools/gone.py, scripts/hotfix, ./scripts/old.js, absent from the project or the memory folder",
   ]);
 });
 
