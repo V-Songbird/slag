@@ -75,7 +75,7 @@ The script prints four kinds of finding in `findings`, each seen in at least `--
 
 Each finding has its `step`, the `sessions` it appears in, its `occurrences`, how many of those came from subagent transcripts (`inSubagents`), and up to three `examples`, each a transcript and the line of its first call there. A command, a sequence or a lookup also says whether the map file already names it (`namedInMap`), and a command or a sequence names the root `package.json` script that already runs it (`projectScript`). A prompt finding says how many repositories it came from (`repositories`).
 
-Read each example line in its transcript. Check that the call did the same job in each session: the same command for the same purpose, not one that only shares its text. A step that only matched after normalization, such as two paths that collapsed to `<temp>/<name>`, is one job only when the lines show it.
+Read each example line in its transcript. An example's `sessionFile` is relative to the root, or starts with `~` for the home directory: expand a leading `~` to the home directory before reading it. Check that the call did the same job in each session: the same command for the same purpose, not one that only shares its text. A step that only matched after normalization, such as two paths that collapsed to `<temp>/<name>`, is one job only when the lines show it.
 
 ## 3. Decide where each finding goes
 

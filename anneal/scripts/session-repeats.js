@@ -142,6 +142,21 @@ function normalizer(paths) {
   };
 }
 
+// The string `name` holds in a JSON arguments object the evidence cut at its bound, directly or as the script of a
+// three-item shell array: its text up to the cut, marked as cut unless it closed before it. Null when the cut text
+// holds no such key.
+function cutString(input, name) {
+  if (!input.startsWith("{") || !input.endsWith(CUT)) return null;
+  const found = new RegExp(String.raw`"${name}"\s*:\s*(?:\[\s*"(?:[^"\\]|\\.)*"\s*,\s*"-(?:l?c|command)"\s*,\s*)?"((?:[^"\\]|\\.)*)(")?`, "i")
+    .exec(input.slice(0, -CUT.length));
+  if (!found) return null;
+  try {
+    return JSON.parse(`"${found[1].replace(/\\u[0-9a-f]{0,3}$/i, "")}"`) + (found[2] ? "" : CUT);
+  } catch {
+    return null;
+  }
+}
+
 // The shell command a Codex call ran: `cmd` or `command` in a direct call's arguments, or the one exec_command or
 // shell_command literal in a code-mode exec script. Null when the call carries none, or more than one.
 function codexCommand(input) {
@@ -154,6 +169,7 @@ function codexCommand(input) {
     return null;
   } catch {
     const found = [...input.matchAll(/tools\.(?:exec_command|shell_command)\(\s*\{\s*(?:cmd|command)\s*:\s*("(?:[^"\\]|\\.)*")/g)];
+    if (!found.length) return cutString(input, "cmd") ?? cutString(input, "command");
     if (found.length !== 1) return null;
     try {
       return JSON.parse(found[0][1]);
@@ -168,7 +184,7 @@ function argument(input, name) {
     const value = JSON.parse(input)[name];
     return typeof value === "string" ? value : null;
   } catch {
-    return null;
+    return typeof input === "string" ? cutString(input, name) : null;
   }
 }
 
@@ -199,8 +215,9 @@ function promptKey(text) {
   return typed.replace(/[\s.!?¡¿,;:…]+$/u, "") || null;
 }
 
-// Whether a map file at the root, or a file one of them imports with @, holds the text.
-function mapText(root) {
+// What a map file at the root, or a file one of them imports with @, names: each inline code span, each line of a
+// fenced block and each link target, whitespace collapsed. A step is named only as one of them whole.
+function mapSpans(root) {
   const texts = [];
   for (const name of MAP_FILES) {
     const file = path.join(root, name);
@@ -214,7 +231,16 @@ function mapText(root) {
       }
     }
   }
-  return texts.join("\n").replace(/\s+/g, " ");
+  const spans = [];
+  for (const text of texts) {
+    const prose = text.replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n([\s\S]*?)^ {0,3}\1[^\n]*$/gm, (block, fence, body) => {
+      spans.push(...body.split("\n"));
+      return "";
+    });
+    for (const [, span] of prose.matchAll(/`([^`\n]+)`/g)) spans.push(span);
+    for (const [, target] of prose.matchAll(/\]\(\s*<?([^)\s>]+)/g)) spans.push(target.replace(/#.*$/, "").replace(/^\.\//, ""));
+  }
+  return new Set(spans.map((span) => span.trim().replace(/\s+/g, " ")).filter(Boolean));
 }
 
 // The root package.json script a command runs by name, or whose own text is the command.
@@ -287,7 +313,7 @@ function main(argv, env = process.env) {
   const running = [env.CLAUDE_CODE_SESSION_ID, env.CODEX_THREAD_ID].filter(Boolean);
   const normalize = normalizer(repositories[0].paths);
   const scripts = scriptsOf(root);
-  const map = mapText(root);
+  const map = mapSpans(root);
   const tallies = Object.fromEntries(KINDS.map((kind) => [kind, new Map()]));
   const skipped = [];
   const read = { claude: 0, codex: 0, subagentTranscripts: 0 };
@@ -408,12 +434,12 @@ function main(argv, env = process.env) {
         };
         if (kind === "commands" || kind === "sequences") {
           const parts = key.split(" -> ");
-          finding.namedInMap = parts.every((part) => map.includes(part));
+          finding.namedInMap = parts.every((part) => map.has(part));
           // A sequence is a script's only when the script's own text runs exactly its commands.
           finding.projectScript = kind === "commands" ? projectScript(key, scripts) : projectScript(parts.join(" && "), scripts, false);
         }
-        // A lookup is named when the map holds its path or pattern.
-        if (kind === "lookups") finding.namedInMap = map.includes(key.slice(key.indexOf(" ") + 1));
+        // A lookup is named when the map names its path or pattern.
+        if (kind === "lookups") finding.namedInMap = map.has(key.slice(key.indexOf(" ") + 1));
         if (kind === "prompts") finding.repositories = tally.repositories.size;
         return finding;
       })
@@ -421,7 +447,7 @@ function main(argv, env = process.env) {
       .slice(0, limit);
   }
   const warnings = [];
-  if (cut) warnings.push(`${cut} steps were cut at 480 characters; steps that differ only after that point share a key.`);
+  if (cut) warnings.push(`${cut} steps were cut at the evidence's 480-character bound; steps that differ only after the cut share a key.`);
   const output = {
     root: directory(root), repositories: repositories.map((repository) => directory(repository.root)), sessionsRead: read, dates,
     skipped, findings, warnings,
@@ -441,4 +467,4 @@ function fail(message, code) {
 
 if (require.main === module) process.exitCode = main(process.argv);
 
-module.exports = { main, promptKey, normalizer, codexCommand };
+module.exports = { main, promptKey, normalizer, codexCommand, argument };

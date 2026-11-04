@@ -12,7 +12,8 @@ const { execFileSync, spawnSync } = require("node:child_process");
 const { tempDir, transcript, at, human, use, result, say, meta, started, turn, message, call, output } = require("./session-transcripts.js");
 const { analyzeClaude } = require("../scripts/session-evidence-claude.js");
 const { analyzeCodex } = require("../scripts/session-evidence-codex.js");
-const { normalizer, promptKey } = require("../scripts/session-repeats.js");
+const { normalizer, promptKey, codexCommand, argument } = require("../scripts/session-repeats.js");
+const { excerpt } = require("../scripts/session-evidence-redaction.js");
 
 const CLI = path.join(__dirname, "..", "scripts", "session-repeats.js");
 
@@ -249,6 +250,34 @@ describe("what the map and the manifest already hold", () => {
         "git status --short --ignored": [named, null], "npm run check": [false, "check"], "node --test && git status --short --ignored": [false, "check"],
       });
     }
+  });
+
+  test("namedInMap needs a whole code span, fenced line or link target, never a word or a longer command holding the step", () => {
+    const root = shop({ files: {
+      "AGENTS.md": "# shop\n\nRun `npm test:watch` or `git status --short --ignored`; the tools are listed below.\n\n```\nnode   --test\n```\n\n"
+        + "The cart is [here](./src/cart.js#top).\n",
+    } });
+    const dir = tempDir();
+    const steps = ["npm test", "git status", "ls", "node --test", ["Read", { file_path: path.join(root, "src", "cart.js") }],
+      ["Read", { file_path: path.join(root, "src", "car.js") }]];
+    for (const index of [0, 1, 2]) claude(dir, root, index, steps);
+    const out = repeats(["--root", root, "--sessions-dir", dir]);
+    const named = (kind) => Object.fromEntries(out.findings[kind].map((finding) => [finding.step, finding.namedInMap]));
+    assert.deepStrictEqual(named("commands"), { "npm test": false, "git status": false, ls: false, "node --test": true });
+    assert.deepStrictEqual(named("lookups"), { "read src/cart.js": true, "read src/car.js": false });
+  });
+});
+
+describe("arguments the evidence cut", () => {
+  test("a long Codex command or Grep pattern keeps its text up to the cut, marked as cut", () => {
+    const long = `npm test -- ${"x".repeat(470)}`;
+    const kept = (key) => `${long.slice(0, 480 - `{"${key}":"`.length)} [excerpt truncated]`;
+    assert.strictEqual(codexCommand(excerpt(JSON.stringify({ cmd: long, workdir: "/r" }))), kept("cmd"));
+    assert.strictEqual(codexCommand(excerpt(JSON.stringify({ cmd: "npm test", workdir: `/${"w".repeat(500)}` }))), "npm test");
+    const shell = excerpt(JSON.stringify({ command: ["bash", "-lc", long] }));
+    assert.strictEqual(codexCommand(shell), `${long.slice(0, 480 - '{"command":["bash","-lc","'.length)} [excerpt truncated]`);
+    assert.strictEqual(argument(excerpt(JSON.stringify({ pattern: long, path: "/r" })), "pattern"), kept("pattern"));
+    assert.strictEqual(codexCommand(excerpt(`*** Begin Patch\n${"x".repeat(500)}`)), null, "a cut patch is no command");
   });
 });
 
