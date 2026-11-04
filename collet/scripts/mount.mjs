@@ -309,7 +309,8 @@ if (!existsSync(unverified)) {
 // for whichever tool happened to be configured first. `CLAUDE.md` is only ever joined, never
 // created: one host reads `AGENTS.md` only while no `CLAUDE.md` exists, so creating it here would
 // hide the project's own instructions behind a file holding nothing but this block. A `CLAUDE.md`
-// with an `@AGENTS.md` import line already loads the block from `AGENTS.md`, so it is left alone.
+// with an `@AGENTS.md` import line already loads the block from `AGENTS.md`, so it gets no copy,
+// and a copy an earlier mount left there is removed.
 const asked = stated(settings.ask_first);
 const block = readFileSync(join(TEMPLATES, 'rules.md'), 'utf8')
   .trim()
@@ -333,7 +334,17 @@ const block = readFileSync(join(TEMPLATES, 'rules.md'), 'utf8')
 
 const surfaces = ['AGENTS.md'];
 const claudeMd = join(target, 'CLAUDE.md');
-if (existsSync(claudeMd) && !/^[ \t]*@(\.\/)?AGENTS\.md[ \t]*$/m.test(readFileSync(claudeMd, 'utf8'))) surfaces.push('CLAUDE.md');
+if (existsSync(claudeMd)) {
+  const text = readFileSync(claudeMd, 'utf8');
+  const start = text.indexOf('<!-- collet:begin');
+  const end = text.indexOf('<!-- collet:end -->');
+  if (!/^[ \t]*@(\.\/)?AGENTS\.md[ \t]*$/m.test(text)) surfaces.push('CLAUDE.md');
+  else if (start !== -1 && end !== -1) {
+    const rest = [text.slice(0, start).trimEnd(), text.slice(end + '<!-- collet:end -->'.length).trim()];
+    writeFileSync(claudeMd, `${rest.filter(Boolean).join('\n\n')}\n`, 'utf8');
+    wrote.push('CLAUDE.md (block removed; it loads from the imported AGENTS.md)');
+  }
+}
 if (existsSync(join(target, '.cursor'))) surfaces.push('.cursor/rules/collet.md');
 
 for (const surface of surfaces) {

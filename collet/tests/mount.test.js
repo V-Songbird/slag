@@ -37,6 +37,15 @@ test('a CLAUDE.md that imports AGENTS.md is left without its own block', () => {
   assert.doesNotMatch(out.stdout, /CLAUDE\.md/);
 });
 
+test('a remount removes the copy an earlier mount left in a CLAUDE.md that imports AGENTS.md', () => {
+  const old = '<!-- collet:begin -->\nold rules\n<!-- collet:end -->';
+  const root = project({ ...TREE, 'CLAUDE.md': `@AGENTS.md\n\n${old}\n\nHouse notes.\n` });
+  const out = mount(root);
+  assert.equal(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n\nHouse notes.\n');
+  assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /collet:begin/);
+  assert.match(out.stdout, /CLAUDE\.md \(block removed/);
+});
+
 test('mounting twice does not duplicate the block', () => {
   const root = project(TREE);
   mount(root);
