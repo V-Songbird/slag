@@ -882,6 +882,18 @@ describe("start context", () => {
     const json = spawnSync(process.execPath, [CLI, "--root", root, "--json"], { encoding: "utf-8" });
     assert.strictEqual(JSON.parse(json.stdout).startContext.budget, 20000);
   });
+
+  test("a line on loading text only when needed appears when the global file is over a quarter of the budget", () => {
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-global-"));
+    created.push(dir);
+    const summary = (size) => {
+      write(dir, { "global.md": "x".repeat(size) });
+      return spawnSync(process.execPath, [CLI, "--root", root, "--global", path.join(dir, "global.md")], { encoding: "utf-8" }).stdout;
+    };
+    assert.match(summary(5001), /\n {2}global files are 25% of the budget; .*rule with paths:.*hook with additionalContext\. See "Text that loads only when needed" in anneal\/docs\/knowledge\/workflows\.md/);
+    assert.doesNotMatch(summary(5000), /additionalContext/);
+  });
 });
 
 describe("CLI", () => {

@@ -97,6 +97,15 @@ The budget is 20,000 characters, the size at which the audit already calls a doc
 
 Outside the repository, the audit reads only the global files, the memory index and the `settings.json` above, with the imports of the global files. It shows their paths with your home as `~` and your account name masked. A repository file that imports a path outside the repository gets a `missing` line, and that file is not read. A `SessionStart` command hook in `.claude/settings.json` is listed with its command; the audit never runs it, so its output is not counted. With no such hook, a `hook:` line says so. Hooks in `.claude/settings.local.json` and plugin hook files are not read, because they load only on one machine or with the plugin installed; `.claude/settings.local.json` is read only for `autoMemoryDirectory`.
 
+### Text that loads only when needed
+
+A line in your global file loads in every session, even when it matters for one tool or one folder. When the global files alone are over a quarter of the budget (5,000 characters), the start context block adds one line pointing here. Claude Code has two ways to load text later:
+
+- **A rule with `paths:`.** A file under `.claude/rules/` whose frontmatter lists globs loads only when Claude reads a matching file. For example, put the workflow-file advice in `.claude/rules/workflows.md` with `paths:` set to `".github/workflows/**"`.
+- **A hook with `additionalContext`.** A hook can return `additionalContext` in its output, and the host adds that text to the session at that moment. For example, a `PreToolUse` hook on `Bash` can return the delegation advice only when the command is a `git` command.
+
+The audit does not pick which lines to move or rewrite them; that choice is yours. It also does not measure whether the line changes anything.
+
 ### Whether your hosts' global files agree
 
 When you keep a global instruction file for more than one host, the copies drift apart. After the start context, an `instruction drift` block compares the global files above, `instructionDrift` in the JSON: your Claude Code and Codex files, or every file you pass with `--global`. It splits each file into its list items, outside code blocks, and lists under `only in <file>` each item that no other file has. An item that names a host, such as Claude, Codex, Antigravity, Gemini, Cursor or `AGENTS.md`, is left out, since those are meant to differ. Items match when their text is the same after runs of spaces and line breaks are made one space. The files' imports are not compared.

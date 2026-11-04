@@ -22,6 +22,7 @@ const EVIDENCE_LIMIT = 15;
 // long document: the size at which the audit already calls a document long
 // (LONG_DOCUMENT_CHARS in audit-observations.js).
 const START_CONTEXT_BUDGET_CHARS = 20000;
+const GLOBAL_SHARE = 0.25;
 // The @path rule map-routes follows: Claude Code and Gemini CLI load a file
 // named as @path, five hops deep. Codex does not.
 const START_IMPORT_HOPS = 5;
@@ -753,6 +754,10 @@ function formatSummary(report) {
   );
   if (start.characters > start.budget) {
     lines.push(`  over budget by ${start.characters - start.budget} characters; cuts would start with the largest sources above. The audit changes none of them.`);
+  }
+  const globalCharacters = start.sources.filter((source) => source.loads === "global").reduce((sum, source) => sum + source.characters, 0);
+  if (globalCharacters > start.budget * GLOBAL_SHARE) {
+    lines.push(`  global files are ${Math.round((globalCharacters / start.budget) * 100)}% of the budget; text that matters for one tool or path can load only when needed, by a rule with paths: or a hook with additionalContext. See "Text that loads only when needed" in anneal/docs/knowledge/workflows.md. The audit moves no line.`);
   }
   const drift = report.instructionDrift;
   if (drift.files.length < 2) lines.push("", `instruction drift: ${plural(drift.files.length, "global instruction file")} read; nothing to compare`);
