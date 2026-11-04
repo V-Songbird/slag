@@ -21,7 +21,7 @@ const RESULT_LANGS = new Set(["text", "txt", "console", "output", "json", "yaml"
 const RESULT_COMMENT = /^\s*(\/\/|#|--|;)\s*\S.*(->|=>|returns|returned)/;
 const VAGUE_LINK = /\[\s*(click here|here|this link|read more|more|link|aqu[ií]|haz clic aqu[ií]|m[aá]s|leer m[aá]s)\s*\]\(/iu;
 // An HTML title, and the `===` underline of a setext title.
-const HTML_H1 = /<h1[\s>]/i;
+const HTML_H1 = /^<h1(?![\w-])/i;
 const SETEXT_H1 = /^ {0,3}=+\s*$/;
 const URL_LINK = /\[\s*([^\]]+?)\s*\]\(\s*(https?:\/\/[^)\s]+)\s*\)/g;
 // Word boundaries over Unicode letters and digits, so `éjust` is not the filler `just`.
@@ -102,7 +102,7 @@ function checkReadme(text, { tier } = {}) {
     if (text.includes("{{")) flag(i, "placeholder", "unfilled template placeholder");
     if (VAGUE_LINK.test(text)) flag(i, "link-text", "link text does not name its destination");
     for (const [, label, href] of text.matchAll(URL_LINK)) {
-      const bare = (url) => url.replace(/^https?:\/\/(www\.)?/i, "").replace(/\/+$/, "").toLowerCase();
+      const bare = (url) => url.replace(/^(https?:\/\/)?(www\.)?/i, "").replace(/\/+$/, "").toLowerCase();
       if (bare(label) === bare(href)) flag(i, "link-text", "link text repeats the URL; name the destination instead");
     }
     for (const [hit] of text.matchAll(FILLER)) flag(i, "filler", `remove or replace '${hit}'`);

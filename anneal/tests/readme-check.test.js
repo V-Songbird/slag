@@ -56,6 +56,11 @@ describe("rules", () => {
     assert.deepStrictEqual(checkReadme(doc("# A", "", "===", "", "```text", "<h1>x</h1>", "T", "===", "```")), []);
   });
 
+  test("h1-count: a mention of the tag in prose or a table is not a title", () => {
+    assert.deepStrictEqual(checkReadme(doc("# T", "", "Wrap the title in an `<h1>` tag.", "", "| a | b |", "| - | - |", "| <h1 class=x> | y |")), []);
+    assert.deepStrictEqual(checkReadme(doc("# T", "", "<h10>x</h10>")), []);
+  });
+
   test("badge-first: a badge above the description, not below it", () => {
     assert.deepStrictEqual(checkReadme(doc("[![CI](ci.svg)](ci)", "# T", "", "Text.")), [{ line: 1, rule: "badge-first", message: MESSAGES.badge }]);
     assert.deepStrictEqual(checkReadme(doc("# T", "", "Text.", "", "[![CI](ci.svg)](ci)", "![logo](logo.png)")), []);
@@ -96,6 +101,7 @@ describe("rules", () => {
     assert.deepStrictEqual(checkReadme(doc("# T", "", "See [Example.com/docs/](https://www.example.com/docs/).")), [{ line: 3, rule: "link-text", message: MESSAGES.echo }]);
     assert.deepStrictEqual(checkReadme(doc("# T", "", "See [https://example.com/docs](https://example.com/docs).")), [{ line: 3, rule: "link-text", message: MESSAGES.echo }]);
     assert.deepStrictEqual(checkReadme(doc("# T", "", "See [HTTP://WWW.Example.com](https://example.com/).")), [{ line: 3, rule: "link-text", message: MESSAGES.echo }]);
+    assert.deepStrictEqual(checkReadme(doc("# T", "", "See [www.example.com](https://example.com).")), [{ line: 3, rule: "link-text", message: MESSAGES.echo }]);
     assert.deepStrictEqual(checkReadme(doc("# T", "", "See the [API reference](https://example.com/docs).")), []);
   });
 
