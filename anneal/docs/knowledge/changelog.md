@@ -18,6 +18,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Changed
 
+- The layout audit and the maintenance proposals find their host inputs from `--root` alone. The audit counts the global `CLAUDE.md` and `AGENTS.md` of each host home that exists and the project's Claude Code memory index. The maintenance proposals read the project's Claude Code transcripts folder and memory folder. `--global`, `--memory` and `--transcripts` still replace them, and a missing default folder prints one line while the run goes on. Paths outside the repository show the home as `~` with the account name masked.
 - Rename `docs-align` to `repo-docs`. `/anneal:repo-docs`, `$repo-docs` and `/repo-docs` replace the old invocations; the reconciliation procedure moved to the skill's `references/reconcile.md`, and `references/policy.md` holds the documentation contract: five invariants, the profiles `solo-public`, `private-repo` and `team`, and an `adopt` mode that, after approval, writes a project-local rule, a pointer in each map file and, for `solo-public`, ignore rules from a shipped template. Adopt never untracks a file and never ignores all of `docs/`, `docs/knowledge/` or `docs/apis/`.
 - On Codex, `repo-docs`, `repo-layout` and `session-review` each show their own icon in the skill list.
 - `session-review` shows a one-line menu description. It runs only when you invoke it, so the longer trigger text was never read.

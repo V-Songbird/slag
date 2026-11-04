@@ -507,7 +507,7 @@ function importsOf(text) {
 // the global file and memory index the caller names. SessionStart hooks are
 // listed, never run. Outside the root it reads only what the caller names.
 function startContext(root, reader, { global = [], memory } = {}) {
-  const { directory } = require("./session-evidence-redaction.js");
+  const { excerpt } = require("./session-evidence-redaction.js");
   const sources = [];
   const missing = [];
   const seen = new Set();
@@ -515,7 +515,9 @@ function startContext(root, reader, { global = [], memory } = {}) {
     const rel = path.relative(root, abs);
     return rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel.split(path.sep).join("/") : null;
   };
-  const label = (abs) => inside(abs) ?? directory(abs);
+  // A path outside the root is redacted as session evidence is: the home shortened to ~, and the
+  // account name masked, also inside a Claude Code project key.
+  const label = (abs) => inside(abs) ?? excerpt(abs);
   // The file's text, null for a file not read as text, undefined when absent.
   const load = (abs, loads) => {
     seen.add(abs);
@@ -703,16 +705,40 @@ function formatSummary(report) {
   return `${lines.join("\n")}\n`;
 }
 
+// The host inputs a run derives from its root when no flag names them: the global instruction file
+// of each host whose home exists, and Claude Code's folder for the project, which holds its
+// transcripts and its memory folder. The homes follow CLAUDE_CONFIG_DIR and CODEX_HOME as the
+// session scripts do, and the folder key is the one session-repeats.js matches: the root's path
+// with each character outside [A-Za-z0-9] a hyphen.
+function hostDefaults(root, env = process.env) {
+  const { HOME } = require("./session-evidence-redaction.js");
+  const claude = env.CLAUDE_CONFIG_DIR || (HOME ? path.join(HOME, ".claude") : null);
+  const codex = env.CODEX_HOME || (HOME ? path.join(HOME, ".codex") : null);
+  const project = claude ? path.join(claude, "projects", path.resolve(root).replace(/[^A-Za-z0-9]/g, "-")) : null;
+  const global = [[claude, "CLAUDE.md"], [codex, "AGENTS.md"]].filter(([home]) => home && fs.existsSync(home)).map(([home, name]) => path.join(home, name));
+  return { global, transcripts: project, memory: project && path.join(project, "memory") };
+}
+
+// One line for a default folder that does not exist; the run goes on without it.
+function noDefault(script, what, dir, flag) {
+  const { excerpt } = require("./session-evidence-redaction.js");
+  process.stderr.write(`${script}: no ${what}${dir ? ` at ${excerpt(dir)}` : ""}; pass ${flag} to name one\n`);
+}
+
 function main(argv) {
   const args = argv.slice(2);
   let root = process.cwd();
   let json = false;
-  const global = [];
+  let global = [];
+  let globalGiven = false;
   let memory;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--json") json = true;
     else if (args[i] === "--root" && i + 1 < args.length) root = args[++i];
-    else if (args[i] === "--global" && i + 1 < args.length) global.push(path.resolve(args[++i]));
+    else if (args[i] === "--global" && i + 1 < args.length) {
+      global.push(path.resolve(args[++i]));
+      globalGiven = true;
+    }
     else if (args[i] === "--memory" && i + 1 < args.length) memory = path.resolve(args[++i]);
     else {
       process.stderr.write("usage: audit.js [--root <dir>] [--json] [--global <file>]... [--memory <file>]\n");
@@ -729,12 +755,18 @@ function main(argv) {
     process.stderr.write(`audit.js: not a directory: ${root}\n`);
     return 2;
   }
+  const defaults = hostDefaults(root);
+  if (!globalGiven) global = defaults.global;
+  if (memory === undefined) {
+    if (defaults.memory && fs.existsSync(defaults.memory)) memory = path.join(defaults.memory, "MEMORY.md");
+    else noDefault("audit.js", "Claude Code memory folder", defaults.memory, "--memory <file>");
+  }
   const report = audit(root, { global, memory });
   process.stdout.write(json ? `${JSON.stringify(report, null, 2)}\n` : formatSummary(report));
   return 0;
 }
 
 // Exported before main runs, so a module main loads lazily sees the whole API.
-module.exports = { HIDDEN_CHARACTERS, audit, formatSummary, limitationFor, main };
+module.exports = { HIDDEN_CHARACTERS, audit, formatSummary, hostDefaults, limitationFor, main, noDefault };
 
 if (require.main === module) process.exitCode = main(process.argv);

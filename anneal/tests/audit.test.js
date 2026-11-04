@@ -10,12 +10,15 @@ const os = require("node:os");
 require("./temp-root.js");
 const path = require("node:path");
 const { spawnSync, execFileSync } = require("node:child_process");
-const { audit, limitationFor } = require("../scripts/audit.js");
+const { audit, hostDefaults, limitationFor } = require("../scripts/audit.js");
 
 const CLI = path.join(__dirname, "..", "scripts", "audit.js");
 
 // Keep git from treating a temp directory as part of a repository above it.
 process.env.GIT_CEILING_DIRECTORIES = os.tmpdir();
+// The CLI's host defaults find homes that do not exist, never the real ones.
+process.env.CLAUDE_CONFIG_DIR = path.join(os.tmpdir(), "no-claude-home");
+process.env.CODEX_HOME = path.join(os.tmpdir(), "no-codex-home");
 
 const created = [];
 after(() => {
@@ -744,6 +747,40 @@ describe("start context", () => {
     assert.strictEqual(startContext.sources.find((source) => source.loads.startsWith("import of")).characters, "extra rules\n".length);
     assert.ok(!byLoads.global.file.startsWith("CLAUDE.md") && byLoads.global.file.endsWith("CLAUDE.md"));
     assert.strictEqual(startContext.missing.length, 0);
+  });
+
+  test("the project folder key is the root's path with each character outside [A-Za-z0-9] a hyphen", () => {
+    const home = path.join(os.tmpdir(), "fake-claude");
+    const [root, key] = process.platform === "win32" ? ["D:\\a.b\\c d", "D--a-b-c-d"] : ["/a.b/c d", "-a-b-c-d"];
+    const defaults = hostDefaults(root, { CLAUDE_CONFIG_DIR: home, CODEX_HOME: path.join(home, "none") });
+    assert.deepStrictEqual(defaults, { global: [], transcripts: path.join(home, "projects", key), memory: path.join(home, "projects", key, "memory") });
+  });
+
+  test("the CLI takes each detected host's global file and the project's memory index from the root", () => {
+    const homes = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-homes-"));
+    created.push(homes);
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    const env = { ...process.env, CLAUDE_CONFIG_DIR: path.join(homes, "claude"), CODEX_HOME: path.join(homes, "codex") };
+    const memory = hostDefaults(root, env).memory;
+    write(homes, { "claude/CLAUDE.md": "claude rules\n", "codex/AGENTS.md": "codex rules\n", "other.md": "named\n" });
+    write(memory, { "MEMORY.md": "- one memory\n" });
+    const run = (...args) => spawnSync(process.execPath, [CLI, "--root", root, "--json", ...args], { encoding: "utf-8", env });
+    const loads = (result) => JSON.parse(result.stdout).startContext.sources.map((source) => [source.loads, source.characters]).sort();
+    const derived = run();
+    assert.strictEqual(derived.status, 0, derived.stderr);
+    assert.strictEqual(derived.stderr, "");
+    assert.deepStrictEqual(loads(derived), [["global", "codex rules\n".length], ["global", "claude rules\n".length],["memory index", "- one memory\n".length], ["project", "# Shop\n".length]]);
+    assert.deepStrictEqual(JSON.parse(derived.stdout).startContext.missing, []);
+    // A flag replaces its default.
+    assert.deepStrictEqual(loads(run("--global", path.join(homes, "other.md"), "--memory", path.join(homes, "other.md"))),
+      [["global", "named\n".length], ["memory index", "named\n".length], ["project", "# Shop\n".length]]);
+
+    // A missing default folder is one line, and the run goes on.
+    fs.rmSync(memory, { recursive: true });
+    const absent = run();
+    assert.strictEqual(absent.status, 0);
+    assert.match(absent.stderr, /^audit\.js: no Claude Code memory folder at .*memory; pass --memory <file> to name one\n$/);
+    assert.match(JSON.parse(absent.stdout).startContext.missing.find((entry) => entry.source === "memory index").reason, /^not given/);
   });
 
   test("rules without paths frontmatter load, rules with it do not", () => {

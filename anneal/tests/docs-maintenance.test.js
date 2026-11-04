@@ -11,11 +11,15 @@ require("./temp-root.js");
 const path = require("node:path");
 const { spawnSync, execFileSync } = require("node:child_process");
 const { maintain } = require("../scripts/docs-maintenance.js");
+const { hostDefaults } = require("../scripts/audit.js");
 
 const CLI = path.join(__dirname, "..", "scripts", "docs-maintenance.js");
 
 // Keep git from treating a temp directory as part of a repository above it.
 process.env.GIT_CEILING_DIRECTORIES = os.tmpdir();
+// The CLI's host defaults find homes that do not exist, never the real ones.
+process.env.CLAUDE_CONFIG_DIR = path.join(os.tmpdir(), "no-claude-home");
+process.env.CODEX_HOME = path.join(os.tmpdir(), "no-codex-home");
 
 const IGNORE = ".private/\ndocs/tasks/\ndocs/decisions/\ndocs/knowledge/private/\ndocs/apis/private/\n";
 const doc = (related, extra = "") => `---\ntype: knowledge\nsummary: "Synthetic fixture."\nrelated_files:\n${related.map((r) => `  - ${r}\n`).join("")}${extra}---\n\n# Doc\n`;
@@ -337,6 +341,33 @@ test("a clean memory folder has no memory proposals", () => {
     "mem/sub/nested.md": "Linked from the index by its relative path.\n",
   });
   assert.deepStrictEqual(maintain(root, { memories: ["mem"], now: NOW }).proposals, []);
+});
+
+test("the CLI reads the project's transcripts and memory folder from the host home unless a flag names them", () => {
+  const root = repo();
+  write(root, { "docs/tasks/done.md": task("completed"), "mem/MEMORY.md": "- [Kept](kept.md) — indexed\n", "mem/kept.md": memory("2026-10-30T00:00:00.000Z", "Indexed.") });
+  age(root, "docs/tasks/done.md", 10);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-claude-home-"));
+  created.push(home);
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: home };
+  const { transcripts, memory: memoryDir } = hostDefaults(root, env);
+  write(memoryDir, { "MEMORY.md": "- [Kept](kept.md) — indexed\n", "kept.md": memory("2026-10-30T00:00:00.000Z", "Indexed."), "orphan.md": memory("2026-10-30T00:00:00.000Z", "Nothing links this one.") });
+  const run = (...args) => spawnSync(process.execPath, [CLI, "--root", root, "--json", ...args], { encoding: "utf8", env });
+  const ids = (result) => JSON.parse(result.stdout).proposals.map((p) => `${p.id} ${p.path} ${p.detail.includes("no transcripts read") ? "unread" : "read"}`);
+
+  const derived = run();
+  assert.strictEqual(derived.status, 0, derived.stderr);
+  assert.strictEqual(derived.stderr, "");
+  assert.deepStrictEqual(ids(derived).map((line) => line.replace(/ \S*memory\//, " memory/")), ["fold-completed docs/tasks/done.md read", "memory-unindexed memory/orphan.md read"]);
+  // Flags replace the defaults.
+  assert.deepStrictEqual(ids(run("--transcripts", root, "--memory", "mem")), ["fold-completed docs/tasks/done.md read"]);
+
+  // A missing default folder is one line each, and the run goes on.
+  fs.rmSync(transcripts, { recursive: true });
+  const absent = run();
+  assert.strictEqual(absent.status, 0);
+  assert.match(absent.stderr, /^docs-maintenance\.js: no Claude Code transcripts folder at .*; pass --transcripts <directory> to name one\ndocs-maintenance\.js: no Claude Code memory folder with a MEMORY\.md at .*; pass --memory <directory> to name one\n$/);
+  assert.deepStrictEqual(ids(absent), ["fold-completed docs/tasks/done.md unread"]);
 });
 
 test("a memory folder without MEMORY.md is refused", () => {

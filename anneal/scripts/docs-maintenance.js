@@ -11,6 +11,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { check, docFiles, frontmatter, linkTargets, relatedCandidates } = require("./docs-check.js");
+const { hostDefaults, noDefault } = require("./audit.js");
+const { excerpt } = require("./session-evidence-redaction.js");
 
 // 96 of 100 task notes that another session ever read were first read within 3 days of their
 // last write, so a completed note untouched for longer is very likely never read again.
@@ -111,7 +113,9 @@ const CHANGING =/\b(?:still|now|currently|not yet|no longer|pending|deferred|unr
 // each. Nothing in the folder is written.
 function memoryProposals(root, dir, now) {
   const folder = path.resolve(root, dir);
-  const label = (name) => `${dir.replace(/\\/g, "/").replace(/\/+$/, "")}/${name}`;
+  // An absolute folder, such as the host's memory folder, is shown redacted as session evidence is.
+  const shown = path.isAbsolute(dir) ? excerpt(folder) : dir;
+  const label = (name) => `${shown.replace(/\\/g, "/").replace(/\/+$/, "")}/${name}`;
   const names = fs.readdirSync(folder).filter((n) => n.endsWith(".md") && n !== "MEMORY.md").sort();
   const proposals = [];
   const add = (id, name, detail) => proposals.push({ id, path: label(name), detail });
@@ -390,6 +394,16 @@ function main(argv) {
   if (!root) {
     process.stderr.write(USAGE);
     return 2;
+  }
+  // Without a flag, Claude Code's folder for the root supplies the transcripts and the memory folder.
+  const defaults = hostDefaults(root);
+  if (!transcripts.length) {
+    if (defaults.transcripts && fs.existsSync(defaults.transcripts)) transcripts.push(defaults.transcripts);
+    else noDefault("docs-maintenance.js", "Claude Code transcripts folder", defaults.transcripts, "--transcripts <directory>");
+  }
+  if (!memories.length) {
+    if (defaults.memory && fs.existsSync(path.join(defaults.memory, "MEMORY.md"))) memories.push(defaults.memory);
+    else noDefault("docs-maintenance.js", "Claude Code memory folder with a MEMORY.md", defaults.memory, "--memory <directory>");
   }
   try {
     const report = maintain(root, { stores, transcripts, memories });
