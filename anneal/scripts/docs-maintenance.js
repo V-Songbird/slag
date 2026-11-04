@@ -95,8 +95,14 @@ const MEMORY_STALE_DAYS = 14;
 // (Jaccard similarity) say much the same thing. Among 15 hand-consolidated memories no pair
 // passed 0.22.
 const MEMORY_DUPLICATE = 0.4;
+// Interpreters whose script's flags belong to the project.
+const INTERPRETER = /^(?:node|bash|sh|py|python|pwsh)$/;
 // Node options whose next token is their value, not the script.
-const NODE_VALUE_OPTION = /^(?:-r|--require|--import|--loader|--experimental-loader|--env-file|--env-file-if-exists|-C|--conditions)$/;
+const NODE_VALUE_OPTION = /^(?:-r|--require|--import|--loader|--experimental-loader|--env-file|--env-file-if-exists|-C|--conditions|--test-reporter|--test-reporter-destination|--watch-path|--cpu-prof-dir|--cpu-prof-name|--heap-prof-dir|--heap-prof-name|--diagnostic-dir|--report-dir|--report-directory|--report-filename|--redirect-warnings)$/;
+// Interpreter options that run inline code or a module, so no project script follows.
+const INLINE_CODE = /^(?:-e|--eval|-p|--print|-c|-m|-Command)$/;
+// Git commands whose arguments before any `--` are refs, not paths.
+const REF_COMMAND = /^(?:checkout|switch|push|branch|merge|rebase)$/;
 const CHANGING =/\b(?:still|now|currently|not yet|no longer|pending|deferred|unresolved|so far)\b/i;
 
 // Proposals for a native memory folder: one Markdown file per fact and a MEMORY.md index linking
@@ -152,19 +158,26 @@ function memoryProposals(root, dir, now) {
       if (run && !scripts.has(run[1])) missing.push(`npm run ${run[1]}`);
       // A path counts only when its first folder, after any leading `./`, exists in the project,
       // which leaves out git refs such as `origin/main`, MIME types, `../` paths into other
-      // workspaces and paths under a deleted top folder.
-      for (const t of tokens.filter(isPath)) {
+      // workspaces and paths under a deleted top folder. A root-level `./file` is always checked.
+      // In `git checkout`, `switch`, `push`, `branch`, `merge` and `rebase`, words before `--` are refs.
+      const refsEnd = tokens[0] === "git" && REF_COMMAND.test(tokens[1]) ? tokens.indexOf("--") + 1 || tokens.length : 0;
+      for (const t of tokens.slice(refsEnd).filter(isPath)) {
         const rel = t.replace(/^(?:\.\/)+/, "");
-        if (!rel.startsWith("../") && fs.existsSync(path.join(root, rel.split("/")[0])) && !fs.existsSync(path.join(root, rel))) missing.push(t);
+        if (!rel.startsWith("../") && (!rel.includes("/") || fs.existsSync(path.join(root, rel.split("/")[0]))) && !fs.existsSync(path.join(root, rel))) missing.push(t);
       }
-      // Flags belong to the project only after its script: `node <script> --flag` or
-      // `npm run <script> -- --flag`, not node's or npm's own. A path that is the value of a node
-      // option, as in `node --import ./setup.js <script>`, is not the script.
-      const script = run
-        ? tokens.indexOf("--")
-        : tokens[0] === "node"
-          ? tokens.findIndex((t, i) => isPath(t) && !NODE_VALUE_OPTION.test(tokens[i - 1]))
-          : -1;
+      // Flags belong to the project only after its script: `<interpreter> <script> --flag` or
+      // `npm run <script> -- --flag`, not the interpreter's or npm's own. The script is the first
+      // path or file name after the interpreter that is not the value of a listed node option, as
+      // in `node --import ./setup.js <script>`; inline code such as `node -e` or `python -m` has none.
+      let script = run ? tokens.indexOf("--") : -1;
+      if (!run && INTERPRETER.test(tokens[0])) {
+        for (let i = 1; i < tokens.length && !INLINE_CODE.test(tokens[i]); i++) {
+          if ((isPath(tokens[i]) || /^\w[\w-]*\.\w+$/.test(tokens[i])) && !NODE_VALUE_OPTION.test(tokens[i - 1])) {
+            script = i;
+            break;
+          }
+        }
+      }
       for (const t of script < 0 ? [] : tokens.slice(script + 1)) {
         const flag = /^--[a-z][\w-]*/i.exec(t)?.[0];
         if (flag) {
@@ -190,10 +203,11 @@ function memoryProposals(root, dir, now) {
     words.set(name, new Set(body.toLowerCase().match(/[a-z0-9]{4,}/g) || []));
   }
 
-  // A flag counts only as a whole token in a project file: `--root` is not found in `--root-dir`.
+  // A flag counts only as a whole token in a project file, binary files included: `--root` is not
+  // found in `--root-dir`.
   const found = new Set();
   if (flags.size) {
-    const grep = spawnSync("git", ["-C", root, "grep", "-h", "-F", "--untracked", ...[...flags].flatMap((f) => ["-e", f]), "--", ".", ...exclude], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+    const grep = spawnSync("git", ["-C", root, "grep", "-h", "-F", "--text", "--untracked", ...[...flags].flatMap((f) => ["-e", f]), "--", ".", ...exclude], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
     if (grep.error) throw grep.error;
     if (grep.status !== 0 && grep.status !== 1) throw new Error(grep.stderr.trim() || "git grep failed.");
     for (const flag of flags) {

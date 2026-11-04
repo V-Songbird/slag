@@ -229,8 +229,8 @@ test("memory spans that name another tool's refs, flags or files are not missing
   const fresh = "2026-10-30T00:00:00.000Z";
   write(root, {
     "mem/MEMORY.md": "- [Steps](steps.md) — owner steps\n- [Logs](logs.md) — evidence names\n- [Refs](refs.md) — other tools\n",
-    "mem/steps.md": memory(fresh, "Never recommend `git branch -D keep/release` to the owner."),
-    "mem/logs.md": memory(fresh, "A script such as `run.sh` may write `ev/long/run.log`."),
+    "mem/steps.md": memory(fresh, "Never recommend `git branch -D draft/spike` to the owner."),
+    "mem/logs.md": memory(fresh, "A script such as `run.sh` may write `out/trace/output.txt`."),
     "mem/refs.md": memory(fresh, "Compare against `origin/main`, send `application/json`, read `git log --oneline anneal/scripts/x.js` and run `node --test tests/x.test.js`; `node scripts/run.js --root` takes a flag."),
   });
   assert.deepStrictEqual(of(maintain(root, { memories: ["mem"], now: NOW }), "memory-missing-path"), [
@@ -238,21 +238,53 @@ test("memory spans that name another tool's refs, flags or files are not missing
   ]);
 });
 
-test("memory paths run by another interpreter are checked, their flags, other workspaces and node option values are not", () => {
+test("memory scripts run by an interpreter have their paths and flags checked; git refs, other workspaces and node option values do not", () => {
   const root = repo();
   commit(root, { "scripts/run.js": "--root", "tools/keep.py": "x" }, "2026-10-01");
   const fresh = "2026-10-30T00:00:00.000Z";
   write(root, {
-    "mem/MEMORY.md": "- [Tools](tools.md) — other interpreters\n- [Away](away.md) — elsewhere\n- [Preload](preload.md) — node options\n",
-    // Flags are checked only in `node <dir>/<script>` and `npm run <script> --`; a ref whose first
-    // segment is a project folder still reads as a path.
-    "mem/tools.md": memory(fresh, "Run `bash scripts/gone.sh --gone-sh` or `py tools/gone.py --gone-py` or `node run.js --gone-root`; `git checkout scripts/hotfix` is a ref and `./scripts/old.js` is gone too."),
+    "mem/MEMORY.md": "- [Tools](tools.md) — other interpreters\n- [Refs](refs.md) — git refs\n- [Away](away.md) — elsewhere\n- [Preload](preload.md) — node options\n",
+    "mem/tools.md": memory(fresh, "Run `bash scripts/gone.sh --gone-sh`, `sh scripts/run.js --gone-sh2`, `py tools/gone.py --gone-py`, `python tools/keep.py --gone-python`, `pwsh scripts/run.js --gone-pwsh` or `node run.js --gone-root`, not `python -m tools.keep --module-flag`; `./scripts/old.js` is gone too."),
+    "mem/refs.md": memory(fresh, "`git checkout scripts/hotfix`, `git switch -c scripts/next`, `git push origin scripts/hotfix`, `git branch -D scripts/old`, `git merge scripts/hotfix` and `git rebase scripts/base` name refs; `git checkout -- scripts/lost.js` names a path."),
     "mem/away.md": memory(fresh, "The sibling checkout has `../other-repo/src/x.js`; `./gone/x.js` sat under a removed folder."),
     "mem/preload.md": memory(fresh, "Debug with `node --import ./scripts/run.js --inspect scripts/run.js --root`."),
   });
   assert.deepStrictEqual(of(maintain(root, { memories: ["mem"], now: NOW }), "memory-missing-path"), [
-    "mem/tools.md names scripts/gone.sh, tools/gone.py, scripts/hotfix, ./scripts/old.js, absent from the project or the memory folder",
+    "mem/refs.md names scripts/lost.js, absent from the project or the memory folder",
+    "mem/tools.md names scripts/gone.sh, --gone-sh, --gone-sh2, tools/gone.py, --gone-py, --gone-python, --gone-pwsh, --gone-root, ./scripts/old.js, absent from the project or the memory folder",
   ]);
+});
+
+test("a missing root-level file written as ./name is a missing memory path", () => {
+  const root = repo();
+  commit(root, { "kept.js": "x" }, "2026-10-01");
+  write(root, {
+    "mem/MEMORY.md": "- [Root](root.md) — root files\n",
+    "mem/root.md": memory("2026-10-30T00:00:00.000Z", "Run `./gone.js`, not `./kept.js`."),
+  });
+  assert.deepStrictEqual(of(maintain(root, { memories: ["mem"], now: NOW }), "memory-missing-path"), [
+    "mem/root.md names ./gone.js, absent from the project or the memory folder",
+  ]);
+});
+
+test("a memory flag found only in a committed binary file is present", () => {
+  const root = repo();
+  commit(root, { "scripts/run.js": "x", "bin/tool.bin": "\0\x01--binflag\0" }, "2026-10-01");
+  write(root, {
+    "mem/MEMORY.md": "- [Bin](bin.md) — binary flag\n",
+    "mem/bin.md": memory("2026-10-30T00:00:00.000Z", "Run `node scripts/run.js --binflag`."),
+  });
+  assert.deepStrictEqual(of(maintain(root, { memories: ["mem"], now: NOW }), "memory-missing-path"), []);
+});
+
+test("a node option's path value is not the script, so node's own flags after it are not checked", () => {
+  const root = repo();
+  commit(root, { "scripts/run.js": "--root" }, "2026-10-01");
+  write(root, {
+    "mem/MEMORY.md": "- [Report](report.md) — reporter\n",
+    "mem/report.md": memory("2026-10-30T00:00:00.000Z", "Run `node --test-reporter-destination out/r.txt --test-reporter spec scripts/run.js --root` or `node --watch-path src/lib --cpu-prof-dir prof/out scripts/run.js --root`."),
+  });
+  assert.deepStrictEqual(of(maintain(root, { memories: ["mem"], now: NOW }), "memory-missing-path"), []);
 });
 
 test("a memory pass leaves the memory folder byte-identical", () => {
