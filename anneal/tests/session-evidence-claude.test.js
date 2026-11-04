@@ -1048,6 +1048,23 @@ describe("a refused call and what followed it", () => {
     assert.deepStrictEqual(report.candidates[0].retriesAfterRefusal, []);
   });
 
+  test("a hook's denial is refused, its identical resubmission is no retry, and another form of it is one", () => {
+    const report = analyzeClaude(transcript([
+      human("add the padding helper", 1),
+      use("t1", "Bash", { command: "npm install pad-lib" }, 2),
+      result("t1", "PreToolUse:Bash hook error: [node guard.js]: guard: pad-lib adds a new dependency; it asks once per package", 3, true),
+      use("t2", "Bash", { command: "npm install pad-lib" }, 4),
+      result("t2", "added 1 package", 5),
+      use("t3", "Bash", { command: "npm install --save-exact pad-lib" }, 6),
+      result("t3", "up to date", 7),
+      use("t4", "Bash", { command: "node report.js" }, 8),
+      result("t4", "line 3 Bash tool-error PreToolUse:Bash hook error: guard", 9),
+      human("audit", 10),
+    ]));
+    assert.deepStrictEqual(report.candidates.map((c) => [c.callLine, c.category]), [[2, "blocked"]]);
+    assert.deepStrictEqual(report.candidates[0].retriesAfterRefusal.map((c) => c.callLine), [6]);
+  });
+
   test("a failure that nobody refused carries no retry list", () => {
     const report = analyzeClaude(transcript([
       human("run the suite", 1),

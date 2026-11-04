@@ -21,7 +21,10 @@ const READ_LIMIT = /exceeds maximum allowed (?:tokens|size)\b/;
 
 // First match wins, so a host's own error text sits above the generic shell ones. A missing path is not listed:
 // it is read from a failed read, search or edit alone, with MISSING.
+// A hook that blocks a call before it runs: the host puts this in place of the call's output.
+const HOOK_DENIAL = /^PreToolUse:\S+ hook error: /;
 const CLAUDE_DIAGNOSTICS = [
+  ["blocked", HOOK_DENIAL],
   ["unknown-tool", /No such tool available/],
   ["invalid-tool-input", /InputValidationError/],
   ["stale-file-state", /File has (?:not been read yet|been modified since read)/],
@@ -168,8 +171,10 @@ function commandPairs(command) {
 
 // A later call retries a refused one when it reaches the same path by the same operation, or, for a shell command that
 // names no path, when a shell command runs the same program with the same first argument, whatever flags or wrapping
-// come between. Any other tool retries only with the same input.
-function retries(refused, call) {
+// come between. Any other tool retries only with the same input. A hook judges an identical call again itself, so after a
+// hook's denial only another form of the call retries it.
+function retries(refused, call, byHook) {
+  if (byHook && call.tool === refused.tool && call.commandOrArguments === refused.commandOrArguments) return false;
   if (refused.path !== null) return call.path === refused.path && call.operation === refused.operation;
   if (!SHELL_TOOLS.has(refused.tool)) return call.tool === refused.tool && call.commandOrArguments === refused.commandOrArguments;
   if (!SHELL_TOOLS.has(call.tool) || typeof call.commandOrArguments !== "string") return false;
@@ -225,6 +230,7 @@ function analyzeClaude(file, before = null, limit = 6) {
   const actors = new Map();
   const failures = [];
   const failedCalls = new WeakMap();
+  const hookDenied = new WeakSet();
   const counts = {};
   const largest = [];
   const context = {};
@@ -287,7 +293,7 @@ function analyzeClaude(file, before = null, limit = 6) {
             // own assistant message ran beside it, whenever the host wrote it down, and one for another prompt is other work.
             if (failure.retriesAfterRefusal && failure.actor === call.actor && failure.promptLine === call.promptLine
               && !siblings(nav, failedCalls.get(failure), call)
-              && failure.retriesAfterRefusal.length < 2 && retries(failure, call)) {
+              && failure.retriesAfterRefusal.length < 2 && retries(failure, call, hookDenied.has(failure))) {
               failure.retriesAfterRefusal.push({ ...call });
             }
           }
@@ -331,6 +337,7 @@ function analyzeClaude(file, before = null, limit = 6) {
             ...(REFUSED.has(category) ? { retriesAfterRefusal: [] } : {}),
           };
           failedCalls.set(failure, call);
+          if (HOOK_DENIAL.test(output)) hookDenied.add(failure);
           keepLast(failures, failure, limit);
           counts[category] = (counts[category] || 0) + 1;
         } else {
