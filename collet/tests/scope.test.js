@@ -2,7 +2,7 @@
 // directions: refusing work it had no business refusing, and waving through the one command that
 // can remove a whole directory.
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import test from 'node:test';
 
@@ -718,6 +718,7 @@ test('the task session and another session share one checkout', () => {
   assert.equal(fires(root, write('docs/tasks/283-note.md')), false, "another session's private note");
   mkdirSync(join(root, 'docs', 'tasks'), { recursive: true });
   writeFileSync(join(root, 'docs', 'tasks', '283-note.md'), 'note\n', 'utf8');
+  assert.equal(fires(root, { tool: 'Bash', input: { command: 'rm -rf docs/tasks' } }), true, "the whole location, every session's notes");
   assert.equal(live({ root, task: TASK }).fires, false, 'the close-time check agrees');
 });
 
@@ -752,9 +753,9 @@ test('an ignored path under .collet/, an instruction file or a dot name is still
 });
 
 test('an instruction file named with a stream or a trailing dot is still refused', () => {
-  const root = withTree({ '.gitignore': 'pkg/\nCLAUDE.md\ndocs/tasks/\n' });
+  const root = withTree({ '.gitignore': 'pkg/docs/tasks/\nCLAUDE.md\ndocs/tasks/\n' });
   repo(root);
-  assert.equal(fires(root, write('pkg/AGENTS.md::$DATA')), true);
+  assert.equal(fires(root, write('pkg/docs/tasks/AGENTS.md::$DATA')), true, 'a stream name in a location below the root');
   assert.equal(fires(root, write('docs/tasks/AGENTS.md::$DATA')), true);
   assert.equal(fires(root, write('docs/tasks/CLAUDE.md:x')), true);
   assert.equal(fires(root, write('docs/tasks/CLAUDE.md.')), true);
@@ -771,7 +772,19 @@ test('ignored dependencies and build output are still enforced', () => {
   assert.equal(fires(root, write('node_modules/dep/index.js')), true);
   assert.equal(fires(root, write('dist/app.js')), true);
   assert.equal(fires(root, { tool: 'Bash', input: { command: 'rm -rf node_modules' } }), true);
+  assert.equal(fires(root, write('node_modules/dep/docs/tasks/index.js')), true, 'a location inside an ignored dependency');
+  assert.equal(fires(root, write('dist/docs/tasks/app.js')), true, 'a location inside ignored build output');
   assert.equal(fires(root, write('pkg/docs/tasks/x.md')), false, 'a private record below the root');
+});
+
+test('a tracked file under a private-record location is still enforced in another letter case', () => {
+  const root = withTree({ '.gitignore': 'docs/tasks/\n', 'docs/tasks/kept/keep.md': 'keep\n' });
+  repo(root);
+  git(root, ['add', '-f', 'docs/tasks/kept/keep.md']);
+  git(root, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'keep']);
+  rmSync(join(root, 'docs', 'tasks', 'kept', 'keep.md'));
+  assert.equal(fires(root, write('docs/tasks/kept/KEEP.md')), true, 'Git ignores this spelling; the index holds the other');
+  assert.equal(fires(root, { tool: 'Bash', input: { command: 'rm -rf docs/tasks/kept' } }), true, 'a directory that holds a tracked file');
 });
 
 test('an ignored link to tracked code is still enforced', () => {

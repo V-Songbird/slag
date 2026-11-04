@@ -11,8 +11,8 @@
 //   - anything outside the repository, including another drive and /dev/null;
 //   - the roadmap and state another planning tool owns, which that tool guards itself;
 //   - a private record: a path under docs/tasks/, docs/decisions/, docs/knowledge/private/ or
-//     docs/apis/private/ that Git ignores and that holds no tracked file, which the close-time check
-//     never lists either.
+//     docs/apis/private/ that Git ignores, that holds no tracked file and that does not sit inside a
+//     directory Git ignores, which the close-time check never lists either.
 import { execFileSync } from 'node:child_process';
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -411,8 +411,10 @@ export function targetsOf(call, root) {
   return null;
 }
 
-// The locations that hold private records, at any depth.
+// The locations that hold private records, at any depth outside a directory Git ignores.
 const PRIVATE_RECORD = /(?:^|\/)docs\/(?:tasks|decisions|knowledge\/private|apis\/private)\//;
+// Windows drops a trailing dot or space from a name and reads `name:stream` as the file `name`.
+const guardedName = (part) => part.startsWith('.') || /:|[. ]$/.test(part) || /^(agents|claude).*\.md$/i.test(part);
 
 /**
  * Is a repository path a private record: one under a private-record location that Git ignores and
@@ -420,7 +422,8 @@ const PRIVATE_RECORD = /(?:^|\/)docs\/(?:tasks|decisions|knowledge\/private|apis
  *
  * The close-time check never lists one, so any session in the checkout, the task's own or another,
  * keeps its notes there without widening the open task. Other ignored paths, such as dependencies
- * and build output the accept command may load, stay guarded. A path with a file or directory name
+ * and build output the accept command may load, stay guarded, and so does a location inside one of
+ * them, such as a dependency's own docs/tasks/. A path with a file or directory name
  * that starts with a dot stays guarded, since host settings live there and one can switch the hooks
  * off, and so does an `AGENTS*.md` or `CLAUDE*.md` at any depth, which a host loads into later
  * sessions, and any name holding a colon or ending in a dot or space, which Windows can resolve to
@@ -432,6 +435,15 @@ const PRIVATE_RECORD = /(?:^|\/)docs\/(?:tasks|decisions|knowledge\/private|apis
 function privateRecord(rel, root) {
   const git = (args) =>
     execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 });
+  // Exit 1 means not ignored; any other failure counts as ignored, so the path stays guarded.
+  const ignored = (path) => {
+    try {
+      git(['check-ignore', '-q', '--', path]);
+      return true;
+    } catch (error) {
+      return error.status !== 1;
+    }
+  };
   try {
     let base = resolve(root, rel);
     let rest = '';
@@ -448,11 +460,12 @@ function privateRecord(rel, root) {
     const real = relative(realpathSync.native(root), join(realpathSync.native(base), rest)).split('\\').join('/');
     if (!real || real === '..' || real.startsWith('../') || isAbsolute(real)) return false;
     for (const path of new Set([rel, real])) {
-      if (!PRIVATE_RECORD.test(path)) return false;
-      // Windows drops a trailing dot or space from a name and reads `name:stream` as the file `name`.
-      const named = (part) => part.startsWith('.') || /:|[. ]$/.test(part) || /^(agents|claude).*\.md$/i.test(part);
-      if (path.split('/').some(named)) return false;
+      const location = PRIVATE_RECORD.exec(path);
+      if (!location) return false;
+      if (path.split('/').some(guardedName)) return false;
       git(['check-ignore', '-q', '--', path]);
+      const above = path.slice(0, location.index);
+      if (above && ignored(`${above}/`)) return false;
       // In any letter case: a case-insensitive filesystem writes `Build/x` over a tracked `build/x`.
       if (git(['ls-files', '-z', '--', `:(icase,literal)${path}`]) !== '') return false;
     }
