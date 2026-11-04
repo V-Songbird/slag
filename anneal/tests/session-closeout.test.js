@@ -360,6 +360,74 @@ describe("the cleanup flag", () => {
     assert.deepStrictEqual({ flag: cleanup.flag, lastChangeLine: cleanup.lastChangeLine, ignoredStatusLine: cleanup.ignoredStatusLine },
       { flag: "needs-cleanup", lastChangeLine: null, ignoredStatusLine: null });
   });
+
+  test("an ExitWorktree after a start whose id the transcript does not show keeps the verdict", () => {
+    const dir = repository();
+    const file = transcript([
+      ...fixTurn(dir),
+      use("b1", "Bash", { command: "npm run dev", run_in_background: true }, 5),
+      result("b1", "Started.", 6),
+      use("x1", "EnterWorktree", { name: "s" }, 7),
+      result("x1", "Created worktree at .claude/worktrees/s", 8),
+      use("x2", "ExitWorktree", { action: "remove" }, 9),
+      result("x2", "Removed the worktree.", 10),
+    ]);
+    const { verdict, cleanup } = closeout(file, dir);
+    assert.strictEqual(verdict, "safe-to-delete");
+    assert.deepStrictEqual(cleanup.leftovers.map(({ kind, id }) => ({ kind, id })), [{ kind: "background-command", id: null }]);
+  });
+
+  test("ExitWorktree remove never removes a worktree the session already left", () => {
+    const dir = repository();
+    const file = transcript([
+      ...fixTurn(dir),
+      use("x1", "EnterWorktree", { name: "a" }, 5),
+      result("x1", "Created worktree at .claude/worktrees/a", 6),
+      use("x2", "ExitWorktree", { action: "keep" }, 7),
+      result("x2", "Kept the worktree.", 8),
+      use("x3", "EnterWorktree", { path: "../other" }, 9),
+      result("x3", "Switched to ../other", 10),
+      use("x4", "ExitWorktree", { action: "remove" }, 11),
+      result("x4", "Removed the worktree.", 12),
+      use("g1", "Bash", { command: "git status --short --ignored" }, 13),
+      result("g1", "", 14),
+    ]);
+    const { cleanup } = closeout(file, dir);
+    assert.strictEqual(cleanup.flag, "needs-cleanup");
+    assert.deepStrictEqual(cleanup.leftovers.map(({ kind, id, callLine }) => ({ kind, id, callLine })), [{ kind: "worktree", id: "a", callLine: 5 }]);
+  });
+
+  test("only a git status that lists ignored files counts as the listing", () => {
+    const dir = repository();
+    for (const command of ["git status --ignored=no", "echo 'run git status --ignored later'", "git stash list --format=status --ignored"]) {
+      const file = transcript([...fixTurn(dir), use("g1", "Bash", { command }, 5), result("g1", "", 6)]);
+      assert.strictEqual(closeout(file, dir).cleanup.ignoredStatusLine, null, command);
+    }
+    const file = transcript([...fixTurn(dir), use("g1", "PowerShell", { command: "git --no-pager status --ignored=matching -s" }, 5), result("g1", "", 6)]);
+    assert.deepStrictEqual({ flag: closeout(file, dir).cleanup.flag, line: closeout(file, dir).cleanup.ignoredStatusLine }, { flag: "clean", line: 5 });
+  });
+
+  test("a forced branch creation counts unless git reported resetting a branch that existed", () => {
+    const dir = repository();
+    const file = transcript([
+      ...fixTurn(dir),
+      use("w1", "Bash", { command: "git checkout -B main origin/main" }, 5),
+      result("w1", "Reset branch 'main'\nYour branch is up to date with 'origin/main'.", 6),
+      use("w2", "Bash", { command: "git worktree add -B release ../release" }, 7),
+      result("w2", "Preparing worktree (resetting branch 'release'; was at 1a2b3c4)", 8),
+      use("w3", "Bash", { command: "git switch --force-create spike" }, 9),
+      result("w3", "Switched to a new branch 'spike'", 10),
+      use("w4", "Bash", { command: "git switch -C quiet -q" }, 11),
+      result("w4", "", 12),
+      use("g1", "Bash", { command: "git status --short --ignored" }, 13),
+      result("g1", "", 14),
+    ]);
+    assert.deepStrictEqual(closeout(file, dir).cleanup.leftovers.map(({ kind, id, callLine }) => ({ kind, id, callLine })), [
+      { kind: "worktree", id: "../release", callLine: 7 },
+      { kind: "branch", id: "spike", callLine: 9 },
+      { kind: "branch", id: "quiet", callLine: 11 },
+    ]);
+  });
 });
 
 describe("the command line", () => {

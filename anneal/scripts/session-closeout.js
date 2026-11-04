@@ -13,7 +13,7 @@ const { spawnSync } = require("node:child_process");
 const { HOME, directory, excerpt } = require("./session-evidence-redaction.js");
 const { textBlocks } = require("./session-evidence-records.js");
 const { actorOf, firstCopies, isPrompt, isQueuedPrompt, subagentTranscripts } = require("./session-evidence-claude.js");
-const { normalizePath, programs } = require("./session-evidence-shell.js");
+const { normalizePath, programName, programs } = require("./session-evidence-shell.js");
 const { detectHost, findTranscript } = require("./session-evidence.js");
 
 // The tools whose input holds what they wrote. A shell command that removes or moves a file carries no content.
@@ -24,7 +24,6 @@ const AT_RISK = new Set(["missing", "outside-missing", "unresolved"]);
 // The cleanup flag: whether the session listed its ignored files after its last change, and which processes it
 // started and never saw end, and which worktrees and branches it created and never removed.
 const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
-const IGNORED_STATUS = /\bgit\b[^;&|\n]*\bstatus\b[^;&|\n]*--ignored\b/;
 const STOP_TOOLS = new Set(["KillShell", "TaskStop"]);
 const WORKTREE_TOOLS = new Set(["EnterWorktree", "ExitWorktree"]);
 const PROCESS_KINDS = new Set(["background-command", "preview-server"]);
@@ -33,7 +32,8 @@ const BRANCH_FLAGS = new Set(["-f", "--force", "-t", "--track", "--no-track", "-
 const BACKGROUND_ID = /running in background with ID: ([\w-]+)/i;
 const SERVER_ID = /serverId["']?\s*[:=]\s*["']?([\w-]+)/i;
 const NOTIFICATION = /<task-notification>([\s\S]*?)<\/task-notification>/g;
-const tagOf = (text, tag) => (new RegExp(`<${tag}>\\s*([^<]*?)\\s*</${tag}>`).exec(text) || [])[1];
+const TASK_ID = /<task-id>\s*([^<]*?)\s*<\/task-id>/;
+const TASK_STATUS = /<status>\s*([^<]*?)\s*<\/status>/;
 
 // The options and positional words of a git subcommand; each option in `valued` takes the next word as its value.
 function parseArgs(args, valued) {
@@ -54,9 +54,10 @@ function parseArgs(args, valued) {
   return { options, positional };
 }
 
-// The worktrees and branches one shell command line creates or removes through git, as far as its text shows. A
-// worktree is keyed by its absolute path, so a relative add and an absolute remove pair.
-function gitEffects(command, cwd) {
+// The worktrees and branches one shell command line creates or removes through git, as far as its text and output
+// show, and whether it lists ignored files. A worktree is keyed by its absolute path, so a relative add and an absolute
+// remove pair. A forced branch creation that git reports as resetting a branch that already existed creates nothing.
+function gitEffects(command, cwd, output) {
   const effects = [];
   const add = (op, kind, id, base) => {
     if (typeof id !== "string" || !id) return;
@@ -65,9 +66,12 @@ function gitEffects(command, cwd) {
       : id;
     effects.push({ op, kind, id, key });
   };
+  const create = (name, forced) => {
+    if (!forced || !(output.includes(`Reset branch '${name}'`) || output.includes(`resetting branch '${name}'`))) add("create", "branch", name);
+  };
   for (const part of programs(command, true)) {
     const words = (part.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((word) => word.replace(/^(["'])([\s\S]*)\1$/, "$2"));
-    if ((words[0] || "").split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, "") !== "git") continue;
+    if (programName(part) !== "git") continue;
     let base = cwd;
     let i = 1;
     for (; i < words.length && words[i].startsWith("-"); i++) {
@@ -78,13 +82,18 @@ function gitEffects(command, cwd) {
     if (sub === "worktree" && rest[0] === "add") {
       const { options, positional } = parseArgs(rest.slice(1), ["-b", "-B", "--reason"]);
       add("create", "worktree", positional[0], base);
-      add("create", "branch", options.get("-b") ?? options.get("-B"));
+      if (typeof options.get("-b") === "string") create(options.get("-b"), false);
+      else if (typeof options.get("-B") === "string") create(options.get("-B"), true);
     } else if (sub === "worktree" && rest[0] === "remove") {
       add("remove", "worktree", parseArgs(rest.slice(1), []).positional[0], base);
     } else if (sub === "checkout" || sub === "switch") {
       const valued = sub === "checkout" ? ["-b", "-B", "--orphan"] : ["-c", "-C", "--create", "--force-create", "--orphan"];
       const { options } = parseArgs(rest, valued);
-      add("create", "branch", valued.map((name) => options.get(name)).find((value) => typeof value === "string"));
+      const flag = valued.find((name) => typeof options.get(name) === "string");
+      if (flag) create(options.get(flag), ["-B", "-C", "--force-create"].includes(flag));
+    } else if (sub === "status") {
+      const ignored = parseArgs(rest, []).options.get("--ignored");
+      if (ignored !== undefined && ignored !== "no") effects.push({ op: "list-ignored" });
     } else if (sub === "branch") {
       const { options, positional } = parseArgs(rest, []);
       const names = [...options.keys()];
@@ -149,6 +158,8 @@ function closeout(file, root) {
     if (kinds.has(each.kind) && each.key !== null && each.key === key) each.ended = true;
   });
   let ignoredStatusLine = null;
+  // The worktree the session's last EnterWorktree created while the session is still in it; ExitWorktree acts on it only.
+  let entered = null;
   let cwd = null;
   let sidechain = 0;
   let turn = null;
@@ -163,8 +174,8 @@ function closeout(file, root) {
     const notices = row.type === "user" || row.type === "attachment"
       ? textBlocks(row.type === "user" ? message.content : (row.attachment || {}).prompt).join("\n") : "";
     for (const [, body] of notices.matchAll(NOTIFICATION)) {
-      const id = tagOf(body, "task-id");
-      const status = tagOf(body, "status");
+      const id = (TASK_ID.exec(body) || [])[1];
+      const status = (TASK_STATUS.exec(body) || [])[1];
       if (id && status && status !== "running") end(PROCESS_KINDS, id);
     }
     const queued = isQueuedPrompt(row);
@@ -197,14 +208,16 @@ function closeout(file, root) {
         const command = typeof input.command === "string" ? input.command : "";
         const start = (kind, id, key, text) => started.push({ kind, id, key, callLine, command: excerpt(text, 240), ended: false });
         if (SHELL_TOOLS.has(tool)) {
-          for (const effect of gitEffects(command, cwd)) {
+          const background = input.run_in_background === true;
+          for (const effect of gitEffects(command, cwd, output)) {
             if (effect.op === "create") start(effect.kind, effect.id, effect.key, command);
-            else end(new Set([effect.kind]), effect.key);
+            else if (effect.op === "remove") end(new Set([effect.kind]), effect.key);
+            else if (!background) ignoredStatusLine = callLine;
           }
-          if (input.run_in_background === true) {
+          if (background) {
             const id = (BACKGROUND_ID.exec(output) || [])[1] || null;
             start("background-command", id, id, command);
-          } else if (IGNORED_STATUS.test(command)) ignoredStatusLine = callLine;
+          }
         } else if (tool.endsWith("preview_start")) {
           // A call with only a url opens a page and starts no server.
           if (typeof input.name === "string" && input.name) {
@@ -213,11 +226,15 @@ function closeout(file, root) {
           }
         } else if (tool === "EnterWorktree") {
           // A call with a path enters a worktree that already exists.
-          if (!input.path) start("worktree", typeof input.name === "string" ? input.name : null, `EnterWorktree:${callLine}`, "EnterWorktree");
+          entered = null;
+          if (!input.path) {
+            start("worktree", typeof input.name === "string" ? input.name : null, `EnterWorktree:${callLine}`, "EnterWorktree");
+            entered = started.at(-1);
+          }
         } else if (tool === "ExitWorktree") {
-          // It acts only on the worktree the session's last EnterWorktree created, and removes its branch with it.
-          const open = started.filter((each) => each.key.startsWith("EnterWorktree:") && !each.ended).at(-1);
-          if (open && input.action === "remove") open.ended = true;
+          // It leaves the worktree, and with remove deletes it and its branch.
+          if (entered && input.action === "remove") entered.ended = true;
+          entered = null;
         } else {
           end(PROCESS_KINDS, input.serverId ?? input.task_id ?? input.shell_id ?? input.bash_id);
         }
@@ -261,14 +278,18 @@ function closeout(file, root) {
       flag: statusAfterChanges !== null && !leftovers.length ? "clean" : "needs-cleanup",
       lastChangeLine: lastChangeLine || null, ignoredStatusLine: statusAfterChanges, leftovers,
       limits: "Reported from the transcript only; no process, worktree, branch or file was checked. The ignored-file listing "
-        + "is a successful Bash or PowerShell call of git status with --ignored after the session's last Edit, MultiEdit, "
-        + "NotebookEdit or Write change, or anywhere in a session with none, since a shell command can write files. A leftover "
-        + "is a background command or preview server the session started and never saw stopped or ended by its id, or a "
-        + "worktree or branch it created with git worktree add, git checkout -b, git switch -c, git branch <name> or "
-        + "EnterWorktree and never removed with git worktree remove, git branch -d or -D, or ExitWorktree remove. A start "
-        + "whose id the transcript does not show is always listed. A process started any other way, such as with & in a "
-        + "shell command, the branch git worktree add creates without -b, worktree prune, branch renames and every git "
-        + "command in a shell call that reported an error are not seen.",
+        + "is a successful Bash or PowerShell call of git status with --ignored, other than --ignored=no, after the session's "
+        + "last Edit, MultiEdit, NotebookEdit or Write change, or anywhere in a session with none, since a shell command can "
+        + "write files. A leftover is a background command or preview server the session started and never saw stopped or "
+        + "ended by its id, or a worktree or branch it created with git worktree add (-b or -B), git checkout -b, -B or "
+        + "--orphan, git switch -c, -C, --create, --force-create or --orphan, git branch <name> or EnterWorktree and never "
+        + "removed with git worktree remove, git branch -d or -D, or ExitWorktree remove, which removes only the worktree "
+        + "the session is in. A forced form (-B, -C, --force-create) whose output says git reset a branch that already "
+        + "existed creates none; one with no such output, as in quiet mode or another language, is listed. A start whose "
+        + "id the transcript does not show is always listed. A process started any other way, such as with & in a shell "
+        + "command, the branch git worktree add creates without -b, a branch name joined to its option, a cd earlier in the "
+        + "same command line, worktree prune, branch renames and every git command in a shell call that reported an error "
+        + "are not seen.",
     },
     warnings: [...warnings].sort(),
     limits: "Claude Code only. A change is a call of Edit, MultiEdit, NotebookEdit or Write that reported no error; a shell "
