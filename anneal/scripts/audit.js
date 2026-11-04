@@ -10,7 +10,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { execFileSync, spawnSync } = require("node:child_process");
-const { observe } = require("./audit-observations.js");
+const { LONG_DOCUMENT_CHARS, MAX_IMPORT_HOPS, importTargets, observe } = require("./audit-observations.js");
 
 const MAP_FILE_MAX_LINES = 200;
 const LARGE_FILE_LINES = 800;
@@ -19,13 +19,9 @@ const MAX_DIR_DEPTH = 6;
 const MAX_READ_BYTES = 2 * 1024 * 1024;
 const EVIDENCE_LIMIT = 15;
 // What every session loads before its first prompt should cost no more than one
-// long document: the size at which the audit already calls a document long
-// (LONG_DOCUMENT_CHARS in audit-observations.js).
-const START_CONTEXT_BUDGET_CHARS = 20000;
+// long document, LONG_DOCUMENT_CHARS, and imports follow map-routes' @path rule,
+// MAX_IMPORT_HOPS deep.
 const GLOBAL_SHARE = 0.25;
-// The @path rule map-routes follows: Claude Code and Gemini CLI load a file
-// named as @path, five hops deep. Codex does not.
-const START_IMPORT_HOPS = 5;
 const START_IMPORTING = new Set(["CLAUDE.md", "CLAUDE.local.md", "GEMINI.md"]);
 const SEVERITY_ORDER = ["high", "medium", "low"];
 
@@ -485,34 +481,23 @@ function bodyOf(text) {
   return { lines: lines.slice(end + 1), scoped: lines.slice(1, Math.max(end, 1)).some((line) => /^paths\s*:/.test(line)) };
 }
 
-// The @path targets of a Markdown text, outside code blocks and code spans.
-function importsOf(text) {
-  const targets = [];
-  let fence = null;
-  for (const line of bodyOf(text).lines) {
-    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    if (fence) {
-      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !line.slice(marker[0].length).trim()) fence = null;
-    } else if (marker) {
-      fence = marker[1];
-    } else {
-      const prose = line.split("`").filter((_, k) => k % 2 === 0).join(" ");
-      for (const match of prose.matchAll(/(?:^|\s)@([^\s`'"()<>[\]]+)/g)) targets.push(match[1].replace(/[.,:;!?]+$/, ""));
-    }
-  }
-  return targets;
-}
+// An @word that names a path: one with an extension, or one that starts at a folder or a drive.
+const looksLikePath = (target) => /^(?:\.{1,2}\/|~\/|\/|[A-Za-z]:[\\/])/.test(target) || /\.[\w-]+$/.test(path.posix.basename(target));
 
 // What a Claude Code session loads before its first prompt: the project's
 // instruction files and their @path imports, rules without a paths: scope, and
-// the global file and memory index the caller names. SessionStart hooks are
-// listed, never run. Outside the root it reads only what the caller names.
-// Codex's global files are listed apart and left out of the Claude Code total.
-function startContext(root, reader, { global = [], codex = [], memory } = {}) {
+// the global file and memory index the caller names, each file once by its
+// resolved path, in any letter case on Windows. SessionStart hooks are listed,
+// never run; the hook text of the newest transcript in `transcripts` is summed
+// apart. Outside the root it reads only what the caller names. Codex's global
+// files are listed apart and left out of the Claude Code total.
+function startContext(root, reader, { global = [], codex = [], memory, transcripts = [] } = {}) {
   const { excerpt } = require("./session-evidence-redaction.js");
   const sources = [];
   const missing = [];
+  const keyOf = (abs) => (process.platform === "win32" ? path.resolve(abs).toLowerCase() : path.resolve(abs));
   const seen = new Set();
+  const SEEN = Symbol("seen");
   const globalFiles = new Set();
   const inside = (abs) => {
     const rel = path.relative(root, abs);
@@ -521,20 +506,24 @@ function startContext(root, reader, { global = [], codex = [], memory } = {}) {
   // A path outside the root is redacted as session evidence is: the home shortened to ~, and the
   // account name masked, also inside a Claude Code project key.
   const label = (abs) => inside(abs) ?? excerpt(abs);
-  // The file's text, null for a file not read as text, undefined when absent.
-  const load = (abs, loads, fromGlobal = false) => {
-    seen.add(abs);
-    const info = fs.statSync(abs, { throwIfNoEntry: false })?.isFile() ? readFile(path.dirname(abs), path.basename(abs)) : null;
+  const read = (abs) => (fs.statSync(abs, { throwIfNoEntry: false })?.isFile() ? readFile(path.dirname(abs), path.basename(abs)) : null);
+  // The file's text, null for a file not read as text, undefined when absent, SEEN when already counted.
+  const load = (abs, loads, fromGlobal = false, given = null) => {
+    if (seen.has(keyOf(abs))) return SEEN;
+    seen.add(keyOf(abs));
+    const info = given ?? read(abs);
     if (!info) return undefined;
     const characters = info.text === null ? info.size : info.text.length;
     const note = info.text === null ? ` (${info.size > MAX_READ_BYTES ? "over 2 MB" : "not text"}, bytes)` : "";
-    sources.push({ file: label(abs), loads: `${loads}${note}`, characters, share: Math.round((characters / START_CONTEXT_BUDGET_CHARS) * 100), fromGlobal });
+    sources.push({ file: label(abs), loads: `${loads}${note}`, characters, share: Math.round((characters / LONG_DOCUMENT_CHARS) * 100), fromGlobal });
     return info.text;
   };
   const loaded = [];
   for (const file of ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"]) {
     const abs = path.join(root, file);
-    if (fs.existsSync(abs)) loaded.push([abs, load(abs, "project")]);
+    if (!fs.existsSync(abs)) continue;
+    const text = load(abs, "project");
+    if (text !== SEEN) loaded.push([abs, text]);
   }
   let rules = [];
   try {
@@ -544,19 +533,23 @@ function startContext(root, reader, { global = [], codex = [], memory } = {}) {
   }
   for (const rule of rules) {
     const abs = path.join(root, ".claude", "rules", rule);
-    if (!bodyOf(readFile(path.dirname(abs), path.basename(abs))?.text || "").scoped) load(abs, "rule");
+    const info = readFile(path.dirname(abs), path.basename(abs));
+    if (!bodyOf(info?.text || "").scoped) load(abs, "rule", false, info);
   }
   for (const file of global) {
     const abs = path.resolve(file);
     const text = load(abs, "global", true);
-    if (text !== undefined) globalFiles.add(abs);
+    if (text === SEEN) continue;
     if (text === undefined) missing.push({ source: "global", file: label(abs), reason: "not found" });
-    else loaded.push([abs, text]);
+    else {
+      globalFiles.add(abs);
+      loaded.push([abs, text]);
+    }
   }
   const others = [];
   for (const file of codex) {
     const abs = path.resolve(file);
-    const info = fs.statSync(abs, { throwIfNoEntry: false })?.isFile() ? readFile(path.dirname(abs), path.basename(abs)) : null;
+    const info = read(abs);
     if (!info) missing.push({ source: "Codex global", file: label(abs), reason: "not found" });
     else others.push({ file: label(abs), loads: "global, Codex; not in the Claude Code total", characters: info.text === null ? info.size : info.text.length });
   }
@@ -565,12 +558,13 @@ function startContext(root, reader, { global = [], codex = [], memory } = {}) {
 
   // Imports, breadth first. A file outside the root is read only when the caller named its importer.
   let next = loaded.filter(([abs, text]) => typeof text === "string" && START_IMPORTING.has(path.basename(abs)));
-  for (let hop = 0; hop < START_IMPORT_HOPS && next.length; hop++) {
-    next = next.flatMap(([importer, text]) => importsOf(text).flatMap((target) => {
+  for (let hop = 0; hop < MAX_IMPORT_HOPS && next.length; hop++) {
+    next = next.flatMap(([importer, text]) => importTargets(text).flatMap(({ target }) => {
       const abs = target.startsWith("~/") ? path.join(os.homedir(), target.slice(2)) : path.resolve(path.dirname(importer), target);
-      if (seen.has(abs)) return [];
+      // The host loads any word that names a file; one that names none is a mention, such as @alice or @types/node.
+      if (seen.has(keyOf(abs)) || (!looksLikePath(target) && !read(abs))) return [];
       if (!inside(abs) && inside(importer)) {
-        seen.add(abs);
+        seen.add(keyOf(abs));
         missing.push({ source: "import", file: label(abs), reason: `outside the root, not read; imported by ${label(importer)}` });
         return [];
       }
@@ -587,7 +581,8 @@ function startContext(root, reader, { global = [], codex = [], memory } = {}) {
     .map((hook) => ({ file: ".claude/settings.json", command: [hook.command, ...(Array.isArray(hook.args) ? hook.args : [])].join(" "), note: "output not measured: the audit never runs a hook" }));
   sources.sort((a, b) => b.characters - a.characters || a.file.localeCompare(b.file));
   const characters = sources.reduce((sum, source) => sum + source.characters, 0);
-  return { budget: START_CONTEXT_BUDGET_CHARS, characters, sources, others, missing, hooks };
+  const hookText = transcripts.length ? require("./session-evidence-claude.js").hookTextOf(transcripts) : null;
+  return { budget: LONG_DOCUMENT_CHARS, characters, sources, others, missing, hooks, hookText: hookText && { transcript: label(hookText.file), hooks: hookText.hooks } };
 }
 
 // A bullet that names a host or its instruction file is expected to differ between hosts.
@@ -755,6 +750,17 @@ function formatSummary(report) {
     ...start.missing.map((entry) => `  missing: ${entry.source}${entry.file ? ` ${entry.file}` : ""}: ${entry.reason}`),
     ...(start.hooks.length ? start.hooks.map((hook) => `  hook ${hook.file} SessionStart: ${hook.command}; output not measured`) : ["  hook: no SessionStart command hook in .claude/settings.json"]),
   );
+  const hookText = start.hookText;
+  if (!hookText) lines.push("  hook text: no Claude Code transcript found for this project");
+  else if (!hookText.hooks.length) lines.push(`  hook text: none in the latest Claude Code transcript (${hookText.transcript})`);
+  else {
+    const { HOOK_EVENTS } = require("./session-evidence-claude.js");
+    lines.push(
+      `  hook text in the latest Claude Code transcript (${hookText.transcript}), not in the total; the transcript does not record which plugin a hook belongs to:`,
+      ...hookText.hooks.map((row) => `    ${row.hook}: ${HOOK_EVENTS.map((event) => `${event} ${row[event]}`).join(", ")}; ${row.characters} characters`),
+      `    the largest is ${hookText.hooks[0].hook}; a cut belongs to that hook. The audit changes no hook.`,
+    );
+  }
   if (start.characters > start.budget) {
     lines.push(`  over budget by ${start.characters - start.budget} characters; cuts would start with the largest sources above. The audit changes none of them.`);
   }
@@ -855,7 +861,7 @@ function main(argv) {
     if (defaults.memory && fs.existsSync(defaults.memory)) memory = path.join(defaults.memory, "MEMORY.md");
     else noDefault("audit.js", "Claude Code memory folder", defaults.memory, "--memory <file>");
   }
-  const report = audit(root, { global, codex, memory });
+  const report = audit(root, { global, codex, memory, transcripts: defaults.transcripts });
   process.stdout.write(json ? `${JSON.stringify(report, null, 2)}\n` : formatSummary(report));
   return 0;
 }

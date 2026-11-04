@@ -10,7 +10,7 @@ const path = require("node:path");
 // explains a finding's evidence. They carry no severity and change no finding.
 const DOCUMENT_EXTENSIONS = new Set(["md", "mdx", "markdown", "rst", "adoc"]);
 const MARKDOWN_EXTENSIONS = new Set(["md", "mdx", "markdown"]);
-// The size at which session evidence calls a document long.
+// The size at which session evidence calls a document long, and audit.js's start-context budget.
 const LONG_DOCUMENT_CHARS = 20000;
 // Claude Code and Gemini CLI load a file their map names as @path, five hops
 // deep. Codex does not, so an @path in AGENTS.md is only a mention.
@@ -44,6 +44,47 @@ const decode = (text) => {
   }
 };
 
+const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s+/;
+const closes = (fence, marker, line) => marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !line.slice(marker[0].length).trim();
+
+// The @path targets of a Markdown text, each with its line, outside the frontmatter, fenced and indented
+// code blocks, code spans and links. A line indented four columns or more is code after a blank line, the
+// start of the body or more code, unless a list item is open: a list item stays open across blank lines
+// until a line at the margin that is no list item. Nothing is resolved; each caller decides what a target names.
+function importTargets(text) {
+  const targets = [];
+  // A leading byte order mark, U+FEFF, is no part of the first line.
+  const lines = (text.charCodeAt(0) === 0xfeff ? text.slice(1) : text).split("\n").map((line) => line.replace(/\r$/, ""));
+  const start = lines[0] === "---" ? lines.indexOf("---", 1) + 1 : 0;
+  let fence = null;
+  let code = false;
+  let list = false;
+  let blank = true;
+  for (let i = start; i < lines.length; i++) {
+    const line = lines[i];
+    const marker = FENCE.exec(line);
+    if (fence || marker) {
+      fence = fence ? (closes(fence, marker, line) ? null : fence) : marker[1];
+      code = false;
+      blank = true;
+      continue;
+    }
+    if (!line.trim()) {
+      blank = true;
+      continue;
+    }
+    const indent = /^[ \t]*/.exec(line)[0].replace(/\t/g, "    ").length;
+    code = indent >= 4 && !list && (blank || code);
+    blank = false;
+    if (code) continue;
+    if (LIST_ITEM.test(line)) list = true;
+    else if (!indent) list = false;
+    const prose = line.split("`").filter((_, k) => k % 2 === 0).join(" ");
+    for (const match of prose.replace(LINK, " ").matchAll(IMPORT)) targets.push({ target: match[1].replace(/[.,:;!?]+$/, ""), line: i + 1 });
+  }
+  return targets;
+}
+
 // One Markdown file: each repository path it names, with the line and the form
 // that names it (prose, table, link, import, or a tree or code in a code
 // block), its @path imports, section links, headings and anchors.
@@ -74,6 +115,8 @@ function parseMarkdown(file, text, kind, dirsOf) {
 
   const lines = text.split("\n").map((line) => line.replace(/\r$/, ""));
   const start = lines[0] === "---" ? lines.indexOf("---", 1) + 1 : 0;
+  const importLines = new Map();
+  for (const { target, line } of importTargets(text)) importLines.set(line, [...(importLines.get(line) || []), target]);
   let fence = null;
   let tree = [];
   for (let i = start; i < lines.length; i++) {
@@ -113,8 +156,7 @@ function parseMarkdown(file, text, kind, dirsOf) {
       if (resolved && linked) name(resolved, number, "link");
       if (resolved && target.includes("#")) parsed.links.push({ target: resolved, anchor: target.slice(target.indexOf("#") + 1), line: number });
     }
-    for (const match of prose.replace(LINK, " ").matchAll(IMPORT)) {
-      const target = match[1].replace(/[.,:;!?]+$/, "");
+    for (const target of importLines.get(number) || []) {
       const imported = /^[~/]/.test(target) ? null : found(path.posix.join(dir, target));
       if (imported && kind(imported) === "file") {
         parsed.imports.push(imported);
@@ -284,4 +326,4 @@ function observe(files, reader, facts, shared) {
   return observations;
 }
 
-module.exports = { observe };
+module.exports = { LONG_DOCUMENT_CHARS, MAX_IMPORT_HOPS, importTargets, observe };

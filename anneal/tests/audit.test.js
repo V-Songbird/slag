@@ -842,7 +842,8 @@ describe("start context", () => {
     assert.strictEqual(JSON.parse(derived.stdout).instructionDrift.files.length, 2);
     // A flag replaces its default.
     const named = run("--global", path.join(homes, "other.md"), "--memory", path.join(homes, "other.md"));
-    assert.deepStrictEqual(loads(named), [["global", "named\n".length], ["memory index", "named\n".length], ["project", "# Shop\n".length]]);
+    // One file named as both counts once.
+    assert.deepStrictEqual(loads(named), [["global", "named\n".length], ["project", "# Shop\n".length]]);
     assert.deepStrictEqual(JSON.parse(named.stdout).startContext.others, []);
 
     // A missing default folder is one line, and the run goes on.
@@ -902,6 +903,86 @@ describe("start context", () => {
     write(dir, { "CLAUDE.md": "@./big.md\n", "big.md": "x".repeat(5001) });
     const stdout = spawnSync(process.execPath, [CLI, "--root", root, "--global", path.join(dir, "CLAUDE.md")], { encoding: "utf-8" }).stdout;
     assert.match(stdout, /\n {2}global files are 25% of the budget; .*additionalContext/);
+  });
+
+  test("a file named twice, or as both the global file and the memory index, counts once", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-global-"));
+    created.push(home);
+    write(home, { "rules.md": "global rules\n" });
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    const file = path.join(home, "rules.md");
+    const { startContext } = audit(root, { global: [file, file], memory: file });
+    assert.deepStrictEqual(startContext.sources.map((source) => source.loads).sort(), ["global", "project"]);
+    assert.deepStrictEqual(startContext.missing, []);
+    assert.strictEqual(startContext.characters, "# Shop\n".length + "global rules\n".length);
+  });
+
+  test("an import named again in another letter case counts once", { skip: process.platform !== "win32" && "needs a case-insensitive file system" }, () => {
+    const root = repo({ tracked: { "CLAUDE.md": "@docs/a.md and @DOCS/A.md\n", "docs/a.md": "a\n" } });
+    assert.deepStrictEqual(rows(audit(root)).sort(), [["CLAUDE.md", "project"], ["docs/a.md", "import of CLAUDE.md"]]);
+  });
+
+  test("an @word that names no file and does not look like a path is not a missing import", () => {
+    const { startContext } = audit(repo({ tracked: { "CLAUDE.md": "Ask @alice, install @types/node, read @gone.md.\n" } }));
+    assert.deepStrictEqual(startContext.missing.filter((entry) => entry.source === "import").map((entry) => entry.file), ["gone.md"]);
+  });
+
+  const indented = { "CLAUDE.md": "# Shop\n\n    @docs/code.md\n\n- item\n\n    @docs/listed.md\n", "docs/code.md": "code\n", "docs/listed.md": "listed\n" };
+
+  test("an @path in an indented code block is not followed; one in a list item's continuation is", () => {
+    assert.deepStrictEqual(rows(audit(repo({ tracked: indented }))), [["CLAUDE.md", "project"], ["docs/listed.md", "import of CLAUDE.md"]]);
+  });
+
+  test("map-routes reads imports as the start context does", () => {
+    assert.match(evidence(observed(indented), "map-routes")[0], /^CLAUDE\.md: 7 lines, imports docs\/listed\.md; /);
+  });
+
+  test("the start context sums the hook text of the latest transcript per hook and event, outside the total", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-transcripts-"));
+    created.push(dir);
+    const success = (hookName, command, stdout) => ({ type: "hook_success", hookEvent: hookName.split(":")[0], hookName, content: stdout, command, stdout, stderr: "", exitCode: 0, durationMs: 5 });
+    const context = (hookName, content) => ({ type: "hook_additional_context", hookEvent: hookName.split(":")[0], hookName, content });
+    const startText = "Start here.\nRead the map.";
+    const records = [
+      success("SessionStart:startup", "node ${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js", JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: startText } })),
+      success("SessionStart:startup", "command hook 5", "Plain context\n"),
+      context("SessionStart:startup", [startText]),
+      context("SessionStart:startup", "Plain context"),
+      success("UserPromptSubmit", "node ${CLAUDE_PLUGIN_ROOT}/hooks/prompt.js", "Reminder"),
+      context("UserPromptSubmit", "Reminder"),
+      success("SessionStart:compact", "node ${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js", "Start here.\nAgain."),
+      context("SessionStart:compact", ["Start here.", "Again."]),
+      success("PostToolUse:Edit", "node ${CLAUDE_PLUGIN_ROOT}/hooks/after-edit.js", "Checked."),
+      context("PostToolUse:Edit", "Checked."),
+      { type: "queued_command", prompt: "x".repeat(500), commandMode: "prompt" },
+    ].map((attachment, i) => JSON.stringify({ uuid: `u${i}`, type: "attachment", attachment }));
+    // A record that repeats an earlier uuid is a replay and counts once.
+    write(dir, { "new.jsonl": `${[...records, records[2]].join("\n")}\n` });
+    write(dir, { "old.jsonl": `${JSON.stringify({ uuid: "o1", type: "attachment", attachment: context("SessionStart:startup", "old") })}\n` });
+    const past = new Date(Date.now() - 60000);
+    fs.utimesSync(path.join(dir, "old.jsonl"), past, past);
+    fs.utimesSync(path.join(dir, "new.jsonl"), new Date(Date.now() - 30000), new Date(Date.now() - 30000));
+    write(dir, { "journal.jsonl": "", "subagents/x.jsonl": `${JSON.stringify({ uuid: "s1", type: "attachment", attachment: context("UserPromptSubmit", "sub") })}\n` });
+
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    const report = audit(root, { transcripts: [dir] });
+    const row = (hook, sums) => ({ hook, SessionStart: 0, UserPromptSubmit: 0, compact: 0, other: 0, ...sums, characters: Object.values(sums).reduce((a, b) => a + b, 0) });
+    assert.deepStrictEqual(report.startContext.hookText.hooks, [
+      row("session-start.js", { SessionStart: startText.length, compact: "Start here.\nAgain.".length }),
+      row("unnamed hook", { SessionStart: "Plain context".length }),
+      row("after-edit.js", { other: "Checked.".length }),
+      row("prompt.js", { UserPromptSubmit: "Reminder".length }),
+    ]);
+    assert.strictEqual(path.basename(report.startContext.hookText.transcript), "new.jsonl");
+    assert.strictEqual(report.startContext.characters, "# Shop\n".length);
+    const summary = formatSummary(report);
+    assert.match(summary, /\n {2}hook text in the latest Claude Code transcript \(.*new\.jsonl\), not in the total; the transcript does not record which plugin a hook belongs to:\n {4}session-start\.js: SessionStart 25, UserPromptSubmit 0, compact 18, other 0; 43 characters\n/);
+    assert.match(summary, /\n {4}prompt\.js: SessionStart 0, UserPromptSubmit 8, compact 0, other 0; 8 characters\n {4}the largest is session-start\.js; a cut belongs to that hook\. The audit changes no hook\.\n/);
+    assert.doesNotMatch(JSON.stringify(report.startContext.hookText), /CLAUDE_PLUGIN_ROOT|Start here/);
+
+    const none = audit(root);
+    assert.strictEqual(none.startContext.hookText, null);
+    assert.match(formatSummary(none), /\n {2}hook text: no Claude Code transcript found for this project\n/);
   });
 });
 

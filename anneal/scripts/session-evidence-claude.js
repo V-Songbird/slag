@@ -385,4 +385,64 @@ function analyzeClaude(file, before = null, limit = 6, { onCall = null, onPrompt
   };
 }
 
-module.exports = { actorOf, analyzeClaude, claudeShape, firstCopies, isPrompt, isQueuedPrompt, subagentTranscripts };
+const HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "compact", "other"];
+
+// The script a hook command runs, by file name only, as a transcript records the command unexpanded:
+// `node ${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js` is session-start.js.
+function scriptOf(command) {
+  const words = String(command || "").split(/\s+/).filter(Boolean).map((word) => word.replace(/^["']+|["']+$/g, "").split(/[\\/]/).pop());
+  return words.slice(words.length > 1 ? 1 : 0).find((word) => /\.[A-Za-z0-9]+$/.test(word)) || "unnamed hook";
+}
+
+// The text of the newest top-level transcript in `dirs` that hooks added to the context, the content of its
+// hook_additional_context records, summed per hook and per event: SessionStart, UserPromptSubmit, compact for
+// SessionStart after a compaction, and other. Such a record names no command, so its hook is the hook_success
+// of the same hookName whose output holds its text, else the only one, else unnamed. The transcript records
+// no plugin. Only file names and counts are returned, never hook text or commands.
+function hookTextOf(dirs) {
+  const files = dirs.flatMap((dir) => {
+    try {
+      return fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl") && entry.name !== "journal.jsonl")
+        .map((entry) => path.join(dir, entry.name));
+    } catch {
+      return [];
+    }
+  });
+  if (!files.length) return null;
+  const mtime = (file) => fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? 0;
+  const file = files.sort((a, b) => mtime(b) - mtime(a) || a.localeCompare(b))[0];
+  const runs = [];
+  const contexts = [];
+  for (const [, row] of firstCopies(fs.readFileSync(file), new Set())) {
+    const hook = row.type === "attachment" && row.attachment;
+    if (hook && hook.type === "hook_success") runs.push(hook);
+    else if (hook && hook.type === "hook_additional_context") contexts.push(hook);
+  }
+  // What a run added: the additionalContext of JSON output, else its output as written.
+  const added = (run) => {
+    const output = textBlocks(run.stdout ?? run.content).join("\n");
+    try {
+      const context = JSON.parse(output)?.hookSpecificOutput?.additionalContext;
+      if (typeof context === "string") return context.trim();
+    } catch {
+      // Plain text output is the context itself.
+    }
+    return output.trim();
+  };
+  const rows = new Map();
+  for (const context of contexts) {
+    const text = textBlocks(context.content).join("\n");
+    const name = String(context.hookName || "");
+    const same = runs.filter((run) => String(run.hookName || "") === name);
+    const run = same.find((candidate) => text.trim() && added(candidate).includes(text.trim())) || (same.length === 1 ? same[0] : null);
+    const hook = scriptOf(run?.command);
+    const event = context.hookEvent || name.split(":")[0];
+    const column = event === "SessionStart" && name.endsWith(":compact") ? "compact" : ["SessionStart", "UserPromptSubmit"].includes(event) ? event : "other";
+    if (!rows.has(hook)) rows.set(hook, { hook, ...Object.fromEntries(HOOK_EVENTS.map((key) => [key, 0])), characters: 0 });
+    rows.get(hook)[column] += text.length;
+    rows.get(hook).characters += text.length;
+  }
+  return { file, hooks: [...rows.values()].sort((a, b) => b.characters - a.characters || a.hook.localeCompare(b.hook)) };
+}
+
+module.exports = { HOOK_EVENTS, actorOf, analyzeClaude, claudeShape, firstCopies, hookTextOf, isPrompt, isQueuedPrompt, subagentTranscripts };
