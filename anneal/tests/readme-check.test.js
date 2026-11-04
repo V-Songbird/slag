@@ -48,6 +48,14 @@ describe("rules", () => {
     assert.deepStrictEqual(checkReadme(doc("# A", "", "Text.", "", "```text", "# not a heading", "```")), []);
   });
 
+  test("h1-count: an HTML or setext title counts once, an underline under nothing or in a fence does not", () => {
+    assert.deepStrictEqual(checkReadme(doc('<h1 align="center">T</h1>', "", "Text.")), []);
+    assert.deepStrictEqual(checkReadme(doc("T", "=", "", "Text.")), []);
+    assert.deepStrictEqual(checkReadme(doc("# A", "", "Text.", "", "<H1>B</H1>")), [{ line: 1, rule: "h1-count", message: "expected exactly one H1, found 2" }]);
+    assert.deepStrictEqual(checkReadme(doc("# A", "", "B", "===")), [{ line: 1, rule: "h1-count", message: "expected exactly one H1, found 2" }]);
+    assert.deepStrictEqual(checkReadme(doc("# A", "", "===", "", "```text", "<h1>x</h1>", "T", "===", "```")), []);
+  });
+
   test("badge-first: a badge above the description, not below it", () => {
     assert.deepStrictEqual(checkReadme(doc("[![CI](ci.svg)](ci)", "# T", "", "Text.")), [{ line: 1, rule: "badge-first", message: MESSAGES.badge }]);
     assert.deepStrictEqual(checkReadme(doc("# T", "", "Text.", "", "[![CI](ci.svg)](ci)", "![logo](logo.png)")), []);
@@ -86,6 +94,8 @@ describe("rules", () => {
 
   test("link-text: a label that repeats its URL, whatever its scheme, www or trailing slash, not a named one", () => {
     assert.deepStrictEqual(checkReadme(doc("# T", "", "See [Example.com/docs/](https://www.example.com/docs/).")), [{ line: 3, rule: "link-text", message: MESSAGES.echo }]);
+    assert.deepStrictEqual(checkReadme(doc("# T", "", "See [https://example.com/docs](https://example.com/docs).")), [{ line: 3, rule: "link-text", message: MESSAGES.echo }]);
+    assert.deepStrictEqual(checkReadme(doc("# T", "", "See [HTTP://WWW.Example.com](https://example.com/).")), [{ line: 3, rule: "link-text", message: MESSAGES.echo }]);
     assert.deepStrictEqual(checkReadme(doc("# T", "", "See the [API reference](https://example.com/docs).")), []);
   });
 

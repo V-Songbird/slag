@@ -20,6 +20,9 @@ const RESULT_LANGS = new Set(["text", "txt", "console", "output", "json", "yaml"
 // A comment in a code block that shows what a call returns, such as `// user -> { id: 42 }`.
 const RESULT_COMMENT = /^\s*(\/\/|#|--|;)\s*\S.*(->|=>|returns|returned)/;
 const VAGUE_LINK = /\[\s*(click here|here|this link|read more|more|link|aqu[ií]|haz clic aqu[ií]|m[aá]s|leer m[aá]s)\s*\]\(/iu;
+// An HTML title, and the `===` underline of a setext title.
+const HTML_H1 = /<h1[\s>]/i;
+const SETEXT_H1 = /^ {0,3}=+\s*$/;
 const URL_LINK = /\[\s*([^\]]+?)\s*\]\(\s*(https?:\/\/[^)\s]+)\s*\)/g;
 // Word boundaries over Unicode letters and digits, so `éjust` is not the filler `just`.
 const FILLER = /(?<![\p{L}\p{N}_])(simply|just|obviously|easy|easily|powerful|blazing|awesome|it should be noted|we will now|utilize)(?![\p{L}\p{N}_])/giu;
@@ -46,12 +49,14 @@ function checkReadme(text, { tier } = {}) {
   const fences = [];
   const prose = [];
   let h1 = 0;
+  let previous = "";
   let firstText = null;
   let firstBadge = null;
   lines.forEach((line, i) => {
     const marker = FENCE_OPEN.exec(line);
     if (marker && !open) {
       open = { start: i, mark: marker[2][0], lang: marker[3].trim() };
+      previous = "";
       return;
     }
     if (open) {
@@ -62,7 +67,10 @@ function checkReadme(text, { tier } = {}) {
       return;
     }
     const stripped = line.trim();
-    if (stripped.startsWith("# ")) h1++;
+    const underline = SETEXT_H1.test(line) && previous !== "" && !previous.startsWith("#");
+    if (stripped.startsWith("# ") || HTML_H1.test(stripped) || underline) h1++;
+    previous = stripped;
+    if (underline) return;
     if (stripped.startsWith("[![") || stripped.startsWith("![")) {
       if (firstBadge === null) firstBadge = i;
       return;
@@ -94,8 +102,8 @@ function checkReadme(text, { tier } = {}) {
     if (text.includes("{{")) flag(i, "placeholder", "unfilled template placeholder");
     if (VAGUE_LINK.test(text)) flag(i, "link-text", "link text does not name its destination");
     for (const [, label, href] of text.matchAll(URL_LINK)) {
-      const naked = href.replace(/^https?:\/\/(www\.)?/, "").replace(/\/+$/, "");
-      if (label.replace(/\/+$/, "").toLowerCase() === naked.toLowerCase()) flag(i, "link-text", "link text repeats the URL; name the destination instead");
+      const bare = (url) => url.replace(/^https?:\/\/(www\.)?/i, "").replace(/\/+$/, "").toLowerCase();
+      if (bare(label) === bare(href)) flag(i, "link-text", "link text repeats the URL; name the destination instead");
     }
     for (const [hit] of text.matchAll(FILLER)) flag(i, "filler", `remove or replace '${hit}'`);
     const long = sentences(text.replace(/`[^`]*`/g, "X")).map((sentence) => words(sentence).length).find((n) => n > MAX_WORDS);
