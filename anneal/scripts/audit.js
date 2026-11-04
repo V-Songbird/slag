@@ -561,13 +561,15 @@ function startContext(root, reader, { global = [], codex = [], memory, transcrip
   for (let hop = 0; hop < MAX_IMPORT_HOPS && next.length; hop++) {
     next = next.flatMap(([importer, text]) => importTargets(text).flatMap(({ target }) => {
       const abs = target.startsWith("~/") ? path.join(os.homedir(), target.slice(2)) : path.resolve(path.dirname(importer), target);
-      // The host loads any word that names a file; one that names none is a mention, such as @alice or @types/node.
-      if (seen.has(keyOf(abs)) || (!looksLikePath(target) && !read(abs))) return [];
+      if (seen.has(keyOf(abs))) return [];
+      // A repository file's import outside the root is listed and never touched, whatever it looks like.
       if (!inside(abs) && inside(importer)) {
         seen.add(keyOf(abs));
         missing.push({ source: "import", file: label(abs), reason: `outside the root, not read; imported by ${label(importer)}` });
         return [];
       }
+      // The host loads any word that names a file; one that names none is a mention, such as @alice or @types/node.
+      if (!looksLikePath(target) && !fs.statSync(abs, { throwIfNoEntry: false })?.isFile()) return [];
       const body = load(abs, `import of ${label(importer)}`, globalFiles.has(importer));
       if (typeof body === "string" && globalFiles.has(importer)) globalFiles.add(abs);
       if (body === undefined) missing.push({ source: "import", file: label(abs), reason: `not found, imported by ${label(importer)}` });
@@ -752,6 +754,7 @@ function formatSummary(report) {
   );
   const hookText = start.hookText;
   if (!hookText) lines.push("  hook text: no Claude Code transcript found for this project");
+  else if (!hookText.hooks) lines.push(`  hook text: the latest Claude Code transcript (${hookText.transcript}) could not be read`);
   else if (!hookText.hooks.length) lines.push(`  hook text: none in the latest Claude Code transcript (${hookText.transcript})`);
   else {
     const { HOOK_EVENTS } = require("./session-evidence-claude.js");

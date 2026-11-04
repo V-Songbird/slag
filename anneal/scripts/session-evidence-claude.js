@@ -388,17 +388,20 @@ function analyzeClaude(file, before = null, limit = 6, { onCall = null, onPrompt
 const HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "compact", "other"];
 
 // The script a hook command runs, by file name only, as a transcript records the command unexpanded:
-// `node ${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js` is session-start.js.
+// `node ${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js` is session-start.js. It is the first word, other than a
+// flag or an interpreter, whose name has an extension.
 function scriptOf(command) {
-  const words = String(command || "").split(/\s+/).filter(Boolean).map((word) => word.replace(/^["']+|["']+$/g, "").split(/[\\/]/).pop());
-  return words.slice(words.length > 1 ? 1 : 0).find((word) => /\.[A-Za-z0-9]+$/.test(word)) || "unnamed hook";
+  const words = String(command || "").split(/\s+/).map((word) => word.replace(/^["']+|["']+$/g, "")).filter((word) => word && !word.startsWith("-"));
+  return words.map((word) => word.split(/[\\/]/).pop())
+    .find((word) => /.\.[A-Za-z]\w*$/.test(word) && !INTERPRETERS.has(word.replace(/\.exe$/i, "").toLowerCase())) || "unnamed hook";
 }
 
 // The text of the newest top-level transcript in `dirs` that hooks added to the context, the content of its
 // hook_additional_context records, summed per hook and per event: SessionStart, UserPromptSubmit, compact for
 // SessionStart after a compaction, and other. Such a record names no command, so its hook is the hook_success
 // of the same hookName whose output holds its text, else the only one, else unnamed. The transcript records
-// no plugin. Only file names and counts are returned, never hook text or commands.
+// no plugin. A line that is not JSON is skipped, and a transcript that cannot be read gives hooks null. Only file
+// names and counts are returned, never hook text or commands.
 function hookTextOf(dirs) {
   const files = dirs.flatMap((dir) => {
     try {
@@ -413,8 +416,25 @@ function hookTextOf(dirs) {
   const file = files.sort((a, b) => mtime(b) - mtime(a) || a.localeCompare(b))[0];
   const runs = [];
   const contexts = [];
-  for (const [, row] of firstCopies(fs.readFileSync(file), new Set())) {
-    const hook = row.type === "attachment" && row.attachment;
+  let lines;
+  try {
+    lines = fs.readFileSync(file, "utf8").split("\n");
+  } catch {
+    return { file, hooks: null };
+  }
+  // A replayed record repeats an earlier uuid and counts once.
+  const seen = new Set();
+  for (const line of lines) {
+    if (!line.includes('"hook_')) continue;
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof row?.uuid === "string" && row.uuid && seen.has(row.uuid)) continue;
+    seen.add(row?.uuid);
+    const hook = row?.type === "attachment" && row.attachment;
     if (hook && hook.type === "hook_success") runs.push(hook);
     else if (hook && hook.type === "hook_additional_context") contexts.push(hook);
   }

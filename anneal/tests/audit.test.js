@@ -937,6 +937,30 @@ describe("start context", () => {
     assert.match(evidence(observed(indented), "map-routes")[0], /^CLAUDE\.md: 7 lines, imports docs\/listed\.md; /);
   });
 
+  test("map-routes counts an @path in an indented code block as a path it names", () => {
+    const tracked = { "CLAUDE.md": "# Shop\n\n    @docs/x.md\n", "docs/x.md": "x\n" };
+    assert.match(evidence(observed(tracked), "map-routes")[0], /^CLAUDE\.md: 3 lines; names 1 path \(1 document\)/);
+  });
+
+  test("an @word that resolves outside the root is listed without touching the file", (t) => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-outside-"));
+    created.push(outside);
+    write(outside, { secret: "outside\n" });
+    const root = repo({ tracked: { "CLAUDE.md": `@docs/../../${path.basename(outside)}/secret\n` } });
+    const touched = [];
+    for (const name of ["statSync", "readFileSync", "existsSync"]) {
+      const original = fs[name];
+      t.mock.method(fs, name, (file, ...rest) => {
+        touched.push(String(file));
+        return original.call(fs, file, ...rest);
+      });
+    }
+    const { startContext } = audit(root);
+    t.mock.restoreAll();
+    assert.deepStrictEqual(touched.filter((file) => path.resolve(file).startsWith(outside)), []);
+    assert.match(startContext.missing.find((entry) => entry.source === "import").reason, /^outside the root, not read; imported by CLAUDE\.md$/);
+  });
+
   test("the start context sums the hook text of the latest transcript per hook and event, outside the total", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-transcripts-"));
     created.push(dir);
@@ -983,6 +1007,36 @@ describe("start context", () => {
     const none = audit(root);
     assert.strictEqual(none.startContext.hookText, null);
     assert.match(formatSummary(none), /\n {2}hook text: no Claude Code transcript found for this project\n/);
+  });
+
+  test("hook text skips a line that is not JSON, names a quoted or flagged command's script, and survives an unreadable transcript", (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-transcripts-"));
+    created.push(dir);
+    const attachment = (i, hook) => JSON.stringify({ uuid: `u${i}`, type: "attachment", attachment: { hookEvent: hook.hookName.split(":")[0], ...hook } });
+    const lines = [
+      attachment(1, { type: "hook_success", hookName: "SessionStart:startup", command: "\"${CLAUDE_PLUGIN_ROOT}/hooks/start.sh\" startup", stdout: "Quoted" }),
+      attachment(2, { type: "hook_additional_context", hookName: "SessionStart:startup", content: "Quoted" }),
+      "{bad",
+      attachment(3, { type: "hook_success", hookName: "UserPromptSubmit", command: "node --env-file=.env hook.js", stdout: "Flagged" }),
+      attachment(4, { type: "hook_additional_context", hookName: "UserPromptSubmit", content: "Flagged" }),
+    ];
+    write(dir, { "s.jsonl": `${lines.join("\n")}\n` });
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    const row = (hook, sums) => ({ hook, SessionStart: 0, UserPromptSubmit: 0, compact: 0, other: 0, ...sums, characters: Object.values(sums).reduce((a, b) => a + b, 0) });
+    assert.deepStrictEqual(audit(root, { transcripts: [dir] }).startContext.hookText.hooks, [
+      row("hook.js", { UserPromptSubmit: "Flagged".length }),
+      row("start.sh", { SessionStart: "Quoted".length }),
+    ]);
+
+    const original = fs.readFileSync;
+    t.mock.method(fs, "readFileSync", (file, ...rest) => {
+      if (String(file).endsWith("s.jsonl")) throw new RangeError("too large");
+      return original.call(fs, file, ...rest);
+    });
+    const unreadable = audit(root, { transcripts: [dir] });
+    t.mock.restoreAll();
+    assert.strictEqual(unreadable.startContext.hookText.hooks, null);
+    assert.match(formatSummary(unreadable), /\n {2}hook text: the latest Claude Code transcript \(.*s\.jsonl\) could not be read\n/);
   });
 });
 

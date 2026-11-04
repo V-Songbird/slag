@@ -164,7 +164,10 @@ function parseMarkdown(file, text, kind, dirsOf) {
       }
     }
     const format = /^\s*\|/.test(line) ? "table" : "prose";
-    const segments = [[prose.replace(LINK, " ").replace(IMPORT, " "), false], ...parts.filter((_, k) => k % 2 === 1).map((span) => [span, true])];
+    // Only an @word read as an import leaves the prose; one in an indented code block stays a path it names.
+    const targets = new Set(importLines.get(number));
+    const words = prose.replace(LINK, " ").replace(IMPORT, (match, target) => (targets.has(target.replace(/[.,:;!?]+$/, "")) ? " " : match));
+    const segments = [[words, false],...parts.filter((_, k) => k % 2 === 1).map((span) => [span, true])];
     for (const [segment, code] of segments) {
       for (const token of segment.replace(URL, " ").match(PATH_TOKEN) || []) name(tokenPath(token, code), number, format);
     }
