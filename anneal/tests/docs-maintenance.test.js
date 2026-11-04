@@ -287,6 +287,28 @@ test("a node option's path value is not the script, so node's own flags after it
   assert.deepStrictEqual(of(maintain(root, { memories: ["mem"], now: NOW }), "memory-missing-path"), []);
 });
 
+test("each command of a memory span is read on its own", () => {
+  const root = repo();
+  commit(root, { "scripts/run.sh": "x", "scripts/run.js": "--root" }, "2026-10-01");
+  write(root, {
+    "mem/MEMORY.md": "- [Chain](chain.md) — chained commands\n",
+    "mem/chain.md": memory("2026-10-30T00:00:00.000Z", "Run `bash scripts/run.sh && git log --oneline`, `node scripts/run.js --root | sh scripts/run.sh; git log --stat` and `git checkout scripts/hotfix && node scripts/gone.js`."),
+  });
+  assert.deepStrictEqual(of(maintain(root, { memories: ["mem"], now: NOW }), "memory-missing-path"), [
+    "mem/chain.md names scripts/gone.js, absent from the project or the memory folder",
+  ]);
+});
+
+test("a dotted value of an unlisted node option is not the script", () => {
+  const root = repo();
+  commit(root, { "scripts/run.js": "--root" }, "2026-10-01");
+  write(root, {
+    "mem/MEMORY.md": "- [Pattern](pattern.md) — node options\n",
+    "mem/pattern.md": memory("2026-10-30T00:00:00.000Z", "Run `node --test-name-pattern foo.bar --test scripts/run.js` or `node --snapshot-blob snap.blob --build-snapshot scripts/run.js`."),
+  });
+  assert.deepStrictEqual(of(maintain(root, { memories: ["mem"], now: NOW }), "memory-missing-path"), []);
+});
+
 test("a memory pass leaves the memory folder byte-identical", () => {
   const root = repo();
   commit(root, { "scripts/run.js": "--root" }, "2026-10-01");

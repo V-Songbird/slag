@@ -97,6 +97,8 @@ const MEMORY_STALE_DAYS = 14;
 const MEMORY_DUPLICATE = 0.4;
 // Interpreters whose script's flags belong to the project.
 const INTERPRETER = /^(?:node|bash|sh|py|python|pwsh)$/;
+// A bare file name the interpreter runs as its script; other dotted words may be option values.
+const SCRIPT_FILE = /^\w[\w-]*\.(?:js|mjs|cjs|ts|mts|cts|sh|py|ps1)$/;
 // Node options whose next token is their value, not the script.
 const NODE_VALUE_OPTION = /^(?:-r|--require|--import|--loader|--experimental-loader|--env-file|--env-file-if-exists|-C|--conditions|--test-reporter|--test-reporter-destination|--watch-path|--cpu-prof-dir|--cpu-prof-name|--heap-prof-dir|--heap-prof-name|--diagnostic-dir|--report-dir|--report-directory|--report-filename|--redirect-warnings)$/;
 // Interpreter options that run inline code or a module, so no project script follows.
@@ -151,10 +153,12 @@ function memoryProposals(root, dir, now) {
     if (!indexed.has(name)) add("memory-unindexed", name, "no MEMORY.md line links it, so no session loads it; index it or delete it");
 
     const missing = [];
-    for (const [, span] of text.matchAll(/`([^`\n]+)`/g)) {
-      const tokens = span.trim().split(/\s+/);
+    // Each command of a span, split at a spaced `&&`, `||` or `|`, or at `;`, is read on its own.
+    const commands = [...text.matchAll(/`([^`\n]+)`/g)].flatMap(([, span]) => span.split(/\s+(?:&&|\|\|?)\s+|;(?:\s+|$)/));
+    for (const command of commands) {
+      const tokens = command.trim().split(/\s+/);
       const isPath = (t) => /^[\w.-]+(?:\/[\w.-]+)+\/?$/.test(t);
-      const run = /^npm run(?:-script)? ([^\s-]\S*)/.exec(span.trim());
+      const run = /^npm run(?:-script)? ([^\s-]\S*)/.exec(command.trim());
       if (run && !scripts.has(run[1])) missing.push(`npm run ${run[1]}`);
       // A path counts only when its first folder, after any leading `./`, exists in the project,
       // which leaves out git refs such as `origin/main`, MIME types, `../` paths into other
@@ -167,12 +171,13 @@ function memoryProposals(root, dir, now) {
       }
       // Flags belong to the project only after its script: `<interpreter> <script> --flag` or
       // `npm run <script> -- --flag`, not the interpreter's or npm's own. The script is the first
-      // path or file name after the interpreter that is not the value of a listed node option, as
-      // in `node --import ./setup.js <script>`; inline code such as `node -e` or `python -m` has none.
+      // path, or file name with a script extension, after the interpreter that is not the value of a
+      // listed node option, as in `node --import ./setup.js <script>`; inline code such as `node -e`
+      // or `python -m` has none.
       let script = run ? tokens.indexOf("--") : -1;
       if (!run && INTERPRETER.test(tokens[0])) {
         for (let i = 1; i < tokens.length && !INLINE_CODE.test(tokens[i]); i++) {
-          if ((isPath(tokens[i]) || /^\w[\w-]*\.\w+$/.test(tokens[i])) && !NODE_VALUE_OPTION.test(tokens[i - 1])) {
+          if ((isPath(tokens[i]) || SCRIPT_FILE.test(tokens[i])) && !NODE_VALUE_OPTION.test(tokens[i - 1])) {
             script = i;
             break;
           }
