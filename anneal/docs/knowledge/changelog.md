@@ -22,6 +22,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
+- repo-docs handles README requests on its own, through its `readme` argument or a request that never says README, such as "add a quick start". Its `references/readme.md` writes, reviews, scores, improves, edits or translates one README, with tier templates in `references/readme-templates.md` and a scoring rubric and final checklist in `references/readme-review.md`. The reconciliation reviews every maintained README the same way, with no optional skill to install.
+
+- `anneal/scripts/readme-check.js` checks one README and writes nothing: unclosed fences, the H1 count, badges above the description, fences with no language, a `$` prompt in a copyable block, no shown result, leftover placeholders, link text that names no destination or repeats its URL, filler words, long sentences and, with `--tier`, a prose budget. It needs only Node and exits 2 for an unknown tier.
+
+- Eval cases tagged `readme` check a README review that changes nothing and a README repair asked for without the word README. They have not run in a live session yet.
+
 - repo-docs takes `maintain` for proposals that trim documentation: docs whose related files changed after them, completed task notes to fold and delete, oversized history to condense, per-roadmap-entry docs to merge, and records of an orphaned knowledge store to fold into the docs that own their paths. `anneal/scripts/docs-maintenance.js` finds them and changes nothing; the skill acts on a group only after you approve it. Uncommitted edits count toward drift, and `--transcripts` keeps a completed note that another Claude Code session read within three days of its last write.
 
 - repo-docs's `maintain` takes `--memory <folder>` for a native memory folder and proposes trims without writing to it: index lines with no file, files with no index line, named project paths, `npm run` scripts and script flags that no longer exist, near-duplicate pairs, and memories older than 14 days that state a current condition. Script flags are those in `npm run <script> -- --flag` and in `<script> --flag` run by `node`, `bash`, `sh`, `py`, `python` or `pwsh`. The pass leaves MIME types, `../` paths, paths under a deleted top folder, git refs whose first segment is not a project folder, refs before any `--` in `git checkout`, `switch`, `push`, `branch`, `merge` and `rebase`, and every other command's flags alone. Each command of a span joined by `&&`, `||`, `|` or `;` is read on its own. A folder without `MEMORY.md` is refused.

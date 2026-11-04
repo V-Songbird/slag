@@ -1445,3 +1445,133 @@ describe("session-failure cases", () => {
     });
   });
 });
+
+// The README cases: one review that must change nothing, and one repair asked for without the
+// word README. Both scaffold the same package, whose README plants what the checker reports.
+describe("readme cases", () => {
+  const { checkReadme } = require("../scripts/readme-check.js");
+  const REVIEW = path.join(EVALS, "readme-review-reports-without-changes");
+  const REPAIR = path.join(EVALS, "readme-repair-without-the-word");
+  const SKILL = { name: "Skill", input: { skill: "anneal:repo-docs" } };
+  const CHECK = 'node "/plugins/anneal/scripts/readme-check.js" README.md';
+
+  // The scaffold without bash: the other case's script it runs first, then the files its heredocs write.
+  function replay(caseDir, dir = tempDir("anneal-graders-readme-")) {
+    const script = /^ {2}scaffold_script: (\S+)$/m.exec(read(caseDir, "case.yaml"))[1];
+    const text = read(caseDir, script);
+    const base = /^bash "\$\(dirname "\$0"\)\/\.\.\/([^/"]+)\/([^/"]+)"$/m.exec(text);
+    if (base) replay(path.join(EVALS, base[1]), dir);
+    for (const [, file, , content] of text.matchAll(/^cat > (\S+) <<'(\w+)'\n([\s\S]*?)\n\2\n/gm)) write(dir, file, `${content}\n`);
+    return dir;
+  }
+
+  test("both cases are tagged readme, and the repair scaffold runs the review's", () => {
+    for (const caseDir of [REVIEW, REPAIR]) assert.match(read(caseDir, "case.yaml"), /^tags: \[readme\]$/m);
+    for (const caseDir of [REVIEW, REPAIR]) assert.deepStrictEqual(listRunFiles(replay(caseDir)).sort(), ["README.md", "bin/csv-tidy.js", "package.json"]);
+  });
+
+  test("the checker reports exactly what the fixture README plants", () => {
+    const findings = checkReadme(read(replay(REVIEW), "README.md")).map(({ line, rule }) => `${line}:${rule}`);
+    assert.deepStrictEqual(findings, ["1:badge-first", "5:filler", "5:filler", "9:no-shown-result", "10:prompt-in-copy-block", "15:fence-lang", "19:link-text"]);
+  });
+
+  describe("readme-review-reports-without-changes", () => {
+    let checks;
+    let run;
+    before(() => {
+      checks = graders(REVIEW);
+      const reply = "Score 31/56. The badge sits above the title, before the description. The install block keeps a `$` prompt, so a copied command fails. Node 22 is never mentioned.";
+      run = { dir: replay(REVIEW), calls: [SKILL, ...bash(CHECK)], reply, created: "" };
+    });
+    const failed = (changes) => failedGraders(checks, { ...run, ...changes });
+
+    test("a run as the case asks passes every grader, and the plugin-only graders are indicators", () => {
+      assert.deepStrictEqual(failed({}), []);
+      assert.deepStrictEqual([checks["skill-fired"].arm, checks["checker-ran"].arm], ["with-only", "with-only"]);
+      assert.deepStrictEqual(checks["no-files-created"], graders(AUDIT)["no-files-created"]);
+    });
+
+    test("a layout audit, an edited README, a created file or a reply that misses a planted problem fails its grader", () => {
+      assert.deepStrictEqual(failed({ calls: [...run.calls, ...bash('node "/plugins/anneal/scripts/audit.js" --root .')] }), ["no-layout-audit"]);
+      const edited = tempDir("anneal-graders-readme-edit-");
+      fs.cpSync(run.dir, edited, { recursive: true });
+      write(edited, "README.md", read(edited, "README.md").replace("$ npm", "npm"));
+      assert.deepStrictEqual(failed({ dir: edited }), ["readme-unchanged"]);
+      assert.deepStrictEqual(failed({ created: "README-review.md" }), ["no-files-created"]);
+      assert.deepStrictEqual(failed({ reply: "Score 31/56. Node 22 is never mentioned." }), ["names-badge-order", "names-copy-prompt"]);
+      assert.deepStrictEqual(failed({ calls: bash("cat README.md") }), ["checker-ran", "skill-fired"]);
+    });
+  });
+
+  describe("readme-repair-without-the-word", () => {
+    const README_GRADERS = ["badge-after-description", "no-click-here", "no-copy-prompt", "node-before-install"];
+    const FIXED = [
+      "# csv-tidy",
+      "",
+      "csv-tidy removes empty rows from CSV files on the command line, so an export loads without hand-editing.",
+      "",
+      "[![License](https://example.com/badges/license-MIT.svg)](LICENSE)",
+      "",
+      "## Install",
+      "",
+      "Requires Node 22 or later.",
+      "",
+      "```bash",
+      "npm install -g csv-tidy",
+      "```",
+      "",
+      "## Quick start",
+      "",
+      "```bash",
+      "csv-tidy input.csv --output clean.csv",
+      "```",
+      "",
+      "Expected output:",
+      "",
+      "```text",
+      "$ csv-tidy input.csv --output clean.csv",
+      "Removed 2 empty rows",
+      "Wrote clean.csv",
+      "```",
+      "",
+      "Every option is in the [csv-tidy documentation](https://example.com/docs).",
+      "",
+    ].join("\n");
+    let checks;
+    let run;
+    before(() => {
+      checks = graders(REPAIR);
+      run = { dir: replay(REPAIR), calls: [SKILL, ...bash(CHECK)], reply: "", created: "" };
+    });
+    const failed = (changes) => failedGraders(checks, { ...run, ...changes });
+
+    test("the fixture README fails each README grader, and the shared graders are the review case's", () => {
+      assert.deepStrictEqual(failed({}), README_GRADERS);
+      for (const name of ["skill-fired", "checker-ran", "no-files-created"]) assert.deepStrictEqual(checks[name], graders(REVIEW)[name], name);
+    });
+
+    test("a repaired README passes every grader and the checker", () => {
+      const fixed = tempDir("anneal-graders-readme-fixed-");
+      fs.cpSync(run.dir, fixed, { recursive: true });
+      write(fixed, "README.md", FIXED);
+      assert.deepStrictEqual(checkReadme(FIXED), []);
+      assert.deepStrictEqual(failed({ dir: fixed }), []);
+      assert.deepStrictEqual(failed({ dir: fixed, created: "LICENSE" }), ["no-files-created"]);
+    });
+
+    test("each README grader fails the one repair it exists for", () => {
+      const variants = {
+        "badge-after-description": FIXED.replace("# csv-tidy\n\n", "[![CI](ci.svg)](ci)\n# csv-tidy\n\n"),
+        "no-click-here": FIXED.replace("the [csv-tidy documentation]", "[click here]"),
+        "no-copy-prompt": FIXED.replace("```bash\nnpm install", "```bash\n$ npm install"),
+        "node-before-install": FIXED.replace("Requires Node 22 or later.\n\n", "").replace("## Quick start", "Requires Node 22 or later.\n\n## Quick start"),
+      };
+      for (const [grader, text] of Object.entries(variants)) {
+        const dir = tempDir("anneal-graders-readme-variant-");
+        write(dir, "README.md", text);
+        assert.notStrictEqual(text, FIXED, grader);
+        assert.strictEqual(passes(checks[grader], { dir }), false, grader);
+      }
+    });
+  });
+});

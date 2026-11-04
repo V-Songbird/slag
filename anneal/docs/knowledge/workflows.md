@@ -7,6 +7,10 @@ related_files:
   - anneal/skills/session-review/SKILL.md
   - anneal/skills/repo-docs/SKILL.md
   - anneal/skills/repo-docs/references/policy.md
+  - anneal/skills/repo-docs/references/reconcile.md
+  - anneal/skills/repo-docs/references/readme.md
+  - anneal/scripts/readme-check.js
+  - anneal/tests/readme-check.test.js
   - anneal/templates/gitignore
   - anneal/templates/docs-rule.md
   - anneal/scripts/audit.js
@@ -255,9 +259,55 @@ The output does not grow with the transcript. It holds at most `--limit` candida
 
 Use `/anneal:repo-docs` on Claude Code, `$repo-docs` on Codex or `/repo-docs` on Antigravity. Add `audit` to receive findings without edits. The audit offers to save its findings and writes that report in the project only after you say yes, even when your own instructions ask to save findings. A run nobody can answer, such as a headless one, writes nothing in the project. Outside the project, the audit writes only its coverage checklist, and only in a scratch directory the host names for the session; without one it writes no file anywhere and reads command output from the command or through a pipe.
 
-The skill inventories maintained documentation, reviews every in-scope README with `readme`, and runs the layout audit without entering its migration steps. It checks claims, references, host instructions, development setup and ignore rules against evidence, and proposes routes that take each anticipated task to the one document holding its contract and to the check that proves it, starting from the audit's observations. If `readme` is unavailable, it reports that gap and reviews the READMEs manually.
+The skill inventories maintained documentation, reviews every in-scope README with its [README reference](#readme-work) and checker, and runs the layout audit without entering its migration steps. It checks claims, references, host instructions, development setup and ignore rules against evidence, and proposes routes that take each anticipated task to the one document holding its contract and to the check that proves it, starting from the audit's observations.
 
 A cleanup request authorizes ordinary documentation fixes within its scope. Changes to standing instructions need your authorization; runtime, hook, permission and publishing changes are proposed separately unless already authorized. The report distinguishes verified claims from unresolved ones and static host checks from live execution.
+
+### README work
+
+Ask for one README with the `readme` argument, as in `/anneal:repo-docs readme`, `$repo-docs readme` or `/repo-docs readme`, or describe the job in your own words: "review and score the README", "add a quick start", "nobody can work out how to install this". The skill then reads its `references/readme.md` and works on that README alone, without the inventory or the layout audit.
+
+| Mode | Request | What changes |
+| --- | --- | --- |
+| Write | No README, or a new one | A new `README.md`, drafted from facts in the repository |
+| Review | Review, audit or score | Nothing; the report scores 14 criteria from 0 to 4 with `references/readme-review.md` |
+| Improve | Improve, rewrite or shorten | The README, after a review |
+| Edit | One targeted change | Only that part of the README |
+
+Write and Improve pick a tier, minimal, standard or advanced, and draft from `references/readme-templates.md`. The skill never invents a command, an output, a URL or a license; it lists the facts it could not confirm in its report.
+
+#### The README checker
+
+`node anneal/scripts/readme-check.js [--tier minimal|standard|advanced] README.md` checks one file and writes nothing. It needs only Node 22 or later. It prints each finding as `line:rule  message`, then the count. On the README of the [README cases](#readme-cases):
+
+```text
+1:badge-first  badges appear before the description; move them below it
+5:filler  remove or replace 'powerful'
+5:filler  remove or replace 'simply'
+9:no-shown-result  no block anywhere shows what a reader should see; add expected output, or a comment on the call showing the value it returns
+10:prompt-in-copy-block  copyable block contains a `$` prompt; use a text block to show responses
+15:fence-lang  code fence has no language tag
+19:link-text  link text does not name its destination
+7 findings
+```
+
+It exits 1 while findings remain, 0 at `0 findings`, and 2 for bad arguments, an unknown tier included, or a file it cannot read.
+
+| Rule | Reports |
+| --- | --- |
+| `fence-unclosed` | A code fence that never closes |
+| `h1-count` | No H1, or more than one, outside fences |
+| `badge-first` | A badge line above the first line of prose |
+| `fence-lang` | A fence with no language tag |
+| `prompt-in-copy-block` | The first line starting `$ ` in a `bash`, `sh`, `shell`, `zsh`, `console`, `powershell` or `ps1` fence |
+| `no-shown-result` | Fences, none tagged `text`, `txt`, `console`, `output`, `json`, `yaml` or `log`, and no comment such as `// x -> 2` that shows a returned value |
+| `placeholder` | `{{` left in prose |
+| `link-text` | A label such as "click here", "here", "read more" or "aquí", or a label that repeats its URL |
+| `filler` | "simply", "just", "obviously", "easy", "easily", "powerful", "blazing", "awesome", "it should be noted", "we will now" or "utilize" |
+| `long-sentence` | The first sentence over 25 words in a line; a code span counts as one word |
+| `over-budget` | With `--tier`, more than 400, 900 or 1200 words of prose |
+
+Prose is every line outside a fence that is not blank, a heading, a badge or a table row. The rules judge no meaning, so the reference's verification pass still applies. [readme-check.test.js](../../tests/readme-check.test.js) pins a trigger and a near miss for each rule, and the exit codes.
 
 ### Adopting the documentation contract
 
@@ -360,14 +410,14 @@ The audits and session review have run from the published package in Claude Code
 
 ## Running the evals
 
-Twenty-eight eval cases live in [evals](../../evals/). Three check skill discovery, audit mode leaving files unchanged, migration stopping on a dirty tree, and session proposals waiting for approval; [two](#a-migration-on-a-clean-tree) apply an approved migration step on a clean tree, one of them into a new directory, [one](#a-plan-from-a-wrong-survey-row) shows a plan from a layout survey row whose importer count is wrong, [one](#an-unreadable-transcript) gives session review a transcript its evidence script refuses, [seven](#session-failure-checks) give session review a transcript of one failure shape and grade what its reply proposes, [two](#reader-only-map-checks) ask a reader what the map alone answers, the six navigation cases have their own [paired protocol](#paired-navigation-runs), and six [held-out cases](#held-out-checks) repeat it on a second repository. Each run drives a real session, so it is slow. The three build their fixtures with a `scaffold_script` and grade Bash calls, so a run needs `--scaffold` and a tool grant. Run them from the repository root, and write the results outside it:
+Thirty eval cases live in [evals](../../evals/). Three check skill discovery, audit mode leaving files unchanged, migration stopping on a dirty tree, and session proposals waiting for approval; [two](#a-migration-on-a-clean-tree) apply an approved migration step on a clean tree, one of them into a new directory, [one](#a-plan-from-a-wrong-survey-row) shows a plan from a layout survey row whose importer count is wrong, [one](#an-unreadable-transcript) gives session review a transcript its evidence script refuses, [seven](#session-failure-checks) give session review a transcript of one failure shape and grade what its reply proposes, [two](#readme-cases) review and repair one README, [two](#reader-only-map-checks) ask a reader what the map alone answers, the six navigation cases have their own [paired protocol](#paired-navigation-runs), and six [held-out cases](#held-out-checks) repeat it on a second repository. Each run drives a real session, so it is slow. The three build their fixtures with a `scaffold_script` and grade Bash calls, so a run needs `--scaffold` and a tool grant. Run them from the repository root, and write the results outside it:
 
 ```bash
 claude plugin eval ./anneal --tag smoke --tag safety --scaffold --no-publish \
   --allow-tools Bash Edit Write --output-dir <results>
 ```
 
-`--tag smoke --tag safety` selects the three. Without it the clean-tree migrations, the plan from a wrong survey row, the unreadable transcript, the seven session-failure cases, the reader-only map checks, the navigation cases and the held-out cases run too, the last two in both arms, which their protocol does not use. Without `--output-dir` the harness writes `aggregate-result.json` and the HTML report under `anneal/evals/results/`, which git does not ignore. Each run's trace stays in its temporary directory as `out/trace.jsonl`. `--keep-temp` keeps that directory; in 2.1.278 it also seals the run's home and workspace under `sealed/` at mode 000 and asks that no git command run in the kept copy.
+`--tag smoke --tag safety` selects the three. Without it the clean-tree migrations, the plan from a wrong survey row, the unreadable transcript, the seven session-failure cases, the two `readme` cases, the reader-only map checks, the navigation cases and the held-out cases run too, the last two in both arms, which their protocol does not use. Without `--output-dir` the harness writes `aggregate-result.json` and the HTML report under `anneal/evals/results/`, which git does not ignore. Each run's trace stays in its temporary directory as `out/trace.jsonl`. `--keep-temp` keeps that directory; in 2.1.278 it also seals the run's home and workspace under `sealed/` at mode 000 and asks that no git command run in the kept copy.
 
 With `--scaffold`, the harness runs each case's `scaffold_script` with bash from that case's folder in the target, as you and outside the sandbox, in the run's new workspace and with the `PATH` the harness started with. A script can therefore reach other files of the target through its own path: each navigation scaffold runs `../navigation-fixture.js`, which reads its contract from `navigation-partner-api.md` beside it, so a copy of `anneal/` used as the target has to keep both files in `evals/`. In the same way, `migration-moves-into-new-directory` and `plan-flags-a-wrong-importer-count` run the fixture script of `migration-applies-approved-step`. A scaffold that fails ends its run before the session starts, at no cost, and the run's error quotes the end of the script's error output. The harness keeps a failed run's temporary directory even without `--keep-temp`, unless `--json` is passed.
 
@@ -478,6 +528,22 @@ Two kinds of grader score each case:
 - **Judged graders.** Eleven graders of `type: llm` read the reply: two each in the flake, machine-fact, refusal and path-hint cases, and one each in the other three. A judge model grades each against the PASS and FAIL criteria written in its file, so a run is billed for those judge calls as well as for its session, in both arms, because these graders name no arm.
 
 [eval-graders.test.js](../../tests/eval-graders.test.js) checks the deterministic graders offline: a run as the case asks passes all of them whatever its reply says, and evidence cut before the failure, a missing evidence call, an edited map file, an edited manifest and a created file each fail the grader meant for it. It checks the judged graders for form only: each is `type: llm`, no other grader reads the reply, and each is skipped without a verdict. Nothing offline shows that a judge would pass or fail a real reply, so the scores of the first live run are the first evidence that the criteria separate the right replies from the wrong ones.
+
+### README cases
+
+Two cases, tagged `readme`, scaffold the same small package, `csv-tidy`. Its README has a badge above the title, the filler words "powerful" and "simply", a `$` prompt in the install block, a fence with no language, no shown result and a "click here" link. It never mentions the Node 22 requirement that `package.json` declares. The checker reports seven findings on it, listed under [the README checker](#the-readme-checker).
+
+- `readme-review-reports-without-changes` asks for a review and a score and says not to change any file. It allows Read, Glob, Grep, Skill and Bash, for 25 turns and 600 seconds. `names-badge-order` and `names-copy-prompt` require the reply to name the badge order and the `$` prompt. `readme-unchanged` requires `README.md` to match the scaffold byte for byte, `no-layout-audit` fails any Bash call of `audit.js`, and `no-files-created` is the audit case's.
+- `readme-repair-without-the-word` asks to fix the front page so a newcomer can install and try the project, without saying README. It also allows Edit and Write, for 30 turns and 600 seconds. In `README.md`, `badge-after-description` requires prose, not a badge or a heading, right after the H1. `no-copy-prompt` fails a `$ ` line in a shell fence, `node-before-install` requires Node 22 before the first `npm install` or `npx`, and `no-click-here` fails a label that names no destination. `no-files-created` fails a created file, such as the `LICENSE` the README links; it does not see an edit to another file.
+
+In both, `skill-fired` requires a Skill call of `repo-docs` and `checker-ran` a Bash call of `readme-check.js`. Both are indicators that run only with the plugin. [eval-graders.test.js](../../tests/eval-graders.test.js) replays the scaffolds without bash and checks the seven findings. A run as each case asks passes every grader. A layout audit, an edited README, a created file, a reply that misses a planted problem and each README problem left unrepaired fail the grader meant for it, and a repaired README passes every grader with no checker finding. Neither case has run in a session yet. Run them from the repository root:
+
+```bash
+claude plugin eval ./anneal --tag readme --scaffold --no-publish \
+  --allow-tools Bash Edit Write --output-dir <results>
+```
+
+Eval sessions load your user skills. Before a run, remove or disable any other README skill installed for your user; otherwise a README request can route to it, and `skill-fired` fails for a reason outside anneal.
 
 ### Reader-only map checks
 

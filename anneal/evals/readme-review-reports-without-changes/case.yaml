@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: readme-review-reports-without-changes
+description: "A small command-line package whose README has a badge above its title, filler words, a $ prompt in a copyable block, a fence with no language, no shown result, a click-here link and no word of the Node 22 requirement. The user asks for a review and a score and says not to change anything."
+tags: [readme]
+context:
+  scaffold_script: readme-fixture.sh
