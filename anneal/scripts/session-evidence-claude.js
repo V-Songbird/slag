@@ -172,9 +172,9 @@ function commandPairs(command) {
 // A later call retries a refused one when it reaches the same path by the same operation, or, for a shell command that
 // names no path, when a shell command runs the same program with the same first argument, whatever flags or wrapping
 // come between. Any other tool retries only with the same input. A hook judges an identical call again itself, so after a
-// hook's denial only another form of the call retries it.
-function retries(refused, call, byHook) {
-  if (byHook && call.tool === refused.tool && call.commandOrArguments === refused.commandOrArguments) return false;
+// hook's denial only a call whose full input differs retries it.
+function retries(refused, call, resentToHook) {
+  if (resentToHook) return false;
   if (refused.path !== null) return call.path === refused.path && call.operation === refused.operation;
   if (!SHELL_TOOLS.has(refused.tool)) return call.tool === refused.tool && call.commandOrArguments === refused.commandOrArguments;
   if (!SHELL_TOOLS.has(call.tool) || typeof call.commandOrArguments !== "string") return false;
@@ -231,6 +231,7 @@ function analyzeClaude(file, before = null, limit = 6) {
   const failures = [];
   const failedCalls = new WeakMap();
   const hookDenied = new WeakSet();
+  const rawInputs = new WeakMap();
   const counts = {};
   const largest = [];
   const context = {};
@@ -282,6 +283,7 @@ function analyzeClaude(file, before = null, limit = 6) {
         const shape = claudeShape(block.name, fields, state.cwd);
         const key = JSON.stringify([actor, block.id]);
         const call = callEntry(block.name, actor, line, state.promptLine, phaseOf(nav, actor, state.promptLine, messageId), shape, input);
+        rawInputs.set(call, JSON.stringify([block.name, block.input ?? {}]));
         if (issue(track, key, call, shape.opaque)) {
           const task = fields.task_id ?? fields.bash_id;
           called(nav, call, shape, {
@@ -293,7 +295,8 @@ function analyzeClaude(file, before = null, limit = 6) {
             // own assistant message ran beside it, whenever the host wrote it down, and one for another prompt is other work.
             if (failure.retriesAfterRefusal && failure.actor === call.actor && failure.promptLine === call.promptLine
               && !siblings(nav, failedCalls.get(failure), call)
-              && failure.retriesAfterRefusal.length < 2 && retries(failure, call, hookDenied.has(failure))) {
+              && failure.retriesAfterRefusal.length < 2
+              && retries(failure, call, hookDenied.has(failure) && rawInputs.get(failedCalls.get(failure)) === rawInputs.get(call))) {
               failure.retriesAfterRefusal.push({ ...call });
             }
           }
@@ -314,16 +317,18 @@ function analyzeClaude(file, before = null, limit = 6) {
         // Successful output is text-matched only for a shell command that neither reads nor searches: content quotes errors.
         const diagnostic = reported || (SHELL_TOOLS.has(call.tool) && !CONTENT.has(call.operation)) ? diagnose(CLAUDE_DIAGNOSTICS, output) : null;
         const failed = reported || Boolean(diagnostic);
+        // A hook's denial names no missing path, whatever its message says: the call never ran.
+        const hookDenial = failed && HOOK_DENIAL.test(output);
         if (call.actor === "main") worked(stalls, failed ? "failed" : "ok");
         const saved = persisted && SAVED_TO.exec(output);
         answered(nav, call, {
           line, timestamp: timeOf(row), output, size, persisted: Boolean(persisted), saved: saved ? normalizePath(saved[1].trim(), state.cwd) : null,
-          appended: text.length - output.length, outcome: failed ? "failed" : "ok", missing: failed ? lineOf(MISSING, output) : null,
+          appended: text.length - output.length, outcome: failed ? "failed" : "ok", missing: failed && !hookDenial ? lineOf(MISSING, output) : null,
           // A Read over the tool's limit returned nothing, and a persisted result only a preview.
           cut: failed ? lineOf(READ_LIMIT, output) : persisted ? lineOf(/Output too large/, output) : null,
         });
         if (failed) {
-          const named = missingIn(call.operation, output) || diagnostic;
+          const named = (hookDenial ? null : missingIn(call.operation, output)) || diagnostic;
           let category = "tool-error";
           if (named) category = named.name;
           else if (exit) category = "nonzero-exit";
@@ -337,7 +342,7 @@ function analyzeClaude(file, before = null, limit = 6) {
             ...(REFUSED.has(category) ? { retriesAfterRefusal: [] } : {}),
           };
           failedCalls.set(failure, call);
-          if (HOOK_DENIAL.test(output)) hookDenied.add(failure);
+          if (hookDenial) hookDenied.add(failure);
           keepLast(failures, failure, limit);
           counts[category] = (counts[category] || 0) + 1;
         } else {

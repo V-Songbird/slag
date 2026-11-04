@@ -1065,6 +1065,34 @@ describe("a refused call and what followed it", () => {
     assert.deepStrictEqual(report.candidates[0].retriesAfterRefusal.map((c) => c.callLine), [6]);
   });
 
+  test("after a hook's denial, a resend that changes only a field beside the command, or its text past the excerpt, retries it", () => {
+    const long = `node build.js ${"--flag ".repeat(80)}`;
+    const report = analyzeClaude(transcript([
+      human("build it", 1),
+      use("t1", "Bash", { command: "npm run build" }, 2),
+      result("t1", "PreToolUse:Bash hook error: [node guard.js]: guard: asks once", 3, true),
+      use("t2", "Bash", { command: "npm run build", dangerouslyDisableSandbox: true }, 4),
+      result("t2", "built", 5),
+      use("t3", "Bash", { command: `${long}a` }, 6),
+      result("t3", "PreToolUse:Bash hook error: [node guard.js]: guard: asks once", 7, true),
+      use("t4", "Bash", { command: `${long}b` }, 8),
+      result("t4", "built", 9),
+      human("audit", 10),
+    ]));
+    assert.deepStrictEqual(report.candidates.map((c) => [c.callLine, c.retriesAfterRefusal.map((r) => r.callLine)]), [[2, [4]], [6, [8]]]);
+  });
+
+  test("a hook's denial of a read is blocked even when its message reads like a missing file", () => {
+    const report = analyzeClaude(transcript([
+      human("read the notes", 1),
+      use("t1", "Read", { file_path: "/work/shop/notes.md" }, 2),
+      result("t1", "PreToolUse:Read hook error: [guard]: File does not exist in allowlist", 3, true),
+      human("audit", 4),
+    ]));
+    assert.deepStrictEqual(report.candidates.map((c) => [c.callLine, c.category]), [[2, "blocked"]]);
+    assert.deepStrictEqual(report.navigationCandidates, []);
+  });
+
   test("a failure that nobody refused carries no retry list", () => {
     const report = analyzeClaude(transcript([
       human("run the suite", 1),
