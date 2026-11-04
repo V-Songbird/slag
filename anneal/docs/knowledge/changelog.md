@@ -22,6 +22,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
+- `session-review closeout <session id or transcript file>` reports whether deleting a finished Claude Code session would lose work: each file the session wrote, by where it lives now, and each turn whose closing text no tracked or ignored file holds. It reads the whole session, writes nothing and deletes nothing.
 - On Claude Code, the session evidence names a call a `PreToolUse` hook denied (`PreToolUse:<tool> hook error:`) as `blocked`, so it carries `retriesAfterRefusal`. The identical call sent again, with every input field alike, is not listed: the hook judges it again, and a hook that asks only once can let it through.
 
 - repo-docs handles README requests on its own, through its `readme` argument or a request that never says README, such as "add a quick start". Its `references/readme.md` writes, reviews, scores, improves, edits or translates one README, with tier templates in `references/readme-templates.md` and a scoring rubric and final checklist in `references/readme-review.md`. The reconciliation reviews every maintained README the same way, with no optional skill to install.

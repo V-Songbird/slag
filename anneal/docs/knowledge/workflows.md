@@ -23,6 +23,8 @@ related_files:
   - anneal/scripts/session-evidence-redaction.js
   - anneal/scripts/session-evidence-shell.js
   - anneal/scripts/session-evidence-stall.js
+  - anneal/scripts/session-closeout.js
+  - anneal/tests/session-closeout.test.js
   - anneal/tests/session-evidence.test.js
   - anneal/tests/session-evidence-claude.test.js
   - anneal/tests/session-evidence-codex.test.js
@@ -254,6 +256,38 @@ The output does not grow with the transcript. It holds at most `--limit` candida
 - On Codex, the outcome of a result without an exit code rests on the wrappers above and on which tools throw their failures, as current rollouts show them. A script is read by pattern, not parsed. A call it builds at run time through `tools`, `globalThis` or `Reflect` makes it `unknown`. A call built through another name for the global object, such as `self`, or code a regex literal hides can still read as `ok`, and so can a failure dropped in another way than `catch`, `allSettled`, `Promise.any` or `Promise.race`, such as `.then(onOk, onErr)`, a tool call without `await` or a `finally` that ends in `continue`. Neither `.then(onOk, onErr)` nor a tool call without `await` occurs in the local Codex rollouts measured. A command call in a loop counts once, so a loop that prints the exit of one pass reads as printing them all, and records that cover that one call count as covering the loop.
 - On Codex, a host record that no call bounds, or one that names no thread while another agent is at work, is matched to a script only by a command or server tool the script spells out. A script that computes its commands takes no such record, and another agent's run of a command the script also spells out, recorded without a thread, is taken for the script's.
 - A plugin or hook that rewrites a tool's output, for example to cut or collapse lines, leaves its marker in text that the evidence cannot tell from the tool's own output. Such markers are not classified.
+
+### Close-out before deleting a session
+
+Deleting a Claude Code session can delete its transcript, and with it any decision or work that only the conversation holds. `/anneal:session-review closeout <session id or transcript file>` tells you, before you delete a finished session, whether anything would be lost. It only reports: it never deletes, archives, moves or edits a session, a transcript or a file, and it does not offer to save its findings.
+
+Run it on a finished session, not on the one you are in. With a session id, the script looks for exactly one transcript with that id under your Claude Code home and stops with exit 2 when it finds none or several; the skill then asks you for the file. It exits 1 for a Codex rollout, a record that is not valid JSON, or a `--root` outside a Git work tree.
+
+The script `anneal/scripts/session-closeout.js` reads the whole transcript with the same parser as the session evidence and prints JSON. It lists two kinds of items:
+
+- A `change` is a file the session wrote with Edit, MultiEdit, NotebookEdit or Write, in a call that reported no error. Its `location` says where that file is now, checked with Git against the repository root:
+
+  | `location` | Meaning | At risk |
+  | --- | --- | --- |
+  | `tracked` | Git tracks the file. `uncommitted: true` means the working tree differs from the last commit. | No |
+  | `ignored` | The file exists and an ignore rule covers it, as for private records. | No |
+  | `untracked` | The file exists, but Git neither tracks nor ignores it. | No |
+  | `outside` | The file is outside the repository. | No |
+  | `missing` | The file is gone and Git never held it, so only the transcript keeps its content. | Yes |
+
+- A `turn` is the last text the assistant wrote after one of your prompts. It counts as in a `file` when that turn wrote a tracked or ignored file, and as `transcript-only` otherwise. A `transcript-only` turn is at risk.
+
+`verdict` is `safe-to-delete` when nothing is at risk, and `would-lose` otherwise, with `wouldLose` naming each item at risk by its line or path. `alsoDeleted` counts the subagent transcripts and saved tool outputs in the session's own folder: they go with the session and were not read.
+
+Most turns that end in a question or a status line are `transcript-only`, so the script alone often says `would-lose`. The skill therefore reads each at-risk turn's line. It drops pure status, such as "Done." or a test count, with a reason. For a decision, a finding or a plan, it searches the repository and its ignored records for the key terms, and counts the text as held by a file only when it can cite the file and line. It then gives one verdict line: `Safe to delete.`, or `Deleting it would lose:` followed by each remaining item.
+
+Limits of the close-out:
+
+- It reads Claude Code transcripts only.
+- A turn that wrote any tracked or ignored file counts as in a file, even when that file is unrelated to the turn's decision. The skill's search does not recheck such a turn.
+- A shell command that changed files is not listed, and a file edited and later reverted still counts as tracked.
+- Subagent records in the transcript, subagent transcripts and saved outputs are counted, not read.
+- Redaction of the copied text is best effort, as in the session evidence.
 
 ## How documentation reconciliation runs
 

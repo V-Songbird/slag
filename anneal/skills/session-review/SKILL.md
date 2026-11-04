@@ -5,13 +5,15 @@ description: >-
   that failed before another worked, a file it had to search for, an output too
   large to read — and turns what the transcript demonstrates into changes to
   this repository's map file, each one approved before it is written. A fact
-  about one machine is reported and never written. Use ONLY on an explicit
-  request to audit a session or to learn from this session, or when the user
-  invokes session-review. Do NOT use to audit the repository's layout,
+  about one machine is reported and never written. With closeout and a session
+  id or transcript, it reports instead whether deleting a finished Claude Code
+  session would lose work or decisions no file holds. Use ONLY on an explicit
+  request to audit a session, to learn from this session or to check whether a
+  session can be deleted, or when the user invokes session-review. Do NOT use to audit the repository's layout,
   which repo-layout does, to change code or settings, or to
   edit an instruction file outside this repository.
 disable-model-invocation: true
-argument-hint: "[transcript file]"
+argument-hint: "[transcript file] | closeout <session id or transcript file>"
 license: MIT
 compatibility: Requires Node 22 or later. Finds the session's transcript on Claude Code and Codex. On Antigravity, and on any other host, it works only on a transcript file you hand it.
 metadata:
@@ -25,6 +27,8 @@ Find where one session lost time, and make the smallest change to this repositor
 The map file is the instruction file the host loads into every session: `CLAUDE.md`, `AGENTS.md` or `GEMINI.md`. What belongs in each of its sections, and what stays out of it, is in [the map file skeleton](../repo-layout/references/map-file.md). Read that file before drafting a change.
 
 Argument: `$ARGUMENTS`. A host that does not fill that in leaves it as written; read the argument from the request instead. When it is a path, it is the transcript to audit. With no argument, the session to audit is this one.
+
+When the argument starts with `closeout`, follow [Close-out](#close-out) only and skip steps 1 to 6.
 
 ## What differs by host
 
@@ -154,3 +158,22 @@ A saved map file is not loaded into a session that is already running. Say so.
 - what was reported and not written: each machine fact, worded so the owner can paste it into a global instruction file, each check worth writing, with, for a check-writer suggestion, the transcript lines where the mistake repeated when it did, each steering source, and each finding for repo-docs or repo-layout;
 - what was dismissed, and why;
 - the limits: one session was read, subagent transcripts were listed and not read, the candidate counts are matches, not verified failures, and a navigation candidate's cause is a hypothesis.
+
+## Close-out
+
+Report whether deleting one finished Claude Code session would lose anything. This mode only reports: never delete, archive, move or edit a session, a transcript or a file, and never offer to save the findings unless asked.
+
+```
+node "<plugin root>/scripts/session-closeout.js" --session-id "<id>" --root "<git rev-parse --show-toplevel>"
+```
+
+With a transcript path, pass `--session-file "<path>"` instead of `--session-id`. Never run it on this session: a live session is not finished.
+
+- When the script exits 2, it found no single transcript. Ask the owner for the file. Never pick the most recent session as a guess.
+- When it exits 1, the transcript is not a readable Claude Code transcript or the root is not a Git work tree. Report its message and stop.
+
+The script prints `items` and a `verdict`. A `change` item is a file the session wrote, with its `location`: `tracked`, `ignored`, `untracked`, `outside` the repository, or `missing`, written and since removed with Git never holding it. A `turn` item is the text that ended a turn: `file` when that turn wrote a tracked or ignored file, `transcript-only` otherwise. `atRisk` marks what only the transcript holds.
+
+For each `turn` item at risk, read its `endingLine` in `sessionFile`. Drop pure status, such as "Done." or a test count, with a one-line reason. For a decision, a finding or a plan, search the repository and its ignored records, such as `docs/tasks/`, `docs/decisions/`, `docs/knowledge/private/` and `.private/`, for its key terms. Count it as held by a file only when you can cite the file and line.
+
+Then give one verdict line: `Safe to delete.`, or `Deleting it would lose:` followed by each remaining item with its transcript line or path. Name `alsoDeleted` as material that goes with the session and was not read, and state the script's `limits`.

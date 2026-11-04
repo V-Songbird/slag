@@ -55,6 +55,10 @@ const result = (id, text, second, error = false, extra = {}) => ({
   type: "user", timestamp: at(second),
   message: { content: [{ type: "tool_result", tool_use_id: id, is_error: error, content: [{ type: "text", text }] }] }, ...extra,
 });
+// Text the assistant wrote, such as the message that ends a turn.
+const say = (id, text, second) => ({
+  type: "assistant", timestamp: at(second), message: { id: `msg-${id}`, model: "model-x", content: [{ type: "text", text }] },
+});
 // An older transcript tags no origin: any user text not marked isMeta reads as a prompt.
 const typed = (text, second, extra = {}) => ({
   type: "user", timestamp: at(second), cwd: "/work/shop", message: { role: "user", content: text }, ...extra,
@@ -93,6 +97,6 @@ const importErrors = (cwd, lead = "") => ({
 });
 
 module.exports = {
-  CLI, SESSION, tempDir, transcript, at, truncated, human, use, result, typed, meta, started, turn, item, message, call, output,
+  CLI, SESSION, tempDir, transcript, at, truncated, human, use, result, say, typed, meta, started, turn, item, message, call, output,
   script, fn, returned, importErrors,
 };

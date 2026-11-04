@@ -68,6 +68,7 @@ These examples use Claude Code syntax. On Codex use `$<skill-name>`; on Antigrav
 | Audit without edits | `/anneal:repo-layout audit` |
 | Plan a migration and approve each step | `/anneal:repo-layout` |
 | Propose instruction changes from one session | `/anneal:session-review [transcript file]` |
+| Check whether deleting a finished session would lose work | `/anneal:session-review closeout <session id or transcript file>` |
 | Reconcile documentation, or write and review a README | `/anneal:repo-docs [audit\|maintain\|adopt\|readme] [path or concern]` |
 
 A migration runs baseline checks, proposes changes, and creates an `anneal/<YYYY-MM-DD>` branch for approved steps.

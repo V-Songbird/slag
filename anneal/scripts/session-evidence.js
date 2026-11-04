@@ -115,4 +115,4 @@ function fail(message, code) {
 
 if (require.main === module) process.exitCode = main(process.argv);
 
-module.exports = { analyzeClaude, analyzeCodex, detectHost, redact, main };
+module.exports = { analyzeClaude, analyzeCodex, detectHost, findTranscript, redact, main };
