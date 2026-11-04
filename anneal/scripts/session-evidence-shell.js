@@ -216,4 +216,4 @@ function placeOf(file, cwd) {
   return TEMPORARY.test(file) ? "temporary" : "outside";
 }
 
-module.exports = { CONTENT, normalizePath, placeOf, programName, programs, shellShape };
+module.exports = { CONTENT, normalizePath, placeOf, programs, shellShape };

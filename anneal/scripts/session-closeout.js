@@ -13,7 +13,7 @@ const { spawnSync } = require("node:child_process");
 const { HOME, directory, excerpt } = require("./session-evidence-redaction.js");
 const { textBlocks } = require("./session-evidence-records.js");
 const { actorOf, firstCopies, isPrompt, isQueuedPrompt, subagentTranscripts } = require("./session-evidence-claude.js");
-const { normalizePath, programName, programs } = require("./session-evidence-shell.js");
+const { normalizePath, programs } =require("./session-evidence-shell.js");
 const { detectHost, findTranscript } = require("./session-evidence.js");
 
 // The tools whose input holds what they wrote. A shell command that removes or moves a file carries no content.
@@ -71,10 +71,12 @@ function gitEffects(command, cwd, output) {
   };
   for (const part of programs(command, true)) {
     const words = (part.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((word) => word.replace(/^(["'])([\s\S]*)\1$/, "$2"));
-    if (programName(part) !== "git") continue;
+    // Assignments before the program, such as `GIT_TRACE=0`, only set its environment.
+    let i = 0;
+    while (/^[\w$:]+=/.test(words[i] || "")) i++;
+    if ((words[i] || "").split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, "") !== "git") continue;
     let base = cwd;
-    let i = 1;
-    for (; i < words.length && words[i].startsWith("-"); i++) {
+    for (i++; i < words.length && words[i].startsWith("-"); i++) {
       if (words[i] === "-C") base = normalizePath(words[++i], base, true);
       else if (/^(?:-c|--git-dir|--work-tree|--namespace)$/.test(words[i])) i++;
     }
@@ -283,8 +285,9 @@ function closeout(file, root) {
         + "write files. A leftover is a background command or preview server the session started and never saw stopped or "
         + "ended by its id, or a worktree or branch it created with git worktree add (-b or -B), git checkout -b, -B or "
         + "--orphan, git switch -c, -C, --create, --force-create or --orphan, git branch <name> or EnterWorktree and never "
-        + "removed with git worktree remove, git branch -d or -D, or ExitWorktree remove, which removes only the worktree "
-        + "the session is in. A forced form (-B, -C, --force-create) whose output says git reset a branch that already "
+        + "removed with git worktree remove of the same path, git branch -d or -D, or ExitWorktree remove, which removes only "
+        + "the worktree the session is in. A worktree from EnterWorktree is removed only by ExitWorktree remove; a later git "
+        + "worktree remove of it is not seen, so it stays listed. A forced form (-B, -C, --force-create) whose output says git reset a branch that already "
         + "existed creates none; one with no such output, as in quiet mode or another language, is listed. A start whose "
         + "id the transcript does not show is always listed. A process started any other way, such as with & in a shell "
         + "command, the branch git worktree add creates without -b, a branch name joined to its option, a cd earlier in the "

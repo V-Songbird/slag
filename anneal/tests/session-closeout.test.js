@@ -407,6 +407,34 @@ describe("the cleanup flag", () => {
     assert.deepStrictEqual({ flag: closeout(file, dir).cleanup.flag, line: closeout(file, dir).cleanup.ignoredStatusLine }, { flag: "clean", line: 5 });
   });
 
+  test("a git command with environment assignments before it counts", () => {
+    const dir = repository();
+    const file = transcript([
+      ...fixTurn(dir),
+      use("w1", "Bash", { command: "GIT_TRACE=0 git switch -c feat" }, 5),
+      result("w1", "Switched to a new branch 'feat'", 6),
+      use("g1", "Bash", { command: "MSYS_NO_PATHCONV=1 git status --short --ignored" }, 7),
+      result("g1", "", 8),
+    ]);
+    const { cleanup } = closeout(file, dir);
+    assert.deepStrictEqual({ line: cleanup.ignoredStatusLine, leftovers: cleanup.leftovers.map(({ kind, id }) => ({ kind, id })) },
+      { line: 7, leftovers: [{ kind: "branch", id: "feat" }] });
+  });
+
+  test("a git worktree remove of a worktree EnterWorktree created is not seen", () => {
+    const dir = repository();
+    const file = transcript([
+      ...fixTurn(dir),
+      use("x1", "EnterWorktree", { name: "s" }, 5),
+      result("x1", "Created worktree at .claude/worktrees/s", 6),
+      use("x2", "ExitWorktree", { action: "keep" }, 7),
+      result("x2", "Kept the worktree.", 8),
+      use("w1", "Bash", { command: "git worktree remove .claude/worktrees/s" }, 9),
+      result("w1", "", 10),
+    ]);
+    assert.deepStrictEqual(closeout(file, dir).cleanup.leftovers.map(({ kind, id }) => ({ kind, id })), [{ kind: "worktree", id: "s" }]);
+  });
+
   test("a forced branch creation counts unless git reported resetting a branch that existed", () => {
     const dir = repository();
     const file = transcript([
