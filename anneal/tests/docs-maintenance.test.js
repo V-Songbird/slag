@@ -350,7 +350,7 @@ test("the CLI reads the project's transcripts and memory folder from the host ho
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-claude-home-"));
   created.push(home);
   const env = { ...process.env, CLAUDE_CONFIG_DIR: home };
-  const { transcripts, memory: memoryDir } = hostDefaults(root, env);
+  const { project, memory: memoryDir } = hostDefaults(root, env);
   write(memoryDir, { "MEMORY.md": "- [Kept](kept.md) — indexed\n", "kept.md": memory("2026-10-30T00:00:00.000Z", "Indexed."), "orphan.md": memory("2026-10-30T00:00:00.000Z", "Nothing links this one.") });
   const run = (...args) => spawnSync(process.execPath, [CLI, "--root", root, "--json", ...args], { encoding: "utf8", env });
   const ids = (result) => JSON.parse(result.stdout).proposals.map((p) => `${p.id} ${p.path} ${p.detail.includes("no transcripts read") ? "unread" : "read"}`);
@@ -358,12 +358,23 @@ test("the CLI reads the project's transcripts and memory folder from the host ho
   const derived = run();
   assert.strictEqual(derived.status, 0, derived.stderr);
   assert.strictEqual(derived.stderr, "");
-  assert.deepStrictEqual(ids(derived).map((line) => line.replace(/ \S*memory\//, " memory/")), ["fold-completed docs/tasks/done.md read", "memory-unindexed memory/orphan.md read"]);
+  const [fold, orphan] = JSON.parse(derived.stdout).proposals;
+  assert.deepStrictEqual(ids(derived).slice(0, 1), ["fold-completed docs/tasks/done.md read"]);
+  // The memory proposal's path names the file.
+  assert.strictEqual(orphan.id, "memory-unindexed");
+  assert.ok(fs.existsSync(orphan.path.replace(/^~(?=\/)/, os.homedir().replace(/\\/g, "/"))), orphan.path);
+  assert.strictEqual(fold.path, "docs/tasks/done.md");
+  // A session in a worktree of the root counts as a reader.
+  const worktree = `${project}--claude-worktrees-side`;
+  const read = { type: "assistant", timestamp: new Date(Date.now() - 9 * 86400000).toISOString(), message: { content: [{ type: "tool_use", name: "Read", input: { file_path: path.join(root, "docs/tasks/done.md") } }] } };
+  write(worktree, { "reader.jsonl": JSON.stringify(read) });
+  assert.deepStrictEqual(ids(run()).filter((line) => line.startsWith("fold-completed")), []);
+  fs.rmSync(worktree, { recursive: true });
   // Flags replace the defaults.
   assert.deepStrictEqual(ids(run("--transcripts", root, "--memory", "mem")), ["fold-completed docs/tasks/done.md read"]);
 
   // A missing default folder is one line each, and the run goes on.
-  fs.rmSync(transcripts, { recursive: true });
+  fs.rmSync(project, { recursive: true });
   const absent = run();
   assert.strictEqual(absent.status, 0);
   assert.match(absent.stderr, /^docs-maintenance\.js: no Claude Code transcripts folder at .*; pass --transcripts <directory> to name one\ndocs-maintenance\.js: no Claude Code memory folder with a MEMORY\.md at .*; pass --memory <directory> to name one\n$/);

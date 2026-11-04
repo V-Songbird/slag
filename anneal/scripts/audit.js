@@ -506,7 +506,8 @@ function importsOf(text) {
 // instruction files and their @path imports, rules without a paths: scope, and
 // the global file and memory index the caller names. SessionStart hooks are
 // listed, never run. Outside the root it reads only what the caller names.
-function startContext(root, reader, { global = [], memory } = {}) {
+// Codex's global files are listed apart and left out of the Claude Code total.
+function startContext(root, reader, { global = [], codex = [], memory } = {}) {
   const { excerpt } = require("./session-evidence-redaction.js");
   const sources = [];
   const missing = [];
@@ -549,6 +550,13 @@ function startContext(root, reader, { global = [], memory } = {}) {
     if (text === undefined) missing.push({ source: "global", file: label(abs), reason: "not found" });
     else loaded.push([abs, text]);
   }
+  const others = [];
+  for (const file of codex) {
+    const abs = path.resolve(file);
+    const info = fs.statSync(abs, { throwIfNoEntry: false })?.isFile() ? readFile(path.dirname(abs), path.basename(abs)) : null;
+    if (!info) missing.push({ source: "Codex global", file: label(abs), reason: "not found" });
+    else others.push({ file: label(abs), loads: "global, Codex; not in the Claude Code total", characters: info.text === null ? info.size : info.text.length });
+  }
   if (!memory) missing.push({ source: "memory index", file: null, reason: "not given; pass --memory <file>" });
   else if (load(path.resolve(memory), "memory index") === undefined) missing.push({ source: "memory index", file: label(path.resolve(memory)), reason: "not found" });
 
@@ -575,7 +583,7 @@ function startContext(root, reader, { global = [], memory } = {}) {
     .map((hook) => ({ file: ".claude/settings.json", command: [hook.command, ...(Array.isArray(hook.args) ? hook.args : [])].join(" "), note: "output not measured: the audit never runs a hook" }));
   sources.sort((a, b) => b.characters - a.characters || a.file.localeCompare(b.file));
   const characters = sources.reduce((sum, source) => sum + source.characters, 0);
-  return { budget: START_CONTEXT_BUDGET_CHARS, characters, sources, missing, hooks };
+  return { budget: START_CONTEXT_BUDGET_CHARS, characters, sources, others, missing, hooks };
 }
 
 function audit(rootArg, options = {}) {
@@ -696,8 +704,9 @@ function formatSummary(report) {
     "",
     `start context: ${start.characters} of ${start.budget} characters (${Math.round((start.characters / start.budget) * 100)}% of the budget)`,
     ...start.sources.map((source) => `  ${source.file} (${source.loads}): ${source.characters} characters, ${source.share}% of the budget`),
+    ...start.others.map((source) => `  ${source.file} (${source.loads}): ${source.characters} characters`),
     ...start.missing.map((entry) => `  missing: ${entry.source}${entry.file ? ` ${entry.file}` : ""}: ${entry.reason}`),
-    ...start.hooks.map((hook) => `  hook ${hook.file} SessionStart: ${hook.command}; output not measured`),
+    ...(start.hooks.length ? start.hooks.map((hook) => `  hook ${hook.file} SessionStart: ${hook.command}; output not measured`) : ["  hook: no SessionStart command hook in .claude/settings.json"]),
   );
   if (start.characters > start.budget) {
     lines.push(`  over budget by ${start.characters - start.budget} characters; cuts would start with the largest sources above. The audit changes none of them.`);
@@ -706,17 +715,43 @@ function formatSummary(report) {
 }
 
 // The host inputs a run derives from its root when no flag names them: the global instruction file
-// of each host whose home exists, and Claude Code's folder for the project, which holds its
-// transcripts and its memory folder. The homes follow CLAUDE_CONFIG_DIR and CODEX_HOME as the
-// session scripts do, and the folder key is the one session-repeats.js matches: the root's path
-// with each character outside [A-Za-z0-9] a hyphen.
+// of each host whose home exists, and Claude Code's folder for the project. The homes follow
+// CLAUDE_CONFIG_DIR and CODEX_HOME as the session scripts do, and the folder key is the one
+// session-repeats.js matches: the root's path with each character outside [A-Za-z0-9] a hyphen.
+// The transcripts are that folder and its `<key>--claude-worktrees-*` siblings. The memory folder
+// is the autoMemoryDirectory of .claude/settings.local.json, else of the home's settings.json,
+// else the project folder's memory/.
 function hostDefaults(root, env = process.env) {
   const { HOME } = require("./session-evidence-redaction.js");
   const claude = env.CLAUDE_CONFIG_DIR || (HOME ? path.join(HOME, ".claude") : null);
   const codex = env.CODEX_HOME || (HOME ? path.join(HOME, ".codex") : null);
-  const project = claude ? path.join(claude, "projects", path.resolve(root).replace(/[^A-Za-z0-9]/g, "-")) : null;
-  const global = [[claude, "CLAUDE.md"], [codex, "AGENTS.md"]].filter(([home]) => home && fs.existsSync(home)).map(([home, name]) => path.join(home, name));
-  return { global, transcripts: project, memory: project && path.join(project, "memory") };
+  const present = (home) => home && fs.existsSync(home);
+  const key = path.resolve(root).replace(/[^A-Za-z0-9]/g, "-");
+  const project = claude ? path.join(claude, "projects", key) : null;
+  const fold = (name) => (process.platform === "win32" ? name.toLowerCase() : name);
+  let transcripts = [];
+  try {
+    transcripts = fs.readdirSync(path.join(claude, "projects"), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && (fold(entry.name) === fold(key) || fold(entry.name).startsWith(fold(`${key}--claude-worktrees-`))))
+      .map((entry) => path.join(claude, "projects", entry.name)).sort();
+  } catch {
+    transcripts = [];
+  }
+  const setting = [path.join(root, ".claude", "settings.local.json"), claude && path.join(claude, "settings.json")].filter(Boolean).map((file) => {
+    try {
+      return JSON.parse(fs.readFileSync(file, "utf8")).autoMemoryDirectory;
+    } catch {
+      return undefined;
+    }
+  }).find((value) => typeof value === "string" && value);
+  const memory = setting ? (setting.startsWith("~/") && HOME ? path.join(HOME, setting.slice(2)) : path.resolve(root, setting)) : project && path.join(project, "memory");
+  return {
+    global: present(claude) ? [path.join(claude, "CLAUDE.md")] : [],
+    codex: present(codex) ? [path.join(codex, "AGENTS.md")] : [],
+    project,
+    transcripts,
+    memory,
+  };
 }
 
 // One line for a default folder that does not exist; the run goes on without it.
@@ -756,12 +791,13 @@ function main(argv) {
     return 2;
   }
   const defaults = hostDefaults(root);
+  const codex = globalGiven ? [] : defaults.codex;
   if (!globalGiven) global = defaults.global;
   if (memory === undefined) {
     if (defaults.memory && fs.existsSync(defaults.memory)) memory = path.join(defaults.memory, "MEMORY.md");
     else noDefault("audit.js", "Claude Code memory folder", defaults.memory, "--memory <file>");
   }
-  const report = audit(root, { global, memory });
+  const report = audit(root, { global, codex, memory });
   process.stdout.write(json ? `${JSON.stringify(report, null, 2)}\n` : formatSummary(report));
   return 0;
 }

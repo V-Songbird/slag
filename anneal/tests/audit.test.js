@@ -753,7 +753,31 @@ describe("start context", () => {
     const home = path.join(os.tmpdir(), "fake-claude");
     const [root, key] = process.platform === "win32" ? ["D:\\a.b\\c d", "D--a-b-c-d"] : ["/a.b/c d", "-a-b-c-d"];
     const defaults = hostDefaults(root, { CLAUDE_CONFIG_DIR: home, CODEX_HOME: path.join(home, "none") });
-    assert.deepStrictEqual(defaults, { global: [], transcripts: path.join(home, "projects", key), memory: path.join(home, "projects", key, "memory") });
+    assert.deepStrictEqual(defaults, { global: [], codex: [], project: path.join(home, "projects", key), transcripts: [], memory: path.join(home, "projects", key, "memory") });
+  });
+
+  test("the memory folder follows autoMemoryDirectory in settings.local.json, then in the home's settings.json", () => {
+    const homes = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-homes-"));
+    created.push(homes);
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    const env = { CLAUDE_CONFIG_DIR: path.join(homes, "claude"), CODEX_HOME: path.join(homes, "codex") };
+    write(homes, { "claude/settings.json": JSON.stringify({ autoMemoryDirectory: path.join(homes, "user-memory") }) });
+    assert.strictEqual(hostDefaults(root, env).memory, path.join(homes, "user-memory"));
+    write(root, { ".claude/settings.local.json": JSON.stringify({ autoMemoryDirectory: path.join(homes, "local-memory") }) });
+    assert.strictEqual(hostDefaults(root, env).memory, path.join(homes, "local-memory"));
+    // The shared settings.json does not move it.
+    write(root, { ".claude/settings.json": JSON.stringify({ autoMemoryDirectory: path.join(homes, "shared-memory") }) });
+    assert.strictEqual(hostDefaults(root, env).memory, path.join(homes, "local-memory"));
+    write(homes, { "local-memory/MEMORY.md": "- one memory\n" });
+    const result = spawnSync(process.execPath, [CLI, "--root", root, "--json"], { encoding: "utf-8", env: { ...process.env, ...env } });
+    assert.strictEqual(result.status, 0, result.stderr);
+    assert.deepStrictEqual(JSON.parse(result.stdout).startContext.sources.filter((source) => source.loads === "memory index").map((source) => source.characters), ["- one memory\n".length]);
+  });
+
+  test("the summary says when no SessionStart hook is declared", () => {
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    const result = spawnSync(process.execPath, [CLI, "--root", root], { encoding: "utf-8" });
+    assert.match(result.stdout, /\n {2}hook: no SessionStart command hook in \.claude\/settings\.json\n/);
   });
 
   test("the CLI takes each detected host's global file and the project's memory index from the root", () => {
@@ -769,11 +793,16 @@ describe("start context", () => {
     const derived = run();
     assert.strictEqual(derived.status, 0, derived.stderr);
     assert.strictEqual(derived.stderr, "");
-    assert.deepStrictEqual(loads(derived), [["global", "codex rules\n".length], ["global", "claude rules\n".length],["memory index", "- one memory\n".length], ["project", "# Shop\n".length]]);
-    assert.deepStrictEqual(JSON.parse(derived.stdout).startContext.missing, []);
+    const start = JSON.parse(derived.stdout).startContext;
+    assert.deepStrictEqual(loads(derived), [["global", "claude rules\n".length], ["memory index", "- one memory\n".length], ["project", "# Shop\n".length]]);
+    // Codex's global file is listed apart and left out of the Claude Code total.
+    assert.deepStrictEqual(start.others.map((source) => [source.loads, source.characters]), [["global, Codex; not in the Claude Code total", "codex rules\n".length]]);
+    assert.strictEqual(start.characters, ["claude rules\n", "- one memory\n", "# Shop\n"].join("").length);
+    assert.deepStrictEqual(start.missing, []);
     // A flag replaces its default.
-    assert.deepStrictEqual(loads(run("--global", path.join(homes, "other.md"), "--memory", path.join(homes, "other.md"))),
-      [["global", "named\n".length], ["memory index", "named\n".length], ["project", "# Shop\n".length]]);
+    const named = run("--global", path.join(homes, "other.md"), "--memory", path.join(homes, "other.md"));
+    assert.deepStrictEqual(loads(named), [["global", "named\n".length], ["memory index", "named\n".length], ["project", "# Shop\n".length]]);
+    assert.deepStrictEqual(JSON.parse(named.stdout).startContext.others, []);
 
     // A missing default folder is one line, and the run goes on.
     fs.rmSync(memory, { recursive: true });

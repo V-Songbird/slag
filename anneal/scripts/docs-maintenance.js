@@ -12,7 +12,7 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { check, docFiles, frontmatter, linkTargets, relatedCandidates } = require("./docs-check.js");
 const { hostDefaults, noDefault } = require("./audit.js");
-const { excerpt } = require("./session-evidence-redaction.js");
+const { directory } = require("./session-evidence-redaction.js");
 
 // 96 of 100 task notes that another session ever read were first read within 3 days of their
 // last write, so a completed note untouched for longer is very likely never read again.
@@ -113,8 +113,8 @@ const CHANGING =/\b(?:still|now|currently|not yet|no longer|pending|deferred|unr
 // each. Nothing in the folder is written.
 function memoryProposals(root, dir, now) {
   const folder = path.resolve(root, dir);
-  // An absolute folder, such as the host's memory folder, is shown redacted as session evidence is.
-  const shown = path.isAbsolute(dir) ? excerpt(folder) : dir;
+  // An absolute folder is shown with the home as ~, so the path still names the file.
+  const shown = path.isAbsolute(dir) ? directory(folder) : dir;
   const label = (name) => `${shown.replace(/\\/g, "/").replace(/\/+$/, "")}/${name}`;
   const names = fs.readdirSync(folder).filter((n) => n.endsWith(".md") && n !== "MEMORY.md").sort();
   const proposals = [];
@@ -398,11 +398,13 @@ function main(argv) {
   // Without a flag, Claude Code's folder for the root supplies the transcripts and the memory folder.
   const defaults = hostDefaults(root);
   if (!transcripts.length) {
-    if (defaults.transcripts && fs.existsSync(defaults.transcripts)) transcripts.push(defaults.transcripts);
-    else noDefault("docs-maintenance.js", "Claude Code transcripts folder", defaults.transcripts, "--transcripts <directory>");
+    if (defaults.transcripts.length) transcripts.push(...defaults.transcripts);
+    else noDefault("docs-maintenance.js", "Claude Code transcripts folder", defaults.project, "--transcripts <directory>");
   }
   if (!memories.length) {
-    if (defaults.memory && fs.existsSync(path.join(defaults.memory, "MEMORY.md"))) memories.push(defaults.memory);
+    // The derived folder is shown relative to the root when inside it, else with the home as ~.
+    const rel = defaults.memory && path.relative(root, defaults.memory);
+    if (defaults.memory && fs.existsSync(path.join(defaults.memory, "MEMORY.md"))) memories.push(rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel : defaults.memory);
     else noDefault("docs-maintenance.js", "Claude Code memory folder with a MEMORY.md", defaults.memory, "--memory <directory>");
   }
   try {
