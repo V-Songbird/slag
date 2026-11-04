@@ -285,6 +285,16 @@ describe("prompts", () => {
     assert.strictEqual(promptKey("/shop:check all of it"), "/shop:check");
   });
 
+  test("a prompt is redacted before it is lower cased, so a POSIX home and its account name never reach the key", () => {
+    // The home and the user name are read when the script loads, so this home gets a process of its own.
+    const script = `const os = require("node:os"); os.homedir = () => "/Users/Alice"; os.userInfo = () => ({ username: "Alice" });`
+      + `process.stdout.write(JSON.stringify(["Read /Users/Alice/shop/notes.md", "Copy /Volumes/Backup/Alice/notes.md"]`
+      + `.map(require(${JSON.stringify(CLI)}).promptKey)));`;
+    const done = spawnSync(process.execPath, ["-e", script], { encoding: "utf8" });
+    assert.strictEqual(done.status, 0, done.stderr);
+    assert.deepStrictEqual(JSON.parse(done.stdout), ["read ~/shop/notes.md", "copy /volumes/backup/<user>/notes.md"]);
+  });
+
   test("with --also-root, another repository's sessions add to prompts only", () => {
     const root = shop();
     const other = shop();
