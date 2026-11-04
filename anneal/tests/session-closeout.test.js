@@ -174,13 +174,27 @@ describe("where a change lives", () => {
     assert.strictEqual(report.verdict, "would-lose");
   });
 
-  test("a tracked file the session removed is still held by Git", () => {
+  test("a tracked file removed from disk with its edit uncommitted is at risk, and so is the turn that wrote it", () => {
     const dir = repository();
     const file = transcript(fixTurn(dir));
     fs.rmSync(path.join(dir, "src", "cart.js"));
-    const [change] = closeout(file, dir).items;
+    const report = closeout(file, dir);
+    const [change] = report.items;
     assert.deepStrictEqual({ location: change.location, uncommitted: change.uncommitted, atRisk: change.atRisk },
-      { location: "tracked", uncommitted: true, atRisk: false });
+      { location: "tracked-missing", uncommitted: true, atRisk: true });
+    assert.strictEqual(report.verdict, "would-lose");
+    assert.deepStrictEqual(report.wouldLose, [{ kind: "change", path: change.path }, { kind: "turn", endingLine: 4 }]);
+  });
+
+  test("a file committed and later removed with git rm is missing and at risk", () => {
+    const dir = repository();
+    const file = transcript(fixTurn(dir));
+    write(dir, "src/cart.js", "export const total = (cents) => Math.round(cents) / 100;\n");
+    git(dir, "commit", "-qam", "round");
+    git(dir, "rm", "-q", "src/cart.js");
+    git(dir, "commit", "-qm", "drop");
+    const [change] = closeout(file, dir).items;
+    assert.deepStrictEqual({ location: change.location, atRisk: change.atRisk }, { location: "missing", atRisk: true });
   });
 
   test("an untracked file and a file outside the repository survive, and neither puts a turn in a file", () => {
@@ -405,6 +419,15 @@ describe("the cleanup flag", () => {
     }
     const file = transcript([...fixTurn(dir), use("g1", "PowerShell", { command: "git --no-pager status --ignored=matching -s" }, 5), result("g1", "", 6)]);
     assert.deepStrictEqual({ flag: closeout(file, dir).cleanup.flag, line: closeout(file, dir).cleanup.ignoredStatusLine }, { flag: "clean", line: 5 });
+  });
+
+  test("git commands inside a here-document body are data, not commands", () => {
+    const dir = repository();
+    const command = "cat <<'EOF' > notes.txt\ngit status --short --ignored\ngit branch keep\nEOF";
+    const file = transcript([...fixTurn(dir), use("b1", "Bash", { command }, 5), result("b1", "", 6)]);
+    const { cleanup } = closeout(file, dir);
+    assert.deepStrictEqual({ flag: cleanup.flag, ignoredStatusLine: cleanup.ignoredStatusLine, leftovers: cleanup.leftovers },
+      { flag: "needs-cleanup", ignoredStatusLine: null, leftovers: [] });
   });
 
   test("a git command with environment assignments before it counts", () => {

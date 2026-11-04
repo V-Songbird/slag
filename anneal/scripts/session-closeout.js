@@ -13,21 +13,23 @@ const { spawnSync } = require("node:child_process");
 const { HOME, directory, excerpt } = require("./session-evidence-redaction.js");
 const { textBlocks } = require("./session-evidence-records.js");
 const { actorOf, firstCopies, isPrompt, isQueuedPrompt, subagentTranscripts } = require("./session-evidence-claude.js");
-const { normalizePath, programs } =require("./session-evidence-shell.js");
+const { normalizePath, programs, withoutData } = require("./session-evidence-shell.js");
 const { detectHost, findTranscript } = require("./session-evidence.js");
 
 // The tools whose input holds what they wrote. A shell command that removes or moves a file carries no content.
 const CONTENT_TOOLS = new Set(["Edit", "MultiEdit", "NotebookEdit", "Write"]);
-// Where a changed file lives now. Deleting the session loses the content of a file that is gone and that Git never held.
+// Where a changed file lives now. A file that is gone from disk is at risk: Git holds at most a committed version, not
+// an edit the session never committed.
 const KEPT = new Set(["tracked", "ignored"]);
-const AT_RISK = new Set(["missing", "outside-missing", "unresolved"]);
+const AT_RISK = new Set(["tracked-missing", "missing", "outside-missing", "unresolved"]);
 // The cleanup flag: whether the session listed its ignored files after its last change, and which processes it
 // started and never saw end, and which worktrees and branches it created and never removed.
 const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
 const STOP_TOOLS = new Set(["KillShell", "TaskStop"]);
 const WORKTREE_TOOLS = new Set(["EnterWorktree", "ExitWorktree"]);
 const PROCESS_KINDS = new Set(["background-command", "preview-server"]);
-// Options of `git branch` that leave its name argument a filter, a new name or a copy instead of a new branch.
+// Options of `git branch` that still let `git branch <name>` create a branch; with any other option, such as a list,
+// rename or copy, the command creates none.
 const BRANCH_FLAGS = new Set(["-f", "--force", "-t", "--track", "--no-track", "-q", "--quiet", "--create-reflog", "--recurse-submodules"]);
 const BACKGROUND_ID = /running in background with ID: ([\w-]+)/i;
 const SERVER_ID = /serverId["']?\s*[:=]\s*["']?([\w-]+)/i;
@@ -69,7 +71,7 @@ function gitEffects(command, cwd, output) {
   const create = (name, forced) => {
     if (!forced || !["Reset", "reset", "resetting"].some((verb) => output.includes(`${verb} branch '${name}'`))) add("create", "branch", name);
   };
-  for (const part of programs(command, true)) {
+  for (const part of programs(withoutData(command), true)) {
     const words = (part.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((word) => word.replace(/^(["'])([\s\S]*)\1$/, "$2"));
     // Assignments before the program, such as `GIT_TRACE=0`, only set its environment.
     let i = 0;
@@ -119,7 +121,8 @@ function locate(root, file) {
   // A pathspec names this one file, never a glob pattern; check-ignore takes plain path names.
   const literal = `:(literal)${spec}`;
   if (git(root, ["ls-files", "--error-unmatch", "--", literal]).status === 0) {
-    return { location: "tracked", uncommitted: git(root, ["status", "--porcelain", "--", literal]).stdout.trim() !== "" };
+    const uncommitted = git(root, ["status", "--porcelain", "--", literal]).stdout.trim() !== "";
+    return { location: uncommitted && !fs.existsSync(file) ? "tracked-missing" : "tracked", uncommitted };
   }
   if (!fs.existsSync(file)) return { location: "missing", uncommitted: false };
   return { location: git(root, ["check-ignore", "-q", "--", spec]).status === 0 ? "ignored" : "untracked", uncommitted: false };

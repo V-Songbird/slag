@@ -293,10 +293,11 @@ The script `anneal/scripts/session-closeout.js` reads the whole transcript with 
   | `location` | Meaning | At risk |
   | --- | --- | --- |
   | `tracked` | Git tracks the file. `uncommitted: true` means the working tree differs from the last commit. | No |
+  | `tracked-missing` | Git tracks the file, but it is gone from disk with uncommitted changes, so Git holds only the last commit's version, not the session's uncommitted edit. | Yes |
   | `ignored` | The file exists and an ignore rule covers it, as for private records. | No |
   | `untracked` | The file exists, but Git neither tracks nor ignores it. | No |
   | `outside` | The file is outside the repository and still exists. | No |
-  | `missing` | The file is gone and Git never held it, so only the transcript keeps its content. | Yes |
+  | `missing` | The file is gone and Git no longer tracks it. Either Git never held it, or a commit removed it, as `git rm` does; Git history may hold an earlier version, but not an edit the session never committed. | Yes |
   | `outside-missing` | The file was outside the repository and is gone, such as a helper script in a scratch folder. | Yes |
   | `unresolved` | The script cannot tell which file the call named, such as a path starting with `~`, so check it by hand. | Yes |
 
