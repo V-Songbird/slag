@@ -162,10 +162,10 @@ as it was. An existing `AGENTS.md` or `CLAUDE.md` keeps its text.
 
 The block always goes into `AGENTS.md`. It goes into `CLAUDE.md` only when the project already has
 one that does not import `AGENTS.md`, and into `.cursor/rules/collet.md` only when `.cursor/`
-exists. A `CLAUDE.md` that imports `AGENTS.md` already loads the block from there, so it keeps only
-an empty pair of markers. **Do not create a `CLAUDE.md` to receive it.** Claude Code reads
-`AGENTS.md` only while no `CLAUDE.md` exists, so a new one holding just the block would hide the
-project's own instructions from that host.
+exists. A `CLAUDE.md` that imports `AGENTS.md` already loads the block from there, so it gets no
+copy; one an earlier mount left there is emptied to its markers. **Do not create a `CLAUDE.md` to
+receive it.** Claude Code reads `AGENTS.md` only while no `CLAUDE.md` exists, so a new one holding
+just the block would hide the project's own instructions from that host.
 
 Then fill in `.collet/config.json` — the one-line description of the project and the conventions a
 change here has to respect. **A task cannot be opened while the project line or the accept command
