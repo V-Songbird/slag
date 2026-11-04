@@ -136,10 +136,13 @@ it would write under `.collet/`. `mkdir` keeps its POSIX flags.
 
 A write to a path Git ignores that holds no tracked file is a private record, not a task change.
 The live check never lists one, so the scope check lets it through for every session in the
-checkout, the task's own and any other. The harness's own `.collet/` files, the rules surfaces
-(`AGENTS.md`, `CLAUDE.md`, `.cursor/rules/collet.md`) in any letter case, and any path under a
-directory whose name starts with a dot, where host settings live, stay refused whether ignored or
-not. Where Git cannot answer, the path is checked against the scope as before.
+checkout, the task's own and any other. The harness's own `.collet/` files, any path with a file
+or directory name that starts with a dot, where host settings live, and any `AGENTS*.md` or
+`CLAUDE*.md` at any depth and in any letter case, which a host loads into later sessions, stay
+refused whether ignored or not. A link can point an ignored path at a tracked one, so the path the
+write lands on, resolved from its nearest existing parent, must pass the same tests and stay inside
+the repository. Where Git or the filesystem cannot answer, the path is checked against the scope as
+before.
 
 Explicit host project context takes precedence. With missing Antigravity workspace context,
 absolute tool paths may identify the nearest mounted harness. Relative paths do not anchor a

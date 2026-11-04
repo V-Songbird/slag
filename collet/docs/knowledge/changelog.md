@@ -51,7 +51,8 @@ All notable changes to collet are documented here. The format follows
 
 - The scope check lets any session in a checkout write a path Git ignores that holds no tracked
   file, such as a private task note, as the close-time check already did. Tracked files, `.collet/`,
-  the rules surfaces and paths under a dot-directory stay guarded.
+  any path with a file or directory name that starts with a dot, any `AGENTS*.md` or `CLAUDE*.md`,
+  and an ignored link that resolves to any of these stay guarded.
 - The mount leaves a `CLAUDE.md` with an `@AGENTS.md` import line without its own rules block,
   and empties a block an earlier mount left there down to its markers, so the host loads the block
   once, from `AGENTS.md`, and the first task after the remount still closes.

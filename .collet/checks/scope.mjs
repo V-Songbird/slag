@@ -13,9 +13,9 @@
 //   - a private record: a path Git ignores that holds no tracked file, which the close-time check
 //     never lists either.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
+import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join, parse, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 
 export const id = 'scope';
 export const what = 'a write outside the files the open task declared writable';
@@ -413,19 +413,38 @@ export function targetsOf(call, root) {
  * Is a repository path a private record: one Git ignores that holds no tracked file?
  *
  * The close-time check never lists one, so any session in the checkout, the task's own or another,
- * keeps its notes there without widening the open task. A rules surface stays the project's, and a
- * path under a dot-directory stays guarded, since host settings live there and one can switch the
- * hooks off. Where Git cannot answer, the path is checked against the scope as before.
+ * keeps its notes there without widening the open task. A path with a file or directory name that
+ * starts with a dot stays guarded, since host settings live there and one can switch the hooks off,
+ * and so does an `AGENTS*.md` or `CLAUDE*.md` at any depth, which a host loads into later sessions.
+ * A link can point an ignored path at a tracked one, so the path the write lands on, resolved from
+ * its nearest existing parent, must pass too. Where Git or the filesystem cannot answer, the path is
+ * checked against the scope as before.
  */
 function privateRecord(rel, root) {
-  if (rel.split('/').some((part) => part.startsWith('.'))) return false;
-  if (RULES_SURFACES.some((surface) => surface.toLowerCase() === rel.toLowerCase())) return false;
   const git = (args) =>
     execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 });
   try {
-    git(['check-ignore', '-q', '--', rel]);
-    // In any letter case: a case-insensitive filesystem writes `Build/x` over a tracked `build/x`.
-    return git(['ls-files', '-z', '--', `:(icase,literal)${rel}`]) === '';
+    let base = resolve(root, rel);
+    let rest = '';
+    for (;;) {
+      try {
+        lstatSync(base);
+        break;
+      } catch {
+        if (base === dirname(base)) return false;
+        rest = join(basename(base), rest);
+        base = dirname(base);
+      }
+    }
+    const real = relative(realpathSync.native(root), join(realpathSync.native(base), rest)).split('\\').join('/');
+    if (!real || real === '..' || real.startsWith('../') || isAbsolute(real)) return false;
+    for (const path of new Set([rel, real])) {
+      if (path.split('/').some((part) => part.startsWith('.') || /^(agents|claude).*\.md$/i.test(part))) return false;
+      git(['check-ignore', '-q', '--', path]);
+      // In any letter case: a case-insensitive filesystem writes `Build/x` over a tracked `build/x`.
+      if (git(['ls-files', '-z', '--', `:(icase,literal)${path}`]) !== '') return false;
+    }
+    return true;
   } catch {
     return false;
   }

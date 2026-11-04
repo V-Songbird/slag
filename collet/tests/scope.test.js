@@ -2,7 +2,7 @@
 // directions: refusing work it had no business refusing, and waving through the one command that
 // can remove a whole directory.
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import test from 'node:test';
 
@@ -730,11 +730,11 @@ test('a tracked file under an ignored directory is still enforced', () => {
   assert.equal(fires(root, { tool: 'Bash', input: { command: 'rm -rf build' } }), true);
 });
 
-test('an ignored path under .collet/, a rules surface or a dot-directory is still refused', () => {
+test('an ignored path under .collet/, an instruction file or a dot name is still refused', () => {
   const root = withTree({
     '.collet/checks/scope.mjs': '',
     '.collet/.gitignore': 'off\n',
-    '.gitignore': 'CLAUDE.md\n.claude/settings.local.json\n',
+    '.gitignore': 'CLAUDE.md\nCLAUDE.local.md\npkg/\n.claude/settings.local.json\n.env.local\nnotes/\n',
   });
   repo(root);
   const { fires: refused, harness } = check({ root, task: TASK, call: write('.collet/off') });
@@ -742,7 +742,21 @@ test('an ignored path under .collet/, a rules surface or a dot-directory is stil
   writeFileSync(join(root, 'CLAUDE.md'), '# Rules\n', 'utf8');
   assert.equal(fires(root, write('CLAUDE.md')), true);
   assert.equal(fires(root, write('claude.md')), true, 'in another letter case');
+  assert.equal(fires(root, write('CLAUDE.local.md')), true, 'a local instruction file');
+  assert.equal(fires(root, write('pkg/AGENTS.md')), true, 'an instruction file below the root');
   assert.equal(fires(root, write('.claude/settings.local.json')), true, 'host settings');
+  assert.equal(fires(root, write('.env.local')), true, 'a dot file');
+  assert.equal(fires(root, write('notes/.draft.md')), true, 'a dot file below the root');
+  assert.equal(fires(root, write('notes/draft.md')), false, 'the same directory, no dot name');
+});
+
+test('an ignored link to tracked code is still enforced', () => {
+  const root = withTree({ '.gitignore': 'out\n' });
+  repo(root);
+  // A junction needs no privilege on Windows; elsewhere the type is ignored and a symlink is made.
+  symlinkSync(join(root, 'src'), join(root, 'out'), 'junction');
+  assert.equal(fires(root, write('out/theme.mjs')), true, 'a tracked file through the link');
+  assert.equal(fires(root, write('out/new.mjs')), true, 'a new file the link puts beside tracked code');
 });
 
 test('outside a Git repository an ignore file exempts nothing', () => {
