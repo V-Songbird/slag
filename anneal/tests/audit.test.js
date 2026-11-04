@@ -11,6 +11,7 @@ require("./temp-root.js");
 const path = require("node:path");
 const { spawnSync, execFileSync } = require("node:child_process");
 const { audit, formatSummary, hostDefaults, limitationFor } = require("../scripts/audit.js");
+const { HOME } = require("../scripts/session-evidence-redaction.js");
 
 const CLI = path.join(__dirname, "..", "scripts", "audit.js");
 
@@ -754,13 +755,15 @@ describe("start context", () => {
     created.push(home);
     write(home, {
       "a.md": "# Rules\n\n- Shared rule.\n- Reply   in Spanish,\n  with technical terms in English.\n- Only in a.\n- Use Claude Code's native tools.\n\n```\n- not a bullet\n```\n",
-      "b.md": "- Shared rule.\n* Reply in Spanish, with technical terms in English.\n1. Only in b.\n- Use Codex's native tools.\n",
+      "b.md": `- Shared rule.\n* Reply in Spanish, with technical terms in English.\n1. Only in b.\n- Use Codex's native tools.\n- Notes live in ${path.join(HOME, "notes")}.\n`,
     });
     const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
     const report = audit(root, { global: [path.join(home, "a.md")], codex: [path.join(home, "b.md")] });
-    assert.deepStrictEqual(report.instructionDrift.onlyIn.map((entry) => [path.basename(entry.file), entry.bullets]), [["a.md", ["Only in a."]], ["b.md", ["Only in b."]]]);
+    // A bullet is redacted as session evidence is: the home shown as ~.
+    assert.deepStrictEqual(report.instructionDrift.onlyIn.map((entry) => [path.basename(entry.file), entry.bullets]), [["a.md", ["Only in a."]], ["b.md", ["Only in b.", `Notes live in ${path.join("~", "notes")}.`]]]);
+    assert.ok(!JSON.stringify(report.instructionDrift).includes(JSON.stringify(HOME).slice(1, -1)));
     const summary = formatSummary(report);
-    assert.match(summary, /\ninstruction drift: 2 bullets in only one of .*a\.md, .*b\.md;/);
+    assert.match(summary, /\ninstruction drift: 3 bullets in only one of .*a\.md, .*b\.md;/);
     assert.match(summary, /\n {2}only in .*a\.md:\n {4}- Only in a\.\n/);
     // One file, or a file named twice, leaves nothing to compare.
     const single = audit(root, { global: [path.join(home, "a.md"), path.join(home, "a.md")] });
