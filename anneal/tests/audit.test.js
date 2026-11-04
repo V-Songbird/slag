@@ -894,6 +894,15 @@ describe("start context", () => {
     assert.match(summary(5001), /\n {2}global files are 25% of the budget; .*rule with paths:.*hook with additionalContext\. See "Text that loads only when needed" in anneal\/docs\/knowledge\/workflows\.md/);
     assert.doesNotMatch(summary(5000), /additionalContext/);
   });
+
+  test("the line counts the files a global file imports", () => {
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-global-"));
+    created.push(dir);
+    write(dir, { "CLAUDE.md": "@./big.md\n", "big.md": "x".repeat(5001) });
+    const stdout = spawnSync(process.execPath, [CLI, "--root", root, "--global", path.join(dir, "CLAUDE.md")], { encoding: "utf-8" }).stdout;
+    assert.match(stdout, /\n {2}global files are 25% of the budget; .*additionalContext/);
+  });
 });
 
 describe("CLI", () => {

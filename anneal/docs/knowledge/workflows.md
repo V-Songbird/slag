@@ -99,7 +99,7 @@ Outside the repository, the audit reads only the global files, the memory index 
 
 ### Text that loads only when needed
 
-A line in your global file loads in every session, even when it matters for one tool or one folder. When the global files alone are over a quarter of the budget (5,000 characters), the start context block adds one line pointing here. Claude Code has two ways to load text later:
+A line in your global file loads in every session, even when it matters for one tool or one folder. When the global files alone, with the files they import, are over a quarter of the budget (5,000 characters), the start context block adds one line pointing here. Claude Code has two ways to load text later:
 
 - **A rule with `paths:`.** A file under `.claude/rules/` whose frontmatter lists globs loads only when Claude reads a matching file. For example, put the workflow-file advice in `.claude/rules/workflows.md` with `paths:` set to `".github/workflows/**"`.
 - **A hook with `additionalContext`.** A hook can return `additionalContext` in its output, and the host adds that text to the session at that moment. For example, a `PreToolUse` hook on `Bash` can return the delegation advice only when the command is a `git` command.

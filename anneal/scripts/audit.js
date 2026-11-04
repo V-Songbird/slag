@@ -513,6 +513,7 @@ function startContext(root, reader, { global = [], codex = [], memory } = {}) {
   const sources = [];
   const missing = [];
   const seen = new Set();
+  const globalFiles = new Set();
   const inside = (abs) => {
     const rel = path.relative(root, abs);
     return rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel.split(path.sep).join("/") : null;
@@ -521,13 +522,13 @@ function startContext(root, reader, { global = [], codex = [], memory } = {}) {
   // account name masked, also inside a Claude Code project key.
   const label = (abs) => inside(abs) ?? excerpt(abs);
   // The file's text, null for a file not read as text, undefined when absent.
-  const load = (abs, loads) => {
+  const load = (abs, loads, fromGlobal = false) => {
     seen.add(abs);
     const info = fs.statSync(abs, { throwIfNoEntry: false })?.isFile() ? readFile(path.dirname(abs), path.basename(abs)) : null;
     if (!info) return undefined;
     const characters = info.text === null ? info.size : info.text.length;
     const note = info.text === null ? ` (${info.size > MAX_READ_BYTES ? "over 2 MB" : "not text"}, bytes)` : "";
-    sources.push({ file: label(abs), loads: `${loads}${note}`, characters, share: Math.round((characters / START_CONTEXT_BUDGET_CHARS) * 100) });
+    sources.push({ file: label(abs), loads: `${loads}${note}`, characters, share: Math.round((characters / START_CONTEXT_BUDGET_CHARS) * 100), fromGlobal });
     return info.text;
   };
   const loaded = [];
@@ -547,7 +548,8 @@ function startContext(root, reader, { global = [], codex = [], memory } = {}) {
   }
   for (const file of global) {
     const abs = path.resolve(file);
-    const text = load(abs, "global");
+    const text = load(abs, "global", true);
+    if (text !== undefined) globalFiles.add(abs);
     if (text === undefined) missing.push({ source: "global", file: label(abs), reason: "not found" });
     else loaded.push([abs, text]);
   }
@@ -572,7 +574,8 @@ function startContext(root, reader, { global = [], codex = [], memory } = {}) {
         missing.push({ source: "import", file: label(abs), reason: `outside the root, not read; imported by ${label(importer)}` });
         return [];
       }
-      const body = load(abs, `import of ${label(importer)}`);
+      const body = load(abs, `import of ${label(importer)}`, globalFiles.has(importer));
+      if (typeof body === "string" && globalFiles.has(importer)) globalFiles.add(abs);
       if (body === undefined) missing.push({ source: "import", file: label(abs), reason: `not found, imported by ${label(importer)}` });
       return typeof body === "string" ? [[abs, body]] : [];
     }));
@@ -755,7 +758,7 @@ function formatSummary(report) {
   if (start.characters > start.budget) {
     lines.push(`  over budget by ${start.characters - start.budget} characters; cuts would start with the largest sources above. The audit changes none of them.`);
   }
-  const globalCharacters = start.sources.filter((source) => source.loads === "global").reduce((sum, source) => sum + source.characters, 0);
+  const globalCharacters = start.sources.filter((source) => source.fromGlobal).reduce((sum, source) => sum + source.characters, 0);
   if (globalCharacters > start.budget * GLOBAL_SHARE) {
     lines.push(`  global files are ${Math.round((globalCharacters / start.budget) * 100)}% of the budget; text that matters for one tool or path can load only when needed, by a rule with paths: or a hook with additionalContext. See "Text that loads only when needed" in anneal/docs/knowledge/workflows.md. The audit moves no line.`);
   }
