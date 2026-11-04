@@ -1,15 +1,17 @@
 // The scope check: a write landing outside the files the open task declared writable.
 //
 // It runs in three places — refused at write time by a session that has the plugin, at commit time
-// and in CI through `run.mjs --live` — so it is a pure function with no side effects and no
-// dependencies beyond Node.
+// and in CI through `run.mjs --live` — so it has no side effects and no dependencies beyond Node.
+// It reads Git only to tell a private record, as the close-time check does.
 //
 // What it deliberately does not flag, because a guard that cries wolf gets switched off:
 //   - a read, whatever tool it arrives in, including the shell forms that also have a write mode;
 //   - a shell command that creates a path which does not exist yet outside `.collet/` (scratch
 //     output is not a change to the repository);
 //   - anything outside the repository, including another drive and /dev/null;
-//   - the roadmap and state another planning tool owns, which that tool guards itself.
+//   - the roadmap and state another planning tool owns, which that tool guards itself;
+//   - a private record: a path Git ignores that holds no tracked file, which the close-time check
+//     never lists either.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -120,6 +122,8 @@ export function matchScope(pattern, path) {
   return path === glob || path.startsWith(`${glob}/`);
 }
 
+// shellTargets keeps only targets in this set, so a path the parser builds, such as expanded()'s, stays
+// relative to the call's directory: an absolute one can hold a Windows short name (~1) and be dropped.
 const LITERAL = /^[A-Za-z0-9._/\\: -]+$/;
 // Keep literal quoted arguments together. This deliberately does not evaluate variables,
 // substitutions or nested shell syntax; it only separates simple commands and their operands.
@@ -318,6 +322,8 @@ function commandTargets(tokens, harness, cmdlets) {
   const name = shared || (ALIASES.get(called) ?? called);
   const flags = POSIX.has(called) && !shared ? args : args.flatMap((token) => bound(name, token));
   const { named, positional } = argumentsOf(flags);
+  // bound() has already turned every alias and abbreviation into these names, and nothing here sees a
+  // flag any other way; a branch reads every path parameter PARAMETERS lists for its cmdlet, -LiteralPath included.
   const paths = [...(named.get('-path') ?? []), ...(named.get('-literalpath') ?? [])];
   const destination = named.get('-destination');
   const hits = [];
@@ -403,6 +409,28 @@ export function targetsOf(call, root) {
   return null;
 }
 
+/**
+ * Is a repository path a private record: one Git ignores that holds no tracked file?
+ *
+ * The close-time check never lists one, so any session in the checkout, the task's own or another,
+ * keeps its notes there without widening the open task. A rules surface stays the project's, and a
+ * path under a dot-directory stays guarded, since host settings live there and one can switch the
+ * hooks off. Where Git cannot answer, the path is checked against the scope as before.
+ */
+function privateRecord(rel, root) {
+  if (rel.split('/').some((part) => part.startsWith('.'))) return false;
+  if (RULES_SURFACES.some((surface) => surface.toLowerCase() === rel.toLowerCase())) return false;
+  const git = (args) =>
+    execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 });
+  try {
+    git(['check-ignore', '-q', '--', rel]);
+    // In any letter case: a case-insensitive filesystem writes `Build/x` over a tracked `build/x`.
+    return git(['ls-files', '-z', '--', `:(icase,literal)${rel}`]) === '';
+  } catch {
+    return false;
+  }
+}
+
 export function check({ root, task, call }) {
   if (!task) return { fires: false, reason: 'no task is open, so nothing is enforced' };
 
@@ -425,6 +453,7 @@ export function check({ root, task, call }) {
       };
     }
     if (!scope.some((pattern) => matchScope(pattern, rel))) {
+      if (privateRecord(rel, root)) continue;
       return {
         fires: true,
         reason: `${rel} is outside the open task (${task.id}). Writable: ${scope.join(', ') || 'nothing'}.`,

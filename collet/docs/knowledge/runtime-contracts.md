@@ -134,6 +134,13 @@ shell. Claude Code and Codex name a Bash tool's shell as POSIX only off Windows,
 names none; with the shell unknown the POSIX reading decides, and the PowerShell reading adds what
 it would write under `.collet/`. `mkdir` keeps its POSIX flags.
 
+A write to a path Git ignores that holds no tracked file is a private record, not a task change.
+The live check never lists one, so the scope check lets it through for every session in the
+checkout, the task's own and any other. The harness's own `.collet/` files, the rules surfaces
+(`AGENTS.md`, `CLAUDE.md`, `.cursor/rules/collet.md`) in any letter case, and any path under a
+directory whose name starts with a dot, where host settings live, stay refused whether ignored or
+not. Where Git cannot answer, the path is checked against the scope as before.
+
 Explicit host project context takes precedence. With missing Antigravity workspace context,
 absolute tool paths may identify the nearest mounted harness. Relative paths do not anchor a
 project from the plugin's working directory.

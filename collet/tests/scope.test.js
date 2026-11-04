@@ -2,7 +2,7 @@
 // directions: refusing work it had no business refusing, and waving through the one command that
 // can remove a whole directory.
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import test from 'node:test';
 
@@ -703,3 +703,49 @@ for (const staged of [false, true]) {
     assert.deepEqual(liveIn(root), { fires: true, reason: 'changed outside the open task t1: AGENTS.md' });
   });
 }
+
+// A private record is a path Git ignores that holds no tracked file. The close-time check never
+// lists one, so the scope check lets every session in the checkout write it, the task's own and any
+// other; everything Git tracks, the harness and the host's settings stay guarded.
+const write = (file_path) => ({ tool: 'Write', input: { file_path } });
+
+test('the task session and another session share one checkout', () => {
+  const root = withTree({ '.gitignore': 'docs/tasks/\n' });
+  repo(root);
+  assert.equal(fires(root, write('src/digest.mjs')), false, 'the task session, inside its scope');
+  assert.equal(fires(root, write('notes.txt')), true, 'a tracked file outside the scope');
+  assert.equal(fires(root, write('docs/tasks/283-note.md')), false, "another session's private note");
+  mkdirSync(join(root, 'docs', 'tasks'), { recursive: true });
+  writeFileSync(join(root, 'docs', 'tasks', '283-note.md'), 'note\n', 'utf8');
+  assert.equal(live({ root, task: TASK }).fires, false, 'the close-time check agrees');
+});
+
+test('a tracked file under an ignored directory is still enforced', () => {
+  const root = withTree({ '.gitignore': 'build/\n', 'build/keep.txt': 'keep\n' });
+  repo(root);
+  git(root, ['add', '-f', 'build/keep.txt']);
+  git(root, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'keep']);
+  assert.equal(fires(root, write('build/keep.txt')), true);
+  assert.equal(fires(root, write('Build/keep.txt')), true, 'in another letter case');
+  assert.equal(fires(root, { tool: 'Bash', input: { command: 'rm -rf build' } }), true);
+});
+
+test('an ignored path under .collet/, a rules surface or a dot-directory is still refused', () => {
+  const root = withTree({
+    '.collet/checks/scope.mjs': '',
+    '.collet/.gitignore': 'off\n',
+    '.gitignore': 'CLAUDE.md\n.claude/settings.local.json\n',
+  });
+  repo(root);
+  const { fires: refused, harness } = check({ root, task: TASK, call: write('.collet/off') });
+  assert.deepEqual({ refused, harness }, { refused: true, harness: true });
+  writeFileSync(join(root, 'CLAUDE.md'), '# Rules\n', 'utf8');
+  assert.equal(fires(root, write('CLAUDE.md')), true);
+  assert.equal(fires(root, write('claude.md')), true, 'in another letter case');
+  assert.equal(fires(root, write('.claude/settings.local.json')), true, 'host settings');
+});
+
+test('outside a Git repository an ignore file exempts nothing', () => {
+  const root = withTree({ '.gitignore': 'docs/tasks/\n' });
+  assert.equal(fires(root, write('docs/tasks/x.md')), true);
+});
