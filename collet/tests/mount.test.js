@@ -28,6 +28,15 @@ test('a project that keeps only AGENTS.md is not given a CLAUDE.md', () => {
   assert.doesNotMatch(out.stdout, /CLAUDE\.md/);
 });
 
+// A `CLAUDE.md` that imports `AGENTS.md` already loads the block; a second copy would load twice.
+test('a CLAUDE.md that imports AGENTS.md is left without its own block', () => {
+  const root = project({ ...TREE, 'CLAUDE.md': '@AGENTS.md\n' });
+  const out = mount(root);
+  assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /collet:begin/);
+  assert.equal(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n');
+  assert.doesNotMatch(out.stdout, /CLAUDE\.md/);
+});
+
 test('mounting twice does not duplicate the block', () => {
   const root = project(TREE);
   mount(root);

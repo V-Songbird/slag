@@ -49,6 +49,8 @@ All notable changes to collet are documented here. The format follows
 
 ### Fixed
 
+- The mount leaves a `CLAUDE.md` with an `@AGENTS.md` import line without its own rules block,
+  so the host loads the block once, from `AGENTS.md`.
 - The handoff hook leaves hidden characters out of the task title, scope, accept command and
   Foreman id it writes into `.collet/handoff.md`, and names each field that held them in the note.
   Before, the note on disk kept them.
