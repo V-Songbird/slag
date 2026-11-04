@@ -265,6 +265,101 @@ describe("the cleanup flag", () => {
     assert.strictEqual(cleanup.ignoredStatusLine, null);
     assert.deepStrictEqual(cleanup.leftovers, [{ kind: "preview-server", id: "srv-1", callLine: 4, command: "shop" }]);
   });
+
+  test("worktrees and branches the session removed are not leftovers", () => {
+    const dir = repository();
+    const file = transcript([
+      ...fixTurn(dir),
+      use("w1", "Bash", { command: "git worktree add -b try ../try" }, 5),
+      result("w1", "Preparing worktree (new branch 'try')", 6),
+      use("w2", "PowerShell", { command: `git -C "${dir}" worktree remove "${path.join(path.dirname(dir), "try")}"` }, 7),
+      result("w2", "", 8),
+      use("w3", "Bash", { command: "git branch -D try && git switch -c spike" }, 9),
+      result("w3", "Deleted branch try.", 10),
+      use("w4", "Bash", { command: "git switch main && git branch -d spike" }, 11),
+      result("w4", "Deleted branch spike.", 12),
+      use("x1", "EnterWorktree", { name: "scratch" }, 13),
+      result("x1", "Created worktree at .claude/worktrees/scratch", 14),
+      use("x2", "ExitWorktree", { action: "remove" }, 15),
+      result("x2", "Removed the worktree.", 16),
+      use("g1", "Bash", { command: "git status --short --ignored" }, 17),
+      result("g1", "", 18),
+    ]);
+    const { cleanup } = closeout(file, dir);
+    assert.deepStrictEqual({ flag: cleanup.flag, leftovers: cleanup.leftovers }, { flag: "clean", leftovers: [] });
+  });
+
+  test("worktrees and branches the session created and left are leftovers", () => {
+    const dir = repository();
+    const file = transcript([
+      ...fixTurn(dir),
+      use("w1", "Bash", { command: "git worktree add -b try ../try main" }, 5),
+      result("w1", "Preparing worktree (new branch 'try')", 6),
+      use("w2", "Bash", { command: "git branch -d spike; git switch -c spike" }, 7),
+      result("w2", "Switched to a new branch 'spike'", 8),
+      use("w3", "Bash", { command: "git branch --list; git branch keep" }, 9),
+      result("w3", "", 10),
+      use("x1", "EnterWorktree", { name: "scratch" }, 11),
+      result("x1", "Created worktree at .claude/worktrees/scratch", 12),
+      use("x2", "EnterWorktree", { path: "../try" }, 13),
+      result("x2", "Switched to ../try", 14),
+      use("x3", "ExitWorktree", { action: "keep" }, 15),
+      result("x3", "Kept the worktree.", 16),
+      use("g1", "Bash", { command: "git status --short --ignored" }, 17),
+      result("g1", "", 18),
+    ]);
+    const { cleanup } = closeout(file, dir);
+    assert.strictEqual(cleanup.flag, "needs-cleanup");
+    assert.deepStrictEqual(cleanup.leftovers.map(({ kind, id, callLine }) => ({ kind, id, callLine })), [
+      { kind: "worktree", id: "../try", callLine: 5 },
+      { kind: "branch", id: "try", callLine: 5 },
+      { kind: "branch", id: "spike", callLine: 7 },
+      { kind: "branch", id: "keep", callLine: 9 },
+      { kind: "worktree", id: "scratch", callLine: 11 },
+    ]);
+  });
+
+  test("a start whose id the transcript does not show stays a leftover after any other stop", () => {
+    const dir = repository();
+    const file = transcript([
+      ...fixTurn(dir),
+      use("k0", "TaskStop", { task_id: "old" }, 5),
+      result("k0", "Stopped.", 6),
+      use("b1", "Bash", { command: "npm run dev", run_in_background: true }, 7),
+      result("b1", "Started.", 8),
+      use("k1", "TaskStop", { task_id: "agent-7" }, 9),
+      result("k1", "Stopped.", 10),
+      use("g1", "Bash", { command: "git status --short --ignored" }, 11),
+      result("g1", "", 12),
+    ]);
+    const { cleanup } = closeout(file, dir);
+    assert.deepStrictEqual(cleanup.leftovers, [{ kind: "background-command", id: null, callLine: 7, command: "npm run dev" }]);
+  });
+
+  test("a preview_start that only opens a page starts no server", () => {
+    const dir = repository();
+    const file = transcript([
+      ...fixTurn(dir),
+      use("p1", "mcp__Claude_Browser__preview_start", { url: "https://example.com" }, 5),
+      result("p1", "Opened https://example.com", 6),
+      use("g1", "Bash", { command: "git status --short --ignored" }, 7),
+      result("g1", "", 8),
+    ]);
+    assert.deepStrictEqual(closeout(file, dir).cleanup.leftovers, []);
+  });
+
+  test("a session with no change reports that no ignored-file listing ran at all", () => {
+    const dir = repository();
+    const file = transcript([
+      { ...human("where is the total computed?", 1), cwd: dir },
+      use("r1", "Read", { file_path: "src/cart.js" }, 2),
+      result("r1", "export const total", 3),
+      say("s1", "In src/cart.js.", 4),
+    ]);
+    const { cleanup } = closeout(file, dir);
+    assert.deepStrictEqual({ flag: cleanup.flag, lastChangeLine: cleanup.lastChangeLine, ignoredStatusLine: cleanup.ignoredStatusLine },
+      { flag: "needs-cleanup", lastChangeLine: null, ignoredStatusLine: null });
+  });
 });
 
 describe("the command line", () => {

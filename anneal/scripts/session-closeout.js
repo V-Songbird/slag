@@ -4,8 +4,8 @@
 // anneal's session close-out: what deleting one finished Claude Code session would lose. Reads the whole
 // transcript with the session-evidence parser, finds where each file the session changed lives now, and prints
 // JSON: one item per changed file, one per turn that ended in text, a verdict, and a cleanup flag that names leftover
-// processes and a missing listing of ignored files. It stops no process, and writes, moves and deletes
-// nothing; its Git queries take no optional locks.
+// processes, worktrees and branches and a missing listing of ignored files. It stops no process, and writes, moves and
+// deletes nothing; its Git queries take no optional locks.
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -13,7 +13,7 @@ const { spawnSync } = require("node:child_process");
 const { HOME, directory, excerpt } = require("./session-evidence-redaction.js");
 const { textBlocks } = require("./session-evidence-records.js");
 const { actorOf, firstCopies, isPrompt, isQueuedPrompt, subagentTranscripts } = require("./session-evidence-claude.js");
-const { normalizePath } = require("./session-evidence-shell.js");
+const { normalizePath, programs } = require("./session-evidence-shell.js");
 const { detectHost, findTranscript } = require("./session-evidence.js");
 
 // The tools whose input holds what they wrote. A shell command that removes or moves a file carries no content.
@@ -22,14 +22,78 @@ const CONTENT_TOOLS = new Set(["Edit", "MultiEdit", "NotebookEdit", "Write"]);
 const KEPT = new Set(["tracked", "ignored"]);
 const AT_RISK = new Set(["missing", "outside-missing", "unresolved"]);
 // The cleanup flag: whether the session listed its ignored files after its last change, and which processes it
-// started and never saw end.
+// started and never saw end, and which worktrees and branches it created and never removed.
 const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
 const IGNORED_STATUS = /\bgit\b[^;&|\n]*\bstatus\b[^;&|\n]*--ignored\b/;
 const STOP_TOOLS = new Set(["KillShell", "TaskStop"]);
+const WORKTREE_TOOLS = new Set(["EnterWorktree", "ExitWorktree"]);
+const PROCESS_KINDS = new Set(["background-command", "preview-server"]);
+// Options of `git branch` that leave its name argument a filter, a new name or a copy instead of a new branch.
+const BRANCH_FLAGS = new Set(["-f", "--force", "-t", "--track", "--no-track", "-q", "--quiet", "--create-reflog", "--recurse-submodules"]);
 const BACKGROUND_ID = /running in background with ID: ([\w-]+)/i;
 const SERVER_ID = /serverId["']?\s*[:=]\s*["']?([\w-]+)/i;
 const NOTIFICATION = /<task-notification>([\s\S]*?)<\/task-notification>/g;
 const tagOf = (text, tag) => (new RegExp(`<${tag}>\\s*([^<]*?)\\s*</${tag}>`).exec(text) || [])[1];
+
+// The options and positional words of a git subcommand; each option in `valued` takes the next word as its value.
+function parseArgs(args, valued) {
+  const options = new Map();
+  const positional = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--") {
+      positional.push(...args.slice(i + 1));
+      break;
+    }
+    if (!args[i].startsWith("-") || args[i] === "-") {
+      positional.push(args[i]);
+      continue;
+    }
+    const [name, inline] = args[i].split(/=(.*)/s);
+    options.set(name, inline ?? (valued.includes(name) ? args[++i] : true));
+  }
+  return { options, positional };
+}
+
+// The worktrees and branches one shell command line creates or removes through git, as far as its text shows. A
+// worktree is keyed by its absolute path, so a relative add and an absolute remove pair.
+function gitEffects(command, cwd) {
+  const effects = [];
+  const add = (op, kind, id, base) => {
+    if (typeof id !== "string" || !id) return;
+    const key = kind === "worktree"
+      ? (normalizePath(id, base, true) || id).replace(/\\/g, "/").replace(/\/+$/, "").replace(/^[A-Z]:\/.*/, (text) => text.toLowerCase())
+      : id;
+    effects.push({ op, kind, id, key });
+  };
+  for (const part of programs(command, true)) {
+    const words = (part.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((word) => word.replace(/^(["'])([\s\S]*)\1$/, "$2"));
+    if ((words[0] || "").split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, "") !== "git") continue;
+    let base = cwd;
+    let i = 1;
+    for (; i < words.length && words[i].startsWith("-"); i++) {
+      if (words[i] === "-C") base = normalizePath(words[++i], base, true);
+      else if (/^(?:-c|--git-dir|--work-tree|--namespace)$/.test(words[i])) i++;
+    }
+    const [sub, ...rest] = words.slice(i);
+    if (sub === "worktree" && rest[0] === "add") {
+      const { options, positional } = parseArgs(rest.slice(1), ["-b", "-B", "--reason"]);
+      add("create", "worktree", positional[0], base);
+      add("create", "branch", options.get("-b") ?? options.get("-B"));
+    } else if (sub === "worktree" && rest[0] === "remove") {
+      add("remove", "worktree", parseArgs(rest.slice(1), []).positional[0], base);
+    } else if (sub === "checkout" || sub === "switch") {
+      const valued = sub === "checkout" ? ["-b", "-B", "--orphan"] : ["-c", "-C", "--create", "--force-create", "--orphan"];
+      const { options } = parseArgs(rest, valued);
+      add("create", "branch", valued.map((name) => options.get(name)).find((value) => typeof value === "string"));
+    } else if (sub === "branch") {
+      const { options, positional } = parseArgs(rest, []);
+      const names = [...options.keys()];
+      if (names.some((name) => name === "--delete" || /^-[a-zA-Z]*[dD]/.test(name))) positional.forEach((name) => add("remove", "branch", name));
+      else if (names.every((name) => BRANCH_FLAGS.has(name))) add("create", "branch", positional[0]);
+    }
+  }
+  return effects;
+}
 
 function git(root, args) {
   return spawnSync("git", ["-C", root, ...args], { encoding: "utf8", env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } });
@@ -79,9 +143,11 @@ function closeout(file, root) {
   const unresolved = new Set();
   const pending = new Map();
   const processCalls = new Map();
+  // What the session started or created, each marked ended by a later stop or removal that names it.
   const started = [];
-  const stopped = new Set();
-  let stoppedUnnamed = 0;
+  const end = (kinds, key) => started.forEach((each) => {
+    if (kinds.has(each.kind) && each.key !== null && each.key === key) each.ended = true;
+  });
   let ignoredStatusLine = null;
   let cwd = null;
   let sidechain = 0;
@@ -99,7 +165,7 @@ function closeout(file, root) {
     for (const [, body] of notices.matchAll(NOTIFICATION)) {
       const id = tagOf(body, "task-id");
       const status = tagOf(body, "status");
-      if (id && status && status !== "running") stopped.add(id);
+      if (id && status && status !== "running") end(PROCESS_KINDS, id);
     }
     const queued = isQueuedPrompt(row);
     if (typed.has(line) || queued || !turn) {
@@ -121,7 +187,7 @@ function closeout(file, root) {
         const resolved = named && normalizePath(named, cwd, true);
         if (named) pending.set(block.id, { path: resolved || named, resolved: Boolean(resolved), line, turn });
       } else if (block.type === "tool_use" && (SHELL_TOOLS.has(block.name) || STOP_TOOLS.has(block.name)
-        || /preview_st(?:art|op)$/.test(block.name))) {
+        || WORKTREE_TOOLS.has(block.name) || /preview_st(?:art|op)$/.test(block.name))) {
         processCalls.set(block.id, { tool: block.name, input: block.input && typeof block.input === "object" ? block.input : {}, line });
       } else if (block.type === "tool_result" && processCalls.has(block.tool_use_id)) {
         const { tool, input, line: callLine } = processCalls.get(block.tool_use_id);
@@ -129,16 +195,31 @@ function closeout(file, root) {
         if (block.is_error) continue;
         const output = textBlocks(block.content).join("\n");
         const command = typeof input.command === "string" ? input.command : "";
-        if (SHELL_TOOLS.has(tool) && input.run_in_background === true) {
-          started.push({ kind: "background-command", id: (BACKGROUND_ID.exec(output) || [])[1] || null, callLine, command: excerpt(command, 240) });
-        } else if (SHELL_TOOLS.has(tool)) {
-          if (IGNORED_STATUS.test(command)) ignoredStatusLine = callLine;
+        const start = (kind, id, key, text) => started.push({ kind, id, key, callLine, command: excerpt(text, 240), ended: false });
+        if (SHELL_TOOLS.has(tool)) {
+          for (const effect of gitEffects(command, cwd)) {
+            if (effect.op === "create") start(effect.kind, effect.id, effect.key, command);
+            else end(new Set([effect.kind]), effect.key);
+          }
+          if (input.run_in_background === true) {
+            const id = (BACKGROUND_ID.exec(output) || [])[1] || null;
+            start("background-command", id, id, command);
+          } else if (IGNORED_STATUS.test(command)) ignoredStatusLine = callLine;
         } else if (tool.endsWith("preview_start")) {
-          started.push({ kind: "preview-server", id: (SERVER_ID.exec(output) || [])[1] || null, callLine, command: excerpt(String(input.name || input.url || ""), 240) });
+          // A call with only a url opens a page and starts no server.
+          if (typeof input.name === "string" && input.name) {
+            const id = (SERVER_ID.exec(output) || [])[1] || null;
+            start("preview-server", id, id, input.name);
+          }
+        } else if (tool === "EnterWorktree") {
+          // A call with a path enters a worktree that already exists.
+          if (!input.path) start("worktree", typeof input.name === "string" ? input.name : null, `EnterWorktree:${callLine}`, "EnterWorktree");
+        } else if (tool === "ExitWorktree") {
+          // It acts only on the worktree the session's last EnterWorktree created, and removes its branch with it.
+          const open = started.filter((each) => each.key.startsWith("EnterWorktree:") && !each.ended).at(-1);
+          if (open && input.action === "remove") open.ended = true;
         } else {
-          const id = input.serverId ?? input.task_id ?? input.shell_id ?? input.bash_id;
-          if (typeof id === "string" && started.some((each) => each.id === id)) stopped.add(id);
-          else stoppedUnnamed += 1;
+          end(PROCESS_KINDS, input.serverId ?? input.task_id ?? input.shell_id ?? input.bash_id);
         }
       } else if (block.type === "tool_result" && pending.has(block.tool_use_id)) {
         const call = pending.get(block.tool_use_id);
@@ -168,8 +249,9 @@ function closeout(file, root) {
     .map((item) => (item.kind === "turn" ? { kind: "turn", endingLine: item.endingLine } : { kind: "change", path: item.path }));
   const lastChangeLine = Math.max(0, ...[...changes.values()].flat());
   const statusAfterChanges = ignoredStatusLine !== null && ignoredStatusLine > lastChangeLine ? ignoredStatusLine : null;
-  // A stop that names no started id ends the oldest start whose id the script could not read.
-  const leftovers = started.filter((each) => (each.id === null ? stoppedUnnamed-- <= 0 : !stopped.has(each.id)));
+  // A start whose id the transcript does not show is never paired with a stop, so it is always listed.
+  const leftovers = started.filter((each) => !each.ended)
+    .map(({ kind, id, callLine, command }) => ({ kind, id: id === null ? null : excerpt(id, 240), callLine, command }));
   const folder = path.join(path.dirname(file), path.basename(file, ".jsonl"));
   return {
     sessionFile: file, sessionId, context: { cwd: directory(cwd) }, root: directory(root),
@@ -177,11 +259,16 @@ function closeout(file, root) {
     alsoDeleted: { folder: directory(folder), subagentTranscripts: subagentTranscripts(file).length, savedOutputs: countFiles(path.join(folder, "tool-results")) },
     cleanup: {
       flag: statusAfterChanges !== null && !leftovers.length ? "clean" : "needs-cleanup",
-      ignoredStatusLine: statusAfterChanges, leftovers,
-      limits: "Reported from the transcript only; no process or file was checked. The ignored-file listing is a successful "
-        + "Bash or PowerShell call of git status with --ignored after the session's last change. A leftover is a background "
-        + "command or preview server the session started and never saw stopped or ended; a process started any other way, "
-        + "such as with & in a shell command, is not listed.",
+      lastChangeLine: lastChangeLine || null, ignoredStatusLine: statusAfterChanges, leftovers,
+      limits: "Reported from the transcript only; no process, worktree, branch or file was checked. The ignored-file listing "
+        + "is a successful Bash or PowerShell call of git status with --ignored after the session's last Edit, MultiEdit, "
+        + "NotebookEdit or Write change, or anywhere in a session with none, since a shell command can write files. A leftover "
+        + "is a background command or preview server the session started and never saw stopped or ended by its id, or a "
+        + "worktree or branch it created with git worktree add, git checkout -b, git switch -c, git branch <name> or "
+        + "EnterWorktree and never removed with git worktree remove, git branch -d or -D, or ExitWorktree remove. A start "
+        + "whose id the transcript does not show is always listed. A process started any other way, such as with & in a "
+        + "shell command, the branch git worktree add creates without -b, worktree prune, branch renames and every git "
+        + "command in a shell call that reported an error are not seen.",
     },
     warnings: [...warnings].sort(),
     limits: "Claude Code only. A change is a call of Edit, MultiEdit, NotebookEdit or Write that reported no error; a shell "
