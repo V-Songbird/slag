@@ -109,9 +109,11 @@ detail, so ask for depth when you need it.
 
 ## Native integration gate
 
-The three plugins that run together in one project keep separate records, and no shared protocol,
-event stream or store connects them. This section states what each one owns and what any future
-connection between them must respect.
+foreman, collet and anneal keep separate records, and no shared protocol, event stream or store
+connects them. Two links already exist: a collet task opened with `--foreman <id>` stores the Foreman
+entry id and its `close` prints the Foreman step for that entry (see
+[alongside a planning tool](../../collet/docs/knowledge/harness-workflow.md#alongside-a-planning-tool)),
+and anneal's `session-review` recommends collet's `check-writer` when `.collet/` exists. This section states what each one owns and what any future connection between them must respect.
 
 - foreman owns the plan, the history of what was done, and the acceptance of that work; see the
   [foreman and collet](#where-two-plugins-meet) row.
