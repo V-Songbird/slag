@@ -107,6 +107,33 @@ detail, so ask for depth when you need it.
 | foreman and hush | foreman produces the handoff prompt and hush shapes how the session that runs it reports. Neither depends on the other. |
 | foreman and anneal | foreman decides what to do; anneal reports navigation findings and documentation drift. Neither depends on the other. |
 
+## Native integration gate
+
+The three plugins that run together in one project keep separate records, and no shared protocol,
+event stream or store connects them. This section states what each one owns and what any future
+connection between them must respect.
+
+- foreman owns the plan, the history of what was done, and the acceptance of that work; see the
+  [foreman and collet](#where-two-plugins-meet) row.
+- collet owns the open task's scope and the executable checks that close it; see
+  [alongside a planning tool](../../collet/docs/knowledge/harness-workflow.md#alongside-a-planning-tool).
+- anneal owns the evidence it reads from sessions and repositories and the recommendations drawn
+  from it, each waiting for your approval; see
+  [how a session audit runs](../../anneal/docs/knowledge/workflows.md#how-a-session-audit-runs).
+- Each host adapter, the hook definition files and manifests listed in
+  [host plugin contracts](host-plugin-formats.md), keeps the real differences between hosts instead
+  of flattening them into one form.
+
+A native integration between these plugins, such as one shared protocol, event stream or store, is
+not built until you approve it. When one is approved, it must not:
+
+- duplicate a rule that another plugin already states;
+- keep a second ledger or a second roadmap;
+- promote a lesson or a finding into a rule without approval;
+- widen any permission the host granted.
+
+How the plugins behave together in a live Claude Code or Codex session is not measured by this page.
+
 ## Choosing
 
 | If you want to | Use |
