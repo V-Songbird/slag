@@ -39,8 +39,8 @@ remain independent of personal skills or private working records.
 
 npm run check runs the plugin suites and repository tests using Node 22 or later. The integrity
 suite validates marketplace sources, local resource paths, host metadata and version ownership.
-The navigation audit is heuristic; its three runtime-name matches in audit.test.js are intentional
-fixture strings and must retain their detector coverage.
+The navigation audit is heuristic; its runtime-name matches in anneal/tests/audit.test.js are
+intentional fixture strings and must retain their detector coverage.
 scripts/hidden-characters.test.js fails on raw zero-width, bidi-control, tag, misplaced
 byte-order-mark and variation-selector characters in tracked text files, naming file, line and
 code point. U+FE0E and U+FE0F are allowed right after an Extended_Pictographic character, and

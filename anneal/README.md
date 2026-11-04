@@ -21,9 +21,9 @@ Use it on an existing project. A single rename or a new scaffold does not need i
 /plugin install anneal@slag
 ```
 
-Start a new session to load it.
+Start a new session to load it. In a terminal, `claude plugin list` names `anneal` once it is installed.
 
-**Codex** — add this repository as a marketplace and install `anneal` from `Slag`.
+**Codex** — add this repository as a marketplace and install `anneal` from the `slag` marketplace, shown as `Slag`. The Codex commands for those two steps are not recorded here; follow Codex's own plugin documentation.
 Before guarded work, open `/hooks` in Codex CLI and review and trust the plugin's `PreToolUse` hook.
 Changed hook definitions need another review; see [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
 
@@ -34,7 +34,7 @@ agy plugin install "<path-to-clone>/anneal"
 agy plugin list
 ```
 
-The list should name `anneal`. With `--sandbox`, headless `agy` runs no shell command.
+The list names `anneal`. If it does not, the install did not register: run the install command again with the clone path. With `--sandbox`, headless `agy` runs no shell command.
 
 anneal acts on your request. Its enabled hook inspects shell commands and stays silent outside a migration branch.
 
@@ -85,7 +85,7 @@ anneal has no settings. Choose a skill and its mode.
 ## Limits
 
 - Findings are heuristics; framework conventions and project instructions take precedence.
-- Import rewriting covers relative JavaScript and TypeScript imports. Other references need review.
+- Import rewriting covers relative imports in JavaScript and TypeScript family files (`.js`, `.ts`, `.vue`, `.svelte` and their variants). Other references need review.
 - Session review reads one transcript. Redaction is best effort; inspect excerpts before sharing them.
 - Transcript parsing depends on the formats covered by tests. Antigravity requires an explicit transcript file. The close-out check reads Claude Code transcripts only.
 - Documentation checks cover the stated evidence and do not scan Git history by default.

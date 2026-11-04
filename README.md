@@ -21,6 +21,7 @@ In Claude Code, install anneal from this marketplace:
 /plugin install anneal@slag
 ```
 
+In a terminal, `claude plugin list` names `anneal` once it is installed.
 Start a new session in the repository you want to inspect, then request:
 
 ```text
@@ -52,6 +53,7 @@ collet's mounted project uses [its harness configuration](collet/docs/knowledge/
 ## Deprecated ideas
 
 These plugins are retired and are not included in the current marketplace.
+The marketplace's rename list also retires `forge` and `proof`, two earlier names whose ideas are not recorded here.
 
 | Plugin | Idea |
 | --- | --- |

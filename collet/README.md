@@ -21,9 +21,9 @@ Use it when agents exceed the task's scope or finish without verification. It co
 /plugin install collet@slag
 ```
 
-Start a new session to load it.
+Start a new session to load it. In a terminal, `claude plugin list` names `collet` once it is installed.
 
-**Codex** — add this repository as a marketplace and install `collet` from `Slag`.
+**Codex** — add this repository as a marketplace and install `collet` from the `slag` marketplace, shown as `Slag`. The Codex commands for those two steps are not recorded here; follow Codex's own plugin documentation.
 Before guarded work, open `/hooks` in Codex CLI and trust the plugin's `SessionStart`, `PreToolUse` and `PreCompact` hooks.
 Changed definitions need another review; see [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
 
@@ -34,7 +34,7 @@ agy plugin install "<path-to-clone>/collet"
 agy plugin list
 ```
 
-The list should name `collet`. Use CLI installation; workspace-directory discovery is unverified.
+The list names `collet`. If it does not, the install did not register: run the install command again with the clone path. Use CLI installation; workspace-directory discovery is unverified.
 
 With hooks active, the session receives its task at startup, recognized writes are guarded, and a handoff is written before compaction.
 Antigravity wires only the write guard. Its rules block and `node .collet/task.mjs status` provide task context.
@@ -51,6 +51,7 @@ Ask the session to mount the harness using your host's invocation:
 
 The skill establishes your project details, first task, scope, and real acceptance command before mounting.
 It creates `.collet/`, adds the rules block to `AGENTS.md`, opens the task, and reports the fixture check results.
+The rules block also goes into `CLAUDE.md` and `.cursor/rules/collet.md` when the project already has `CLAUDE.md` or a `.cursor` folder.
 On Claude Code, it can also add the permission ask rules you confirm for your ask-first list to the project's `.claude/settings.json`.
 It stops before performing the task itself.
 
@@ -77,6 +78,8 @@ See the [harness workflow](docs/knowledge/harness-workflow.md) for direct mounti
 | Task | Request or command |
 | --- | --- |
 | Inspect the task | `node .collet/task.mjs status` |
+| Open a task | `node .collet/task.mjs add --title "..." --why "..." --scope "src/cart.mjs,test/**"` |
+| Close the task | `node .collet/task.mjs close --left-out "..." --unverified "..."` |
 | Check changed files | `node .collet/checks/run.mjs --live` |
 | Add a check for a recurring mistake | `/collet:check-writer help me catch skipped tests` |
 
@@ -104,7 +107,7 @@ The [configuration reference](docs/knowledge/harness-workflow.md#configuration) 
 - No open task means no enforcement.
 - Shell analysis recognizes specific forms. Dynamic paths and writes performed by invoked programs can escape the guard.
 - Optional checks inspect some edit tools immediately; other writes wait for working-tree checks.
-- Closing requires strict live checks and the acceptance command to pass. Unavailable verification leaves the task open.
+- Closing requires the `--left-out` and `--unverified` lines, strict live checks and the acceptance command to pass. Unavailable verification leaves the task open.
 - Fixture success does not measure false alarms on your code, and an acceptance command passing does not establish correctness.
 - Mounting and check writing have run in Claude Code, in headless Codex sessions and in headless Antigravity CLI sessions without `--sandbox`. Both are unverified in the Antigravity IDE.
 - A collet refusal and a verified close have been observed in long sessions: interactive on Claude Code and the Antigravity IDE, headless on Codex.

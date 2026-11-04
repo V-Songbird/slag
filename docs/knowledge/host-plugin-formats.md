@@ -27,8 +27,9 @@ Claude plugin manifests contain no version. Codex marketplace entries contain no
 All three effective versions agree. Descriptions and author identity also agree; the repository
 integrity test checks these contracts and declared local resources.
 
-Root plugin.json deliberately omits the portable Agent Plugins schema and com.openai extension.
-Codex uses the compatibility manifest so its hooks remain discoverable. Changing loader selection
+The plugin-root plugin.json, Antigravity's manifest, deliberately omits the portable Agent Plugins
+schema and com.openai extension. Codex uses the compatibility manifest, .codex-plugin/plugin.json,
+so its hooks remain discoverable. Changing loader selection
 requires actual host discovery and execution checks, not only valid JSON.
 
 ## Hook events and payloads
@@ -45,8 +46,10 @@ Relative arguments alone do not establish a project. The nearest mounted harness
 
 ## Installation and trust
 
-Install Claude Code plugins through its marketplace. Install Codex plugins from Slag, then review
-and trust their exact hook definitions through /hooks. New or changed definitions need review.
+Install Claude Code plugins through its marketplace. Install Codex plugins from the slag
+marketplace, then review and trust their exact hook definitions through Codex's /hooks command,
+which lists each plugin's hooks by event name: PreToolUse for anneal; SessionStart, PreToolUse and
+PreCompact for collet. New or changed definitions need review.
 For Antigravity CLI, use agy plugin install and confirm registration with agy plugin list.
 
 Headless Antigravity CLI runs no shell command without a permission rule. Measured with agy 1.2.8

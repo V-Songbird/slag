@@ -51,7 +51,7 @@ An `audit` run shows the findings, offers to save them and writes a findings, re
 
 | Severity | Finding | What it means |
 | --- | --- | --- |
-| high | `map-file-missing` | No `CLAUDE.md`, `AGENTS.md` or `GEMINI.md`, so every session starts by exploring |
+| high | `map-file-missing` | No map file, the `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` a session reads first to learn where things are, so every session starts by exploring |
 | high | `check-command-missing` | No test or check command found |
 | high | `build-output-not-ignored` | Build or dependency folders that git does not ignore, so they fill search results |
 | high | `not-a-git-repo` | Search cannot use `.gitignore` to skip generated files |
@@ -458,7 +458,11 @@ The audits and session review have run from the published package in Claude Code
 
 ## Running the evals
 
-Thirty eval cases live in [evals](../../evals/). Three check skill discovery, audit mode leaving files unchanged, migration stopping on a dirty tree, and session proposals waiting for approval; [two](#a-migration-on-a-clean-tree) apply an approved migration step on a clean tree, one of them into a new directory, [one](#a-plan-from-a-wrong-survey-row) shows a plan from a layout survey row whose importer count is wrong, [one](#an-unreadable-transcript) gives session review a transcript its evidence script refuses, [seven](#session-failure-checks) give session review a transcript of one failure shape and grade what its reply proposes, [two](#readme-cases) review and repair one README, [two](#reader-only-map-checks) ask a reader what the map alone answers, the six navigation cases have their own [paired protocol](#paired-navigation-runs), and six [held-out cases](#held-out-checks) repeat it on a second repository. Each run drives a real session, so it is slow. The three build their fixtures with a `scaffold_script` and grade Bash calls, so a run needs `--scaffold` and a tool grant. Run them from the repository root, and write the results outside it:
+Thirty eval cases live in [evals](../../evals/). Three check skill discovery, audit mode leaving files unchanged, migration stopping on a dirty tree, and session proposals waiting for approval; [two](#a-migration-on-a-clean-tree) apply an approved migration step on a clean tree, one of them into a new directory, [one](#a-plan-from-a-wrong-survey-row) shows a plan from a layout survey row whose importer count is wrong, [one](#an-unreadable-transcript) gives session review a transcript its evidence script refuses, [seven](#session-failure-checks) give session review a transcript of one failure shape and grade what its reply proposes, [two](#readme-cases) review and repair one README, [two](#reader-only-map-checks) ask a reader what the map alone answers, the six navigation cases have their own [paired protocol](#paired-navigation-runs), and six [held-out cases](#held-out-checks) repeat it on a second repository. Each run drives a real session, so it is slow. The three build their fixtures with a `scaffold_script` and grade Bash calls, so a run needs `--scaffold` and a tool grant.
+
+The harness confines the granted shell in a sandbox, and native Windows has none. There it refuses the run: `A shell tool (Bash or PowerShell) was granted but this machine cannot confine it`. Run it under WSL2 or Linux, with `bubblewrap` and `socat` installed. With no terminal, add `--trust-plugin`, or the harness refuses an untrusted plugin directory.
+
+Run them from the repository root, and write the results outside it:
 
 ```bash
 claude plugin eval ./anneal --tag smoke --tag safety --scaffold --no-publish \
@@ -469,7 +473,7 @@ claude plugin eval ./anneal --tag smoke --tag safety --scaffold --no-publish \
 
 With `--scaffold`, the harness runs each case's `scaffold_script` with bash from that case's folder in the target, as you and outside the sandbox, in the run's new workspace and with the `PATH` the harness started with. A script can therefore reach other files of the target through its own path: each navigation scaffold runs `../navigation-fixture.js`, which reads its contract from `navigation-partner-api.md` beside it, so a copy of `anneal/` used as the target has to keep both files in `evals/`. In the same way, `migration-moves-into-new-directory` and `plan-flags-a-wrong-importer-count` run the fixture script of `migration-applies-approved-step`, and `readme-repair-without-the-word` runs the fixture script of `readme-review-reports-without-changes`. A scaffold that fails ends its run before the session starts, at no cost, and the run's error quotes the end of the script's error output. The harness keeps a failed run's temporary directory even without `--keep-temp`, unless `--json` is passed.
 
-The harness confines the granted shell in a sandbox, and native Windows has none. There it refuses the run: `A shell tool (Bash or PowerShell) was granted but this machine cannot confine it`. Run it under WSL2 or Linux, with `bubblewrap` and `socat` installed. With no terminal, add `--trust-plugin`, or the harness refuses an untrusted plugin directory. Inside the sandbox:
+Inside the sandbox:
 
 - The workspace holds 13 untracked entries the harness and its sandbox put there: `.bash_profile`, `.bashrc`, `.claude/`, `.eval-artifacts`, `.gitconfig`, `.gitmodules`, `.idea`, `.mcp.json`, `.profile`, `.ripgreprc`, `.vscode`, `.zprofile` and `.zshrc`. `git status` lists them and the audit counts them as files, so a skill that stops on any `git status` output, as a migration does, never sees a clean tree there. A case that needs one has to exclude them in its fixture, as `migration-applies-approved-step` does in `.git/info/exclude`, and its list has to follow the harness. Every run also leaves an empty `.git/config.worktree` the fixture did not create.
 - The shell cannot read the `.bashrc` placeholder, so every command prints `Permission denied` for it and nothing a startup file adds to `PATH` applies. `node` was not found through fnm's alias directory either, although it was on `PATH`: in the WSL2 run measured below, the first `node` call of every session with the plugin failed with `command not found`, and each session went on through the versioned binary, a turn or two later. Putting the versioned directory itself on `PATH` before starting the harness, for fnm `~/.local/share/fnm/node-versions/<version>/installation/bin`, gives the runs the path that worked.
@@ -584,14 +588,14 @@ Two cases, tagged `readme`, scaffold the same small package, `csv-tidy`. Its REA
 - `readme-review-reports-without-changes` asks for a review and a score and says not to change any file. It allows Read, Glob, Grep, Skill and Bash, for 25 turns and 600 seconds. `names-badge-order` and `names-copy-prompt` require the reply to name the badge order and the `$` prompt. `readme-unchanged` requires `README.md` to match the scaffold byte for byte, `no-layout-audit` fails any Bash call of `audit.js`, and `no-files-created` is the audit case's.
 - `readme-repair-without-the-word` asks to fix the front page so a newcomer can install and try the project, without saying README. It also allows Edit and Write, for 30 turns and 600 seconds. In `README.md`, `badge-after-description` requires prose, not a badge or a heading, right after the H1. `no-copy-prompt` fails a `$ ` line in a shell fence, `node-before-install` requires Node 22 before the first `npm install` or `npx`, and `no-click-here` fails a label that names no destination. `no-files-created` fails a created file, such as the `LICENSE` the README links; it does not see an edit to another file.
 
-In both, `skill-fired` requires a Skill call of `repo-docs` and `checker-ran` a Bash call of `readme-check.js`. Both are indicators that run only with the plugin. [eval-graders.test.js](../../tests/eval-graders.test.js) replays the scaffolds without bash and checks the seven findings. A run as each case asks passes every grader. A layout audit, an edited README, a created file, a reply that misses a planted problem and each README problem left unrepaired fail the grader meant for it, and a repaired README passes every grader with no checker finding. Neither case has run in a session yet. Run them from the repository root:
+In both, `skill-fired` requires a Skill call of `repo-docs` and `checker-ran` a Bash call of `readme-check.js`. Both are indicators that run only with the plugin. [eval-graders.test.js](../../tests/eval-graders.test.js) replays the scaffolds without bash and checks the seven findings. A run as each case asks passes every grader. A layout audit, an edited README, a created file, a reply that misses a planted problem and each README problem left unrepaired fail the grader meant for it, and a repaired README passes every grader with no checker finding. Neither case has run in a session yet.
+
+Eval sessions load your user skills. Before a run, remove or disable any other README skill installed for your user; otherwise a README request can route to it, and `skill-fired` fails for a reason outside anneal. Run them from the repository root:
 
 ```bash
 claude plugin eval ./anneal --tag readme --scaffold --no-publish \
   --allow-tools Bash Edit Write --output-dir <results>
 ```
-
-Eval sessions load your user skills. Before a run, remove or disable any other README skill installed for your user; otherwise a README request can route to it, and `skill-fired` fails for a reason outside anneal.
 
 ### Reader-only map checks
 

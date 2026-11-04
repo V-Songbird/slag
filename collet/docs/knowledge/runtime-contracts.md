@@ -15,6 +15,8 @@ Collet holds one open task with an explicit writable scope and an acceptance com
 beside a planning tool's `ROADMAP.jsonl` or `.foreman/`: that tool owns the plan, collet enforces
 the session boundary and never reads the roadmap. Mounting never installs a Git hook or CI workflow.
 The delivered project runtime uses .mjs files independently of the target package's module type.
+The mount writes a rules block, the text between collet markers in the project's `AGENTS.md`, and
+the plugin's session start hook prints the open task when a session begins.
 
 An optional `ask_first` list in `.collet/config.json`, written by `mount.mjs --ask-first`, names
 what must not happen without asking the person. The rules block and the session start state it as
