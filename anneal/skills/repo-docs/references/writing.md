@@ -259,7 +259,7 @@ The limit must match the real product.
 
 ## Review checklist
 
-Answer each item **Yes**, **No** or **N/A**. Fix every No, or say in the report why it stays. The list catches defects; it is not a score and does not prove the page works for readers.
+Answer each item **Yes**, **No** or **N/A**. Fix every No, or say in the report why it stays. On a review, or when told to change no file, list each No with its fix instead and leave the page as it is. The list catches defects; it is not a score and does not prove the page works for readers.
 
 ### Purpose and truth
 
@@ -313,7 +313,7 @@ Answer each item **Yes**, **No** or **N/A**. Fix every No, or say in the report 
 
 ## Report
 
-Run [the review checklist](#review-checklist) on the page and fix every "No". Then state in your report:
+Run [the review checklist](#review-checklist) on the page and fix every "No"; on a review, list each "No" with its fix and change no file. Then state in your report:
 
 - the reader and task you wrote for, and any assumption about them;
 - the UI labels, limits or behaviour you could not verify against the product;

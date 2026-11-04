@@ -1625,6 +1625,8 @@ describe("writing cases", () => {
       assert.deepStrictEqual(failed({ dir: edited }), ["page-unchanged"]);
       assert.deepStrictEqual(failed({ created: "review.md" }), ["no-files-created"]);
       assert.deepStrictEqual(failed({ reply: "The title is vague." }), ["names-overwrite-order", "names-unnumbered-steps"]);
+      assert.deepStrictEqual(failed({ reply: run.reply.replace("bullets, not numbered", "unnumbered bullets") }), []);
+      assert.deepStrictEqual(failed({ reply: run.reply.replace("The steps are bullets, not numbered.", "It shows the number of rows.") }), ["names-unnumbered-steps"]);
       assert.deepStrictEqual(failed({ calls: bash(`cat ${PAGE}`) }), ["skill-fired", "writing-read"]);
     });
   });

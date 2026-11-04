@@ -23,7 +23,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - `session-review` shows a one-line menu description. It runs only when you invoke it, so the longer trigger text was never read.
 - `repo-docs` has a shorter description that puts its trigger phrases first. It links every reference file from the skill itself, and its README reference opens with a contents list.
 - `repo-layout` and `session-review` open with a checklist of their steps for the session to copy and tick.
-- `repo-docs`' description now leads with writing pages people read, and no longer excludes tutorials, changelogs or CONTRIBUTING files.
+- `repo-docs`' description now leads with writing pages people read, and no longer excludes API reference pages, tutorials, changelogs or CONTRIBUTING files. It still sends code layout to `repo-layout` and a session transcript to `session-review`.
 
 ### Added
 

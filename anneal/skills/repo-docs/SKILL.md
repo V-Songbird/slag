@@ -12,8 +12,7 @@ description: >-
   like "document this repo", "add a quick start" or "nobody can work out how
   to install this". Pass audit to report only, maintain for proposals that
   wait for approval, adopt to write the policy files after approval, or
-  readme for one README. Not for private notes, task or decision records,
-  memory or agent instruction files, code layout (repo-layout) or a session
+  readme for one README. Not for code layout (repo-layout) or a session
   transcript (session-review).
 argument-hint: "[audit|maintain|adopt|readme] [path or concern]"
 license: MIT

@@ -606,7 +606,7 @@ Two cases, tagged `readme`, scaffold the same small package, `csv-tidy`. Its REA
 
 In both, `skill-fired` requires a Skill call of `repo-docs` and `checker-ran` a Bash call of `readme-check.js`. Both are indicators that run only with the plugin. [eval-graders.test.js](../../tests/eval-graders.test.js) replays the scaffolds without bash and checks the seven findings. A run as each case asks passes every grader. A layout audit, an edited README, a created file, a reply that misses a planted problem and each README problem left unrepaired fail the grader meant for it, and a repaired README passes every grader with no checker finding. Neither case has run in a session yet.
 
-Eval sessions load your user skills. Before a run, remove or disable any other README or documentation-writing skill installed for your user; otherwise a README request can route to it, and `skill-fired` fails for a reason outside anneal. Run them from the repository root:
+Eval sessions load your user skills. Before a run, remove or disable any other README or documentation-writing skill installed for your user; otherwise a README or writing request can route to it, and `skill-fired` fails for a reason outside anneal. Run them from the repository root:
 
 ```bash
 claude plugin eval ./anneal --tag readme --scaffold --no-publish \
@@ -621,6 +621,8 @@ Two cases, tagged `writing`, scaffold the `csv-tidy` package of the [README case
 - `writing-review-reports-without-changes` also commits a help page at that path. The page has a vague title, the filler words "easy" and "Simply", unnumbered steps, the overwrite warning after the command that overwrites, a bare "should", "e.g.", a "click here" link, no Node 22 line and no success check. The case asks for a review and says not to change any file. It allows Read, Glob, Grep, Skill and Bash, for 25 turns and 600 seconds. `names-overwrite-order` requires the reply to put "overwrite" and "before" near each other, which the page itself never does, and `names-unnumbered-steps` requires it to mention numbered steps. `page-unchanged` requires the page to match the scaffold byte for byte. `no-layout-audit` and `no-files-created` are the README review's.
 
 In both, `skill-fired` requires a Skill call of `repo-docs` and `writing-read` a Read of `skills/repo-docs/references/writing.md`. Both are indicators that run only with the plugin. [eval-graders.test.js](../../tests/eval-graders.test.js) replays the scaffolds without bash. A run as the review asks passes every grader, and a layout audit, an edited page, a created file or a reply that misses a planted problem fails the grader meant for it. A written page passes every grader, and each fault planted in it fails only its own grader. Neither case has run in a session yet.
+
+As for the README cases, remove or disable any other documentation-writing skill installed for your user before a run; otherwise a writing request can route to it, and `skill-fired` fails for a reason outside anneal.
 
 ```bash
 claude plugin eval ./anneal --tag writing --scaffold --no-publish \
