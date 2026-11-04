@@ -10,7 +10,8 @@
 //     output is not a change to the repository);
 //   - anything outside the repository, including another drive and /dev/null;
 //   - the roadmap and state another planning tool owns, which that tool guards itself;
-//   - a private record: a path Git ignores that holds no tracked file, which the close-time check
+//   - a private record: a path under docs/tasks/, docs/decisions/, docs/knowledge/private/ or
+//     docs/apis/private/ that Git ignores and that holds no tracked file, which the close-time check
 //     never lists either.
 import { execFileSync } from 'node:child_process';
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
@@ -409,13 +410,20 @@ export function targetsOf(call, root) {
   return null;
 }
 
+// The locations that hold private records, at any depth.
+const PRIVATE_RECORD = /(?:^|\/)docs\/(?:tasks|decisions|knowledge\/private|apis\/private)\//;
+
 /**
- * Is a repository path a private record: one Git ignores that holds no tracked file?
+ * Is a repository path a private record: one under a private-record location that Git ignores and
+ * that holds no tracked file?
  *
  * The close-time check never lists one, so any session in the checkout, the task's own or another,
- * keeps its notes there without widening the open task. A path with a file or directory name that
- * starts with a dot stays guarded, since host settings live there and one can switch the hooks off,
- * and so does an `AGENTS*.md` or `CLAUDE*.md` at any depth, which a host loads into later sessions.
+ * keeps its notes there without widening the open task. Other ignored paths, such as dependencies
+ * and build output the accept command may load, stay guarded. A path with a file or directory name
+ * that starts with a dot stays guarded, since host settings live there and one can switch the hooks
+ * off, and so does an `AGENTS*.md` or `CLAUDE*.md` at any depth, which a host loads into later
+ * sessions, and any name holding a colon or ending in a dot or space, which Windows can resolve to
+ * one of those.
  * A link can point an ignored path at a tracked one, so the path the write lands on, resolved from
  * its nearest existing parent, must pass too. Where Git or the filesystem cannot answer, the path is
  * checked against the scope as before.
@@ -439,7 +447,10 @@ function privateRecord(rel, root) {
     const real = relative(realpathSync.native(root), join(realpathSync.native(base), rest)).split('\\').join('/');
     if (!real || real === '..' || real.startsWith('../') || isAbsolute(real)) return false;
     for (const path of new Set([rel, real])) {
-      if (path.split('/').some((part) => part.startsWith('.') || /^(agents|claude).*\.md$/i.test(part))) return false;
+      if (!PRIVATE_RECORD.test(path)) return false;
+      // Windows drops a trailing dot or space from a name and reads `name:stream` as the file `name`.
+      const named = (part) => part.startsWith('.') || /:|[. ]$/.test(part) || /^(agents|claude).*\.md$/i.test(part);
+      if (path.split('/').some(named)) return false;
       git(['check-ignore', '-q', '--', path]);
       // In any letter case: a case-insensitive filesystem writes `Build/x` over a tracked `build/x`.
       if (git(['ls-files', '-z', '--', `:(icase,literal)${path}`]) !== '') return false;

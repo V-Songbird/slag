@@ -704,9 +704,10 @@ for (const staged of [false, true]) {
   });
 }
 
-// A private record is a path Git ignores that holds no tracked file. The close-time check never
-// lists one, so the scope check lets every session in the checkout write it, the task's own and any
-// other; everything Git tracks, the harness and the host's settings stay guarded.
+// A private record is a path under a private-record location that Git ignores and that holds no
+// tracked file. The close-time check never lists one, so the scope check lets every session in the
+// checkout write it, the task's own and any other; everything Git tracks, other ignored paths, the
+// harness and the host's settings stay guarded.
 const write = (file_path) => ({ tool: 'Write', input: { file_path } });
 
 test('the task session and another session share one checkout', () => {
@@ -734,7 +735,7 @@ test('an ignored path under .collet/, an instruction file or a dot name is still
   const root = withTree({
     '.collet/checks/scope.mjs': '',
     '.collet/.gitignore': 'off\n',
-    '.gitignore': 'CLAUDE.md\nCLAUDE.local.md\npkg/\n.claude/settings.local.json\n.env.local\nnotes/\n',
+    '.gitignore': 'CLAUDE.md\nCLAUDE.local.md\ndocs/decisions/\n.claude/settings.local.json\n.env.local\ndocs/tasks/\n',
   });
   repo(root);
   const { fires: refused, harness } = check({ root, task: TASK, call: write('.collet/off') });
@@ -743,20 +744,44 @@ test('an ignored path under .collet/, an instruction file or a dot name is still
   assert.equal(fires(root, write('CLAUDE.md')), true);
   assert.equal(fires(root, write('claude.md')), true, 'in another letter case');
   assert.equal(fires(root, write('CLAUDE.local.md')), true, 'a local instruction file');
-  assert.equal(fires(root, write('pkg/AGENTS.md')), true, 'an instruction file below the root');
+  assert.equal(fires(root, write('docs/decisions/AGENTS.md')), true, 'an instruction file below the root');
   assert.equal(fires(root, write('.claude/settings.local.json')), true, 'host settings');
   assert.equal(fires(root, write('.env.local')), true, 'a dot file');
-  assert.equal(fires(root, write('notes/.draft.md')), true, 'a dot file below the root');
-  assert.equal(fires(root, write('notes/draft.md')), false, 'the same directory, no dot name');
+  assert.equal(fires(root, write('docs/tasks/.draft.md')), true, 'a dot file below the root');
+  assert.equal(fires(root, write('docs/tasks/draft.md')), false, 'the same directory, no dot name');
+});
+
+test('an instruction file named with a stream or a trailing dot is still refused', () => {
+  const root = withTree({ '.gitignore': 'pkg/\nCLAUDE.md\ndocs/tasks/\n' });
+  repo(root);
+  assert.equal(fires(root, write('pkg/AGENTS.md::$DATA')), true);
+  assert.equal(fires(root, write('docs/tasks/AGENTS.md::$DATA')), true);
+  assert.equal(fires(root, write('docs/tasks/CLAUDE.md:x')), true);
+  assert.equal(fires(root, write('docs/tasks/CLAUDE.md.')), true);
+  assert.equal(fires(root, write('docs/tasks/notes./AGENTS.md')), true, 'a directory with a trailing dot');
+  assert.equal(fires(root, write('docs/tasks/note.md')), false, 'a plain private note');
+});
+
+test('ignored dependencies and build output are still enforced', () => {
+  const root = withTree({
+    '.gitignore': 'node_modules/\ndist/\npkg/docs/tasks/\n',
+    'node_modules/dep/index.js': '',
+  });
+  repo(root);
+  assert.equal(fires(root, write('node_modules/dep/index.js')), true);
+  assert.equal(fires(root, write('dist/app.js')), true);
+  assert.equal(fires(root, { tool: 'Bash', input: { command: 'rm -rf node_modules' } }), true);
+  assert.equal(fires(root, write('pkg/docs/tasks/x.md')), false, 'a private record below the root');
 });
 
 test('an ignored link to tracked code is still enforced', () => {
-  const root = withTree({ '.gitignore': 'out\n' });
+  const root = withTree({ '.gitignore': 'docs/tasks\n' });
   repo(root);
+  mkdirSync(join(root, 'docs'));
   // A junction needs no privilege on Windows; elsewhere the type is ignored and a symlink is made.
-  symlinkSync(join(root, 'src'), join(root, 'out'), 'junction');
-  assert.equal(fires(root, write('out/theme.mjs')), true, 'a tracked file through the link');
-  assert.equal(fires(root, write('out/new.mjs')), true, 'a new file the link puts beside tracked code');
+  symlinkSync(join(root, 'src'), join(root, 'docs', 'tasks'), 'junction');
+  assert.equal(fires(root, write('docs/tasks/theme.mjs')), true, 'a tracked file through the link');
+  assert.equal(fires(root, write('docs/tasks/new.mjs')), true, 'a new file the link puts beside tracked code');
 });
 
 test('outside a Git repository an ignore file exempts nothing', () => {

@@ -134,12 +134,15 @@ shell. Claude Code and Codex name a Bash tool's shell as POSIX only off Windows,
 names none; with the shell unknown the POSIX reading decides, and the PowerShell reading adds what
 it would write under `.collet/`. `mkdir` keeps its POSIX flags.
 
-A write to a path Git ignores that holds no tracked file is a private record, not a task change.
-The live check never lists one, so the scope check lets it through for every session in the
-checkout, the task's own and any other. The harness's own `.collet/` files, any path with a file
-or directory name that starts with a dot, where host settings live, and any `AGENTS*.md` or
-`CLAUDE*.md` at any depth and in any letter case, which a host loads into later sessions, stay
-refused whether ignored or not. A link can point an ignored path at a tracked one, so the path the
+A write to a path under `docs/tasks/`, `docs/decisions/`, `docs/knowledge/private/` or
+`docs/apis/private/`, at any depth, that Git ignores and that holds no tracked file is a private
+record, not a task change. The live check never lists one, so the scope check lets it through for
+every session in the checkout, the task's own and any other. Any other ignored path outside the
+scope stays refused, including dependencies and build output. The harness's own
+`.collet/` files, any path with a file or directory name that starts with a dot, where host settings
+live, any `AGENTS*.md` or `CLAUDE*.md` at any depth and in any letter case, which a host loads into
+later sessions, and any name holding a colon or ending in a dot or space, which Windows can resolve
+to one of those, stay refused inside those locations too. A link can point an ignored path at a tracked one, so the path the
 write lands on, resolved from its nearest existing parent, must pass the same tests and stay inside
 the repository. Where Git or the filesystem cannot answer, the path is checked against the scope as
 before.
