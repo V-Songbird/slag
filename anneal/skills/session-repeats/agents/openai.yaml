@@ -1,0 +1,8 @@
+interface:
+  display_name: "Session repeats"
+  short_description: "Find repeated session steps a plain script can run"
+  default_prompt: "Use $session-repeats to find steps this project's sessions repeat and propose scripts and map-file lines."
+  icon_small: "./assets/icon.png"
+  icon_large: "./assets/icon.png"
+policy:
+  allow_implicit_invocation: false

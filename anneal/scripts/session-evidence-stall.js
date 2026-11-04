@@ -87,9 +87,9 @@ function projectCommands(tail) {
 const CAUSES = { offer: "offer-to-continue", question: "question-before-continuing", "next-steps": "next-steps-listed" };
 
 // The main session's turns, read in line order: its latest text, cleared by any later call or result, and the outcome
-// of its latest result. The owner's next prompt settles the turn.
-function stallTracker(limit) {
-  return { limit, ending: null, outcome: null, promptLine: null, kept: [], counts: {} };
+// of its latest result. The owner's next prompt settles the turn. `onPrompt`, when given, receives each owner prompt.
+function stallTracker(limit, onPrompt = null) {
+  return { limit, onPrompt, ending: null, outcome: null, promptLine: null, kept: [], counts: {} };
 }
 
 // The assistant's text. Codex repeats a message as an event, so the first record of the same text keeps its line.
@@ -107,6 +107,7 @@ function worked(stalls, outcome = null) {
 // for no authorized action, its latest result did not fail, and the prompt only says to go on. `plain` is false when
 // the prompt carries more than text, such as an image, or arrived while the session worked.
 function prompted(stalls, { line, timestamp, text, plain = true }) {
+  if (stalls.onPrompt) stalls.onPrompt({ line, timestamp, text });
   const { ending, outcome, promptLine } = stalls;
   Object.assign(stalls, { ending: null, outcome: null, promptLine: line });
   if (!ending || outcome === "failed" || !plain || !continueOnly(text)) return;

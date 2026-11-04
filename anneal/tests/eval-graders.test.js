@@ -1446,6 +1446,129 @@ describe("session-failure cases", () => {
   });
 });
 
+// The repeated-step cases: three transcripts that run the same two commands, once beside a map
+// file that names only the first and once beside one that names both. The graders read what
+// session-repeats.js prints for the case's own sessions folder; only a judge reads the reply.
+describe("session-repeats cases", () => {
+  const PROPOSES = path.join(EVALS, "session-repeats-proposes-a-script");
+  const SKIPS = path.join(EVALS, "session-repeats-skips-what-the-map-names");
+  const REPEATS = path.join(__dirname, "..", "scripts", "session-repeats.js");
+  const CALL = 'node "/plugins/anneal/scripts/session-repeats.js" --root "/work/cwd" --sessions-dir sessions/';
+  const SHARED = ["evidence-found-the-repeat", "evidence-ran", "no-files-created"];
+  const JUDGED = { [PROPOSES]: "proposes-command-and-map-line", [SKIPS]: "no-change-for-a-named-step" };
+  const traceOf = (output) => JSON.stringify({ type: "user", message: { role: "user", content: [{ tool_use_id: "toolu_1", type: "tool_result", content: output, is_error: false }] } });
+  // GIT_CONFIG_NOSYSTEM drops the system core.longpaths that Git for Windows sets, so the
+  // isolated global config restores it, as in the migration workspace graders' helper.
+  const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: "1" };
+  for (const name of ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) delete gitEnv[name];
+
+  // The scaffold without bash: the other case's script it runs first, the files its heredocs
+  // write, a Git repository, and the sessions its embedded program writes, with /work/cwd as
+  // their working directory.
+  function scaffold(caseDir, dir = tempDir("anneal-graders-repeats-")) {
+    const script = /^ {2}scaffold_script: (\S+)$/m.exec(read(caseDir, "case.yaml"))[1];
+    const text = read(caseDir, script);
+    const base = /^bash "\$\(dirname "\$0"\)\/\.\.\/([^/"]+)\/([^/"]+)"$/m.exec(text);
+    if (base) scaffold(path.join(EVALS, base[1]), dir);
+    for (const [, file, , content] of text.matchAll(/^cat > (\S+) <<'(\w+)'\n([\s\S]*?)\n\2\n/gm)) write(dir, file, `${content}\n`);
+    if (!fs.existsSync(path.join(dir, ".git"))) execFileSync("git", ["-c", "core.longpaths=true", "init", "-q"], { cwd: dir, env: gitEnv, stdio: "pipe" });
+    const program = /^node - [^\n]*<<'JS'\n([\s\S]*?)\nJS\n/m.exec(text);
+    if (program) execFileSync(process.execPath, ["-", "/work/cwd"], { input: program[1], cwd: dir, stdio: "pipe" });
+    return dir;
+  }
+
+  const empty = () => tempDir("anneal-graders-home-");
+  function repeatsFor(dir, ...args) {
+    const run = spawnSync(process.execPath, [REPEATS, "--root", dir, "--sessions-dir", path.join(dir, "sessions"), "--claude-home", empty(), "--codex-home", empty(), ...args], { encoding: "utf8", env: gitEnv });
+    assert.strictEqual(run.status, 0, run.stderr);
+    return run.stdout;
+  }
+
+  let dirs;
+  before(() => {
+    gitEnv.GIT_CONFIG_GLOBAL = path.join(tempDir("anneal-graders-git-"), "config");
+    fs.writeFileSync(gitEnv.GIT_CONFIG_GLOBAL, "[core]\n\tlongpaths = true\n");
+    dirs = { [PROPOSES]: scaffold(PROPOSES), [SKIPS]: scaffold(SKIPS) };
+  });
+
+  test("both cases are tagged session-repeats, and the skip case runs the other's scaffold", () => {
+    for (const caseDir of [PROPOSES, SKIPS]) assert.match(read(caseDir, "case.yaml"), /^tags: \[session-repeats\]$/m);
+    const [, caseName, script] = /^bash "\$\(dirname "\$0"\)\/\.\.\/([^/"]+)\/([^/"]+)"$/m.exec(read(SKIPS, "skips-fixture.sh"));
+    assert.strictEqual(caseName, path.basename(PROPOSES));
+    assert.match(read(PROPOSES, "case.yaml"), new RegExp(`^ {2}scaffold_script: ${script.replaceAll(".", "\\.")}$`, "m"));
+  });
+
+  test("the cases differ only in AGENTS.md and their own judge, and share every other grader file", () => {
+    const [proposes, skips] = [PROPOSES, SKIPS].map((caseDir) => dirs[caseDir]);
+    const files = listRunFiles(proposes);
+    assert.deepStrictEqual(listRunFiles(skips), files);
+    assert.deepStrictEqual(files.filter((file) => file.startsWith("sessions/")).length, 3);
+    for (const file of files.filter((name) => name !== "AGENTS.md")) assert.strictEqual(read(skips, file), read(proposes, file), file);
+    assert.notStrictEqual(read(skips, "AGENTS.md"), read(proposes, "AGENTS.md"));
+    for (const name of SHARED) assert.strictEqual(read(path.join(SKIPS, "graders"), `${name}.md`), read(path.join(PROPOSES, "graders"), `${name}.md`), name);
+    const own = (caseDir) => fs.readdirSync(path.join(caseDir, "graders")).map((file) => path.basename(file, ".md")).filter((name) => !SHARED.includes(name)).sort();
+    for (const caseDir of [PROPOSES, SKIPS]) assert.deepStrictEqual(own(caseDir), ["map-file-left-alone", JUDGED[caseDir]].sort());
+  });
+
+  test("the script finds the listing in all three sessions, named in the map only where the skip case names it", () => {
+    for (const [caseDir, named] of [[PROPOSES, false], [SKIPS, true]]) {
+      const listing = JSON.parse(repeatsFor(dirs[caseDir])).findings.commands.find((finding) => finding.step === "git status --short --ignored");
+      assert.deepStrictEqual([listing.sessions, listing.namedInMap, listing.projectScript], [3, named, null], path.basename(caseDir));
+    }
+  });
+
+  for (const caseDir of [PROPOSES, SKIPS]) {
+    describe(path.basename(caseDir), () => {
+      let checks;
+      let run;
+      before(() => {
+        checks = graders(caseDir);
+        run = { dir: dirs[caseDir], calls: bash(CALL), trace: traceOf(repeatsFor(dirs[caseDir])), created: "" };
+      });
+      const failed = (changes) => failedGraders(checks, { ...run, ...changes });
+
+      test("a run as the case asks fails no deterministic grader, whatever its reply", () => {
+        assert.deepStrictEqual(failed({ reply: "No change proposed." }), []);
+        assert.deepStrictEqual(failed({ reply: "" }), []);
+      });
+
+      test("output from two of the three sessions, or with --min-sessions 4, fails the evidence grader", () => {
+        const two = tempDir("anneal-graders-repeats-two-");
+        fs.cpSync(run.dir, two, { recursive: true });
+        fs.rmSync(path.join(two, "sessions", "0a1b2c3d-0000-4000-8000-000000000003.jsonl"));
+        assert.deepStrictEqual(failed({ trace: traceOf(repeatsFor(two)) }), ["evidence-found-the-repeat"]);
+        assert.deepStrictEqual(failed({ trace: traceOf(repeatsFor(two, "--min-sessions", "2")) }), ["evidence-found-the-repeat"]);
+        assert.deepStrictEqual(failed({ trace: traceOf(repeatsFor(run.dir, "--min-sessions", "4")) }), ["evidence-found-the-repeat"]);
+      });
+
+      test("reading the transcripts instead of running the script fails evidence-ran and the evidence grader", () => {
+        const raw = fs.readdirSync(path.join(run.dir, "sessions")).map((file) => read(path.join(run.dir, "sessions"), file)).join("");
+        assert.deepStrictEqual(failed({ calls: bash("cat sessions/*.jsonl") }), ["evidence-ran"]);
+        assert.deepStrictEqual(failed({ trace: traceOf(raw) }), ["evidence-found-the-repeat"]);
+        assert.deepStrictEqual(failed({ trace: withReply(traceOf(raw), repeatsFor(run.dir)) }), ["evidence-found-the-repeat"], "the reply quotes the output");
+      });
+
+      test("an edited AGENTS.md or a created script fails its grader", () => {
+        const edited = tempDir("anneal-graders-repeats-edit-");
+        fs.cpSync(run.dir, edited, { recursive: true });
+        fs.appendFileSync(path.join(edited, "AGENTS.md"), "| `npm run status` | lists every file | seconds |\n");
+        assert.deepStrictEqual(failed({ dir: edited }), ["map-file-left-alone"]);
+        assert.deepStrictEqual(failed({ created: "scripts/check-status.sh" }), ["no-files-created"]);
+      });
+
+      test("a judge grades the reply against PASS and FAIL lines, and no other grader reads the reply", () => {
+        const readsReply = Object.values(checks).filter((grader) => grader.type !== "tool_used" && (grader.target ?? grader.focus ?? "last_message") === "last_message");
+        assert.deepStrictEqual(readsReply.map((grader) => grader.name), [JUDGED[caseDir]]);
+        const [judge] = readsReply;
+        assert.strictEqual(judge.type, "llm");
+        assert.match(judge.criteria, /^PASS if /m);
+        assert.match(judge.criteria, /^FAIL if /m);
+        assert.strictEqual(passes(judge, { ...run, reply: "No change proposed." }), null);
+      });
+    });
+  }
+});
+
 // A readme or writing case's scaffold without bash: the other case's script it runs first, then
 // the files its heredocs write.
 function replay(caseDir, dir = tempDir("anneal-graders-readme-")) {

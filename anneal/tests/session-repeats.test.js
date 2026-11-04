@@ -1,0 +1,316 @@
+"use strict";
+
+// The repeated-step search on synthetic Claude Code transcripts and Codex rollouts in temporary Git repositories:
+// which sessions it reads, how it normalizes steps, each kind of finding, its exit codes, and that the hooks it reads
+// the calls through leave session-evidence's own output unchanged.
+
+const { test, describe } = require("node:test");
+const assert = require("node:assert");
+const fs = require("node:fs");
+const path = require("node:path");
+const { execFileSync, spawnSync } = require("node:child_process");
+const { tempDir, transcript, at, human, use, result, say, meta, started, turn, message, call, output } = require("./session-transcripts.js");
+const { analyzeClaude } = require("../scripts/session-evidence-claude.js");
+const { analyzeCodex } = require("../scripts/session-evidence-codex.js");
+const { normalizer, promptKey } = require("../scripts/session-repeats.js");
+
+const CLI = path.join(__dirname, "..", "scripts", "session-repeats.js");
+
+// GIT_CONFIG_NOSYSTEM drops the system core.longpaths that Git for Windows sets, so the isolated global config restores
+// it; the script's own Git queries, in a child process, read the same config.
+process.env.GIT_CONFIG_NOSYSTEM = "1";
+process.env.GIT_CONFIG_GLOBAL = path.join(tempDir(), "config");
+fs.writeFileSync(process.env.GIT_CONFIG_GLOBAL, "[core]\n\tlongpaths = true\n");
+const git = (dir, ...args) => execFileSync("git", [
+  "-c", "core.longpaths=true", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", ...args,
+], { cwd: dir, stdio: "pipe", encoding: "utf8" });
+
+// The script never reads this run's own session, nor a host home the test did not hand it.
+const ENV = { ...process.env };
+for (const name of ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) delete ENV[name];
+const EMPTY = tempDir();
+
+function run(args, env = {}) {
+  return spawnSync(process.execPath, [CLI, "--claude-home", EMPTY, "--codex-home", EMPTY, ...args], { encoding: "utf8", env: { ...ENV, ...env } });
+}
+
+function repeats(args, env) {
+  const ran = run(args, env);
+  assert.strictEqual(ran.status, 0, ran.stderr);
+  return JSON.parse(ran.stdout);
+}
+
+// A Git repository named shop, at the path Git reports for it.
+function shop({ files = {} } = {}) {
+  const dir = path.join(tempDir(), "shop");
+  fs.mkdirSync(dir);
+  git(dir, "init", "-q");
+  for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), content);
+  return path.resolve(git(dir, "rev-parse", "--show-toplevel").trim());
+}
+
+const ids = ["0a1b2c3d-0000-4000-8000-000000000001", "0a1b2c3d-0000-4000-8000-000000000002", "0a1b2c3d-0000-4000-8000-000000000003",
+  "0a1b2c3d-0000-4000-8000-000000000004"];
+
+// One Claude Code session in `root`: a typed prompt, then each step as a call and its result, in order. A step is a
+// shell command, or [tool, input] for any other tool.
+function claude(dir, root, index, steps, { prompt = `Task ${index}.`, rows = [] } = {}) {
+  const id = ids[index];
+  const lines = [{ ...human(prompt, 1), cwd: root, sessionId: id }];
+  steps.forEach((step, n) => {
+    const [tool, input] = typeof step === "string" ? ["Bash", { command: step }] : step;
+    lines.push(use(`t${index}-${n}`, tool, input, 2 + n * 2), result(`t${index}-${n}`, "ok", 3 + n * 2));
+  });
+  lines.push(...rows, say(`end-${index}`, "Done.", 50));
+  return transcript(lines, { dir, name: `${id}.jsonl` });
+}
+
+const commands = (out) => out.findings.commands.map((finding) => [finding.step, finding.sessions]);
+
+describe("which sessions count", () => {
+  test("a command in 3 of 3 sessions is one finding; in 2 it needs --min-sessions 2", () => {
+    const root = shop();
+    const three = tempDir();
+    for (const index of [0, 1, 2]) claude(three, root, index, ["npm test"]);
+    const out = repeats(["--root", root, "--sessions-dir", three]);
+    assert.deepStrictEqual(commands(out), [["npm test", 3]]);
+    assert.deepStrictEqual(out.sessionsRead, { claude: 3, codex: 0, subagentTranscripts: 0 });
+    assert.deepStrictEqual(out.dates, { first: at(1), last: at(1) });
+    assert.strictEqual(out.findings.commands[0].occurrences, 3);
+    assert.strictEqual(out.findings.commands[0].examples.length, 3);
+    const two = tempDir();
+    for (const index of [0, 1]) claude(two, root, index, ["npm test"]);
+    assert.deepStrictEqual(commands(repeats(["--root", root, "--sessions-dir", two])), []);
+    assert.deepStrictEqual(commands(repeats(["--root", root, "--sessions-dir", two, "--min-sessions", "2"])), [["npm test", 2]]);
+  });
+
+  test("the running session is skipped; an unreadable one is reported while the others count; a journal is never read", () => {
+    const root = shop();
+    const dir = tempDir();
+    for (const index of [0, 1, 2, 3]) claude(dir, root, index, ["npm test"]);
+    fs.writeFileSync(path.join(dir, "0a1b2c3d-0000-4000-8000-0000000000ff.jsonl"), "{not json\n");
+    fs.writeFileSync(path.join(dir, "journal.jsonl"), "{not json\n");
+    const out = repeats(["--root", root, "--sessions-dir", dir], { CLAUDE_CODE_SESSION_ID: ids[3] });
+    assert.deepStrictEqual(commands(out), [["npm test", 3]]);
+    assert.deepStrictEqual(out.skipped.map((skip) => [path.basename(skip.sessionFile), skip.reason]).sort(), [
+      [`${ids[3]}.jsonl`, "running-session"], ["0a1b2c3d-0000-4000-8000-0000000000ff.jsonl", "unreadable"],
+    ]);
+    assert.match(out.skipped.find((skip) => skip.reason === "unreadable").message, /Invalid JSON record at line 1/);
+  });
+
+  test("a subagent transcript counts toward its parent session, in inSubagents", () => {
+    const root = shop();
+    const dir = tempDir();
+    for (const index of [0, 1]) claude(dir, root, index, ["npm test"]);
+    const parent = claude(dir, root, 2, []);
+    const agent = { isSidechain: true, agentId: "a1" };
+    transcript([
+      { type: "user", ...agent, cwd: root, timestamp: at(1), message: { role: "user", content: "Run the suite." } },
+      { ...use("s1", "Bash", { command: "npm test" }, 2), ...agent }, { ...result("s1", "ok", 3), ...agent },
+    ], { dir: path.join(dir, path.basename(parent, ".jsonl"), "subagents", "workflows", "w1"), name: "agent-a1.jsonl" });
+    const out = repeats(["--root", root, "--sessions-dir", dir]);
+    assert.deepStrictEqual(out.sessionsRead, { claude: 3, codex: 0, subagentTranscripts: 1 });
+    assert.deepStrictEqual(commands(out), [["npm test", 3]]);
+    assert.strictEqual(out.findings.commands[0].inSubagents, 1);
+    assert.deepStrictEqual(out.findings.prompts, [], "a subagent's task is no owner prompt");
+  });
+
+  test("discovery reads the root's and a worktree's project folders and Codex rollouts whose session_meta cwd is the root", () => {
+    const root = shop({ files: { "README.md": "# shop\n" } });
+    git(root, "add", ".");
+    git(root, "commit", "-qm", "initial");
+    const worktree = path.join(path.dirname(root), "shop-wt");
+    git(root, "worktree", "add", "-q", "-b", "wt", worktree);
+    const home = tempDir();
+    const key = (dir) => path.resolve(git(dir, "rev-parse", "--show-toplevel").trim()).replace(/[^A-Za-z0-9]/g, "-");
+    const projects = path.join(home, "claude", "projects");
+    claude(path.join(projects, key(root)), root, 0, ["npm test"]);
+    claude(path.join(projects, key(worktree)), worktree, 1, ["npm test"]);
+    claude(path.join(projects, `${key(root)}-other`), root, 2, ["npm test"]);
+    // A session folder's nested transcript other than a subagent's is not read as a session.
+    claude(path.join(projects, key(root), "nested"), root, 3, ["npm test"]);
+    const rollout = (cwd, name) => transcript([
+      { ...meta, payload: { ...meta.payload, cwd } }, started(1), { ...turn(2), payload: { ...turn(2).payload, cwd } },
+      call("c1", "npm test", 3), output("c1", ["Process exited with code 0"], 4),
+    ], { dir: path.join(home, "codex", "sessions", "2026", "01", "01"), name });
+    rollout(root, "rollout-2026-01-01T00-00-00-0a1b2c3d-0000-4000-8000-0000000000c1.jsonl");
+    rollout(path.join(path.dirname(root), "elsewhere"), "rollout-2026-01-01T00-00-00-0a1b2c3d-0000-4000-8000-0000000000c2.jsonl");
+    const ran = spawnSync(process.execPath, [CLI, "--root", root, "--claude-home", path.join(home, "claude"), "--codex-home", path.join(home, "codex"),
+      "--min-sessions", "2"], { encoding: "utf8", env: ENV });
+    assert.strictEqual(ran.status, 0, ran.stderr);
+    const out = JSON.parse(ran.stdout);
+    assert.deepStrictEqual(out.sessionsRead, { claude: 2, codex: 1, subagentTranscripts: 0 });
+    assert.deepStrictEqual(commands(out), [["npm test", 3]]);
+  });
+});
+
+describe("normalized steps", () => {
+  test("whitespace, the root in either slash style, ids and temporary paths collapse to one key", () => {
+    const root = path.resolve("/work/shop");
+    const normalize = normalizer([root]);
+    const forward = root.replace(/\\/g, "/");
+    const variants = [
+      `node   scripts/check.js  "${forward}" --run 0a1b2c3d-0000-4000-8000-00000000abcd > /tmp/run-1/out.txt`,
+      `node scripts/check.js "${forward.replace(/\//g, "\\")}" --run 1b2c3d4e-0000-4000-8000-00000000abcd >  /tmp/run-2/out.txt`,
+      `cd "${forward}" && node scripts/check.js "." --run deadbeef1 > /var/tmp/x/out.txt`,
+    ];
+    assert.deepStrictEqual([...new Set(variants.map(normalize))], ['node scripts/check.js "." --run <id> > <temp>/out.txt']);
+    assert.strictEqual(normalize(`cat ${forward}/src/cart.js`), "cat ./src/cart.js");
+    assert.strictEqual(normalize(`git -C "${forward}" status --short`), "git status --short");
+    assert.strictEqual(normalize("npm test 1234567"), "npm test 1234567", "a number is no id");
+  });
+
+  test("Edit and Write are no steps; a read of the same path in 3 sessions is a lookup with a root-relative path", () => {
+    const root = shop();
+    const dir = tempDir();
+    const file = path.join(root, "src", "cart.js");
+    for (const index of [0, 1, 2]) {
+      claude(dir, root, index, [["Read", { file_path: file }], ["Edit", { file_path: file, old_string: "a", new_string: "b" }],
+        ["Write", { file_path: path.join(root, "notes.md"), content: "x" }]]);
+    }
+    const out = repeats(["--root", root, "--sessions-dir", dir]);
+    assert.deepStrictEqual(out.findings.lookups.map((finding) => [finding.step, finding.sessions, finding.namedInMap]), [["read src/cart.js", 3, false]]);
+    assert.deepStrictEqual(out.findings.commands, []);
+    assert.deepStrictEqual(out.findings.sequences, []);
+  });
+
+  test("two commands in a row by one actor for one prompt are a sequence; split across prompts or actors they are not", () => {
+    const root = shop();
+    const together = tempDir();
+    for (const index of [0, 1, 2]) claude(together, root, index, ["npm test", "git status --short --ignored"]);
+    const out = repeats(["--root", root, "--sessions-dir", together]);
+    assert.deepStrictEqual(out.findings.sequences.map((finding) => [finding.step, finding.sessions]), [["npm test -> git status --short --ignored", 3]]);
+    const apart = tempDir();
+    for (const index of [0, 1, 2]) {
+      const agent = { isSidechain: true, agentId: "a1" };
+      claude(apart, root, index, ["npm test"], {
+        rows: index === 0
+          ? [{ ...human("Now the status.", 30), cwd: root }, use("p2", "Bash", { command: "git status --short --ignored" }, 31), result("p2", "ok", 32)]
+          : [{ ...use(`s${index}`, "Bash", { command: "git status --short --ignored" }, 31), ...agent }, { ...result(`s${index}`, "ok", 32), ...agent }],
+      });
+    }
+    const split = repeats(["--root", root, "--sessions-dir", apart]);
+    assert.deepStrictEqual(split.findings.sequences, []);
+    assert.deepStrictEqual(commands(split), [["git status --short --ignored", 3], ["npm test", 3]]);
+  });
+});
+
+describe("prompts", () => {
+  test("the same typed prompt in 3 sessions is a finding; injected text and host notices are not", () => {
+    const root = shop();
+    const dir = tempDir();
+    const injected = [{ type: "user", isMeta: true, cwd: root, timestamp: at(40), message: { role: "user", content: "Caveat from the host." } },
+      { ...human("<system-reminder>Notice.</system-reminder>", 41), cwd: root }];
+    for (const index of [0, 1, 2]) claude(dir, root, index, [], { prompt: ["Run the checks.", "run the  checks", "Run the checks!"][index], rows: injected });
+    const out = repeats(["--root", root, "--sessions-dir", dir]);
+    assert.deepStrictEqual(out.findings.prompts.map((finding) => [finding.step, finding.sessions, finding.repositories]), [["run the checks", 3, 1]]);
+  });
+
+  test("a slash command is keyed by its name", () => {
+    assert.strictEqual(promptKey("<command-message>shop:check</command-message>\n<command-name>/shop:check</command-name>\n<command-args>now</command-args>"), "/shop:check");
+    assert.strictEqual(promptKey("/shop:check all of it"), "/shop:check");
+  });
+
+  test("with --also-root, another repository's sessions add to prompts only", () => {
+    const root = shop();
+    const other = shop();
+    const home = tempDir();
+    const dir = tempDir();
+    for (const index of [0, 1]) claude(dir, root, index, [], { prompt: "Run the checks." });
+    const key = other.replace(/[^A-Za-z0-9]/g, "-");
+    claude(path.join(home, "projects", key), other, 2, ["npm test", "npm test"], { prompt: "Run the checks." });
+    claude(path.join(home, "projects", key), other, 3, ["npm test"], { prompt: "Something else." });
+    const ran = spawnSync(process.execPath, [CLI, "--root", root, "--sessions-dir", dir, "--also-root", other, "--claude-home", home, "--codex-home", EMPTY,
+      "--min-sessions", "2"], { encoding: "utf8", env: ENV });
+    assert.strictEqual(ran.status, 0, ran.stderr);
+    const out = JSON.parse(ran.stdout);
+    assert.deepStrictEqual(out.findings.prompts.map((finding) => [finding.step, finding.sessions, finding.repositories]), [["run the checks", 3, 2]]);
+    assert.deepStrictEqual(out.findings.commands, []);
+    assert.strictEqual(out.repositories.length, 2);
+  });
+});
+
+describe("what the map and the manifest already hold", () => {
+  test("namedInMap reads AGENTS.md or a CLAUDE.md that imports it; projectScript names the script a command runs or is", () => {
+    const scripts = JSON.stringify({ scripts: { check: "node --test && git status --short --ignored", test: "node --test" } });
+    const dir = tempDir();
+    const steps = ["npm run check", "node --test && git status --short --ignored", "git status --short --ignored"];
+    for (const [files, named] of [
+      [{ "AGENTS.md": "# shop\n\n| `git status --short --ignored` | lists every file |\n" }, true],
+      [{ "CLAUDE.md": "@AGENTS.md\n", "AGENTS.md": "# shop\n\nRun `git status   --short --ignored` last.\n" }, true],
+      [{ "CLAUDE.md": "# shop\n" }, false],
+    ]) {
+      const root = shop({ files: { ...files, "package.json": scripts } });
+      const sessions = path.join(dir, String(named), String(Object.keys(files).length));
+      for (const index of [0, 1, 2]) claude(sessions, root, index, steps);
+      const out = repeats(["--root", root, "--sessions-dir", sessions]);
+      const byStep = Object.fromEntries(out.findings.commands.map((finding) => [finding.step, [finding.namedInMap, finding.projectScript]]));
+      assert.deepStrictEqual(byStep, {
+        "git status --short --ignored": [named, null], "npm run check": [false, "check"], "node --test && git status --short --ignored": [false, "check"],
+      });
+    }
+  });
+});
+
+describe("Codex rollouts", () => {
+  test("three rollouts that run the same command give the same finding as Claude Code sessions, and a prompt counts once", () => {
+    const root = shop();
+    const dir = tempDir();
+    for (const index of [0, 1, 2]) {
+      transcript([
+        { ...meta, payload: { id: `thread-${index}`, cwd: root } }, started(1), { ...turn(2), payload: { ...turn(2).payload, cwd: root } },
+        message("Run the checks.", 3), { timestamp: at(3), type: "event_msg", payload: { type: "user_message", message: "Run the checks." } },
+        call(`c${index}`, "npm test", 4), output(`c${index}`, ["Process exited with code 0"], 5),
+      ], { dir, name: `rollout-2026-01-01T00-00-0${index}-${ids[index]}.jsonl` });
+    }
+    const out = repeats(["--root", root, "--sessions-dir", dir]);
+    assert.deepStrictEqual(out.sessionsRead, { claude: 0, codex: 3, subagentTranscripts: 0 });
+    assert.deepStrictEqual(commands(out), [["npm test", 3]]);
+    assert.deepStrictEqual(out.findings.prompts.map((finding) => [finding.step, finding.occurrences]), [["run the checks", 3]]);
+  });
+});
+
+describe("the command line", () => {
+  test("two runs print the same bytes", () => {
+    const root = shop();
+    const dir = tempDir();
+    for (const index of [0, 1, 2]) claude(dir, root, index, ["npm test", "git status --short --ignored"]);
+    const first = run(["--root", root, "--sessions-dir", dir]);
+    assert.strictEqual(first.status, 0, first.stderr);
+    assert.strictEqual(run(["--root", root, "--sessions-dir", dir]).stdout, first.stdout);
+  });
+
+  test("it exits 2 on a bad option, a root outside Git, or no session to read", () => {
+    const root = shop();
+    const dir = tempDir();
+    claude(dir, root, 0, ["npm test"]);
+    for (const args of [["--root", root, "--sessions-dir", dir, "--since", "1d"], ["--sessions-dir", dir], ["--root", root, "--min-sessions", "1"],
+      ["--root", root, "--min-sessions", "21"], ["--root", root, "--limit", "0"], ["--root", root, "--limit", "x"], ["--root", root, "--sessions-dir"]]) {
+      assert.strictEqual(run(args).status, 2, args.join(" "));
+    }
+    const outside = tempDir();
+    assert.match(run(["--root", outside, "--sessions-dir", dir]).stderr, /not inside a Git work tree/);
+    const none = run(["--root", root, "--sessions-dir", tempDir()]);
+    assert.strictEqual(none.status, 2);
+    assert.match(none.stderr, /no session found to read/);
+  });
+});
+
+describe("the evidence hooks", () => {
+  test("analyzeClaude and analyzeCodex return the same evidence with and without hooks, and onCall sees each issued call once", () => {
+    const root = "/work/shop";
+    const file = transcript([human("Run the checks.", 1), use("t1", "Bash", { command: "npm test" }, 2), result("t1", "ok", 3),
+      use("t1", "Bash", { command: "npm test" }, 2), use("t2", "Read", { file_path: "/work/shop/a.js" }, 4), result("t2", "x", 5), say("e", "Done.", 6)]);
+    const rollout = transcript([meta, started(1), turn(2), message("Run the checks.", 3), call("c1", "npm test", 4), output("c1", ["ok"], 5)]);
+    for (const [analyze, input, prompts] of [[analyzeClaude, file, 1], [analyzeCodex, rollout, 1]]) {
+      const calls = [];
+      const typed = [];
+      const hooked = analyze(input, Number.MAX_SAFE_INTEGER, 6, { onCall: (seen) => calls.push(seen), onPrompt: (seen) => typed.push(seen) });
+      assert.deepStrictEqual(hooked, analyze(input, Number.MAX_SAFE_INTEGER, 6));
+      assert.ok(calls.length > 0);
+      assert.strictEqual(calls.length, hooked.coverage.calls);
+      assert.ok(typed.length >= prompts);
+      assert.ok(calls.every((seen) => seen.cwd === root && typeof seen.callLine === "number"));
+    }
+  });
+});

@@ -1,6 +1,6 @@
 # anneal
 
-anneal helps coding agents navigate an existing project, review session detours, and align documentation with current behavior. It provides three skills for those tasks.
+anneal helps coding agents navigate an existing project, review session detours, find steps sessions repeat that a plain script could run, and align documentation with current behavior. It provides four skills for those tasks.
 
 Use it on an existing project. A single rename or a new scaffold does not need it.
 
@@ -69,10 +69,12 @@ These examples use Claude Code syntax. On Codex use `$<skill-name>`; on Antigrav
 | Plan a migration and approve each step | `/anneal:repo-layout` |
 | Propose instruction changes from one session | `/anneal:session-review [transcript file]` |
 | Check whether deleting a finished session would lose work | `/anneal:session-review closeout <session id or transcript file>` |
+| Find repeated session steps a plain script could run | `/anneal:session-repeats [sessions folder or transcript files]` |
 | Reconcile documentation, write a page for people, or write and review a README | `/anneal:repo-docs [audit\|maintain\|adopt\|readme] [path or concern]` |
 
 A migration runs baseline checks, proposes changes, and creates an `anneal/<YYYY-MM-DD>` branch for approved steps.
 Each successful step is checked and committed. Session review proposes edits and waits for approval; it commits nothing.
+The repeated-step search reads this project's past sessions and proposes, for each step they repeated, a command or a short no-model script and the map-file line that names it; it writes only what you approve.
 Documentation cleanup applies authorized corrections. Its `audit` mode reports findings without edits and saves a report only after you say yes to its offer. Its `adopt` mode writes the project-local documentation rule, a map pointer and, for a public solo repository, ignore rules from a shipped template, each after you approve it.
 Its `readme` mode writes, reviews or repairs one README and runs a bundled checker on it.
 Asked to write or review a help page, guide, FAQ or changelog, it follows its writing reference and reports what it could not check against the product.
@@ -88,6 +90,7 @@ anneal has no settings. Choose a skill and its mode.
 - Findings are heuristics; framework conventions and project instructions take precedence.
 - Import rewriting covers relative imports in JavaScript and TypeScript family files (`.js`, `.ts`, `.vue`, `.svelte` and their variants). Other references need review.
 - Session review reads one transcript. Redaction is best effort; inspect excerpts before sharing them.
+- The repeated-step search matches steps as text after normalization. It finds Claude Code and Codex sessions on its own; on Antigravity it reads only the files you hand it. It has not run live on any host yet.
 - Transcript parsing depends on the formats covered by tests. Antigravity requires an explicit transcript file. The close-out check reads Claude Code transcripts only.
 - Documentation checks cover the stated evidence and do not scan Git history by default.
 - A complete migration, with the Git guard's refusal on its branch, has been observed in Claude Code, Codex CLI and the Antigravity IDE. On Codex it only changed the map file, so a migration that moves files is unverified there.

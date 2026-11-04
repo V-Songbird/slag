@@ -95,9 +95,10 @@ const ADVICE = {
   ],
 };
 
-function navigator(limit) {
+// `onCall`, when given, receives a copy of each issued call with its working directory, as session-repeats.js reads them.
+function navigator(limit, onCall = null) {
   return {
-    limit, facts: new WeakMap(), byKey: new Map(), actors: new Map(), reads: new Map(), versions: new Map(), backgrounds: [], open: [],
+    limit, onCall, facts: new WeakMap(), byKey: new Map(), actors: new Map(), reads: new Map(), versions: new Map(), backgrounds: [], open: [],
     unknownEffects: 0, compactions: 0, kept: [], counts: {},
   };
 }
@@ -144,6 +145,7 @@ function called(nav, call, shape, { actor, key, message, cwd, background = false
       && !(message !== null && candidate.fact.message === message);
     if (follows && candidate.next.length < WINDOW) candidate.next.push(fact);
   }
+  if (nav.onCall) nav.onCall({ ...call, cwd });
 }
 
 // Two calls from one assistant message ran together, whatever order the host wrote them in.

@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: session-repeats-proposes-a-script
+description: A small repository whose map file names npm test but not git status --short --ignored, and three synthetic transcripts of sessions that each ran npm test and then git status --short --ignored. The user asks for repeated steps in those sessions and approves nothing. The run must find the listing in all three sessions, propose the command and a Commands line for it, and write nothing.
+tags: [session-repeats]
+context:
+  scaffold_script: repeats-fixture.sh

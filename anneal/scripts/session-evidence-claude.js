@@ -203,7 +203,7 @@ function subagentTranscripts(file) {
   });
 }
 
-function analyzeClaude(file, before = null, limit = 6) {
+function analyzeClaude(file, before = null, limit = 6, { onCall = null, onPrompt = null } = {}) {
   const warnings = new Set();
   const buffer = fs.readFileSync(file);
   const prompts = [];
@@ -225,8 +225,8 @@ function analyzeClaude(file, before = null, limit = 6) {
   const typed = new Set(starts.map((prompt) => prompt.line));
 
   const track = tracker();
-  const nav = navigator(limit);
-  const stalls = stallTracker(limit);
+  const nav = navigator(limit, onCall);
+  const stalls = stallTracker(limit, onPrompt);
   const actors = new Map();
   const failures = [];
   const failedCalls = new WeakMap();

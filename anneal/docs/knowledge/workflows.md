@@ -26,6 +26,9 @@ related_files:
   - anneal/scripts/session-evidence-stall.js
   - anneal/scripts/session-closeout.js
   - anneal/tests/session-closeout.test.js
+  - anneal/skills/session-repeats/SKILL.md
+  - anneal/scripts/session-repeats.js
+  - anneal/tests/session-repeats.test.js
   - anneal/tests/session-evidence.test.js
   - anneal/tests/session-evidence-claude.test.js
   - anneal/tests/session-evidence-codex.test.js
@@ -304,6 +307,66 @@ Limits of the close-out:
 - Redaction of the copied text is best effort, as in the session evidence.
 - The cleanup flag does not see a process started another way, such as with `&` inside a shell command, or one that ended without a notification. It does not see the branch `git worktree add` creates without `-b`, a branch name joined to its option such as `-bname`, a `cd` earlier in the same command line, `git worktree prune`, a branch rename, or any git command in a shell call that reported an error.
 
+## How a repeated-step search runs
+
+Use `/anneal:session-repeats [sessions folder or transcript files]` on Claude Code, `$session-repeats` on Codex or `/session-repeats` on Antigravity. It reads many sessions of one repository and lists the steps they repeated the same way, so that a plain command or a short script with no model can take their place. A single session's detours are session review's job.
+
+The skill runs `scripts/session-repeats.js`, which reads transcripts through the same parser as session review and prints JSON. It writes nothing.
+
+```shell
+node anneal/scripts/session-repeats.js --root "<repository>" [--sessions-dir <dir>]... [--session-file <file>]...
+```
+
+### Which sessions it reads
+
+- `--root` must be inside a Git work tree; otherwise the script exits 2. The repository's paths are its top level and every worktree `git worktree list` names.
+- With `--session-file` or `--sessions-dir`, it reads exactly those files, and only the top-level `.jsonl` files of a folder.
+- With neither, it finds the sessions itself. On Claude Code it reads `<claude home>/projects/<key>/*.jsonl`, where `<key>` is a repository path with each character other than an ASCII letter or digit written as `-`, and the keys that add `--claude-worktrees-<name>` to one of them, for worktrees Claude Code made and has since removed. That key rule is how local folders are named, not a documented host contract. On Codex it reads each rollout under `<codex home>/sessions/` whose first `session_meta` names a repository path as `cwd`; that route is held by test fixtures and has not been checked on a real Codex home.
+- A Claude Code session's `subagents/**/agent-*.jsonl` transcripts count toward that session. A file named `journal.jsonl` is never read.
+- It skips the running session, named by `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`, with its subagent transcripts, and lists it under `skipped` as `running-session`. A transcript the parser refuses is listed as `unreadable` with its error, and the others still count. When no session is left, it exits 2 and names what it searched.
+- `--also-root <repository>` adds another repository's sessions. They count toward `prompts` only.
+
+### How steps are matched
+
+A finding is text equality after normalization. A shell command is trimmed and its whitespace collapsed. Each repository path, in either slash style, in MSYS form and as the evidence's redaction spells it, becomes `.`. A leading `cd .` or `pwd` and git's `-C .` are dropped. A UUID, and a hex run of seven or more characters holding a digit and a letter, become `<id>`. A path under the temporary directory, or in a `tmp`, `temp` or `scratchpad` folder, becomes `<temp>/<its name>`. Bash and PowerShell runs of one command share a key. On Codex the command is the one an `exec_command` or `shell_command` call carries, directly or inside a code-mode script.
+
+The script prints four kinds, each kept only when it appears in at least `--min-sessions` sessions (3 by default, 2 to 20), sorted by sessions, then occurrences, then text, with at most `--limit` per kind (10 by default, 1 to 30):
+
+| Kind | What repeats |
+| --- | --- |
+| `commands` | one shell command |
+| `sequences` | two or three commands one actor ran in a row for one prompt; a command run again at once counts once, and reads between them do not break the run |
+| `lookups` | a read of one file, by a file tool or a shell read of one path, as `read <path from the root>`; a Grep or Glob pattern; an LS path |
+| `prompts` | a prompt the owner typed: lower case, without host envelopes, whitespace collapsed and closing punctuation removed; a slash command by its name |
+
+An edit, a write and any other call is no step. Injected text, host notices and a subagent's task are no prompt, and on Codex the event that repeats a typed prompt counts once.
+
+Each finding carries `step`, `sessions`, `occurrences`, `inSubagents` (occurrences from subagent transcripts) and up to three `examples`, each a transcript and the line of its first call there, from different sessions. A command, a sequence or a lookup adds `namedInMap`: whether the root `CLAUDE.md`, `AGENTS.md` or `GEMINI.md`, or a file one of them imports with `@`, holds the step, or a lookup's path. A command or a sequence adds `projectScript`: the root `package.json` script the command runs by name, as in `npm run check`, or whose own text is the command, or the sequence's commands joined by `&&`. A prompt adds `repositories`. The output also gives `sessionsRead`, `dates` (the earliest and the latest typed prompt), `skipped`, `warnings` and `limits`.
+
+### What the skill does with the findings
+
+The skill reads only each finding's example lines and checks that the calls did the same job. It states how many sessions it read and over which dates, and quotes nothing beyond the script's `step`. Then the first rule that holds routes each finding:
+
+1. A step that needed judgement each time: nothing.
+2. A step the map file already names: nothing.
+3. A step a project script runs: a `Commands` line naming that script.
+4. A step no script runs: the plain command, or a short script with no network and no model, in the project's own scripts folder and language, plus its `Commands` line.
+5. A repeated lookup: a path hint in `Where things live` or a pointer in `Start here`.
+6. A repeated prompt here that only runs steps: the command or script that runs them, plus its map line.
+7. A prompt repeated across repositories: reported for the owner's global instructions or a personal command, never written.
+8. A repeated mistake a machine could catch: reported as a check, naming collet's `check-writer` only when `.collet/` exists.
+9. A step for CI, a hook or a schedule: reported, never written.
+
+It shows a prioritized list with each entry's example lines, its exact command or script text and its map line, and applies only the entries the owner approves. It then shows `git diff` and the map file's line count before and after. A run nobody can answer writes nothing, and the skill commits nothing unless asked.
+
+Limits of the search:
+
+- Matches are text, not meaning: two commands that do one job in different words are two steps, and one command can do different jobs.
+- A command is copied at most 480 characters long, so commands that differ only after that point share a key, and the script warns how many were cut. A prompt key is cut at 120 characters.
+- A step is listed, not judged. Most repeated reads are ordinary work on the files a task changes.
+- Antigravity has no known transcript location, so its sessions are read only from files handed in.
+- Redaction is best effort, as in the session evidence.
+
 ## How documentation reconciliation runs
 
 Use `/anneal:repo-docs` on Claude Code, `$repo-docs` on Codex or `/repo-docs` on Antigravity. Add `audit` to receive findings without edits. The audit offers to save its findings and writes that report in the project only after you say yes, even when your own instructions ask to save findings. A run nobody can answer, such as a headless one, writes nothing in the project. Outside the project, the audit writes only its coverage checklist, and only in a scratch directory the host names for the session; without one it writes no file anywhere and reads command output from the command or through a pipe.
@@ -460,6 +523,7 @@ The hook matches command text, so it cannot see every rewrite, such as git run t
 - anneal reports code that builds names at runtime. It never rewrites that code.
 - Moving files collides with branches other people have open. Migrate when few are.
 - A session audit reads one session. It cannot tell a pattern from an accident, so "repeated" means repeated inside that session.
+- The repeated-step search matches steps as text after normalization, and lists them without judging them. It finds sessions on Claude Code and Codex, and on Antigravity reads only files you hand it. Its Codex discovery is held by fixtures only, and the skill has not run in a live session on any host.
 - The transcript parser reads the shapes held by its tests; host format changes can require parser updates. Antigravity has no known transcript location, so there the skill works only on a file you hand it.
 - Redaction of credentials, your home directory and your account name in the evidence is best effort. Read an excerpt before you share it.
 - Documentation reconciliation covers the stated files and evidence. It does not prove every claim, host or distribution safe, and does not scan Git history by default.
@@ -474,7 +538,7 @@ The audits and session review have run from the published package in Claude Code
 
 ## Running the evals
 
-Thirty-two eval cases live in [evals](../../evals/). Three check skill discovery, audit mode leaving files unchanged, migration stopping on a dirty tree, and session proposals waiting for approval; [two](#a-migration-on-a-clean-tree) apply an approved migration step on a clean tree, one of them into a new directory, [one](#a-plan-from-a-wrong-survey-row) shows a plan from a layout survey row whose importer count is wrong, [one](#an-unreadable-transcript) gives session review a transcript its evidence script refuses, [seven](#session-failure-checks) give session review a transcript of one failure shape and grade what its reply proposes, [two](#readme-cases) review and repair one README, [two](#writing-cases) write and review a page for people, [two](#reader-only-map-checks) ask a reader what the map alone answers, the six navigation cases have their own [paired protocol](#paired-navigation-runs), and six [held-out cases](#held-out-checks) repeat it on a second repository. Each run drives a real session, so it is slow. The three build their fixtures with a `scaffold_script` and grade Bash calls, so a run needs `--scaffold` and a tool grant.
+Thirty-four eval cases live in [evals](../../evals/). Three check skill discovery, audit mode leaving files unchanged, migration stopping on a dirty tree, and session proposals waiting for approval; [two](#a-migration-on-a-clean-tree) apply an approved migration step on a clean tree, one of them into a new directory, [one](#a-plan-from-a-wrong-survey-row) shows a plan from a layout survey row whose importer count is wrong, [one](#an-unreadable-transcript) gives session review a transcript its evidence script refuses, [seven](#session-failure-checks) give session review a transcript of one failure shape and grade what its reply proposes, [two](#repeated-step-cases) give the repeated-step search three transcripts that repeat the same commands, [two](#readme-cases) review and repair one README, [two](#writing-cases) write and review a page for people, [two](#reader-only-map-checks) ask a reader what the map alone answers, the six navigation cases have their own [paired protocol](#paired-navigation-runs), and six [held-out cases](#held-out-checks) repeat it on a second repository. Each run drives a real session, so it is slow. The three build their fixtures with a `scaffold_script` and grade Bash calls, so a run needs `--scaffold` and a tool grant.
 
 The harness confines the granted shell in a sandbox, and native Windows has none. There it refuses the run: `A shell tool (Bash or PowerShell) was granted but this machine cannot confine it`. Run it under WSL2 or Linux, with `bubblewrap` and `socat` installed. With no terminal, add `--trust-plugin`, or the harness refuses an untrusted plugin directory.
 
@@ -485,7 +549,7 @@ claude plugin eval ./anneal --tag smoke --tag safety --scaffold --no-publish \
   --allow-tools Bash Edit Write --output-dir <results>
 ```
 
-`--tag smoke --tag safety` selects the three. Without it the clean-tree migrations, the plan from a wrong survey row, the unreadable transcript, the seven session-failure cases, the two `readme` cases, the two `writing` cases, the reader-only map checks, the navigation cases and the held-out cases run too, the last two in both arms, which their protocol does not use. Without `--output-dir` the harness writes `aggregate-result.json` and the HTML report under `anneal/evals/results/`, which git does not ignore. Each run's trace stays in its temporary directory as `out/trace.jsonl`. `--keep-temp` keeps that directory; in 2.1.278 it also seals the run's home and workspace under `sealed/` at mode 000 and asks that no git command run in the kept copy.
+`--tag smoke --tag safety` selects the three. Without it the clean-tree migrations, the plan from a wrong survey row, the unreadable transcript, the seven session-failure cases, the two `session-repeats` cases, the two `readme` cases, the two `writing` cases, the reader-only map checks, the navigation cases and the held-out cases run too, the last two in both arms, which their protocol does not use. Without `--output-dir` the harness writes `aggregate-result.json` and the HTML report under `anneal/evals/results/`, which git does not ignore. Each run's trace stays in its temporary directory as `out/trace.jsonl`. `--keep-temp` keeps that directory; in 2.1.278 it also seals the run's home and workspace under `sealed/` at mode 000 and asks that no git command run in the kept copy.
 
 With `--scaffold`, the harness runs each case's `scaffold_script` with bash from that case's folder in the target, as you and outside the sandbox, in the run's new workspace and with the `PATH` the harness started with. A script can therefore reach other files of the target through its own path: each navigation scaffold runs `../navigation-fixture.js`, which reads its contract from `navigation-partner-api.md` beside it, so a copy of `anneal/` used as the target has to keep both files in `evals/`. In the same way, `migration-moves-into-new-directory` and `plan-flags-a-wrong-importer-count` run the fixture script of `migration-applies-approved-step`, and `readme-repair-without-the-word`, `writing-page-without-the-word` and `writing-review-reports-without-changes` run the fixture script of `readme-review-reports-without-changes`. A scaffold that fails ends its run before the session starts, at no cost, and the run's error quotes the end of the script's error output. The harness keeps a failed run's temporary directory even without `--keep-temp`, unless `--json` is passed.
 
@@ -596,6 +660,24 @@ Two kinds of grader score each case:
 - **Judged graders.** Eleven graders of `type: llm` read the reply: two each in the flake, machine-fact, refusal and path-hint cases, and one each in the other three. A judge model grades each against the PASS and FAIL criteria written in its file, so a run is billed for those judge calls as well as for its session, in both arms, because these graders name no arm.
 
 [eval-graders.test.js](../../tests/eval-graders.test.js) checks the deterministic graders offline: a run as the case asks passes all of them whatever its reply says, and evidence cut before the failure, a missing evidence call, an edited map file, an edited manifest and a created file each fail the grader meant for it. It checks the judged graders for form only: each is `type: llm`, no other grader reads the reply, and each is skipped without a verdict. Nothing offline shows that a judge would pass or fail a real reply, so the scores of the first live run are the first evidence that the criteria separate the right replies from the wrong ones.
+
+### Repeated-step cases
+
+Two cases, tagged `session-repeats`, give `/anneal:session-repeats sessions/` three synthetic Claude Code transcripts in a small shop repository and approve nothing. In each transcript the session runs `npm test`, then `git status --short --ignored`. Each case allows 25 turns and 600 seconds, and the tools Read, Glob, Grep, Skill, Bash, Edit and Write. Run them from the repository root:
+
+```bash
+claude plugin eval ./anneal --tag session-repeats --scaffold --no-publish \
+  --allow-tools Bash Edit Write --output-dir <results>
+```
+
+| Case | The map file names | The reply must |
+| --- | --- | --- |
+| `session-repeats-proposes-a-script` | `npm test` only | Propose, for approval, a `Commands` line in `AGENTS.md` for `git status --short --ignored`, or for a short script that runs it after `npm test`, with the exact text (`proposes-command-and-map-line`) |
+| `session-repeats-skips-what-the-map-names` | both commands | Propose no new line, script or command for either (`no-change-for-a-named-step`) |
+
+The second scaffold runs the first one's, then rewrites only `AGENTS.md`. Both cases share their deterministic graders: `evidence-ran` requires a Bash call of `session-repeats.js` and is an indicator that runs only with the plugin; `evidence-found-the-repeat` requires a tool result in which `git status --short --ignored`, alone or after `npm test`, is a step found in 3 sessions; `map-file-left-alone` requires each case's `AGENTS.md` byte for byte; and `no-files-created` fails on any created path outside `.git/` and `.claude/`. The judged grader is each case's only one that reads the reply.
+
+[eval-graders.test.js](../../tests/eval-graders.test.js) replays each scaffold without bash in a temporary Git repository and runs the script on its sessions folder. A run as the case asks fails no deterministic grader. Output from two of the three sessions, output with `--min-sessions 4`, and raw transcripts in the trace fail `evidence-found-the-repeat`; reading the transcripts with `cat` fails `evidence-ran`; an edited `AGENTS.md` fails `map-file-left-alone`, and a created script fails `no-files-created`. The test also checks that the two cases differ only in `AGENTS.md` and their judge, and that the script reports `namedInMap` false for the listing in the first case and true in the second. Neither case has run in a live session yet.
 
 ### README cases
 

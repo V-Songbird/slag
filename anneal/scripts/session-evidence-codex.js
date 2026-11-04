@@ -314,7 +314,7 @@ function isCodexPrompt(row) {
   return !/^\s*<(?!send_user_message_question_reply>)/.test(text) && !/^\s*# AGENTS\.md instructions\b/.test(text);
 }
 
-function analyzeCodex(file, before = null, limit = 6) {
+function analyzeCodex(file, before = null, limit = 6, { onCall = null, onPrompt = null } = {}) {
   const warnings = new Set();
   const buffer = fs.readFileSync(file);
   const starts = [];
@@ -346,8 +346,8 @@ function analyzeCodex(file, before = null, limit = 6) {
   const track = tracker();
   // Only a rollout can carry the host's own records, so only its coverage counts the outcomes they settled.
   track.coverage.recordedOutcomes = 0;
-  const nav = navigator(limit);
-  const stalls = stallTracker(limit);
+  const nav = navigator(limit, onCall);
+  const stalls = stallTracker(limit, onPrompt);
   const failures = [];
   const counts = {};
   const largest = [];
