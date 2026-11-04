@@ -116,6 +116,27 @@ describe("which sessions count", () => {
     assert.deepStrictEqual(out.findings.prompts, [], "a subagent's task is no owner prompt");
   });
 
+  test("a session whose main transcript cannot be read counts none of its subagent transcripts", () => {
+    const root = shop();
+    const dir = tempDir();
+    for (const index of [0, 1]) claude(dir, root, index, ["npm test"]);
+    // The first record is whole, so the host is known; the parser refuses the second.
+    const broken = transcript([{ ...human("Task 2.", 1), cwd: root, sessionId: ids[2] }], { dir, name: `${ids[2]}.jsonl`, tail: "{not json\n{}\n" });
+    const agent = { isSidechain: true, agentId: "a1" };
+    transcript([{ ...use("s1", "Bash", { command: "npm test" }, 2), ...agent }, { ...result("s1", "ok", 3), ...agent }],
+      { dir: path.join(dir, ids[2], "subagents"), name: "agent-a1.jsonl" });
+    const out = repeats(["--root", root, "--sessions-dir", dir, "--min-sessions", "2"]);
+    assert.deepStrictEqual(out.sessionsRead, { claude: 2, codex: 0, subagentTranscripts: 0 });
+    assert.deepStrictEqual(out.findings.commands.map((finding) => [finding.step, finding.sessions, finding.inSubagents]), [["npm test", 2, 0]]);
+    assert.deepStrictEqual(out.skipped.map((skip) => [path.basename(skip.sessionFile), skip.reason]), [[path.basename(broken), "unreadable"]]);
+    // With only that session, nothing is read.
+    const alone = tempDir();
+    fs.cpSync(dir, alone, { recursive: true, filter: (from) => !path.basename(from).startsWith(ids[0]) && !path.basename(from).startsWith(ids[1]) });
+    const none = run(["--root", root, "--sessions-dir", alone]);
+    assert.strictEqual(none.status, 2, none.stdout);
+    assert.match(none.stderr, /no session found to read/);
+  });
+
   test("discovery reads the root's and a worktree's project folders and Codex rollouts whose session_meta cwd is the root", () => {
     const root = shop({ files: { "README.md": "# shop\n" } });
     git(root, "add", ".");
@@ -159,6 +180,13 @@ describe("normalized steps", () => {
     assert.strictEqual(normalize(`cat ${forward}/src/cart.js`), "cat ./src/cart.js");
     assert.strictEqual(normalize(`git -C "${forward}" status --short`), "git status --short");
     assert.strictEqual(normalize("npm test 1234567"), "npm test 1234567", "a number is no id");
+  });
+
+  test("a redirect to a temporary path keeps its operator, so it never shares a key with that path as an argument", () => {
+    const normalize = normalizer([path.resolve("/work/shop")]);
+    assert.strictEqual(normalize("npm test 2>/tmp/run-1/err.txt"), "npm test 2><temp>/err.txt");
+    assert.strictEqual(normalize("npm test >/tmp/run-1/out.txt <C:/Temp/in.txt"), "npm test ><temp>/out.txt <<temp>/in.txt");
+    assert.strictEqual(normalize("npm test /tmp/run-1/err.txt"), "npm test <temp>/err.txt");
   });
 
   test("Edit and Write are no steps; a read of the same path in 3 sessions is a lookup with a root-relative path", () => {
@@ -266,6 +294,27 @@ describe("what the map and the manifest already hold", () => {
     assert.deepStrictEqual(named("commands"), { "npm test": false, "git status": false, ls: false, "node --test": true });
     assert.deepStrictEqual(named("lookups"), { "read src/cart.js": true, "read src/car.js": false });
   });
+
+  test("the map's spans and the scripts' text are normalized as steps are, temporary paths and the root included", () => {
+    const check = "node scripts/check.js --out /tmp/check.txt";
+    const dir = tempDir();
+    const root = path.join(dir, "shop");
+    fs.mkdirSync(root);
+    git(root, "init", "-q");
+    const top = path.resolve(git(root, "rev-parse", "--show-toplevel").trim());
+    const forward = top.replace(/\\/g, "/");
+    fs.writeFileSync(path.join(top, "AGENTS.md"), `# shop\n\nRun \`${check}\` or \`node "${forward}/scripts/lint.js"\`. The cart is \`${forward}/src/cart.js\`.\n`);
+    fs.writeFileSync(path.join(top, "package.json"), JSON.stringify({ scripts: { "check:out": check } }));
+    const sessions = tempDir();
+    for (const index of [0, 1, 2]) {
+      claude(sessions, top, index, [`node scripts/check.js --out /tmp/run-${index}/check.txt`, 'node "./scripts/lint.js"',
+        ["Read", { file_path: path.join(top, "src", "cart.js") }]]);
+    }
+    const out = repeats(["--root", top, "--sessions-dir", sessions]);
+    const byStep = Object.fromEntries(out.findings.commands.map((finding) => [finding.step, [finding.namedInMap, finding.projectScript]]));
+    assert.deepStrictEqual(byStep, { "node scripts/check.js --out <temp>/check.txt": [true, "check:out"], 'node "./scripts/lint.js"': [true, null] });
+    assert.deepStrictEqual(out.findings.lookups.map((finding) => [finding.step, finding.namedInMap]), [["read src/cart.js", true]]);
+  });
 });
 
 describe("arguments the evidence cut", () => {
@@ -296,6 +345,34 @@ describe("Codex rollouts", () => {
     assert.deepStrictEqual(out.sessionsRead, { claude: 0, codex: 3, subagentTranscripts: 0 });
     assert.deepStrictEqual(commands(out), [["npm test", 3]]);
     assert.deepStrictEqual(out.findings.prompts.map((finding) => [finding.step, finding.occurrences]), [["run the checks", 3]]);
+  });
+
+  test("a forked rollout counts toward the thread it came from, and the prompts it copied are not typed again", () => {
+    const root = shop();
+    const dir = tempDir();
+    const owner = (id, second = 0) => [
+      { timestamp: at(second), type: "session_meta", payload: { id, cwd: root } }, started(1), { ...turn(2), payload: { ...turn(2).payload, cwd: root } },
+      message("Fix the checkout.", 3), { timestamp: at(3), type: "event_msg", payload: { type: "user_message", message: "Fix the checkout." } },
+      call(`${id}-c`, "npm test", 4), output(`${id}-c`, ["Process exited with code 0"], 5),
+    ];
+    const name = (index) => `rollout-2026-01-01T00-00-0${index}-${ids[index]}.jsonl`;
+    for (const [index, id] of [[0, "thread-p"], [1, "thread-q"]]) transcript(owner(id), { dir, name: name(index) });
+    // One fork marks where its own history starts after the copy; a fork of that fork marks none, so its copy stays.
+    const fork = (id, from, start) => [
+      { timestamp: at(0), type: "session_meta", payload: { id, cwd: root, forked_from_id: from, ...(start ? { subagent_history_start_ordinal: start } : {}) } },
+      ...owner(from), started(6), { ...turn(7), payload: { ...turn(7).payload, cwd: root } }, message("Review the change.", 8),
+      call(`${id}-c`, "npm test", 9), output(`${id}-c`, ["Process exited with code 0"], 10),
+    ].map((row, ordinal) => ({ ...row, ordinal }));
+    transcript(fork("thread-a", "thread-p", 8), { dir, name: name(2) });
+    transcript(fork("thread-b", "thread-a"), { dir, name: name(3) });
+    const out = repeats(["--root", root, "--sessions-dir", dir, "--min-sessions", "2"]);
+    assert.deepStrictEqual(out.sessionsRead, { claude: 0, codex: 2, subagentTranscripts: 2 });
+    assert.deepStrictEqual(out.findings.commands.map((finding) => [finding.step, finding.sessions, finding.inSubagents]), [["npm test", 2, 3]]);
+    assert.deepStrictEqual(out.findings.prompts.map((finding) => [finding.step, finding.sessions, finding.occurrences]), [["fix the checkout", 2, 2]]);
+    // Forks whose thread is not read share one session of their own.
+    const forks = repeats(["--root", root, "--session-file", path.join(dir, name(2)), "--session-file", path.join(dir, name(3)), "--min-sessions", "2"]);
+    assert.deepStrictEqual(forks.sessionsRead, { claude: 0, codex: 0, subagentTranscripts: 2 });
+    assert.deepStrictEqual([forks.findings.commands, forks.findings.prompts], [[], []]);
   });
 });
 

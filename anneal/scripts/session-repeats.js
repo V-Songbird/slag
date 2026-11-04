@@ -87,22 +87,23 @@ function discover(paths, homes) {
     || (WINDOWS ? name.toLowerCase() : name).startsWith(`${WINDOWS ? key.toLowerCase() : key}--claude-worktrees-`));
   const claude = homes.claude ? list(path.join(homes.claude, "projects")).filter((entry) => entry.isDirectory() && match(entry.name))
     .flatMap((entry) => transcriptsIn(path.join(homes.claude, "projects", entry.name))) : [];
-  const codex = homes.codex ? walk(path.join(homes.codex, "sessions")).filter((file) => file.endsWith(".jsonl") && paths.some((dir) => {
-    const cwd = rolloutCwd(file);
-    return cwd !== null && same(path.resolve(cwd), dir);
-  })) : [];
+  const codex = homes.codex ? walk(path.join(homes.codex, "sessions")).filter((file) => {
+    const cwd = file.endsWith(".jsonl") ? rolloutMeta(file).cwd : null;
+    return typeof cwd === "string" && paths.some((dir) => same(path.resolve(cwd), dir));
+  }) : [];
   return [...claude, ...codex.sort()];
 }
 
-function rolloutCwd(file) {
+// A Codex rollout's first session_meta payload, or {} when it has none.
+function rolloutMeta(file) {
   try {
     for (const [, row] of records(fs.readFileSync(file), new Set())) {
-      if (row.type === "session_meta") return row.payload && typeof row.payload.cwd === "string" ? row.payload.cwd : null;
+      if (row.type === "session_meta") return row.payload && typeof row.payload === "object" ? row.payload : {};
     }
   } catch {
-    return null;
+    return {};
   }
-  return null;
+  return {};
 }
 
 // Every spelling a repository path can take in a command: either slash, MSYS's /d/…, and redacted as the evidence
@@ -121,7 +122,7 @@ function prefixPattern(paths) {
 // A path token under the temporary directory, or in a tmp, temp or scratchpad folder, as <temp>/<its name>.
 function withoutTemp(text) {
   const temp = slashes(os.tmpdir()).toLowerCase();
-  return text.replace(/[^\s"'`=;|&()<>][^\s"'`=;|&()]*/g, (token) => {
+  return text.replace(/[^\s"'`=;|&()<>][^\s"'`=;|&()<>]*/g, (token) => {
     const forward = slashes(token);
     const under = TEMP_FOLDER.test(forward) || (temp.length > 3 && forward.toLowerCase().startsWith(`${temp}/`));
     return under ? `<temp>/${forward.split("/").filter(Boolean).pop()}` : token;
@@ -257,7 +258,7 @@ function projectScript(command, scripts, byName = true) {
   const run = byName && /^(?:npm|pnpm|yarn|bun)(?: run(?:-script)?)? ([\w:.-]+)\b|^node --run ([\w:.-]+)\b/.exec(command);
   const name = run && (run[1] || run[2]);
   if (name && Object.hasOwn(scripts, name)) return name;
-  return Object.keys(scripts).sort().find((key) => typeof scripts[key] === "string" && scripts[key].trim().replace(/\s+/g, " ") === command) ?? null;
+  return Object.keys(scripts).sort().find((key) => scripts[key] === command) ?? null;
 }
 
 function parse(argv) {
@@ -312,8 +313,9 @@ function main(argv, env = process.env) {
 
   const running = [env.CLAUDE_CODE_SESSION_ID, env.CODEX_THREAD_ID].filter(Boolean);
   const normalize = normalizer(repositories[0].paths);
-  const scripts = scriptsOf(root);
-  const map = mapSpans(root);
+  // A script's text and what the map names are normalized as a step is, so that they compare with its key.
+  const scripts = Object.fromEntries(Object.entries(scriptsOf(root)).map(([key, text]) => [key, typeof text === "string" ? normalize(text) : null]));
+  const map = new Set([...mapSpans(root)].map(normalize));
   const tallies = Object.fromEntries(KINDS.map((kind) => [kind, new Map()]));
   const skipped = [];
   const read = { claude: 0, codex: 0, subagentTranscripts: 0 };
@@ -335,6 +337,11 @@ function main(argv, env = process.env) {
     return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? slashes(relative) : directory(file);
   };
 
+  // Each session to count, with its main transcript and its subagent transcripts. A Codex rollout whose first
+  // session_meta names the thread it was forked from is a sub-agent's: it counts toward the rollout of the thread at
+  // the start of that chain, or, when that rollout is not read, toward a session of its own that its sibling forks share.
+  const entries = [];
+  const parents = new Map(); // a forked Codex thread to the thread it was forked from
   for (const { file, repository } of sessions) {
     let host;
     try {
@@ -343,12 +350,45 @@ function main(argv, env = process.env) {
       skipped.push({ sessionFile: directory(file), reason: "unreadable", message: excerpt(error.message, 240) });
       continue;
     }
-    const name = path.basename(file, ".jsonl");
+    const meta = host === "codex" ? rolloutMeta(file) : {};
+    const id = typeof meta.id === "string" ? meta.id : null;
+    const forked = id !== null && meta.forked_from_id != null;
+    if (forked) parents.set(id, String(meta.forked_from_id));
+    entries.push({ file, repository, host, id, forked });
+  }
+  const origin = (id) => {
+    const seen = new Set();
+    while (parents.has(id) && !seen.has(id)) {
+      seen.add(id);
+      id = parents.get(id);
+    }
+    return id;
+  };
+  const groups = [];
+  const byThread = new Map(); // a Codex thread to the session its rollout and its forks count toward
+  for (const entry of entries.filter((candidate) => !candidate.forked)) {
+    const group = { key: entry.file, file: entry.file, repository: entry.repository, host: entry.host, forks: [] };
+    groups.push(group);
+    if (entry.id !== null && !byThread.has(entry.id)) byThread.set(entry.id, group);
+  }
+  for (const entry of entries.filter((candidate) => candidate.forked)) {
+    const thread = origin(entry.id);
+    if (!byThread.has(thread)) {
+      const group = { key: `codex thread ${thread}`, file: null, repository: entry.repository, host: "codex", forks: [] };
+      groups.push(group);
+      byThread.set(thread, group);
+    }
+    byThread.get(thread).forks.push(entry.file);
+  }
+
+  for (const { key: session, file, repository, host, forks } of groups) {
+    const name = file === null ? "" : path.basename(file, ".jsonl");
     if (running.some((id) => name === id || name.endsWith(`-${id}`))) {
       skipped.push({ sessionFile: directory(file), reason: "running-session" });
       continue;
     }
-    const transcripts = [{ file, subagent: false }, ...(host === "claude" ? subagentsOf(file).map((agent) => ({ file: agent, subagent: true })) : [])];
+    const agents = host === "claude" ? subagentsOf(file) : forks;
+    const transcripts = [...(file === null ? [] : [{ file, subagent: false }]), ...agents.map((agent) => ({ file: agent, subagent: true }))];
     const steps = [];
     let prompts = [];
     let readOne = false;
@@ -364,11 +404,14 @@ function main(argv, env = process.env) {
         result = host === "codex" ? analyzeCodex(transcript.file, Number.MAX_SAFE_INTEGER, 1, hooks)
           : analyzeClaude(transcript.file, Number.MAX_SAFE_INTEGER, 1, hooks);
       } catch (error) {
+        // A session whose main transcript cannot be read is not counted, nor are its subagent transcripts.
         skipped.push({ sessionFile: directory(transcript.file), reason: "unreadable", message: excerpt(error.message, 240) });
-        continue;
+        if (transcript.subagent) continue;
+        break;
       }
-      if (!transcript.subagent && running.includes(result.sessionId)) {
-        skipped.push({ sessionFile: directory(file), reason: "running-session" });
+      if (running.includes(result.sessionId)) {
+        skipped.push({ sessionFile: directory(transcript.file), reason: "running-session" });
+        if (transcript.subagent) continue;
         break;
       }
       readOne = true;
@@ -394,31 +437,31 @@ function main(argv, env = process.env) {
       if (prompt.timestamp && (dates.first === null || prompt.timestamp < dates.first)) dates.first = prompt.timestamp;
       if (prompt.timestamp && (dates.last === null || prompt.timestamp > dates.last)) dates.last = prompt.timestamp;
       const key = promptKey(prompt.text);
-      if (key) count("prompts", excerpt(key, 120), file, file, prompt.line, false, repository.root);
+      if (key) count("prompts", excerpt(key, 120), session, file, prompt.line, false, repository.root);
     }
     for (const step of steps) {
       if (step.key.endsWith(CUT)) cut += 1;
-      count(step.kind, step.key, file, step.file, step.line, step.subagent, repository.root);
+      count(step.kind, step.key, session, step.file, step.line, step.subagent, repository.root);
     }
     // Two or three consecutive commands by one actor for one prompt, in call order; a command run again at once counts
     // once. Lookups between them do not break a run: a repeated read is a lookup finding of its own.
-    const groups = new Map();
+    const runs = new Map();
     for (const step of steps.filter((candidate) => candidate.kind === "commands")) {
       const group = JSON.stringify([step.file, step.actor, step.promptLine]);
-      if (!groups.has(group)) groups.set(group, []);
-      const run = groups.get(group);
+      if (!runs.has(group)) runs.set(group, []);
+      const run = runs.get(group);
       if (!run.length || run[run.length - 1].key !== step.key) run.push(step);
     }
-    for (const run of groups.values()) {
+    for (const run of runs.values()) {
       for (let size = 2; size <= 3; size++) {
         for (let i = 0; i + size <= run.length; i++) {
           const part = run.slice(i, i + size);
-          count("sequences", part.map((step) => step.key).join(" -> "), file, part[0].file, part[0].line, part[0].subagent, repository.root);
+          count("sequences", part.map((step) => step.key).join(" -> "), session, part[0].file, part[0].line, part[0].subagent, repository.root);
         }
       }
     }
   }
-  if (!read.claude && !read.codex) {
+  if (!read.claude && !read.codex && !read.subagentTranscripts) {
     return fail(`session-repeats.js: no session found to read. Searched: ${searched.join(", ")}. Supply --session-file or --sessions-dir.\n`, 2);
   }
 
@@ -438,8 +481,9 @@ function main(argv, env = process.env) {
           // A sequence is a script's only when the script's own text runs exactly its commands.
           finding.projectScript = kind === "commands" ? projectScript(key, scripts) : projectScript(parts.join(" && "), scripts, false);
         }
-        // A lookup is named when the map names its path or pattern.
-        if (kind === "lookups") finding.namedInMap = map.has(key.slice(key.indexOf(" ") + 1));
+        // A lookup is named when the map names its path, also from the root as ./<path>, or its pattern.
+        const target = key.slice(key.indexOf(" ") + 1);
+        if (kind === "lookups") finding.namedInMap = map.has(target) || map.has(`./${target}`);
         if (kind === "prompts") finding.repositories = tally.repositories.size;
         return finding;
       })
@@ -453,7 +497,8 @@ function main(argv, env = process.env) {
     skipped, findings, warnings,
     limits: "Matches are text equality after normalization: whitespace, repository paths, ids and temporary paths. A step is listed, "
       + "not judged: whether it needed judgement is for the reviewer. Antigravity has no known transcript location, so its sessions "
-      + "are read only from files handed in. Redaction is best effort. Subagent transcripts count toward their parent session. "
+      + "are read only from files handed in. Redaction is best effort. Subagent transcripts, and forked Codex "
+      + "rollouts, count toward their parent session, and their prompts are not counted. "
       + "Other repositories contribute only to prompts.",
   };
   process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);

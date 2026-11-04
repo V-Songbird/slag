@@ -108,4 +108,4 @@ A saved map file is not loaded into a session that is already running. Say so.
 - the entries applied, and the map file's line count before and after;
 - what was reported and not written: each prompt for the global instructions, each check worth writing, each step for CI, a hook or a schedule;
 - what was dismissed, and why;
-- `skipped`, and the script's `limits`: matches are text equality after normalization, a step is listed and not judged, Antigravity sessions come only from files handed in, redaction is best effort, and subagent transcripts count toward their parent session.
+- `skipped`, and the script's `limits`: matches are text equality after normalization, a step is listed and not judged, Antigravity sessions come only from files handed in, redaction is best effort, and subagent transcripts and forked Codex rollouts count toward their parent session.
