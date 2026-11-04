@@ -111,6 +111,26 @@ describe("the verdict", () => {
     assert.deepStrictEqual({ textLines: turn.textLines, endingLine: turn.endingLine, ending: turn.ending, atRisk: turn.atRisk },
       { textLines: [2, 5], endingLine: 5, ending: "Done.", atRisk: true });
   });
+
+  test("a prompt queued while the agent worked starts a turn, so the earlier decision stays at risk", () => {
+    const dir = repository();
+    const file = transcript([
+      { ...human("which rounding should we use?", 1), cwd: dir },
+      say("s1", "Decision: round half-up at checkout", 2),
+      { type: "attachment", timestamp: "2026-01-01T00:00:03.000Z",
+        attachment: { type: "queued_command", commandMode: "prompt", prompt: "now fix the cart", origin: { kind: "human" } } },
+      use("e1", "Edit", { file_path: "src/cart.js", old_string: "cents / 100", new_string: "Math.round(cents) / 100" }, 4),
+      result("e1", "The file has been updated.", 5),
+      say("s2", "Fixed the rounding in cart.js", 6),
+    ]);
+    const report = closeout(file, dir);
+    const turns = report.items.filter((item) => item.kind === "turn");
+    assert.deepStrictEqual(turns.map(({ promptLine, prompt, endingLine, location }) => ({ promptLine, prompt, endingLine, location })), [
+      { promptLine: 1, prompt: "which rounding should we use?", endingLine: 2, location: "transcript-only" },
+      { promptLine: 3, prompt: "now fix the cart", endingLine: 6, location: "file" },
+    ]);
+    assert.deepStrictEqual(report.wouldLose, [{ kind: "turn", endingLine: 2 }]);
+  });
 });
 
 describe("where a change lives", () => {
@@ -126,6 +146,32 @@ describe("where a change lives", () => {
     assert.deepStrictEqual({ location: plan.location, atRisk: plan.atRisk }, { location: "missing", atRisk: true });
     assert.strictEqual(report.verdict, "would-lose");
     assert.deepStrictEqual(report.wouldLose, [{ kind: "change", path: plan.path }]);
+  });
+
+  test("a path is one literal file name, a removed file is at risk wherever it was, and so is an unresolved path", () => {
+    const dir = repository();
+    write(dir, "a.js", "x");
+    git(dir, "add", "a.js");
+    git(dir, "commit", "-qm", "a");
+    const gone = path.join(tempDir(), "notes.md");
+    write(dir, "notes/[id].md", "x");
+    const writes = [["w1", "[ab].js"], ["w2", "routes/$id.tsx"], ["w3", gone], ["w4", "~/plan.md"], ["w5", "notes/[id].md"]];
+    const file = transcript([
+      { ...human("draft them", 1), cwd: dir },
+      ...writes.flatMap(([id, target], i) => [
+        use(id, "Write", { file_path: target, content: "x" }, 2 + 2 * i),
+        result(id, "File created successfully.", 3 + 2 * i),
+      ]),
+    ]);
+    const report = closeout(file, dir);
+    assert.deepStrictEqual(report.items.map(({ path: changed, location, atRisk }) => ({ name: path.basename(changed), location, atRisk })), [
+      { name: "[ab].js", location: "missing", atRisk: true },
+      { name: "$id.tsx", location: "missing", atRisk: true },
+      { name: "notes.md", location: "outside-missing", atRisk: true },
+      { name: "plan.md", location: "unresolved", atRisk: true },
+      { name: "[id].md", location: "ignored", atRisk: false },
+    ]);
+    assert.strictEqual(report.verdict, "would-lose");
   });
 
   test("a tracked file the session removed is still held by Git", () => {

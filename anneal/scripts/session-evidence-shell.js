@@ -51,9 +51,10 @@ const WINDOWS_ROOT = /^(?:[A-Za-z]:[\\/]|\\\\)/;
 const TEMPORARY = /\/(?:tmp|temp)(?:\/|$)/i;
 
 // The absolute path a path names, with forward slashes. Null when a shell would expand it or its
-// directory is unknown: only a path that names one file identifies it.
-function normalizePath(value, cwd) {
-  if (typeof value !== "string" || !value || /[\0\r\n*?$%{}`]|^~/.test(value)) return null;
+// directory is unknown: only a path that names one file identifies it. A literal path, as a file tool takes it, keeps
+// every character a shell would expand except a leading `~`.
+function normalizePath(value, cwd, literal = false) {
+  if (typeof value !== "string" || !value || (literal ? /[\0\r\n]|^~/ : /[\0\r\n*?$%{}`]|^~/).test(value)) return null;
   const base = typeof cwd === "string" ? cwd : "";
   const windows = (resolved) => resolved.replace(/\\/g, "/").replace(/^[a-z]:/, (drive) => drive.toUpperCase());
   if (WINDOWS_ROOT.test(value)) return windows(path.win32.resolve(value));

@@ -382,4 +382,4 @@ function analyzeClaude(file, before = null, limit = 6) {
   };
 }
 
-module.exports = { actorOf, analyzeClaude, claudeShape, firstCopies, isPrompt, subagentTranscripts };
+module.exports = { actorOf, analyzeClaude, claudeShape, firstCopies, isPrompt, isQueuedPrompt, subagentTranscripts };

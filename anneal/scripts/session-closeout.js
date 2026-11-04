@@ -11,13 +11,15 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { HOME, directory, excerpt } = require("./session-evidence-redaction.js");
 const { textBlocks } = require("./session-evidence-records.js");
-const { actorOf, claudeShape, firstCopies, isPrompt, subagentTranscripts } = require("./session-evidence-claude.js");
+const { actorOf, firstCopies, isPrompt, isQueuedPrompt, subagentTranscripts } = require("./session-evidence-claude.js");
+const { normalizePath } = require("./session-evidence-shell.js");
 const { detectHost, findTranscript } = require("./session-evidence.js");
 
 // The tools whose input holds what they wrote. A shell command that removes or moves a file carries no content.
 const CONTENT_TOOLS = new Set(["Edit", "MultiEdit", "NotebookEdit", "Write"]);
 // Where a changed file lives now. Deleting the session loses the content of a file that is gone and that Git never held.
 const KEPT = new Set(["tracked", "ignored"]);
+const AT_RISK = new Set(["missing", "outside-missing", "unresolved"]);
 
 function git(root, args) {
   return spawnSync("git", ["-C", root, ...args], { encoding: "utf8", env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } });
@@ -25,10 +27,14 @@ function git(root, args) {
 
 function locate(root, file) {
   const relative = path.relative(root, file);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return { location: "outside", uncommitted: false };
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    return { location: fs.existsSync(file) ? "outside" : "outside-missing", uncommitted: false };
+  }
   const spec = relative.split(path.sep).join("/");
-  if (git(root, ["ls-files", "--error-unmatch", "--", spec]).status === 0) {
-    return { location: "tracked", uncommitted: git(root, ["status", "--porcelain", "--", spec]).stdout.trim() !== "" };
+  // A pathspec names this one file, never a glob pattern; check-ignore takes plain path names.
+  const literal = `:(literal)${spec}`;
+  if (git(root, ["ls-files", "--error-unmatch", "--", literal]).status === 0) {
+    return { location: "tracked", uncommitted: git(root, ["status", "--porcelain", "--", literal]).stdout.trim() !== "" };
   }
   if (!fs.existsSync(file)) return { location: "missing", uncommitted: false };
   return { location: git(root, ["check-ignore", "-q", "--", spec]).status === 0 ? "ignored" : "untracked", uncommitted: false };
@@ -45,7 +51,7 @@ function countFiles(folder) {
 function closeout(file, root) {
   const warnings = new Set();
   const buffer = fs.readFileSync(file);
-  // A turn starts at a prompt the owner typed, by the rule session-evidence uses.
+  // A turn starts at a prompt the owner typed or queued while the agent worked, by the rule session-evidence uses.
   const prompts = [];
   let originAware = false;
   let sessionId = null;
@@ -60,6 +66,7 @@ function closeout(file, root) {
 
   const turns = [];
   const changes = new Map();
+  const unresolved = new Set();
   const pending = new Map();
   let cwd = null;
   let sidechain = 0;
@@ -71,8 +78,11 @@ function closeout(file, root) {
     }
     if (row.cwd) cwd = row.cwd;
     const message = row.message || {};
-    if (typed.has(line) || !turn) {
-      turn = { promptLine: typed.has(line) ? line : null, prompt: typed.has(line) ? excerpt(textBlocks(message.content).join("\n"), 240) : null,
+    const queued = isQueuedPrompt(row);
+    if (typed.has(line) || queued || !turn) {
+      const starts = typed.has(line) || queued;
+      turn = { promptLine: starts ? line : null,
+        prompt: starts ? excerpt(textBlocks(queued ? row.attachment.prompt : message.content).join("\n"), 240) : null,
         textLines: [], endingLine: null, ending: null, wrote: new Set() };
       turns.push(turn);
     }
@@ -82,13 +92,17 @@ function closeout(file, root) {
         if (turn.textLines.at(-1) !== line) turn.textLines.push(line);
         Object.assign(turn, { endingLine: line, ending: excerpt(block.text, 480) });
       } else if (block.type === "tool_use" && CONTENT_TOOLS.has(block.name)) {
-        const shape = claudeShape(block.name, block.input && typeof block.input === "object" ? block.input : {}, cwd);
-        if (shape.path) pending.set(block.id, { path: shape.path, line, turn });
+        const input = block.input && typeof block.input === "object" ? block.input : {};
+        const named = [input.file_path, input.notebook_path].find((value) => typeof value === "string" && value);
+        // The tool takes its path literally. One the script cannot resolve, such as `~/plan.md`, is kept as written.
+        const resolved = named && normalizePath(named, cwd, true);
+        if (named) pending.set(block.id, { path: resolved || named, resolved: Boolean(resolved), line, turn });
       } else if (block.type === "tool_result" && pending.has(block.tool_use_id)) {
         const call = pending.get(block.tool_use_id);
         pending.delete(block.tool_use_id);
         // A refused or failed call changed nothing.
         if (block.is_error) continue;
+        if (!call.resolved) unresolved.add(call.path);
         if (!changes.has(call.path)) changes.set(call.path, []);
         changes.get(call.path).push(call.line);
         call.turn.wrote.add(call.path);
@@ -97,10 +111,11 @@ function closeout(file, root) {
   }
   if (sidechain) warnings.add(`Skipped ${sidechain} subagent records in the transcript; only the main session's turns are listed.`);
 
-  const located = new Map([...changes.keys()].map((changed) => [changed, locate(root, changed)]));
+  const located = new Map([...changes.keys()].map((changed) => [changed,
+    unresolved.has(changed) ? { location: "unresolved", uncommitted: false } : locate(root, changed)]));
   const items = [...changes].map(([changed, lines]) => {
     const { location, uncommitted } = located.get(changed);
-    return { kind: "change", path: excerpt(changed), location, uncommitted, callLines: lines, atRisk: location === "missing" };
+    return { kind: "change", path: excerpt(changed), location, uncommitted, callLines: lines, atRisk: AT_RISK.has(location) };
   });
   for (const { wrote, ...rest } of turns.filter((each) => each.ending !== null)) {
     const location = [...wrote].some((changed) => KEPT.has(located.get(changed).location)) ? "file" : "transcript-only";
@@ -115,7 +130,8 @@ function closeout(file, root) {
     alsoDeleted: { folder: directory(folder), subagentTranscripts: subagentTranscripts(file).length, savedOutputs: countFiles(path.join(folder, "tool-results")) },
     warnings: [...warnings].sort(),
     limits: "Claude Code only. A change is a call of Edit, MultiEdit, NotebookEdit or Write that reported no error; a shell "
-      + "command that changed files is not listed. A turn counts as in a file when it changed any tracked or ignored file, "
+      + "command that changed files is not listed. A path the script cannot resolve, such as one starting with ~, is "
+      + "unresolved and at risk until checked by hand. A turn counts as in a file when it changed any tracked or ignored file, "
       + "even an unrelated one, and as transcript-only otherwise, including a turn of questions or status. Only a turn's "
       + "last text is copied; textLines names every line where the turn wrote text. A file edited "
       + "and later reverted still counts as tracked. Subagent records, subagent transcripts and saved outputs were counted, "
