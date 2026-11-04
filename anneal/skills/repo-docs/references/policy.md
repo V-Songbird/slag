@@ -16,13 +16,15 @@ Every mode of repo-docs reads the Invariants below first and treats the project'
 
 ## Document kinds
 
-| Type | Folder | Purpose | Lifecycle | Size cap |
-| --- | --- | --- | --- | --- |
-| `task_summary` | `docs/tasks/` | The snapshot of one task that outlives a session: objective, completion criteria, constraints, checklist and status, changed files, checks, blockers, approval source and next action | Created when the work starts, updated at each material change, folded into its topic documents and deleted on completion | 20,000 characters |
-| `adr` | `docs/decisions/` | One consequential decision, its reasons and its `Rejected Alternatives` | Written when the decision is taken; a later decision marks it superseded instead of rewriting it | 50,000 characters when named for history |
-| `knowledge` | `docs/knowledge/` | Public product knowledge: current behavior, contracts, setup and limitations | Living; updated in the same change as what it describes | 50,000 characters under `docs/knowledge/private/` or when named for history |
-| `knowledge` or `api_spec` | `docs/apis/` | Public API documentation, and under `docs/apis/private/` the research behind an integration | Living; updated with the API it describes | 50,000 characters under `docs/apis/private/` or when named for history |
-| none | `.private/` | Non-document working material: raw outputs, transcripts, bulky artifacts a record links | Local only, never tracked | None |
+| Type | Folder | Purpose | Reader | Lifecycle | Size cap |
+| --- | --- | --- | --- | --- | --- |
+| `task_summary` | `docs/tasks/` | The snapshot of one task that outlives a session: objective, completion criteria, constraints, checklist and status, changed files, checks, blockers, approval source and next action | Agents; the owner reads their summaries | Created when the work starts, updated at each material change, folded into its topic documents and deleted on completion | 20,000 characters |
+| `adr` | `docs/decisions/` | One consequential decision, its reasons and its `Rejected Alternatives` | People and agents | Written when the decision is taken; a later decision marks it superseded instead of rewriting it | 50,000 characters when named for history |
+| `knowledge` | `docs/knowledge/` | Public product knowledge: current behavior, contracts, setup and limitations | People first, agents too; under `docs/knowledge/private/`, agents | Living; updated in the same change as what it describes | 50,000 characters under `docs/knowledge/private/` or when named for history |
+| `knowledge` or `api_spec` | `docs/apis/` | Public API documentation, and under `docs/apis/private/` the research behind an integration | People, agents too; under `docs/apis/private/`, agents | Living; updated with the API it describes | 50,000 characters under `docs/apis/private/` or when named for history |
+| none | `.private/` | Non-document working material: raw outputs, transcripts, bulky artifacts a record links | Agents and scripts | Local only, never tracked | None |
+
+Write each record for its reader. A record read mainly by people follows [the writing reference](writing.md); a record read by agents favors exactness and brevity over explanation.
 
 The caps are the ones `docs-check.js` enforces as `task-note-large` and `history-doc-large`. A `README.md`, `AGENTS.md`, `CLAUDE.md` or `SKILL.md` is a map or an interface, not a record, and carries no frontmatter.
 
@@ -52,7 +54,7 @@ The caps are the ones `docs-check.js` enforces as `task-note-large` and `history
 
 ## Adopt
 
-`adopt` writes the contract into a project. It shows every file before writing it and writes only after approval.
+`adopt` writes the contract into a project. It shows every file before writing it and writes only after approval. When it proposes the profile, it tells the owner who reads each record kind, from the Reader column of [Document kinds](#document-kinds).
 
 1. Confirm the project root, and that it is a Git working tree: without Git, adopt writes no ignore rules and says so. Capture `git status --short --ignored`. Read the map files present (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`), the existing `.gitignore` and `.claude/rules/`.
 2. Choose the profile with the owner. Propose `solo-public` when `git check-ignore --no-index -q docs/tasks/x.md` already ignores the private directories or the repository is public; otherwise ask. Never guess silently.
