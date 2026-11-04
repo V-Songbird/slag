@@ -75,6 +75,8 @@ test("a root-only ignore file leaves nested private docs committable until the n
   assert.strictEqual(ignored(after, "docs/tasks/README.md"), false);
   const overridden = repo(`${rootOnly}**/docs/tasks/\n`);
   assert.strictEqual(ignored(overridden, "docs/tasks/README.md"), true, "**/ reaches the root and overrides the negation");
+  const nestedNegation = repo(`${rootOnly}packages/a/docs/tasks/*\n!packages/a/docs/tasks/README.md\n*/**/docs/tasks/\n`);
+  assert.strictEqual(ignored(nestedNegation, "packages/a/docs/tasks/README.md"), true, "*/**/ reaches nested roots, so a nested negation gets no appended rule");
 });
 
 test("docs-check reads the template as the ignored profile with no high finding", () => {
@@ -111,4 +113,5 @@ test("the adopt procedure never untracks and names the files it writes", () => {
   // The append step and the final probes reach a nested package root, not only the repository root.
   assert.strictEqual((adopt.match(/pkg\/docs\/tasks\/probe\.md/g) ?? []).length, 2, "nested probe in the append step and in the verification");
   assert.ok(adopt.includes("`*/**/docs/tasks/`"), "the nested-only rule that spares a root negation");
+  assert.ok(adopt.includes("`!packages/a/docs/tasks/README.md`") && /append no nested rule/.test(adopt), "a nested negation gets no blanket rule");
 });
