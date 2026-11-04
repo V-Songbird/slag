@@ -19,6 +19,9 @@ const { detectHost } = require("./session-evidence.js");
 
 const WINDOWS = process.platform === "win32";
 const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
+// Codex's shell tools: exec_command, shell_command, the legacy shell with its argument array, and the code-mode exec
+// script that calls them.
+const CODEX_SHELL_TOOLS = new Set(["exec_command", "shell_command", "shell", "exec"]);
 const LOOKUP_TOOLS = new Set(["Read", "NotebookRead", "Grep", "Glob", "LS"]);
 const MAP_FILES = ["CLAUDE.md", "AGENTS.md", "GEMINI.md"];
 const KINDS = ["commands", "sequences", "lookups", "prompts"];
@@ -192,7 +195,9 @@ function argument(input, name) {
 }
 
 // A call as a step: a lookup for a file tool's read or search and a shell read of one path, a command for any other
-// shell command. An edit, a write and any other call is no step.
+// shell command. A command run from a folder inside the repository other than its top level keeps that folder in
+// front, as `cd <folder> && <command>`; on Codex the folder is the call's workdir when it names one. A folder outside
+// the repository adds nothing. An edit, a write and any other call is no step.
 function stepOf(call, host, normalize) {
   const where = (file) => normalize(file).replace(/^\.(?:[\\/]+|$)/, "") || ".";
   if (host === "claude" && LOOKUP_TOOLS.has(call.tool)) {
@@ -203,10 +208,17 @@ function stepOf(call, host, normalize) {
     if (call.path === null) return null;
     return { kind: "lookups", key: `${call.tool === "LS" ? "LS" : "read"} ${where(call.path)}` };
   }
-  const command = host === "claude" ? (SHELL_TOOLS.has(call.tool) ? call.commandOrArguments : null) : codexCommand(call.commandOrArguments);
+  const command = host === "claude" ? (SHELL_TOOLS.has(call.tool) ? call.commandOrArguments : null)
+    : CODEX_SHELL_TOOLS.has(call.tool) ? codexCommand(call.commandOrArguments) : null;
   if (typeof command !== "string" || !command.trim()) return null;
   if (call.operation === "read" && call.path !== null) return { kind: "lookups", key: `read ${where(call.path)}` };
-  return { kind: "commands", key: normalize(command) };
+  const workdir = host === "codex" ? argument(call.commandOrArguments, "workdir") : null;
+  const dir = workdir && call.cwd && !path.isAbsolute(workdir) ? path.join(call.cwd, workdir) : workdir || call.cwd;
+  const inside = typeof dir === "string" && dir ? /^\.[\\/]+(.+)$/.exec(normalize(excerpt(dir))) : null;
+  const key = normalize(command);
+  if (!inside) return { kind: "commands", key };
+  const folder = slashes(inside[1]).replace(/\/+$/, "");
+  return { kind: "commands", key: `cd ${/^[\w./<>-]+$/.test(folder) ? folder : JSON.stringify(folder)} && ${key}` };
 }
 
 // A typed prompt's key: a slash command by its name, any other prompt lower case, without host envelopes, with its
@@ -324,7 +336,15 @@ function main(argv, env = process.env) {
   // The earliest and the latest typed prompt of the sessions read, as their records time them.
   const dates = { first: null, last: null };
   let cut = 0;
-  const count = (kind, key, session, file, line, subagent, repository) => {
+  // The uuids of the Claude Code records already counted. A resumed session's transcript copies earlier records with
+  // their uuids, and a copy another transcript already gave is not counted again.
+  const counted = new Set();
+  const fresh = (item, own) => {
+    if (!item.uuid) return true;
+    own.add(item.uuid);
+    return !counted.has(item.uuid);
+  };
+  const count =(kind, key, session, file, line, subagent, repository) => {
     if (!tallies[kind].has(key)) tallies[kind].set(key, { sessions: new Set(), occurrences: 0, inSubagents: 0, first: new Map(), repositories: new Set() });
     const tally = tallies[kind].get(key);
     tally.sessions.add(session);
@@ -419,11 +439,13 @@ function main(argv, env = process.env) {
       readOne = true;
       if (transcript.subagent) read.subagentTranscripts += 1;
       else read[host] += 1;
+      const own = new Set();
       for (const call of calls) {
-        const step = repository.own ? stepOf(call, host, normalize) : null;
+        const step = repository.own && fresh(call, own) ? stepOf(call, host, normalize) : null;
         if (step) steps.push({ ...step, file: transcript.file, line: call.callLine, actor: call.actor, promptLine: call.promptLine, subagent: transcript.subagent });
       }
-      if (!transcript.subagent) prompts = typed;
+      if (!transcript.subagent) prompts = typed.filter((prompt) => fresh(prompt, own));
+      for (const uuid of own) counted.add(uuid);
     }
     if (!readOne) continue;
     // Codex records a typed prompt as an item and again as an event: the second of two adjacent prompts with the same
@@ -500,7 +522,8 @@ function main(argv, env = process.env) {
     limits: "Matches are text equality after normalization: whitespace, repository paths, ids and temporary paths. A step is listed, "
       + "not judged: whether it needed judgement is for the reviewer. Antigravity has no known transcript location, so its sessions "
       + "are read only from files handed in. Redaction is best effort. Subagent transcripts, and forked Codex "
-      + "rollouts, count toward their parent session, and their prompts are not counted. "
+      + "rollouts, count toward their parent session, and their prompts are not counted. A Claude Code record another transcript "
+      + "already holds, as a resumed session copies them, counts once, toward the first session read. "
       + "Other repositories contribute only to prompts.",
   };
   process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);

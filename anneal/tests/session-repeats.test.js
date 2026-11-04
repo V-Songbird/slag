@@ -9,7 +9,7 @@ const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync, spawnSync } = require("node:child_process");
-const { tempDir, transcript, at, human, use, result, say, meta, started, turn, message, call, output } = require("./session-transcripts.js");
+const { tempDir, transcript, at, human, use, result, say, meta, started, turn, message, call, output, fn } = require("./session-transcripts.js");
 const { analyzeClaude } = require("../scripts/session-evidence-claude.js");
 const { analyzeCodex } = require("../scripts/session-evidence-codex.js");
 const { normalizer, promptKey, codexCommand, argument } = require("../scripts/session-repeats.js");
@@ -137,6 +137,24 @@ describe("which sessions count", () => {
     assert.match(none.stderr, /no session found to read/);
   });
 
+  test("a record another transcript already holds, as a resumed session copies it, counts once, toward the first session read", () => {
+    const root = shop();
+    const dir = tempDir();
+    const first = [{ ...human("Run the checks.", 1), cwd: root, uuid: "r1" }, { ...use("a1", "Bash", { command: "npm test" }, 2), uuid: "r2" },
+      { ...result("a1", "ok", 3), uuid: "r3" }];
+    transcript(first, { dir, name: `${ids[0]}.jsonl` });
+    transcript([...first, { ...human("Now the status.", 10), cwd: root, uuid: "r4" }, { ...use("b1", "Bash", { command: "git status" }, 11), uuid: "r5" },
+      { ...result("b1", "ok", 12), uuid: "r6" }], { dir, name: `${ids[1]}.jsonl` });
+    const out = repeats(["--root", root, "--sessions-dir", dir, "--min-sessions", "2"]);
+    assert.deepStrictEqual(out.sessionsRead, { claude: 2, codex: 0, subagentTranscripts: 0 });
+    assert.deepStrictEqual([out.findings.commands, out.findings.prompts], [[], []]);
+    // A session of its own that runs the same command and types the same prompt still counts.
+    claude(dir, root, 2, ["npm test"], { prompt: "Run the checks." });
+    const three = repeats(["--root", root, "--sessions-dir", dir, "--min-sessions", "2"]);
+    assert.deepStrictEqual(three.findings.commands.map((finding) => [finding.step, finding.sessions, finding.occurrences]), [["npm test", 2, 2]]);
+    assert.deepStrictEqual(three.findings.prompts.map((finding) => [finding.step, finding.sessions, finding.occurrences]), [["run the checks", 2, 2]]);
+  });
+
   test("discovery reads the root's and a worktree's project folders and Codex rollouts whose session_meta cwd is the root", () => {
     const root = shop({ files: { "README.md": "# shop\n" } });
     git(root, "add", ".");
@@ -189,6 +207,31 @@ describe("normalized steps", () => {
     assert.strictEqual(normalize("npm test /tmp/run-1/err.txt"), "npm test <temp>/err.txt");
     // The account placeholder the redaction writes inside a path leaves the path whole.
     assert.strictEqual(normalize("cat /mnt/c/Users/<user>/AppData/Local/Temp/run/in.txt"), "cat <temp>/in.txt");
+  });
+
+  test("one command run from two folders of the repository is two steps, each keyed with its folder from the root", () => {
+    const root = shop();
+    const dir = tempDir();
+    for (const index of [0, 1, 2]) {
+      claude(dir, root, index, [], {
+        rows: [{ ...use(`a${index}`, "Bash", { command: "node --test" }, 20), cwd: path.join(root, "anneal") }, result(`a${index}`, "ok", 21),
+          { ...use(`c${index}`, "Bash", { command: "node --test" }, 22), cwd: path.join(root, "collet") }, result(`c${index}`, "ok", 23),
+          { ...use(`r${index}`, "Bash", { command: "node --test" }, 24), cwd: root }, result(`r${index}`, "ok", 25),
+          { ...use(`o${index}`, "Bash", { command: "node --test" }, 26), cwd: "/elsewhere/shop" }, result(`o${index}`, "ok", 27)],
+      });
+    }
+    const out = repeats(["--root", root, "--sessions-dir", dir]);
+    assert.deepStrictEqual(commands(out), [["node --test", 3], ["cd anneal && node --test", 3], ["cd collet && node --test", 3]]);
+    assert.strictEqual(out.findings.commands[0].occurrences, 6, "a folder outside the repository adds nothing");
+    // On Codex the folder is the call's workdir, absolute or relative to the turn's cwd.
+    const rollouts = tempDir();
+    for (const index of [0, 1, 2]) {
+      transcript([
+        { ...meta, payload: { id: `thread-${index}`, cwd: root } }, started(1), { ...turn(2), payload: { ...turn(2).payload, cwd: root } },
+        fn(`w${index}`, "exec_command", { cmd: "node --test", workdir: index ? "anneal" : path.join(root, "anneal") }, 3), output(`w${index}`, ["ok"], 4),
+      ], { dir: rollouts, name: `rollout-2026-01-01T00-00-0${index}-${ids[index]}.jsonl` });
+    }
+    assert.deepStrictEqual(commands(repeats(["--root", root, "--sessions-dir", rollouts])), [["cd anneal && node --test", 3]]);
   });
 
   test("Edit and Write are no steps; a read of the same path in 3 sessions is a lookup with a root-relative path", () => {
@@ -347,6 +390,22 @@ describe("Codex rollouts", () => {
     assert.deepStrictEqual(out.sessionsRead, { claude: 0, codex: 3, subagentTranscripts: 0 });
     assert.deepStrictEqual(commands(out), [["npm test", 3]]);
     assert.deepStrictEqual(out.findings.prompts.map((finding) => [finding.step, finding.occurrences]), [["run the checks", 3]]);
+  });
+
+  test("only a shell tool's call is a command: another tool's arguments that hold a command are none", () => {
+    const root = shop();
+    const dir = tempDir();
+    for (const index of [0, 1, 2]) {
+      transcript([
+        { ...meta, payload: { id: `thread-${index}`, cwd: root } }, started(1), { ...turn(2), payload: { ...turn(2).payload, cwd: root } },
+        fn(`m${index}`, "mcp__deploy__run", { command: "npm run deploy" }, 3), output(`m${index}`, ["ok"], 4),
+        fn(`n${index}`, "notes", { cmd: "cat README.md" }, 5), output(`n${index}`, ["ok"], 6),
+        fn(`s${index}`, "shell", { command: ["bash", "-lc", "npm test"] }, 7), output(`s${index}`, ["ok"], 8),
+      ], { dir, name: `rollout-2026-01-01T00-00-0${index}-${ids[index]}.jsonl` });
+    }
+    const out = repeats(["--root", root, "--sessions-dir", dir]);
+    assert.deepStrictEqual(commands(out), [["npm test", 3]]);
+    assert.deepStrictEqual(out.findings.lookups, []);
   });
 
   test("a forked rollout counts toward the thread it came from, and the prompts it copied are not typed again", () => {

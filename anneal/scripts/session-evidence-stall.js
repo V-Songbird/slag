@@ -87,7 +87,8 @@ function projectCommands(tail) {
 const CAUSES = { offer: "offer-to-continue", question: "question-before-continuing", "next-steps": "next-steps-listed" };
 
 // The main session's turns, read in line order: its latest text, cleared by any later call or result, and the outcome
-// of its latest result. The owner's next prompt settles the turn. `onPrompt`, when given, receives each owner prompt.
+// of its latest result. The owner's next prompt settles the turn. `onPrompt`, when given, receives each owner prompt,
+// with its record's uuid when the host writes one.
 function stallTracker(limit, onPrompt = null) {
   return { limit, onPrompt, ending: null, outcome: null, promptLine: null, kept: [], counts: {} };
 }
@@ -106,8 +107,8 @@ function worked(stalls, outcome = null) {
 // A prompt from the owner. It makes a candidate when the turn before it ended on text of one of the shapes that asks
 // for no authorized action, its latest result did not fail, and the prompt only says to go on. `plain` is false when
 // the prompt carries more than text, such as an image, or arrived while the session worked.
-function prompted(stalls, { line, timestamp, text, plain = true }) {
-  if (stalls.onPrompt) stalls.onPrompt({ line, timestamp, text });
+function prompted(stalls, { line, timestamp, text, plain = true, uuid = null }) {
+  if (stalls.onPrompt) stalls.onPrompt({ line, timestamp, text, uuid });
   const { ending, outcome, promptLine } = stalls;
   Object.assign(stalls, { ending: null, outcome: null, promptLine: line });
   if (!ending || outcome === "failed" || !plain || !continueOnly(text)) return;

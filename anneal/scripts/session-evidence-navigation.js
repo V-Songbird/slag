@@ -95,7 +95,8 @@ const ADVICE = {
   ],
 };
 
-// `onCall`, when given, receives a copy of each issued call with its working directory, as session-repeats.js reads them.
+// `onCall`, when given, receives a copy of each issued call with its working directory and its record's uuid, as
+// session-repeats.js reads them.
 function navigator(limit, onCall = null) {
   return {
     limit, onCall, facts: new WeakMap(), byKey: new Map(), actors: new Map(), reads: new Map(), versions: new Map(), backgrounds: [], open: [],
@@ -117,7 +118,7 @@ function phaseOf(nav, actor, promptLine, message) {
 // A new call: it moves its actor's phase, may change files, and joins the calls that follow an open candidate. `key`
 // is its call id, `message` the assistant message that issued it, `background` whether it started a background
 // command, and `task` the background task whose output it returns.
-function called(nav, call, shape, { actor, key, message, cwd, background = false, task = null }) {
+function called(nav, call, shape, { actor, key, message, cwd, uuid = null, background = false, task = null }) {
   let state = nav.actors.get(actor);
   if (!state || state.promptLine !== call.promptLine) {
     state = { promptLine: call.promptLine, changed: false, unknown: false, message: null, messagePhase: null };
@@ -145,7 +146,7 @@ function called(nav, call, shape, { actor, key, message, cwd, background = false
       && !(message !== null && candidate.fact.message === message);
     if (follows && candidate.next.length < WINDOW) candidate.next.push(fact);
   }
-  if (nav.onCall) nav.onCall({ ...call, cwd });
+  if (nav.onCall) nav.onCall({ ...call, cwd, uuid });
 }
 
 // Two calls from one assistant message ran together, whatever order the host wrote them in.

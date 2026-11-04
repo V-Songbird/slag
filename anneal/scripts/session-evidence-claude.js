@@ -80,6 +80,8 @@ function persistedSize(match) {
   return Math.round(Number(match[1]) * 1024 ** "BKMG".indexOf(match[2][0].toUpperCase()));
 }
 
+const uuidOf = (row) => (typeof row.uuid === "string" && row.uuid ? row.uuid : null);
+
 // A bridged or resumed session can append its history again, record for record. A record whose uuid
 // was already read is that replay, not new work, and is skipped with a warning.
 function* firstCopies(buffer, warnings) {
@@ -265,7 +267,7 @@ function analyzeClaude(file, before = null, limit = 6, { onCall = null, onPrompt
       const content = typed.has(line) ? message.content : row.attachment.prompt;
       const text = (block) => typeof block === "string" || (block && block.type === "text");
       const plain = typed.has(line) && (!Array.isArray(content) || content.every(text));
-      prompted(stalls, { line, timestamp: timeOf(row), text: textBlocks(content).join("\n"), plain });
+      prompted(stalls, { line, timestamp: timeOf(row), text: textBlocks(content).join("\n"), plain, uuid: uuidOf(row) });
     }
     // Claude Code writes each call of an assistant message as a record of its own, and all of them carry its id.
     const messageId = typeof message.id === "string" && message.id ? message.id : null;
@@ -287,7 +289,7 @@ function analyzeClaude(file, before = null, limit = 6, { onCall = null, onPrompt
         if (issue(track, key, call, shape.opaque)) {
           const task = fields.task_id ?? fields.bash_id;
           called(nav, call, shape, {
-            actor, key, message: messageId, cwd: state.cwd, background: SHELL_TOOLS.has(block.name) && fields.run_in_background === true,
+            actor, key, message: messageId, cwd: state.cwd, uuid: uuidOf(row), background: SHELL_TOOLS.has(block.name) && fields.run_in_background === true,
             task: BACKGROUND_OUTPUT.test(String(block.name)) ? String(task ?? "").slice(0, 120) : null,
           });
           for (const failure of failures) {
