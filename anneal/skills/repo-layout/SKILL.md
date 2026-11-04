@@ -48,6 +48,16 @@ On Antigravity, give every command the project root the person named as its work
 - The project's own rules (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.agents/rules/`, `CONTRIBUTING.md`) win over the conventions here. List every conflict in the final report.
 - Never skip, delete, weaken or edit a test or check to make a step pass.
 
+Copy this checklist into your reply and tick it as you go. With `audit`, stop after item 2.
+
+- [ ] 1. Audit run
+- [ ] 2. Findings reported
+- [ ] 3. Preconditions hold
+- [ ] 4. Checks baselined
+- [ ] 5. Plan approved by the owner
+- [ ] 6. Each approved step committed or set aside
+- [ ] 7. Audit rerun and report written
+
 ## 1. Audit
 
 ```

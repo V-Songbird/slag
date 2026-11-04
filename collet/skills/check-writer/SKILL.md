@@ -121,6 +121,8 @@ That includes a fixture that does not parse and a check that will not load. If y
 fix the check; if the near miss turns out to be a real violation, say so and change the fixture
 deliberately, out loud.
 
+After any fix, return to step 2 or 3 and run admission again. Stop only when the check is admitted or you report why it cannot be.
+
 ## 5. Say what it does not cover
 
 A check catches the shape it was written for, and one line of honest limits is worth more than a

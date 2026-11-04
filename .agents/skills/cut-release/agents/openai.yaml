@@ -1,2 +1,8 @@
+interface:
+  display_name: "Cut Release"
+  short_description: "Release one Slag plugin: bump its version, date its changelog, commit and push"
+  default_prompt: "Use $cut-release to release a Slag plugin"
+  icon_small: "./assets/icon.png"
+  icon_large: "./assets/icon.png"
 policy:
   allow_implicit_invocation: false

@@ -19,6 +19,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 ### Changed
 
 - Rename `docs-align` to `repo-docs`. `/anneal:repo-docs`, `$repo-docs` and `/repo-docs` replace the old invocations; the reconciliation procedure moved to the skill's `references/reconcile.md`, and `references/policy.md` holds the documentation contract: five invariants, the profiles `solo-public`, `private-repo` and `team`, and an `adopt` mode that, after approval, writes a project-local rule, a pointer in each map file and, for `solo-public`, ignore rules from a shipped template. Adopt never untracks a file and never ignores all of `docs/`, `docs/knowledge/` or `docs/apis/`.
+- On Codex, `repo-docs`, `repo-layout` and `session-review` each show their own icon in the skill list.
+- `session-review` shows a one-line menu description. It runs only when you invoke it, so the longer trigger text was never read.
+- `repo-docs` has a shorter description that puts its trigger phrases first. It links every reference file from the skill itself, and its README reference opens with a contents list.
+- `repo-layout` and `session-review` open with a checklist of their steps for the session to copy and tick.
 
 ### Added
 

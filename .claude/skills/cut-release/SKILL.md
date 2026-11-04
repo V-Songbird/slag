@@ -6,7 +6,7 @@ disable-model-invocation: true
 license: MIT
 compatibility: Claude Code only. Requires git and Node 22 or later.
 metadata:
-  version: "1.0"
+  version: "1.1"
 ---
 
 # cut-release
@@ -21,6 +21,15 @@ directory. Never assume a plugin name — list them.
 
 > These are experiments with no support promise. A release is a checkpoint, not a commitment. The
 > version still has to move, or `/plugin update` reports nothing changed.
+
+Copy this checklist into your reply and tick it as you go:
+
+- [ ] Step 0: plugin chosen, manifests listed, `npm run check` green
+- [ ] Step 1: new version agreed
+- [ ] Step 2: changelog dated, fresh `[Unreleased]` above it
+- [ ] Step 3: every manifest reads the new version
+- [ ] Step 4: staged diff shown, committed, pushed
+- [ ] Step 5: version, SHA and push result reported
 
 ## The version lives in a different file per host
 
@@ -66,13 +75,9 @@ npm run check
 Report what is uncommitted and what is unpushed. Everything lands in one commit in Step 4, so
 uncommitted plugin source is fine — say what is coming along rather than sweeping it in silently.
 
-`npm run check` runs `node --test` from the root with the suite-failure reporter
-(`scripts/suite-failure-reporter.js`), covering every plugin's suite plus the repository's own. The
-reporter fails the run when a suite fails outside its tests, such as a describe callback that throws
-before it registers a test or a suite's after hook that throws; plain `node --test` exits 0 on
-those. If `npm run check` fails, stop and report. Do not release over a red suite without the
-user's explicit go-ahead. To run one plugin alone, `cd <plugin>` and run `node --test` there; its
-exit code can miss a failed suite, so the release still rests on `npm run check`.
+`npm run check` adds the suite-failure reporter, which catches a suite that fails outside its
+tests; plain `node --test` misses it. If it fails, stop and report. Do not release over a red
+suite without the user's explicit go-ahead.
 
 ## Step 1 — pick the new version
 
@@ -128,9 +133,9 @@ private blocklist deliberately and say so. Do not bypass with `--no-verify`. The
 when the blocklist is absent, so a clean pass is not proof it ran. See
 `.claude/rules/reference-names.md`.
 
-When the Claude settings allow `git push` without a prompt, the release authorization is the
-user's request, not a prompt. Show the staged diff and the commit before
-pushing; every other command goes through the usual permission prompt.
+Show the staged diff and the commit, then wait for the user's yes before
+pushing, even when the Claude settings allow `git push` without a prompt.
+Every other command goes through the usual permission prompt.
 
 ## Step 5 — confirm
 

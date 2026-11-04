@@ -1,5 +1,18 @@
 # README
 
+## Contents
+
+- [Choose the mode](#choose-the-mode)
+- [Step 1: Collect facts](#step-1-collect-facts)
+- [Step 2: Pick the tier](#step-2-pick-the-tier)
+- [Step 3: Draft in reader order](#step-3-draft-in-reader-order)
+- [Writing rules](#writing-rules)
+- [Commands, code and results](#commands-code-and-results)
+- [Step 4: Verify](#step-4-verify)
+- [Step 5: Report](#step-5-report)
+- [Translations](#translations)
+- [Gotchas](#gotchas)
+
 repo-docs reads this file for any request to write, review, score, shorten, repair or translate one README, including a request that never says README, such as "document this repo" or "add a quick start". The reconciliation's step 2 reads it once and applies its Review mode to every maintained README.
 
 A README is the front door of a repository, not its documentation. A person who arrives with no context must be able to answer five questions from it alone:

@@ -1,20 +1,17 @@
 ---
 name: repo-docs
 description: >-
-  Keeps a project's documentation in line with its code: reconciles the
-  maintained docs and non-code development files with current behavior and
-  the project's documentation policy, proposes drift and trim maintenance,
-  and adopts the documentation contract into a project. Use for a complete
-  documentation cleanup, repository housekeeping or consistency audit across
-  Claude Code, Codex and Antigravity, or to set up where docs go. Pass audit
-  to report without edits, maintain for drift and trim proposals that wait
-  for approval, or adopt to write the project-local rule, map pointer and
-  ignore rules after approval. Also writes, reviews, scores, shortens, repairs
-  or translates a single README.md, including requests that never say README,
-  such as "document this repo", "add a quick start" or "nobody can work out
-  how to install this"; not for API reference pages, tutorials, changelogs or
-  CONTRIBUTING files. Formerly docs-align. For code layout use repo-layout;
-  for a session transcript use session-review.
+  Reconciles a project's docs, agent instructions and host setup with its
+  current behavior, proposes drift and trim fixes, adopts a documentation
+  policy, and writes, reviews, scores, repairs or translates one README. Use
+  for a documentation cleanup, docs audit, repository housekeeping or
+  consistency check, to set up where docs go, or for README work never named
+  as such, like "document this repo", "add a quick start" or "nobody can work
+  out how to install this". Pass audit to report only, maintain for proposals
+  that wait for approval, adopt to write the policy files after approval, or
+  readme for one README. Not for API reference pages, tutorials, changelogs,
+  CONTRIBUTING files, code layout (repo-layout) or a session transcript
+  (session-review).
 argument-hint: "[audit|maintain|adopt|readme] [path or concern]"
 license: MIT
 compatibility: Portable instructions for Claude Code, Codex and Antigravity. The bundled layout audit and README checker require Node 22 or later. Git enables tracked and ignored file checks.
@@ -42,3 +39,5 @@ Every mode reads the Invariants section of [the documentation contract](referenc
 | `maintain` | Read [the reconciliation](references/reconcile.md) and run its Maintenance step first |
 | `adopt` | Read [the documentation contract](references/policy.md) and run its Adopt section |
 | `readme`, or a request to write, review, score, improve, edit or translate one README | Read [the README reference](references/readme.md) and follow its mode table; it skips the inventory and the layout audit |
+
+Read these only when the file above sends you to them: [the README templates](references/readme-templates.md) and [the review rubric](references/readme-review.md) from the README reference, and [the review checklist](references/review-checklist.md) from the reconciliation.

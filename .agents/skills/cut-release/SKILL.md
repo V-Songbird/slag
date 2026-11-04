@@ -1,13 +1,11 @@
 ---
 name: cut-release
-description: >-
-  Release one Slag plugin when explicitly invoked. Discover the current plugins,
-  select an owner-approved version, update the changelog and host manifests,
-  verify checks, then commit and push within the owner's authorization.
+description: Release one Slag plugin, only when explicitly invoked. Bumps its version, dates its changelog, then commits and pushes.
+disable-model-invocation: true
 license: MIT
 compatibility: Codex in the Slag checkout. Requires git and Node 22 or later.
 metadata:
-  version: "1.0"
+  version: "1.1"
 ---
 
 # cut-release

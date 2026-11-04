@@ -37,6 +37,11 @@ All notable changes to collet are documented here. The format follows
 
 ### Changed
 
+- On Codex, `check-writer` and `task-harness` each show their own icon in the skill list.
+- `task-harness` opens with a checklist of the mount for the session to copy and tick.
+- `check-writer` runs admission again after any fix, until the check is admitted or the session
+  reports why it cannot be.
+
 - `mount.mjs` mounts in a project that keeps a `ROADMAP.jsonl` or a `.foreman/` directory, instead
   of writing nothing and exiting 2. The planning tool owns the plan and collet enforces the session
   boundary. collet never reads that roadmap, never enforces the files an entry lists, and leaves

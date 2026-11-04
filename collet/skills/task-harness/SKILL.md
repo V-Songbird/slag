@@ -25,6 +25,17 @@ Read the plugin's `README.md` — two directories up — for what ends up in the
 and the mounting itself is a command — `scripts/mount.mjs` — because the part that must be
 identical every time has no business being a list of instructions someone follows by hand.
 
+Copy this checklist into your reply and tick it as you go:
+
+- [ ] Five questions answered from the repository or the person
+- [ ] Task scope derived from the code, accept command named
+- [ ] Plan owner checked (`ROADMAP.jsonl`, `.foreman/`)
+- [ ] `mount.mjs` run, written and kept paths shown
+- [ ] `.collet/config.json` filled in
+- [ ] First task opened
+- [ ] `task.mjs status` and `checks/run.mjs` run, results reported
+- [ ] Limits explained, then stop
+
 ## Before you write anything
 
 **Ask. Do not infer.** Read the repository first — its README, its test command, its decisions
