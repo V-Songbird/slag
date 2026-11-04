@@ -315,6 +315,30 @@ test("an npm run script after a cd in the same span is not read against the root
   ]);
 });
 
+test("no flag is checked after a cd in the same span", () => {
+  const root = repo();
+  commit(root, { "package.json": '{"scripts":{"build":"x"}}', "scripts/run.js": "x" }, "2026-10-01");
+  write(root, {
+    "mem/MEMORY.md": "- [Away](away.md) — another directory\n",
+    "mem/away.md": memory("2026-10-30T00:00:00.000Z", "Run `cd ../other && npm run build -- --their-flag`, `cd ../other && node scripts/run.js --other-flag` or `node scripts/run.js --gone-flag`."),
+  });
+  assert.deepStrictEqual(of(maintain(root, { memories: ["mem"], now: NOW }), "memory-missing-path"), [
+    "mem/away.md names --gone-flag, absent from the project or the memory folder",
+  ]);
+});
+
+test("a cd inside a subshell counts as a cd, and a command named cd-something does not", () => {
+  const root = repo();
+  commit(root, { "package.json": '{"scripts":{"check":"x"}}' }, "2026-10-01");
+  write(root, {
+    "mem/MEMORY.md": "- [Sub](sub.md) — nested package\n",
+    "mem/sub.md": memory("2026-10-30T00:00:00.000Z", "Run `(cd sub && npm run build)` or `cd-tool x && npm run gone`."),
+  });
+  assert.deepStrictEqual(of(maintain(root, { memories: ["mem"], now: NOW }), "memory-missing-path"), [
+    "mem/sub.md names npm run gone, absent from the project or the memory folder",
+  ]);
+});
+
 test("a script outside the project, written as a ../ path, has no flags checked", () => {
   const root = repo();
   commit(root, { "scripts/run.sh": "x" }, "2026-10-01");

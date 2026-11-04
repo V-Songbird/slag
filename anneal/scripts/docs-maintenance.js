@@ -158,15 +158,16 @@ function memoryProposals(root, dir, now) {
 
     const missing = [];
     // Each command of a span, split at a spaced `&&`, `||` or `|`, or at `;`, is read on its own,
-    // with whether an earlier command of the same span ran `cd`.
+    // with whether an earlier command of the same span ran `cd`, also as `(cd sub && ...)`.
     const commands = [...text.matchAll(/`([^`\n]+)`/g)].flatMap(([, span]) =>
-      span.split(/\s+(?:&&|\|\|?)\s+|;(?:\s+|$)/).map((c, i, all) => [c, all.slice(0, i).some((p) => /^cd\b/.test(p.trim()))]),
+      span.split(/\s+(?:&&|\|\|?)\s+|;(?:\s+|$)/).map((c, i, all) => [c, all.slice(0, i).some((p) => /^\(?cd(?:\s|$)/.test(p.trim()))]),
     );
     for (const [command, afterCd] of commands) {
       const tokens = command.trim().split(/\s+/);
       const isPath = (t) => /^[\w.-]+(?:\/[\w.-]+)+\/?$/.test(t);
       const run = /^npm run(?:-script)? ([^\s-]\S*)/.exec(command.trim());
       // After a `cd`, the script belongs to that directory's package.json, which is not read.
+      // Its flags are skipped below.
       if (run && !afterCd && !scripts.has(run[1])) missing.push(`npm run ${run[1]}`);
       // A path counts only when its first folder, after any leading `./`, exists in the project,
       // which leaves out git refs such as `origin/main`, MIME types, `../` paths into other
@@ -181,7 +182,8 @@ function memoryProposals(root, dir, now) {
       // `npm run <script> -- --flag`, not the interpreter's or npm's own. The script is the first
       // path, or file name with a script extension, after the interpreter that is not the value of a
       // listed node option, as in `node --import ./setup.js <script>`; inline code such as `node -e`
-      // or `python -m` has none. A `../` script belongs to another workspace, so its flags are not checked.
+      // or `python -m` has none. A `../` script and every command after a `cd` belong to another
+      // directory, so their flags are not checked.
       let script = run ? tokens.indexOf("--") : -1;
       if (!run && INTERPRETER.test(tokens[0])) {
         for (let i = 1; i < tokens.length && !INLINE_CODE.test(tokens[i]); i++) {
@@ -191,7 +193,7 @@ function memoryProposals(root, dir, now) {
           }
         }
       }
-      for (const t of script < 0 ? [] : tokens.slice(script + 1)) {
+      for (const t of script < 0 || afterCd ? [] : tokens.slice(script + 1)) {
         const flag = /^--[a-z][\w-]*/i.exec(t)?.[0];
         if (flag) {
           flags.add(flag);
