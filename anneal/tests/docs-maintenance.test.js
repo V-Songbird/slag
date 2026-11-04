@@ -303,6 +303,30 @@ test("each command of a memory span is read on its own", () => {
   ]);
 });
 
+test("an npm run script after a cd in the same span is not read against the root package.json", () => {
+  const root = repo();
+  commit(root, { "package.json": '{"scripts":{"check":"x"}}', "sub/package.json": '{"scripts":{"build":"x"}}' }, "2026-10-01");
+  write(root, {
+    "mem/MEMORY.md": "- [Sub](sub.md) — nested package\n",
+    "mem/sub.md": memory("2026-10-30T00:00:00.000Z", "Run `cd sub && npm run build`; after `cd sub` a separate `npm run gone` is read at the root, and so is `npm run gone2`."),
+  });
+  assert.deepStrictEqual(of(maintain(root, { memories: ["mem"], now: NOW }), "memory-missing-path"), [
+    "mem/sub.md names npm run gone, npm run gone2, absent from the project or the memory folder",
+  ]);
+});
+
+test("a script outside the project, written as a ../ path, has no flags checked", () => {
+  const root = repo();
+  commit(root, { "scripts/run.sh": "x" }, "2026-10-01");
+  write(root, {
+    "mem/MEMORY.md": "- [Away](away.md) — another workspace\n",
+    "mem/away.md": memory("2026-10-30T00:00:00.000Z", "Run `bash ../other-repo/deploy.sh --target-x`, `node ./../other-repo/tool.js --their-flag` or `bash scripts/run.sh --gone-flag`."),
+  });
+  assert.deepStrictEqual(of(maintain(root, { memories: ["mem"], now: NOW }), "memory-missing-path"), [
+    "mem/away.md names --gone-flag, absent from the project or the memory folder",
+  ]);
+});
+
 test("a dotted value of an unlisted node option is not the script", () => {
   const root = repo();
   commit(root, { "scripts/run.js": "--root" }, "2026-10-01");

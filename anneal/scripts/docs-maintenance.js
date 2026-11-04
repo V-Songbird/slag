@@ -157,13 +157,17 @@ function memoryProposals(root, dir, now) {
     if (!indexed.has(name)) add("memory-unindexed", name, "no MEMORY.md line links it, so no session loads it; index it or delete it");
 
     const missing = [];
-    // Each command of a span, split at a spaced `&&`, `||` or `|`, or at `;`, is read on its own.
-    const commands = [...text.matchAll(/`([^`\n]+)`/g)].flatMap(([, span]) => span.split(/\s+(?:&&|\|\|?)\s+|;(?:\s+|$)/));
-    for (const command of commands) {
+    // Each command of a span, split at a spaced `&&`, `||` or `|`, or at `;`, is read on its own,
+    // with whether an earlier command of the same span ran `cd`.
+    const commands = [...text.matchAll(/`([^`\n]+)`/g)].flatMap(([, span]) =>
+      span.split(/\s+(?:&&|\|\|?)\s+|;(?:\s+|$)/).map((c, i, all) => [c, all.slice(0, i).some((p) => /^cd\b/.test(p.trim()))]),
+    );
+    for (const [command, afterCd] of commands) {
       const tokens = command.trim().split(/\s+/);
       const isPath = (t) => /^[\w.-]+(?:\/[\w.-]+)+\/?$/.test(t);
       const run = /^npm run(?:-script)? ([^\s-]\S*)/.exec(command.trim());
-      if (run && !scripts.has(run[1])) missing.push(`npm run ${run[1]}`);
+      // After a `cd`, the script belongs to that directory's package.json, which is not read.
+      if (run && !afterCd && !scripts.has(run[1])) missing.push(`npm run ${run[1]}`);
       // A path counts only when its first folder, after any leading `./`, exists in the project,
       // which leaves out git refs such as `origin/main`, MIME types, `../` paths into other
       // workspaces and paths under a deleted top folder. A root-level `./file` is always checked.
@@ -177,12 +181,12 @@ function memoryProposals(root, dir, now) {
       // `npm run <script> -- --flag`, not the interpreter's or npm's own. The script is the first
       // path, or file name with a script extension, after the interpreter that is not the value of a
       // listed node option, as in `node --import ./setup.js <script>`; inline code such as `node -e`
-      // or `python -m` has none.
+      // or `python -m` has none. A `../` script belongs to another workspace, so its flags are not checked.
       let script = run ? tokens.indexOf("--") : -1;
       if (!run && INTERPRETER.test(tokens[0])) {
         for (let i = 1; i < tokens.length && !INLINE_CODE.test(tokens[i]); i++) {
           if ((isPath(tokens[i]) || SCRIPT_FILE.test(tokens[i])) && !NODE_VALUE_OPTION.test(tokens[i - 1])) {
-            script = i;
+            script = tokens[i].replace(/^(?:\.\/)+/, "").startsWith("../") ? -1 : i;
             break;
           }
         }
