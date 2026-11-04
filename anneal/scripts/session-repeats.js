@@ -221,12 +221,12 @@ function stepOf(call, host, normalize) {
   return { kind: "commands", key: `cd ${/^[\w./<>-]+$/.test(folder) ? folder : JSON.stringify(folder)} && ${key}` };
 }
 
-// A typed prompt's key: a slash command by its name, any other prompt redacted and then lower case, so a home path or
-// account name that redaction matches by case never survives, without host envelopes, with its whitespace collapsed
-// and its closing punctuation removed.
+// A typed prompt's key, read from the redacted prompt, so a home path or account name that redaction matches by case
+// is gone before lower casing: a slash command by its name, any other prompt lower case, without host envelopes, with
+// its whitespace collapsed and its closing punctuation removed.
 function promptKey(text) {
   const named = COMMAND_NAME.exec(text);
-  const typed = (named ? named[1] : redact(text.replace(ENVELOPE, " "))).toLowerCase().replace(/\s+/g, " ").trim();
+  const typed = redact(named ? named[1] : text.replace(ENVELOPE, " ")).toLowerCase().replace(/\s+/g, " ").trim();
   if (typed.startsWith("/")) return typed.split(" ")[0];
   return typed.replace(/[\s.!?¡¿,;:…]+$/u, "") || null;
 }
