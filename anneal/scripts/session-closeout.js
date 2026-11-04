@@ -67,7 +67,7 @@ function gitEffects(command, cwd, output) {
     effects.push({ op, kind, id, key });
   };
   const create = (name, forced) => {
-    if (!forced || !(output.includes(`Reset branch '${name}'`) || output.includes(`resetting branch '${name}'`))) add("create", "branch", name);
+    if (!forced || !["Reset", "reset", "resetting"].some((verb) => output.includes(`${verb} branch '${name}'`))) add("create", "branch", name);
   };
   for (const part of programs(command, true)) {
     const words = (part.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((word) => word.replace(/^(["'])([\s\S]*)\1$/, "$2"));

@@ -412,15 +412,17 @@ describe("the cleanup flag", () => {
     const file = transcript([
       ...fixTurn(dir),
       use("w1", "Bash", { command: "git checkout -B main origin/main" }, 5),
-      result("w1", "Reset branch 'main'\nYour branch is up to date with 'origin/main'.", 6),
+      result("w1", "Switched to and reset branch 'main'\nYour branch is up to date with 'origin/main'.", 6),
       use("w2", "Bash", { command: "git worktree add -B release ../release" }, 7),
       result("w2", "Preparing worktree (resetting branch 'release'; was at 1a2b3c4)", 8),
       use("w3", "Bash", { command: "git switch --force-create spike" }, 9),
       result("w3", "Switched to a new branch 'spike'", 10),
       use("w4", "Bash", { command: "git switch -C quiet -q" }, 11),
       result("w4", "", 12),
-      use("g1", "Bash", { command: "git status --short --ignored" }, 13),
-      result("g1", "", 14),
+      use("w5", "Bash", { command: "git switch -C topic" }, 13),
+      result("w5", "Reset branch 'topic'", 14),
+      use("g1", "Bash", { command: "git status --short --ignored" }, 15),
+      result("g1", "", 16),
     ]);
     assert.deepStrictEqual(closeout(file, dir).cleanup.leftovers.map(({ kind, id, callLine }) => ({ kind, id, callLine })), [
       { kind: "worktree", id: "../release", callLine: 7 },
