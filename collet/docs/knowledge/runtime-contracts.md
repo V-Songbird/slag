@@ -138,8 +138,9 @@ A write to a path under `docs/tasks/`, `docs/decisions/`, `docs/knowledge/privat
 `docs/apis/private/`, at any depth, that Git ignores and that holds no tracked file is a private
 record, not a task change. The live check never lists one, so the scope check lets it through for
 every session in the checkout, the task's own and any other. Any other ignored path outside the
-scope stays refused, including dependencies and build output. A location inside a directory Git
-ignores, such as a dependency's own `docs/tasks/`, holds no private records.
+scope stays refused, including dependencies and build output. A location whose path above its
+`docs/` folder lies inside a directory Git ignores, such as a dependency's own `docs/tasks/`, holds
+no private records.
 
 Some names stay refused whether ignored or not, in any directory or file name of the path, above
 the location as well as inside it:
