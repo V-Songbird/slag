@@ -310,7 +310,8 @@ if (!existsSync(unverified)) {
 // created: one host reads `AGENTS.md` only while no `CLAUDE.md` exists, so creating it here would
 // hide the project's own instructions behind a file holding nothing but this block. A `CLAUDE.md`
 // with an `@AGENTS.md` import line already loads the block from `AGENTS.md`, so it gets no copy,
-// and a copy an earlier mount left there is removed.
+// and a copy an earlier mount left there is emptied to its markers. Keeping the markers and every
+// byte around them lets the scope check read the change as the harness's own write.
 const asked = stated(settings.ask_first);
 const block = readFileSync(join(TEMPLATES, 'rules.md'), 'utf8')
   .trim()
@@ -338,11 +339,11 @@ if (existsSync(claudeMd)) {
   const text = readFileSync(claudeMd, 'utf8');
   const start = text.indexOf('<!-- collet:begin');
   const end = text.indexOf('<!-- collet:end -->');
+  const stub = '<!-- collet:begin — the rules load from the imported AGENTS.md -->\n<!-- collet:end -->';
   if (!/^[ \t]*@(\.\/)?AGENTS\.md[ \t]*$/m.test(text)) surfaces.push('CLAUDE.md');
-  else if (start !== -1 && end !== -1) {
-    const rest = [text.slice(0, start).trimEnd(), text.slice(end + '<!-- collet:end -->'.length).trim()];
-    writeFileSync(claudeMd, `${rest.filter(Boolean).join('\n\n')}\n`, 'utf8');
-    wrote.push('CLAUDE.md (block removed; it loads from the imported AGENTS.md)');
+  else if (start !== -1 && end > start && text.slice(start, end + '<!-- collet:end -->'.length) !== stub) {
+    writeFileSync(claudeMd, text.slice(0, start) + stub + text.slice(end + '<!-- collet:end -->'.length), 'utf8');
+    wrote.push('CLAUDE.md (block emptied; it loads from the imported AGENTS.md)');
   }
 }
 if (existsSync(join(target, '.cursor'))) surfaces.push('.cursor/rules/collet.md');

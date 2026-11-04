@@ -37,13 +37,29 @@ test('a CLAUDE.md that imports AGENTS.md is left without its own block', () => {
   assert.doesNotMatch(out.stdout, /CLAUDE\.md/);
 });
 
-test('a remount removes the copy an earlier mount left in a CLAUDE.md that imports AGENTS.md', () => {
+test('a remount empties the copy an earlier mount left in a CLAUDE.md that imports AGENTS.md', () => {
+  const old = '<!-- collet:begin -->\nold rules\n<!-- collet:end -->';
+  const root = project({ ...TREE, 'CLAUDE.md': `@AGENTS.md\r\n\r\n${old}\r\n\r\n  House notes.\r\n` });
+  const out = mount(root);
+  const claude = readFileSync(join(root, 'CLAUDE.md'), 'utf8');
+  assert.match(claude, /^@AGENTS\.md\r\n\r\n<!-- collet:begin[^\n]*-->\n<!-- collet:end -->\r\n\r\n {2}House notes\.\r\n$/);
+  assert.doesNotMatch(claude, /old rules|Change only the files/);
+  assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /Change only the files/);
+  assert.match(out.stdout, /CLAUDE\.md \(block emptied/);
+  assert.doesNotMatch(mount(root).stdout, /CLAUDE\.md/);
+});
+
+// The mount's own change to a rules surface must not hold up the first task's close.
+test('the first task closes after a remount empties the block in a CLAUDE.md that imports AGENTS.md', () => {
   const old = '<!-- collet:begin -->\nold rules\n<!-- collet:end -->';
   const root = project({ ...TREE, 'CLAUDE.md': `@AGENTS.md\n\n${old}\n\nHouse notes.\n` });
-  const out = mount(root);
-  assert.equal(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n\nHouse notes.\n');
-  assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /collet:begin/);
-  assert.match(out.stdout, /CLAUDE\.md \(block removed/);
+  repo(root);
+  mount(root);
+  writeFileSync(join(root, '.collet', 'config.json'), CONFIG, 'utf8');
+  assert.equal(task(root, ['add', '--title', 'w', '--why', 'w', '--scope', 'src/cli.mjs']).status, 0);
+  writeFileSync(join(root, 'src', 'cli.mjs'), "import { build } from './digest.mjs';\nexport const run = () => build() + 1;\n", 'utf8');
+  const out = task(root, ['close', '--left-out', 'nothing', '--unverified', 'nothing']);
+  assert.equal(out.status, 0, out.stdout + out.stderr);
 });
 
 test('mounting twice does not duplicate the block', () => {
