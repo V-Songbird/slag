@@ -43,6 +43,8 @@ test("the ignore template hides private records and leaves public product files 
   const cases = [
     [".private/raw/x.jsonl", true], ["docs/tasks/current.md", true], ["docs/decisions/a.md", true],
     ["docs/knowledge/private/r.md", true], ["docs/knowledge/private/nested/t.md", true], ["docs/apis/private/s.md", true],
+    ["pkg/docs/tasks/n.md", true], ["pkg/docs/decisions/d.md", true], ["pkg/docs/knowledge/private/p.md", true],
+    ["pkg/docs/apis/private/q.md", true], ["pkg/docs/knowledge/public.md", false], ["pkg/docs/README.md", false],
     ["README.md", false], ["AGENTS.md", false], ["CLAUDE.md", false], ["docs/README.md", false],
     ["docs/knowledge/algorithm.md", false], ["docs/knowledge/current-contract.md", false],
     ["docs/apis/client.md", false], ["docs/apis/current-api.md", false],

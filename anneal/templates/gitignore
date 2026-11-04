@@ -1,12 +1,16 @@
 # Repository baseline for the solo-public documentation profile. Copy into a project's .gitignore and add its own rules.
 # Keep source, shared configuration, fixtures and public documentation visible.
 
-# Private working material and documentation
+# Private working material and documentation, at the root and in nested package or plugin roots
 .private/
 docs/tasks/
 docs/decisions/
 docs/knowledge/private/
 docs/apis/private/
+**/docs/tasks/
+**/docs/decisions/
+**/docs/knowledge/private/
+**/docs/apis/private/
 
 # Local environment values; public .env.example/.sample/.template files stay visible
 .env
