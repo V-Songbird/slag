@@ -129,7 +129,8 @@ function claudeShape(tool, input, cwd) {
   if (operation === "other") return { operation, path: null, opaque: OPAQUE.test(String(tool)) };
   const named = [input.file_path, input.notebook_path, input.path].find((value) => typeof value === "string");
   const whole = operation === "read" && ["offset", "limit", "pages"].every((range) => input[range] === undefined);
-  return { operation, path: normalizePath(named === undefined && operation === "search" ? cwd : named, cwd), whole };
+  // A file tool takes its path literally, so `$`, `%` and braces name characters of the file.
+  return { operation, path: normalizePath(named === undefined && operation === "search" ? cwd : named, cwd, true), whole };
 }
 
 // A call the owner, a permission rule, a policy or a hook refused. A later call that does the same job in another form

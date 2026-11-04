@@ -541,6 +541,24 @@ describe("identity and chronology in a Claude Code transcript", () => {
     ]);
   });
 
+  test("a file tool's path keeps the characters a shell would expand", () => {
+    const report = analyzeClaude(transcript([
+      human("fix the route", 1),
+      use("a", "Read", { file_path: "/work/shop/app/routes/$id.tsx" }, 2),
+      result("a", "<tool_use_error>File does not exist.</tool_use_error>", 3, true),
+      use("b", "Edit", { file_path: "/work/shop/{a}/100%.js", old_string: "x", new_string: "y" }, 4),
+      result("b", "<tool_use_error>File does not exist.</tool_use_error>", 5, true),
+      use("c", "Bash", { command: "cat /work/shop/app/routes/$id.tsx" }, 6),
+      result("c", "Exit code 1\ncat: no such file", 7, true),
+      human("audit", 8),
+    ]));
+    assert.deepStrictEqual(report.candidates.map((c) => [c.operation, c.path]), [
+      ["read", "/work/shop/app/routes/$id.tsx"],
+      ["edit", "/work/shop/{a}/100%.js"],
+      ["read", null],
+    ]);
+  });
+
   test("a Windows path is one identity whatever its spelling, and a shell-dependent one is none", () => {
     const windows = { cwd: "D:\\work\\shop" };
     const report = analyzeClaude(transcript([
