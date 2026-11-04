@@ -48,6 +48,16 @@ test('an import anywhere in the text of CLAUDE.md counts, and one inside code do
   }
 });
 
+// A lone backtick opens no code span across a blank line, and a line that starts with three
+// backticks and holds another backtick opens no fence.
+test('an import after a backtick that opens no code counts', () => {
+  for (const text of ['Type ` to quote.\n\n@AGENTS.md\n\nRun `x`.\n', '```npm test``` runs it.\n\n@AGENTS.md\n']) {
+    const root = project({ ...TREE, 'CLAUDE.md': text });
+    mount(root);
+    assert.equal(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), text, JSON.stringify(text));
+  }
+});
+
 // `@agents.md` loads AGENTS.md only where the filesystem resolves both names to one file.
 test('an import that differs from AGENTS.md in case counts only where it names the same file', () => {
   const root = project({ ...TREE, 'CLAUDE.md': '@agents.md\n' });

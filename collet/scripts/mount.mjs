@@ -343,12 +343,14 @@ function blockIn(text) {
 }
 
 // Whether CLAUDE.md imports AGENTS.md: `@AGENTS.md` or `@./AGENTS.md` anywhere in its text outside
-// a code block or code span, where the host reads no import. A name in another case counts only
-// where the filesystem resolves it to the AGENTS.md the mount wrote.
+// a code block or code span, where the host reads no import. A backtick fence opener has no
+// backtick after it on its line, and a code span closes on a run of the same length before a blank
+// line. A name in another case counts only where the filesystem resolves it to the AGENTS.md the
+// mount wrote.
 function importsAgents(text) {
   const prose = text
-    .replace(/^ {0,3}((`|~)\2{2,})[^]*?(?:^ {0,3}\1\2*[ \t]*$|(?![^]))/gm, '')
-    .replace(/(`+)[^]*?\1/g, '');
+    .replace(/^ {0,3}((`|~)\2{2,})(?:(?<=~)|(?![^\n]*`))[^]*?(?:^ {0,3}\1\2*[ \t]*$|(?![^]))/gm, '')
+    .replace(/(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\r?\n)[^])*?(?<!`)\1(?!`)/g, '');
   const agents = statSync(join(target, 'AGENTS.md'), { bigint: true });
   return [...prose.matchAll(/(?<=^|\s)@(?:\.\/)?(agents\.md)(?=\s|$)/gim)].some(([, name]) => {
     if (name === 'AGENTS.md') return true;
