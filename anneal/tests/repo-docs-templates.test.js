@@ -10,7 +10,7 @@ const os = require("node:os");
 require("./temp-root.js");
 const path = require("node:path");
 const { execFileSync, spawnSync } = require("node:child_process");
-const { check } = require("../scripts/docs-check.js");
+const { check, committedIgnored } = require("../scripts/docs-check.js");
 
 process.env.GIT_CEILING_DIRECTORIES = os.tmpdir();
 
@@ -68,6 +68,8 @@ test("a root-only ignore file leaves nested private docs committable until the n
   const before = repo(rootOnly);
   assert.strictEqual(ignored(before, "docs/tasks/probe.md"), true);
   assert.strictEqual(ignored(before, "docs/tasks/README.md"), false);
+  assert.strictEqual(committedIgnored(before, "docs/tasks/README.md"), false, "a negated match is not coverage");
+  assert.strictEqual(committedIgnored(before, "docs/tasks/probe.md"), true);
   assert.strictEqual(ignored(before, "pkg/docs/tasks/probe.md"), false);
   const after = repo(`${rootOnly}*/**/docs/tasks/\n`);
   assert.strictEqual(ignored(after, "pkg/docs/tasks/probe.md"), true);
@@ -83,6 +85,26 @@ test("docs-check reads the template as the ignored profile with no high finding"
   const report = check(repo());
   assert.strictEqual(report.profile, "ignored");
   assert.strictEqual(report.counts.high, 0);
+});
+
+test("adopt and docs-check count only a committed .gitignore as covering a private directory", () => {
+  const root = repo("");
+  fs.writeFileSync(path.join(root, ".git", "empty-excludes"), "docs/tasks/\n");
+  fs.writeFileSync(path.join(root, ".git", "info", "exclude"), "docs/decisions/\n");
+  assert.strictEqual(ignored(root, "docs/tasks/probe.md"), true, "a machine-local exclude satisfies a plain check-ignore");
+  assert.strictEqual(check(root).profile, "versioned");
+
+  const adopt = section(POLICY, "Adopt");
+  const steps = adopt.split(/^(?=\d\. )/m);
+  for (const step of [2, 4, 6]) assert.ok(/\bcovered\b/.test(steps.find((s) => s.startsWith(`${step}. `)) ?? ""), `step ${step} probes coverage`);
+  assert.ok(adopt.includes("`git -c core.excludesFile= check-ignore --no-index -v") && adopt.includes("`core.excludesFile`") && adopt.includes("`.git/info/exclude`"), "coverage names the committed source");
+  assert.ok(!adopt.includes("--no-index -q"), "a plain check-ignore counts machine-local excludes");
+});
+
+test("the style for each reader is stated in the contract alone", () => {
+  const skill = fs.readFileSync(path.join(__dirname, "..", "skills", "repo-docs", "SKILL.md"), "utf8");
+  assert.ok(POLICY.includes("exactness and brevity"));
+  assert.ok(!skill.includes("exactness and brevity") && skill.includes("references/policy.md#document-kinds"), "SKILL.md points to the contract");
 });
 
 test("the template ignores each private directory once and never a documentation root", () => {

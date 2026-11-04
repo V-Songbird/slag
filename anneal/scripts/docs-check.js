@@ -47,6 +47,18 @@ function ignored(root, file) {
   return result.status === 0;
 }
 
+// Ignored by a .gitignore in the working tree, which every clone carries. core.excludesFile and
+// .git/info/exclude stay on this machine: Git prints them as an absolute path or under .git/, while
+// a .gitignore source is relative to the top level. A negated pattern leaves the path visible. The
+// global file is dropped so its rule on a parent directory cannot mask a committed rule.
+function committedIgnored(root, file) {
+  const result = spawnSync("git", ["-C", root, "-c", "core.excludesFile=", "check-ignore", "--no-index", "-v", "-z", "--stdin"], { encoding: "utf8", input: `${file}\0` });
+  if (result.error) throw result.error;
+  if (![0, 1].includes(result.status)) throw new Error(result.stderr.trim() || "git check-ignore failed.");
+  const [source = "", , pattern = ""] = result.stdout.split("\0");
+  return result.status === 0 && !path.isAbsolute(source) && path.posix.basename(source.replace(/\\/g, "/")) === ".gitignore" && !pattern.startsWith("!");
+}
+
 // Every Markdown file under a directory named docs, ignored ones included. Dot directories,
 // dependencies and ignored directories outside a docs tree, such as build output, are skipped.
 function docFiles(root) {
@@ -128,11 +140,11 @@ function check(directory) {
   const findings = [];
   const add = (id, severity, file, detail) => findings.push({ id, severity, path: file, detail });
 
-  const privateIgnored = PRIVATE_DOCS.filter((dir) => ignored(root, `${dir}/${PROBE}`));
+  const privateIgnored = PRIVATE_DOCS.filter((dir) => committedIgnored(root, `${dir}/${PROBE}`));
   const profile = privateIgnored.length === 0 ? "versioned" : "ignored";
   const isPrivate = (file) => LOCAL_PATH.test(file) || (profile === "ignored" && PRIVATE_DOC_PATH.test(file));
 
-  if (!ignored(root, `${LOCAL_ONLY}/${PROBE}`)) add("private-visible", "high", `${LOCAL_ONLY}/`, "not ignored");
+  if (!committedIgnored(root, `${LOCAL_ONLY}/${PROBE}`)) add("private-visible", "high", `${LOCAL_ONLY}/`, "not ignored");
   if (profile === "ignored") {
     for (const dir of PRIVATE_DOCS) {
       if (!privateIgnored.includes(dir)) add("private-visible", "high", `${dir}/`, "not ignored while the other private documentation directories are");
@@ -253,6 +265,6 @@ function main(argv) {
   }
 }
 
-module.exports = { check, docFiles, formatSummary, frontmatter, linkTargets, main, relatedCandidates };
+module.exports = { check, committedIgnored, docFiles, formatSummary, frontmatter, linkTargets, main, relatedCandidates };
 
 if (require.main === module) process.exitCode = main(process.argv);

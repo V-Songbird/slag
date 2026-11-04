@@ -103,6 +103,20 @@ test("the profile comes from the ignore rules, and .private stays ignored in bot
   ]);
 });
 
+test("only a committed .gitignore counts toward the profile and .private", () => {
+  // Machine-local excludes hide every private directory here, but a clone carries none of them.
+  const root = repo({ ignore: "" });
+  fs.writeFileSync(path.join(root, ".git", "empty-excludes"), "docs/tasks/\ndocs/decisions/\n.private/\n");
+  fs.writeFileSync(path.join(root, ".git", "info", "exclude"), "docs/knowledge/private/\ndocs/apis/private/\n");
+  const local = check(root);
+  assert.strictEqual(local.profile, "versioned");
+  assert.deepStrictEqual(ids(local), ["private-visible .private/"]);
+
+  // A negation in the committed file leaves its path uncovered.
+  const negated = check(repo({ ignore: IGNORE.replace("docs/tasks/\n", "docs/tasks/*\n!docs/tasks/docs-check-probe.md\n") }));
+  assert.deepStrictEqual(ids(negated), ["private-visible docs/tasks/"]);
+});
+
 test("tracked private files are reported without leaving the index", () => {
   const tracked = { ".private/example.txt": "Synthetic.\n", "docs/decisions/example.md": NOTE("adr"), "pkg/docs/tasks/nested.md": NOTE("task_summary", "status: active\n") };
   const root = repo({ tracked });
