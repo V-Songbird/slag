@@ -4,7 +4,7 @@
 // Proposes documentation maintenance, without changing anything: docs whose related files changed
 // after the doc did, completed task notes to fold and delete, oversized history to condense,
 // per-entry docs to merge, and records of an orphaned knowledge store to fold into the docs that
-// own their paths, and native memories that are stale, duplicated or unindexed. docs-align's
+// own their paths, and native memories that are stale, duplicated or unindexed. repo-docs's
 // maintenance mode acts on these proposals after approval.
 
 const fs = require("node:fs");

@@ -60,7 +60,7 @@ It does not plan work. With no open task it enforces nothing.
 ### anneal
 
 anneal has three skills. `repo-layout` audits how easily an agent can search and read a repository,
-and can plan an approved migration on its own branch. `docs-align` reconciles documentation with
+and can plan an approved migration on its own branch. `repo-docs` reconciles documentation with
 current behavior. `session-review` reads one transcript and proposes changes to the repository's
 map file, such as `AGENTS.md`, each one waiting for your approval.
 

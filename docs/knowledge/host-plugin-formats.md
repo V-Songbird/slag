@@ -60,7 +60,7 @@ skill's shell commands with agy 1.2.8 and 1.2.9 on Windows on 2026-09-23. Whethe
 settings was not measured.
 
 Session scratch directories, for a skill that keeps a working file outside the project, as
-docs-align's audit mode does. Each fact is marked measured, host-stated or not checked:
+repo-docs's audit mode does. Each fact is marked measured, host-stated or not checked:
 
 | Host | Session scratch directory | Writing there without a new approval |
 | --- | --- | --- |

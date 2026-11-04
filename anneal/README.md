@@ -68,11 +68,11 @@ These examples use Claude Code syntax. On Codex use `$<skill-name>`; on Antigrav
 | Audit without edits | `/anneal:repo-layout audit` |
 | Plan a migration and approve each step | `/anneal:repo-layout` |
 | Propose instruction changes from one session | `/anneal:session-review [transcript file]` |
-| Reconcile documentation and development files | `/anneal:docs-align [audit] [path or concern]` |
+| Reconcile documentation and development files | `/anneal:repo-docs [audit|maintain|adopt] [path or concern]` |
 
 A migration runs baseline checks, proposes changes, and creates an `anneal/<YYYY-MM-DD>` branch for approved steps.
 Each successful step is checked and committed. Session review proposes edits and waits for approval; it commits nothing.
-Documentation cleanup applies authorized corrections. Its `audit` mode reports findings without edits and saves a report only after you say yes to its offer.
+Documentation cleanup applies authorized corrections. Its `audit` mode reports findings without edits and saves a report only after you say yes to its offer. Its `adopt` mode writes the project-local documentation rule, a map pointer and, for a public solo repository, ignore rules from a shipped template, each after you approve it.
 
 The [workflow guide](docs/knowledge/workflows.md) covers every audit finding, approval boundary, map-file format, safety hook, and eval.
 

@@ -25,7 +25,7 @@ const QUIET = new Set(["none", "transient"]);
 // The smallest change for each candidate cause, and how to check it, with the scope that would make it.
 const SECTION = [
   "documentation",
-  "Hand the document to docs-align: a descriptive heading or a section link lets one section be read alone. Split only a separable topic.",
+  "Hand the document to repo-docs: a descriptive heading or a section link lets one section be read alone. Split only a separable topic.",
   "The next session reaches the section it needs with one ranged read or search.",
 ];
 // A new candidate kind needs a note() call, a judge() branch and an ADVICE row for each kind:cause it

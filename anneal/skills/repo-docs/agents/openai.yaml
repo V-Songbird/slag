@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo docs"
+  short_description: "Verify docs, instructions and repository hygiene"
+  default_prompt: "Use $repo-docs to reconcile this project's documentation and non-code development files with its current behavior."

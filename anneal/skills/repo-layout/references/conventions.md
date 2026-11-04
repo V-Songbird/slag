@@ -37,7 +37,7 @@ Each rule removes steps an agent repeats every session: searches, file reads and
 A session that lost time points at the smallest change, and often at none:
 
 - A file looked for in the wrong place: a path hint in the map file, which session-review proposes.
-- A long document read again, or cut, to reach one part: a descriptive heading or a section link, which docs-align handles. Split only a separable topic.
+- A long document read again, or cut, to reach one part: a descriptive heading or a section link, which repo-docs handles. Split only a separable topic.
 - A check that prints a lot when it passes: its quieter reporter, behind the one check command.
 - Search results full of generated or dependency files: ignore those folders.
 - Text a host, hook, plugin or tool server added, temporary output and paths on one machine: reported to their owner, never changed in the repository.

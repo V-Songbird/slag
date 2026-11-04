@@ -102,7 +102,7 @@ Check each proposed rename and move before it enters the plan. Its `From` file m
 The plan holds structural work. A duplicate name, a deep path or a large file alone is no reason to rename, move or split, and these findings go elsewhere:
 
 - a file an agent looks for in the wrong place: a path hint in the map file's `Where things live`, written by the map file step when the plan has one and otherwise listed in the report. session-review proposes such hints from a transcript;
-- a long document read again, or cut, to reach one part: a heading or a section link, which docs-align handles;
+- a long document read again, or cut, to reach one part: a heading or a section link, which repo-docs handles;
 - text a host, hook, plugin or tool server added, temporary output and paths on one machine: reported to their owner, never changed here;
 - `instruction-hidden-characters`: each line and code point reported for the owner to inspect. Never decode the characters, copy them into a step or remove them here;
 - a start context over budget: reported with its largest sources. A cut to the project's map file is planned only through the map file step; global and memory files are never changed here.
@@ -149,7 +149,7 @@ Run the audit again, then report:
 - each finding's count before and after;
 - the check results before and after;
 - steps skipped or set aside, and why, naming each set-aside branch with the step it holds, read from its commit subject (`git log -1 --format=%s <branch>`);
-- path hints no step wrote, and findings left to docs-align or to their owner;
+- path hints no step wrote, and findings left to repo-docs or to their owner;
 - names and paths kept because an observation explains them;
 - conflicts with the project's own rules.
 

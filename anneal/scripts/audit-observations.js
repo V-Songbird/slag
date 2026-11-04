@@ -234,7 +234,7 @@ function observe(files, reader, facts, shared) {
     if (text.length >= LONG_DOCUMENT_CHARS) documents.push([1, `${file}: ${plural(countLines(text), "line")}; headings in .${extensionOf(file)} files are not read, so its structure is unknown`]);
   }
   observed("document-sections", "Long documents, and how a reader reaches their parts", byRank(documents),
-    "Length alone is no reason to split: headings and section links let a search or a range read reach one part. A long part without a heading is a candidate for a descriptive heading or a section link, which docs-align handles.");
+    "Length alone is no reason to split: headings and section links let a search or a range read reach one part. A long part without a heading is a candidate for a descriptive heading or a section link, which repo-docs handles.");
 
   const owner = (file) => dirsOf(file).map((_, i, dirs) => dirs.slice(0, dirs.length - i).join("/")).concat("").find((dir) => packages.has(dir)) ?? null;
   observed("package-local-names", "Duplicate names that fall one per package", facts.duplicates.filter(([, group]) => {

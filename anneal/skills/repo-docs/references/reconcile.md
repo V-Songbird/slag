@@ -1,31 +1,6 @@
----
-name: docs-align
-description: >-
-  Reconciles a project's documentation and non-code development files with
-  its current behavior and applicable instructions. Checks stale references,
-  unsupported claims, every maintained README, documentation structure,
-  agent instructions, host setup and public-repository hygiene. Use for a
-  complete documentation cleanup, repository housekeeping or consistency
-  audit across Claude Code, Codex and Antigravity. Pass audit to report
-  without edits, or maintain for drift and trim proposals that wait for
-  approval. For a single README use readme; for code layout use
-  repo-layout; for a session transcript use session-review.
-argument-hint: "[audit|maintain] [path or concern]"
-license: MIT
-compatibility: Portable instructions for Claude Code, Codex and Antigravity. The bundled layout audit requires Node 22 or later. Git enables tracked and ignored file checks. Uses the readme skill when available and reports missing dependencies.
-metadata:
-  version: "1.2"
----
-
-# Docs align
+# Reconcile documentation
 
 Make the maintained documentation agree with what the project actually does, and make its development instructions usable by each intended host. A complete pass accounts for every in-scope document; it does not require changing every file.
-
-Argument: `$ARGUMENTS`. If the host leaves it literal, read the request instead. `audit`, a review request or an explicit no-edit instruction means report only: nothing is written in the project, and a report is saved only as step 4 allows. Otherwise an explicit reconciliation or cleanup request authorizes ordinary in-scope documentation fixes. Resolve an ambiguous request as an audit. `maintain` runs the maintenance step in section 3 first and edits nothing until the owner approves a group of its proposals. A path narrows the pass to that area plus its incoming references; state that boundary.
-
-On Claude Code invoke `/anneal:docs-align`; on Codex use `$docs-align`; on Antigravity use `/docs-align`. Find the plugin files through `${CLAUDE_PLUGIN_ROOT}` on Claude Code, or resolve `../../` from this file on other hosts. Resolve target paths against the project root, never the installed plugin directory.
-
-On Antigravity, give every command the project root the person named as its working directory, the `Cwd` of `run_command`. Without it, commands can run in Antigravity's own scratch directory instead of the project. When the person named no project root, ask for it before running anything.
 
 ## Scope and authority
 
@@ -47,13 +22,13 @@ Build a compact finding ledger as you go: location, claim or defect, source of t
 
 ## 2. Reuse the specialist passes
 
-**Repository navigation.** Read [repo-layout](../repo-layout/SKILL.md) and run its audit-only steps once, using this plugin's script:
+**Repository navigation.** Read [repo-layout](../../repo-layout/SKILL.md) and run its audit-only steps once, using this plugin's script:
 
 ```text
 node "<plugin root>/scripts/audit.js" --root "<project root>" --json
 ```
 
-Use the findings as candidates, and read [the conventions](../repo-layout/references/conventions.md) for the ones that matter. The audit's `observations` carry no severity: what each map file and its imports name, which packages the map already routes to, how long documents are reached, and which findings a package boundary, a framework path, a fixture or an unbuilt `dist/` folder explains. They are the starting evidence for task routes in step 3, not defects to fix. Record legitimate framework paths and project-policy exceptions. This reconciliation never enters the migration, branching or commit steps; code moves and layout policy changes need their own authorization. If Node is unavailable, report the missed audit and continue independent checks.
+Use the findings as candidates, and read [the conventions](../../repo-layout/references/conventions.md) for the ones that matter. The audit's `observations` carry no severity: what each map file and its imports name, which packages the map already routes to, how long documents are reached, and which findings a package boundary, a framework path, a fixture or an unbuilt `dist/` folder explains. They are the starting evidence for task routes in step 3, not defects to fix. Record legitimate framework paths and project-policy exceptions. This reconciliation never enters the migration, branching or commit steps; code moves and layout policy changes need their own authorization. If Node is unavailable, report the missed audit and continue independent checks.
 
 **Every maintained README.** Locate and read the available `readme` skill once, then use its Review mode on each in-scope README, including nested packages, examples and tools. In a cleanup, use its Edit or Improve mode only where findings justify it. Group shared corrections while retaining a coverage entry for each README. Keep detailed rubric results in the review ledger; synthesize the actionable findings in the final report unless the user requests full scores. If the skill is unavailable, disclose that gap and perform a bounded manual review of purpose, fit, prerequisites, first working result and next steps; never claim `/readme` ran or install it silently.
 
@@ -61,7 +36,7 @@ Independent read-only reviewers can divide README groups, host setup and claim v
 
 ## 3. Reconcile against evidence
 
-Use [the review checklist](references/review-checklist.md) for the dimensions of this pass. Verify each actionable claim against the narrowest authoritative source: executable entry points, manifests, tests, maintained configuration, current official host documentation or explicit owner decisions. Record source and version when host behavior is version-dependent.
+Use [the review checklist](review-checklist.md) for the dimensions of this pass. Verify each actionable claim against the narrowest authoritative source: executable entry points, manifests, tests, maintained configuration, current official host documentation or explicit owner decisions. Record source and version when host behavior is version-dependent.
 
 **Task routes.** For each kind of task the project's instructions, docs or checks anticipate, trace the route an agent would follow: the map pointer that names the area, the one document or section that holds the current contract, and the check that proves the change. Propose only a missing link: a `Start here` pointer, a `Where things live` row, a section link or a descriptive heading. Point at the source that owns each fact, such as the manifest, the test or the maintained contract, instead of copying it into the map or another document. A direct route needs nothing, and the map need not list every package or document. Keep a long cohesive reference whole when headings and section links reach its parts, and keep framework and manifest conventions such as required entry names, routing folders and package layouts. Historical records, task notes, experiments and temporary outputs are not contracts; do not route a task to them. A pointer in a map file changes standing instructions, so propose it unless the owner authorized map edits; a heading or section link inside a maintained document is an ordinary fix in a cleanup. Report each proposed route with its task, contract, check and evidence.
 

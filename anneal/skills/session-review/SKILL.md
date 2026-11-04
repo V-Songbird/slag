@@ -114,7 +114,7 @@ Then look, inside the same interval, for what the script cannot see:
 | A project fact: a command, a version, a path, a pitfall | the map file, after approval |
 | A file looked for in the wrong place inside the project (`scope: map-file`) | a focused path hint in the map file's `Where things live`, after approval |
 | A project tool, such as a test or build command, that printed a lot while it passed (`reporter`) | the quieter form the project already supports, in the map file's `Commands`, after approval. A change to the check script itself is reported for repo-layout |
-| A long document read again, or cut, to reach one part (`documentation`) | reported for docs-align: a descriptive heading or a section link. A pointer to the section in the map file's `Start here` may be proposed here; the document is never restructured here |
+| A long document read again, or cut, to reach one part (`documentation`) | reported for repo-docs: a descriptive heading or a section link. A pointer to the section in the map file's `Start here` may be proposed here; the document is never restructured here |
 | Search results filled with generated or dependency files (`layout`) | reported for repo-layout's audit and its ignore step |
 | A machine fact: a shell, a path outside the repository, a version manager (`machine`) | reported for the owner's own global instruction file, never written |
 | A turn that stopped to offer, ask or list the next steps when nothing required it, and the owner only said to continue (a stall candidate, `machine`) | reported for the owner's own global instruction file, never written: a line saying to finish the task without stopping, unless a real stop applies |
@@ -151,6 +151,6 @@ A saved map file is not loaded into a session that is already running. Say so.
 ## 6. Report
 
 - the changes applied, and the map file's line count before and after;
-- what was reported and not written: each machine fact, worded so the owner can paste it into a global instruction file, each check worth writing, with, for a check-writer suggestion, the transcript lines where the mistake repeated when it did, each steering source, and each finding for docs-align or repo-layout;
+- what was reported and not written: each machine fact, worded so the owner can paste it into a global instruction file, each check worth writing, with, for a check-writer suggestion, the transcript lines where the mistake repeated when it did, each steering source, and each finding for repo-docs or repo-layout;
 - what was dismissed, and why;
 - the limits: one session was read, subagent transcripts were listed and not read, the candidate counts are matches, not verified failures, and a navigation candidate's cause is a hypothesis.
