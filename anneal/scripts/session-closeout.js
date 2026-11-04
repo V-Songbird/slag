@@ -294,14 +294,15 @@ function closeout(file, root) {
         + "existed creates none; one with no such output, as in quiet mode or another language, is listed. A start whose "
         + "id the transcript does not show is always listed. A process started any other way, such as with & in a shell "
         + "command, the branch git worktree add creates without -b, a branch name joined to its option, a cd earlier in the "
-        + "same command line, worktree prune, branch renames and every git command in a shell call that reported an error "
-        + "are not seen.",
+        + "same command line, worktree prune, branch renames, every git command in a shell call that reported an error "
+        + "and every git command inside a here-document body, a PowerShell here-string or a block comment, even a body "
+        + "fed to a shell such as bash, sh or pwsh, which runs it, are not seen.",
     },
     warnings: [...warnings].sort(),
     limits: "Claude Code only. A change is a call of Edit, MultiEdit, NotebookEdit or Write that reported no error; a shell "
       + "command that changed files is not listed. A path the script cannot resolve, such as one starting with ~, is "
-      + "unresolved and at risk until checked by hand. A turn counts as in a file when it changed any tracked or ignored file, "
-      + "even an unrelated one, and as transcript-only otherwise, including a turn of questions or status. Only a turn's "
+      + "unresolved and at risk until checked by hand. A turn counts as in a file when it changed any file whose location is now tracked "
+      + "or ignored, even an unrelated one, and as transcript-only otherwise, including a turn of questions or status. Only a turn's "
       + "last text is copied; textLines names every line where the turn wrote text. A file edited "
       + "and later reverted still counts as tracked. Subagent records, subagent transcripts and saved outputs were counted, "
       + "not read. Redaction is best effort.",

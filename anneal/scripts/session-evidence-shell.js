@@ -108,7 +108,7 @@ function programName(part) {
 // PowerShell here-strings and PowerShell block comments.
 function withoutData(command) {
   return command
-    .replace(/<<-?[ \t]*(['"]?)([A-Za-z_]\w*)\1[^\n]*\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\r?\n|$)/g, (text) => text.slice(0, text.indexOf("\n")))
+    .replace(/<<-?[ \t]*(['"]?)([A-Za-z_]\w*)\1[^\n]*\n(?:[\s\S]*?\n)??[ \t]*\2[ \t]*(?=\r?\n|$)/g, (text) => text.slice(0, text.indexOf("\n")))
     .replace(/@(['"])\r?\n[\s\S]*?\r?\n\1@/g, "''")
     .replace(/<#[\s\S]*?#>/g, "");
 }

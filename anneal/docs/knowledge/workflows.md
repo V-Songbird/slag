@@ -303,7 +303,7 @@ The script `anneal/scripts/session-closeout.js` reads the whole transcript with 
 
   The path is taken literally, as the tool took it: `routes/$id.tsx` or `[ab].js` names that one file.
 
-- A `turn` is the text the assistant wrote after one of your prompts, typed or queued while the assistant worked. `ending` copies the last text, and `textLines` names every transcript line where the turn wrote text, since a decision can come before a closing "Done.". The turn counts as in a `file` when it wrote a tracked or ignored file, and as `transcript-only` otherwise. A `transcript-only` turn is at risk.
+- A `turn` is the text the assistant wrote after one of your prompts, typed or queued while the assistant worked. `ending` copies the last text, and `textLines` names every transcript line where the turn wrote text, since a decision can come before a closing "Done.". The turn counts as in a `file` when it wrote a file now `tracked` or `ignored`, and as `transcript-only` otherwise. A `transcript-only` turn is at risk.
 
 `verdict` is `safe-to-delete` when nothing is at risk, and `would-lose` otherwise, with `wouldLose` naming each item at risk by its line or path. `alsoDeleted` counts the subagent transcripts and saved tool outputs in the session's own folder: they go with the session and were not read.
 
@@ -321,11 +321,11 @@ Most turns that end in a question or a status line are `transcript-only`, and mo
 Limits of the close-out:
 
 - It reads Claude Code transcripts only.
-- A turn that wrote any tracked or ignored file counts as in a file, even when that file is unrelated to the turn's decision. The skill's search does not recheck such a turn.
+- A turn that wrote any file now `tracked` or `ignored` counts as in a file, even when that file is unrelated to the turn's decision. The skill's search does not recheck such a turn.
 - A shell command that changed files is not listed, and a file edited and later reverted still counts as tracked.
 - Subagent records in the transcript, subagent transcripts and saved outputs are counted, not read.
 - Redaction of the copied text is best effort, as in the session evidence.
-- The cleanup flag does not see a process started another way, such as with `&` inside a shell command, or one that ended without a notification. It does not see the branch `git worktree add` creates without `-b`, a branch name joined to its option such as `-bname`, a `cd` earlier in the same command line, `git worktree prune`, a branch rename, or any git command in a shell call that reported an error.
+- The cleanup flag does not see a process started another way, such as with `&` inside a shell command, or one that ended without a notification. It does not see the branch `git worktree add` creates without `-b`, a branch name joined to its option such as `-bname`, a `cd` earlier in the same command line, `git worktree prune`, a branch rename, any git command in a shell call that reported an error, or any git command inside a here-document body, a PowerShell here-string or a block comment, even a body fed to a shell such as `bash`, `sh` or `pwsh`, which runs it.
 
 ## How a repeated-step search runs
 

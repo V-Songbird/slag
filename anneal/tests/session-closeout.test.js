@@ -430,6 +430,13 @@ describe("the cleanup flag", () => {
       { flag: "needs-cleanup", ignoredStatusLine: null, leftovers: [] });
   });
 
+  test("a git command after a here-document with an empty body still counts", () => {
+    const dir = repository();
+    const command = "cat <<EOF > a\nEOF\ngit branch keep\ncat <<EOF > b\nx\nEOF";
+    const file = transcript([...fixTurn(dir), use("b1", "Bash", { command }, 5), result("b1", "", 6)]);
+    assert.deepStrictEqual(closeout(file, dir).cleanup.leftovers.map(({ kind, id }) => ({ kind, id })), [{ kind: "branch", id: "keep" }]);
+  });
+
   test("a git command with environment assignments before it counts", () => {
     const dir = repository();
     const file = transcript([
