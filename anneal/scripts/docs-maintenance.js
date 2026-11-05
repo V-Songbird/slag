@@ -278,7 +278,12 @@ function maintain(directory, { stores = [], transcripts = [], memories = [], now
 
   const isTask = (file) => /(^|\/)docs\/tasks\//.test(file) || fields.get(file)?.type === "task_summary";
   const completed = docs.filter((file) => isTask(file) && fields.get(file)?.status === "completed");
-  const uses = transcripts.length ? transcriptUses(transcripts, root, completed) : null;
+  for (const dir of transcripts) {
+    if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`not a transcripts directory: ${dir}`);
+  }
+  // Transcripts are read only when a completed note is old enough to be proposed.
+  const stale = completed.filter((file) => now - written(file) > FOLD_AFTER_DAYS * DAY);
+  const uses = transcripts.length && stale.length ? transcriptUses(transcripts, root, stale) : null;
 
   for (const file of docs) {
     const meta = fields.get(file);

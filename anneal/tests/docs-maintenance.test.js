@@ -141,6 +141,26 @@ test("with transcripts, a completed note another session read within three days 
   assert.ok(report.proposals.every((p) => p.detail.includes("no other session read it within 3 days")));
 });
 
+test("transcripts are read only when a completed note is older than three days", (t) => {
+  const root = repo();
+  write(root, { "docs/tasks/done.md": task("completed"), ".private/transcripts/reader.jsonl": "{}\n" });
+  age(root, "docs/tasks/done.md", 1);
+  const dir = path.join(root, ".private", "transcripts");
+  const transcripts = [];
+  const read = fs.readFileSync;
+  t.mock.method(fs, "readFileSync", function (file, ...rest) {
+    if (String(file).endsWith(".jsonl")) transcripts.push(path.basename(String(file)));
+    return read.call(this, file, ...rest);
+  });
+  maintain(root, { transcripts: [dir] });
+  assert.deepStrictEqual(transcripts, []);
+  age(root, "docs/tasks/done.md", 10);
+  maintain(root, { transcripts: [dir] });
+  assert.deepStrictEqual(transcripts, ["reader.jsonl"]);
+  // A transcripts folder that does not exist is refused even then.
+  assert.throws(() => maintain(repo(), { transcripts: [path.join(root, "missing")] }));
+});
+
 test("oversized history is proposed for condensing and per-entry docs for merging", () => {
   const root = repo();
   const entry = (n) => `---\ntype: knowledge\nsummary: "Evidence from roadmap entry ${n}."\nrelated_files: []\n---\n`;
@@ -456,6 +476,9 @@ test("the CLI changes nothing, works before the first commit, and exits 2 on bad
   assert.strictEqual(cli([]), 2);
   assert.strictEqual(cli(["--root", root, "--store"]), 2);
   assert.strictEqual(cli(["--root", root, "--transcripts", path.join(root, "missing")]), 2);
+  // With no note old enough to need transcripts, a missing folder is still refused.
+  const fresh = repo();
+  assert.strictEqual(cli(["--root", fresh, "--transcripts", path.join(fresh, "missing")]), 2);
   assert.strictEqual(cli(["--root", root, "--memory", "missing"]), 2);
   assert.strictEqual(cli(["--help"]), 0);
 });

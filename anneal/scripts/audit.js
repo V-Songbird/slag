@@ -492,7 +492,7 @@ const looksLikePath = (target) => /^(?:\.{1,2}\/|~\/|\/|[A-Za-z]:[\\/])/.test(ta
 // apart. Outside the root it reads only what the caller names. Codex's global
 // files are listed apart and left out of the Claude Code total.
 function startContext(root, reader, { global = [], codex = [], memory, transcripts = [] } = {}) {
-  const { excerpt } = require("./session-evidence-redaction.js");
+  const { directory } = require("./session-evidence-redaction.js");
   const sources = [];
   const missing = [];
   const keyOf = (abs) => (process.platform === "win32" ? path.resolve(abs).toLowerCase() : path.resolve(abs));
@@ -503,9 +503,8 @@ function startContext(root, reader, { global = [], codex = [], memory, transcrip
     const rel = path.relative(root, abs);
     return rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel.split(path.sep).join("/") : null;
   };
-  // A path outside the root is redacted as session evidence is: the home shortened to ~, and the
-  // account name masked, also inside a Claude Code project key.
-  const label = (abs) => inside(abs) ?? excerpt(abs);
+  // A path outside the root has the home shortened to ~ and nothing else changed, so it still names the file.
+  const label = (abs) => inside(abs) ?? directory(abs);
   const read = (abs) => (fs.statSync(abs, { throwIfNoEntry: false })?.isFile() ? readFile(path.dirname(abs), path.basename(abs)) : null);
   // The file's text, null for a file not read as text, undefined when absent, SEEN when already counted.
   const load = (abs, loads, fromGlobal = false, given = null) => {
@@ -553,7 +552,7 @@ function startContext(root, reader, { global = [], codex = [], memory, transcrip
     if (!info) missing.push({ source: "Codex global", file: label(abs), reason: "not found" });
     else others.push({ file: label(abs), loads: "global, Codex; not in the Claude Code total", characters: info.text === null ? info.size : info.text.length });
   }
-  if (!memory) missing.push({ source: "memory index", file: null, reason: "not given; pass --memory <file>" });
+  if (!memory) missing.push({ source: "memory index", file: null, reason: "not given" });
   else if (load(path.resolve(memory), "memory index") === undefined) missing.push({ source: "memory index", file: label(path.resolve(memory)), reason: "not found" });
 
   // Imports, breadth first. A file outside the root is read only when the caller named its importer.
@@ -617,10 +616,10 @@ function bulletsOf(text) {
 // The bullets of each global instruction file that no other one has, leaving out bullets that
 // name a host. It reports only; which copy is right is the owner's call.
 function instructionDrift(files) {
-  const { excerpt, redact } = require("./session-evidence-redaction.js");
+  const { directory, redact } = require("./session-evidence-redaction.js");
   const read = [...new Set(files.map((file) => path.resolve(file)))].flatMap((abs) => {
     const info = fs.statSync(abs, { throwIfNoEntry: false })?.isFile() ? readFile(path.dirname(abs), path.basename(abs)) : null;
-    return typeof info?.text === "string" ? [{ file: excerpt(abs), bullets: new Set(bulletsOf(info.text).filter((bullet) => !HOST_NAME.test(bullet))) }] : [];
+    return typeof info?.text === "string" ? [{ file: directory(abs), bullets: new Set(bulletsOf(info.text).filter((bullet) => !HOST_NAME.test(bullet))) }] : [];
   });
   if (read.length < 2) return { files: read.map((entry) => entry.file), onlyIn: [] };
   // Bullets are compared as written, so a difference only in a secret or the account name still counts. Those reported
@@ -714,6 +713,7 @@ function audit(rootArg, options = {}) {
     checks,
     startContext: startContext(root, reader, options),
     instructionDrift: instructionDrift([...(options.global || []), ...(options.codex || [])]),
+    strandedMemory: options.stranded ?? null,
     findings,
     observations: observe(files, reader, facts, shared),
   };
@@ -778,6 +778,16 @@ function formatSummary(report) {
     lines.push("", `instruction drift: ${plural(count, "bullet")} in only one of ${drift.files.join(", ")}; bullets that name a host left out. Which copy is right is yours to decide.`);
     for (const entry of drift.onlyIn) lines.push(`  only in ${entry.file}:`, ...entry.bullets.map((bullet) => `    - ${bullet}`));
   }
+  const stranded = report.strandedMemory;
+  if (stranded?.candidates.length) {
+    const n = stranded.candidates.length;
+    lines.push(
+      "",
+      `memory left behind: ${stranded.folder} holds no memory, and ${plural(n, "other Claude Code project folder")} whose transcripts name this repository ${n === 1 ? "does" : "do"}:`,
+      ...stranded.candidates.map((entry) => `  ${entry.memory}: ${plural(entry.files, "memory file")}; a transcript names this repository's ${entry.names}`),
+      "  Claude Code keys memory by folder path, so a renamed or moved repository starts without it. Moving the files is yours to decide; the audit moves none. To keep memory with the repository, see \"Memory kept by folder path\" in anneal/skills/repo-layout/references/map-file.md.",
+    );
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -785,21 +795,21 @@ function formatSummary(report) {
 // of each host whose home exists, and Claude Code's folder for the project. The homes follow
 // CLAUDE_CONFIG_DIR and CODEX_HOME as the session scripts do, and the folder key is the one
 // session-repeats.js matches: the root's path with each character outside [A-Za-z0-9] a hyphen.
-// The transcripts are that folder and its `<key>--claude-worktrees-*` siblings. The memory folder
-// is the autoMemoryDirectory of .claude/settings.local.json, else of the home's settings.json,
-// else the project folder's memory/.
+// The transcripts are the folders of the root and of its primary checkout, each with its
+// `<key>--claude-worktrees-*` siblings. The memory folder is the autoMemoryDirectory of
+// .claude/settings.local.json, else of the home's settings.json, else the project folder's memory/;
+// a leading ~/, on Windows ~\, or a bare ~ is the home.
 function hostDefaults(root, env = process.env) {
   const { HOME } = require("./session-evidence-redaction.js");
   const claude = env.CLAUDE_CONFIG_DIR || (HOME ? path.join(HOME, ".claude") : null);
   const codex = env.CODEX_HOME || (HOME ? path.join(HOME, ".codex") : null);
   const present = (home) => home && fs.existsSync(home);
-  const key = path.resolve(root).replace(/[^A-Za-z0-9]/g, "-");
-  const project = claude ? path.join(claude, "projects", key) : null;
-  const fold = (name) => (process.platform === "win32" ? name.toLowerCase() : name);
+  const project = claude ? path.join(claude, "projects", projectKey(root)) : null;
+  const own = ownFolders(root, primaryCheckout(root));
   let transcripts = [];
   try {
     transcripts = fs.readdirSync(path.join(claude, "projects"), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && (fold(entry.name) === fold(key) || fold(entry.name).startsWith(fold(`${key}--claude-worktrees-`))))
+      .filter((entry) => entry.isDirectory() && own(entry.name))
       .map((entry) => path.join(claude, "projects", entry.name)).sort();
   } catch {
     transcripts = [];
@@ -811,7 +821,8 @@ function hostDefaults(root, env = process.env) {
       return undefined;
     }
   }).find((value) => typeof value === "string" && value);
-  const memory = setting ? (setting.startsWith("~/") && HOME ? path.join(HOME, setting.slice(2)) : path.resolve(root, setting)) : project && path.join(project, "memory");
+  const tilde = process.platform === "win32" ? /^~(?:[\\/]|$)/ : /^~(?:\/|$)/;
+  const memory = setting ? (tilde.test(setting) && HOME ? path.join(HOME, setting.slice(2)) : path.resolve(root, setting)) : project && path.join(project, "memory");
   return {
     global: present(claude) ? [path.join(claude, "CLAUDE.md")] : [],
     codex: present(codex) ? [path.join(codex, "AGENTS.md")] : [],
@@ -821,10 +832,101 @@ function hostDefaults(root, env = process.env) {
   };
 }
 
+const projectKey = (dir) => path.resolve(dir).replace(/[^A-Za-z0-9]/g, "-");
+
+// The primary checkout of the repository that holds root, the first one `git worktree list` names,
+// or root itself when Git names none.
+function primaryCheckout(root) {
+  const listed = spawnSync("git", ["-C", root, "worktree", "list", "--porcelain"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  const first = listed.status === 0 ? /^worktree (.+)$/m.exec(listed.stdout) : null;
+  return path.resolve(first ? first[1] : root);
+}
+
+// Whether a Claude Code project folder belongs to root: the folder of root or of its primary
+// checkout, or one of their `--claude-worktrees-` folders, in any letter case on Windows.
+function ownFolders(root, primary) {
+  const fold = (name) => (process.platform === "win32" ? name.toLowerCase() : name);
+  const keys = [...new Set([root, primary].map((dir) => fold(projectKey(dir))))];
+  return (name) => keys.some((key) => fold(name) === key || fold(name).startsWith(`${key}--claude-worktrees-`));
+}
+
+// When the root's own Claude Code project folder keeps no memory, the other project folders whose
+// memory/ holds a .md file and whose transcripts name this repository: a remote URL, as host/owner/repo,
+// or the path of the root or its primary checkout. Each folder's top-level transcripts are read
+// newest first until one matches. Null when there is no projects folder to read. It reads and moves nothing else.
+function strandedMemory(root, defaults) {
+  if (!defaults.project) return null;
+  const { directory } = require("./session-evidence-redaction.js");
+  const projects = path.dirname(defaults.project);
+  let names;
+  try {
+    names = fs.readdirSync(projects, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+  } catch {
+    return null;
+  }
+  const notes = (folder) => {
+    try {
+      return fs.readdirSync(path.join(folder, "memory")).filter((name) => name.endsWith(".md"));
+    } catch {
+      return [];
+    }
+  };
+  const folder = directory(path.join(defaults.project, "memory"));
+  if (notes(defaults.project).length) return { folder, candidates: [] };
+
+  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const absolute = path.resolve(root);
+  const primary = primaryCheckout(root);
+  const own = ownFolders(absolute, primary);
+  let config = "";
+  try {
+    config = execFileSync("git", ["-C", absolute, "config", "--get-regexp", "^remote\\..*\\.url$"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    config = "";
+  }
+  // A remote URL as host/owner/repo, without its scheme, user, trailing slash or .git.
+  const remotes = config.split("\n").map((line) => line.trim().split(/\s+/)[1]).filter(Boolean)
+    .map((url) => url.toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").replace(/^[^@/]+@/, "").replace(/\/+$/, "").replace(/\.git$/, "").replace(/^([^/:]{2,}):/, "$1/"))
+    .filter((url) => /^[^/:]+\/[^/]+\/./.test(url))
+    .map((url) => `${escape(url.slice(0, url.indexOf("/")))}[/:]${escape(url.slice(url.indexOf("/") + 1))}(?:\\.git)?`);
+  const remote = remotes.length ? new RegExp(`(?<![\\w.-])(?:${[...new Set(remotes)].join("|")})(?![\\w.-])`, "i") : null;
+  const spellings = [...new Set([absolute, primary].flatMap((dir) => [dir, dir.replace(/\\/g, "/"), JSON.stringify(dir).slice(1, -1)]))];
+  const named = new RegExp(`(?:${spellings.map(escape).join("|")})(?![\\w.-])`, process.platform === "win32" ? "i" : "");
+
+  const candidates = [];
+  for (const name of names) {
+    const dir = path.join(projects, name);
+    const memory = notes(dir);
+    if (own(name) || !memory.length) continue;
+    let transcripts = [];
+    try {
+      transcripts = fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+        .map((entry) => ({ file: path.join(dir, entry.name), time: fs.statSync(path.join(dir, entry.name)).mtimeMs }))
+        .sort((a, b) => b.time - a.time);
+    } catch {
+      transcripts = [];
+    }
+    let match = null;
+    for (const { file } of transcripts) {
+      let text;
+      try {
+        text = fs.readFileSync(file, "utf8");
+      } catch {
+        continue;
+      }
+      match = remote?.test(text) ? "remote" : named.test(text) ? "path" : null;
+      if (match) break;
+    }
+    if (match) candidates.push({ memory: directory(path.join(dir, "memory")), files: memory.filter((file) => file !== "MEMORY.md").length, transcripts: transcripts.length, names: match });
+  }
+  candidates.sort((a, b) => b.files - a.files || a.memory.localeCompare(b.memory));
+  return { folder, candidates };
+}
+
 // One line for a default folder that does not exist; the run goes on without it.
 function noDefault(script, what, dir, flag) {
-  const { excerpt } = require("./session-evidence-redaction.js");
-  process.stderr.write(`${script}: no ${what}${dir ? ` at ${excerpt(dir)}` : ""}; pass ${flag} to name one\n`);
+  const { directory } = require("./session-evidence-redaction.js");
+  process.stderr.write(`${script}: no ${what}${dir ? ` at ${directory(dir)}` : ""}; pass ${flag} to name one\n`);
 }
 
 function main(argv) {
@@ -860,16 +962,19 @@ function main(argv) {
   const defaults = hostDefaults(root);
   const codex = globalGiven ? [] : defaults.codex;
   if (!globalGiven) global = defaults.global;
-  if (memory === undefined) {
-    if (defaults.memory && fs.existsSync(defaults.memory)) memory = path.join(defaults.memory, "MEMORY.md");
-    else noDefault("audit.js", "Claude Code memory folder", defaults.memory, "--memory <file>");
+  const memoryGiven = memory !== undefined;
+  if (!memoryGiven) {
+    // A derived memory index that does not exist is still named, as not found.
+    if (defaults.memory) memory = path.join(defaults.memory, "MEMORY.md");
+    if (!defaults.memory || !fs.existsSync(defaults.memory)) noDefault("audit.js", "Claude Code memory folder", defaults.memory, "--memory <file>");
   }
-  const report = audit(root, { global, codex, memory, transcripts: defaults.transcripts });
+  const stranded = memoryGiven ? null : strandedMemory(root, defaults);
+  const report = audit(root, { global, codex, memory, transcripts: defaults.transcripts, stranded });
   process.stdout.write(json ? `${JSON.stringify(report, null, 2)}\n` : formatSummary(report));
   return 0;
 }
 
 // Exported before main runs, so a module main loads lazily sees the whole API.
-module.exports = { HIDDEN_CHARACTERS, audit, formatSummary, hostDefaults, limitationFor, main, noDefault };
+module.exports = { HIDDEN_CHARACTERS, audit, formatSummary, hostDefaults, limitationFor, main, noDefault, strandedMemory };
 
 if (require.main === module) process.exitCode = main(process.argv);

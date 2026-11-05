@@ -46,3 +46,9 @@ In a map anneal writes, spell the headings this way and keep this order. Leave o
 A map that already routes works in whatever form it has: prose, a table, a tree, links or an `@path` import. Offer a reshape as an option the owner can decline, never as a defect to fix.
 
 Move sentences; don't rewrite them. Before editing, show the owner which old heading lands in which section, and list separately anything that would leave the file, with the document it would move to. Nothing leaves without that approval. The project's own rules about its map file win over this skeleton.
+
+## Memory kept by folder path
+
+Claude Code keeps a project's native memory under its own home, in a folder named from the project's path. A renamed or moved repository therefore starts with no memory, and the audit's `memory left behind` block names the old folders whose transcripts name the repository.
+
+To keep memory with the repository, set `autoMemoryDirectory` in `.claude/settings.local.json` to a folder inside the repository, such as `.claude/memory/`. That file belongs to one machine; the audit does not read the setting from the shared `.claude/settings.json`. Point the setting at the repository's current location, and update it after a move if it holds a full path. Whether to move existing memory files there is the owner's call; the audit moves none.

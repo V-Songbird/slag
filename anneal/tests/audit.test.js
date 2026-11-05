@@ -7,6 +7,11 @@ const { test, describe, after } = require("node:test");
 const assert = require("node:assert");
 const fs = require("node:fs");
 const os = require("node:os");
+// The home and the account are fixed before the scripts load, so a case that names them holds on any
+// machine. A test that changes the real account's file access uses its real name.
+const ACCOUNT = os.userInfo().username;
+os.homedir = () => (process.platform === "win32" ? "C:\\Users\\quillfen" : "/home/quillfen");
+os.userInfo = () => ({ username: "quillfen" });
 require("./temp-root.js");
 const path = require("node:path");
 const { spawnSync, execFileSync } = require("node:child_process");
@@ -428,7 +433,7 @@ describe("build output", () => {
       assertNo(readable, "build-output-not-ignored");
 
       // Deny the read the way a sandbox does: an ACL entry on Windows, mode 000 elsewhere.
-      if (process.platform === "win32") spawnSync("icacls", [excludes, "/deny", `${os.userInfo().username}:(R)`], { stdio: "ignore" });
+      if (process.platform === "win32") spawnSync("icacls", [excludes, "/deny", `${ACCOUNT}:(R)`], { stdio: "ignore" });
       else fs.chmodSync(excludes, 0);
       try {
         fs.readFileSync(excludes);
@@ -787,6 +792,19 @@ describe("start context", () => {
     });
   }
 
+  test("a path outside the root keeps the account name, with the home as ~", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-label-"));
+    created.push(dir);
+    const file = path.join(dir, "quillfen", "CLAUDE.md");
+    write(dir, { "quillfen/CLAUDE.md": "- one rule\n" });
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    const report = audit(root, { global: [file] });
+    assert.strictEqual(report.startContext.sources.find((source) => source.loads === "global").file, file);
+    assert.deepStrictEqual(report.instructionDrift.files, [file]);
+    const home = audit(root, { global: [path.join(HOME, "CLAUDE.md")] });
+    assert.strictEqual(home.startContext.missing.find((entry) => entry.source === "global").file, path.join("~", "CLAUDE.md"));
+  });
+
   test("the project folder key is the root's path with each character outside [A-Za-z0-9] a hyphen", () => {
     const home = path.join(os.tmpdir(), "fake-claude");
     const [root, key] = process.platform === "win32" ? ["D:\\a.b\\c d", "D--a-b-c-d"] : ["/a.b/c d", "-a-b-c-d"];
@@ -810,6 +828,35 @@ describe("start context", () => {
     const result = spawnSync(process.execPath, [CLI, "--root", root, "--json"], { encoding: "utf-8", env: { ...process.env, ...env } });
     assert.strictEqual(result.status, 0, result.stderr);
     assert.deepStrictEqual(JSON.parse(result.stdout).startContext.sources.filter((source) => source.loads === "memory index").map((source) => source.characters), ["- one memory\n".length]);
+  });
+
+  test("autoMemoryDirectory ~ and, on Windows, ~\\<dir> are the home", () => {
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    const env = { CLAUDE_CONFIG_DIR: path.join(root, "no-home"), CODEX_HOME: path.join(root, "no-home") };
+    const memoryFor = (setting) => {
+      write(root, { ".claude/settings.local.json": JSON.stringify({ autoMemoryDirectory: setting }) });
+      return hostDefaults(root, env).memory;
+    };
+    assert.strictEqual(memoryFor("~"), HOME);
+    assert.strictEqual(memoryFor("~/mem"), path.join(HOME, "mem"));
+    assert.strictEqual(memoryFor("~mem"), path.join(root, "~mem"));
+    if (process.platform === "win32") assert.strictEqual(memoryFor("~\\mem"), path.join(HOME, "mem"));
+  });
+
+  test("a linked worktree reads the primary checkout's transcript folders", () => {
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+    execFileSync("git", ["-C", root, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"], { stdio: "ignore" });
+    const outer = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-worktree-"));
+    created.push(outer);
+    const worktree = path.join(outer, "wt");
+    execFileSync("git", ["-C", root, "worktree", "add", "-q", worktree, "-b", "side"], { stdio: "ignore" });
+    const listed = execFileSync("git", ["-C", worktree, "worktree", "list", "--porcelain"], { encoding: "utf8" });
+    const [primary, linked] = [...listed.matchAll(/^worktree (.+)$/gm)].map((match) => path.resolve(match[1]).replace(/[^A-Za-z0-9]/g, "-"));
+    const claude = path.join(outer, "claude");
+    for (const name of [primary, `${primary}--claude-worktrees-x`, linked, "unrelated"]) fs.mkdirSync(path.join(claude, "projects", name), { recursive: true });
+    const { transcripts, project } = hostDefaults(worktree, { CLAUDE_CONFIG_DIR: claude, CODEX_HOME: path.join(outer, "codex") });
+    assert.deepStrictEqual(transcripts, [primary, `${primary}--claude-worktrees-x`, linked].map((name) => path.join(claude, "projects", name)).sort());
+    assert.strictEqual(path.basename(project).toLowerCase(), path.resolve(worktree).replace(/[^A-Za-z0-9]/g, "-").toLowerCase());
   });
 
   test("the summary says when no SessionStart hook is declared", () => {
@@ -851,7 +898,75 @@ describe("start context", () => {
     const absent = run();
     assert.strictEqual(absent.status, 0);
     assert.match(absent.stderr, /^audit\.js: no Claude Code memory folder at .*memory; pass --memory <file> to name one\n$/);
-    assert.match(JSON.parse(absent.stdout).startContext.missing.find((entry) => entry.source === "memory index").reason, /^not given/);
+    // The derived memory index is named as not found.
+    const [missing, ...more] = JSON.parse(absent.stdout).startContext.missing.filter((entry) => entry.source === "memory index");
+    assert.deepStrictEqual(more, []);
+    assert.strictEqual(missing.reason, "not found");
+    assert.ok(missing.file.endsWith(path.join(path.basename(memory), "MEMORY.md")), missing.file);
+  });
+
+  describe("memory left behind", () => {
+    // Every file under a folder with its size, to show a run changed nothing.
+    const listing = (dir) => fs.readdirSync(dir, { recursive: true }).map(String).sort().map((file) => `${file} ${fs.statSync(path.join(dir, file)).size}`);
+
+    function setup() {
+      const homes = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-homes-"));
+      created.push(homes);
+      const root = repo({ tracked: { "CLAUDE.md": "# Shop\n" } });
+      fs.appendFileSync(path.join(root, ".git", "config"), '[remote "origin"]\n\turl = https://example.invalid/team/shop.git\n');
+      const claude = path.join(homes, "claude");
+      const projects = path.join(claude, "projects");
+      const key = path.resolve(root).replace(/[^A-Za-z0-9]/g, "-");
+      const line = (record) => `${JSON.stringify(record)}\n`;
+      write(projects, {
+        "old-shop/memory/MEMORY.md": "- [A](a.md)\n- [B](b.md)\n",
+        "old-shop/memory/a.md": "a\n",
+        "old-shop/memory/b.md": "b\n",
+        "old-shop/s1.jsonl": line({ type: "user", cwd: root }),
+        "old-remote/memory/one.md": "one\n",
+        "old-remote/s2.jsonl": line({ type: "user", message: "pushed to git@example.invalid:team/shop.git" }),
+        "unrelated/memory/x.md": "x\n",
+        "unrelated/s3.jsonl": line({ type: "user", cwd: `${root}-old`, message: "cloned https://example.invalid/team/shop2" }),
+        [`${key}--claude-worktrees-a/memory/x.md`]: "x\n",
+        [`${key}--claude-worktrees-a/s4.jsonl`]: line({ type: "user", cwd: root }),
+      });
+      // A home apart from the fixtures, so their paths show in full.
+      const home = path.join(homes, "home");
+      const env = { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: claude, CODEX_HOME: path.join(homes, "codex") };
+      const run = (...args) => spawnSync(process.execPath, [CLI, "--root", root, ...args], { encoding: "utf-8", env });
+      return { root, projects, key, run };
+    }
+
+    test("names other project folders with memory whose transcripts name the repository's path or remote", () => {
+      const { projects, key, run } = setup();
+      const before = listing(projects);
+      const json = run("--json");
+      assert.strictEqual(json.status, 0, json.stderr);
+      assert.deepStrictEqual(JSON.parse(json.stdout).strandedMemory, {
+        folder: path.join(projects, key, "memory"),
+        candidates: [
+          { memory: path.join(projects, "old-shop", "memory"), files: 2, transcripts: 1, names: "path" },
+          { memory: path.join(projects, "old-remote", "memory"), files: 1, transcripts: 1, names: "remote" },
+        ],
+      });
+      const { stdout } = run();
+      assert.ok(stdout.includes(`\n\nmemory left behind: ${path.join(projects, key, "memory")} holds no memory, and 2 other Claude Code project folders whose transcripts name this repository do:\n`
+        + `  ${path.join(projects, "old-shop", "memory")}: 2 memory files; a transcript names this repository's path\n`
+        + `  ${path.join(projects, "old-remote", "memory")}: 1 memory file; a transcript names this repository's remote\n`
+        + "  Claude Code keys memory by folder path, so a renamed or moved repository starts without it. Moving the files is yours to decide; the audit moves none."), stdout);
+      assert.deepStrictEqual(listing(projects), before);
+    });
+
+    test("names nothing when the root's own folder has memory or --memory names a file", () => {
+      const { root, projects, key, run } = setup();
+      write(projects, { [`${key}/memory/MEMORY.md`]: "- one memory\n" });
+      const own = run("--json");
+      assert.deepStrictEqual(JSON.parse(own.stdout).strandedMemory, { folder: path.join(projects, key, "memory"), candidates: [] });
+      assert.ok(!run().stdout.includes("memory left behind"));
+      fs.rmSync(path.join(projects, key), { recursive: true });
+      write(root, { "notes/MEMORY.md": "- one memory\n" });
+      assert.strictEqual(JSON.parse(run("--json", "--memory", path.join(root, "notes", "MEMORY.md")).stdout).strandedMemory, null);
+    });
   });
 
   test("rules without paths frontmatter load, rules with it do not", () => {
