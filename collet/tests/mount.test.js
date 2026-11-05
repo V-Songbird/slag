@@ -62,7 +62,15 @@ for (const [label, text] of [
   ['an indented code block', '# Notes\n\n    @AGENTS.md\n'],
   ['a tab-indented code block', '# Notes\n\n\t@AGENTS.md\n'],
   ['a fence in a blockquote', '# Notes\n\n> ~~~\n> @AGENTS.md\n> ~~~\n'],
-  ['a fence in a nested list item', '- a\n  - b\n\n        ~~~\n        @AGENTS.md\n        ~~~\n'],
+  ['a fence in a nested list item', '- a\n  - b\n\n      ~~~\n      @AGENTS.md\n      ~~~\n'],
+  ['a fence on a bullet line', '- ```\n  @AGENTS.md\n  ```\n'],
+  ['a fence on a numbered line', '1. ~~~\n   @AGENTS.md\n   ~~~\n'],
+  ['an indented code block after a heading', '# H\n    @AGENTS.md\n'],
+  ['an indented code block on the first line', '    @AGENTS.md\n'],
+  ['indented code on a list line', '-     x\n\n      @AGENTS.md\n'],
+  ['a fence in a blockquote in a list item', '- a\n\n  > ~~~\n  > @AGENTS.md\n  > ~~~\n'],
+  ['a fence whose indented closer is content', '~~~\n    ~~~\n@AGENTS.md\n~~~\n'],
+  ['a fence whose quoted closer is content', '~~~\n> ~~~\n@AGENTS.md\n~~~\n'],
   ['a blockquote fence with a bare quote line', '# Notes\n\n> ```\n> x\n>\n> @AGENTS.md\n> ```\n'],
 ]) {
   test(`an import inside ${label} does not count`, () => {
@@ -78,6 +86,9 @@ for (const [label, text] of [
   ['a nested list paragraph', '- a\n  - b\n\n      @AGENTS.md\n'],
   ['an indented line that looks like a fence', 'Example:\n\n    ```\n\n@AGENTS.md\n'],
   ['a blockquote fence the quote ends', '> ~~~\n> x\n\n@AGENTS.md\n'],
+  ['a nested blockquote fence the outer quote ends', '> > ~~~\n> \n> @AGENTS.md\n'],
+  ['a tab-separated list paragraph', '-\tfoo\n\n\t@AGENTS.md\n'],
+  ['a list-item fence a dedented line ends', '- ```\n  x\n@AGENTS.md\n'],
 ]) {
   test(`an import after ${label} still counts`, () => {
     const root = project({ ...TREE, 'CLAUDE.md': text });
