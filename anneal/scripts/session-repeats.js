@@ -11,17 +11,14 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { HOME, directory, excerpt, redact } = require("./session-evidence-redaction.js");
+const { HOME, cut, directory, excerpt, redact } = require("./session-evidence-redaction.js");
 const { records } = require("./session-evidence-records.js");
 const { analyzeClaude } = require("./session-evidence-claude.js");
-const { analyzeCodex } = require("./session-evidence-codex.js");
+const { CODEX_SHELL_TOOLS, analyzeCodex } = require("./session-evidence-codex.js");
 const { detectHost } = require("./session-evidence.js");
 
 const WINDOWS = process.platform === "win32";
 const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
-// Codex's shell tools: exec_command, shell_command, the legacy shell with its argument array, and the code-mode exec
-// script that calls them.
-const CODEX_SHELL_TOOLS = new Set(["exec_command", "shell_command", "shell", "exec"]);
 const LOOKUP_TOOLS = new Set(["Read", "NotebookRead", "Grep", "Glob", "LS"]);
 const MAP_FILES = ["CLAUDE.md", "AGENTS.md", "GEMINI.md"];
 const KINDS = ["commands", "sequences", "lookups", "prompts"];
@@ -33,6 +30,10 @@ const TEMP_FOLDER = /(?:^|\/)(?:tmp|temp|scratchpad)\//i;
 const ENVELOPE = /<([a-z][\w-]*)\b[^>]*>[\s\S]*?<\/\1>/gi;
 const COMMAND_NAME = /<command-name>\s*(\/[^\s<]+)\s*<\/command-name>/;
 const CUT = " [excerpt truncated]";
+// What redaction writes in place of a secret or a character a reader cannot see.
+const MARKERS = /(\[REDACTED\]|<U\+[0-9A-F]{4,6}>|<\d+ Unicode tag characters?>)/;
+// A printed step's bound, below the key's.
+const SHOWN = 240;
 
 const USAGE = "usage: session-repeats.js --root <repository> [--sessions-dir <dir>]... [--session-file <file>]... [--also-root <repository>]...\n"
   + "       [--claude-home <dir>] [--codex-home <dir>] [--min-sessions <2-20>] [--limit <1-30>]\n";
@@ -222,17 +223,20 @@ function stepOf(call, host, normalize) {
 }
 
 // A typed prompt's key, read from the redacted prompt, so a home path or account name that redaction matches by case
-// is gone before lower casing: a slash command by its name, any other prompt lower case, without host envelopes, with
-// its whitespace collapsed and its closing punctuation removed.
+// is gone before lower casing: a slash command, a first word whose only slash leads it, by its name; any other prompt
+// lower case outside redaction's markers, without host envelopes, with its whitespace collapsed and its closing
+// punctuation removed. A prompt that starts with an absolute path is keyed whole.
 function promptKey(text) {
   const named = COMMAND_NAME.exec(text);
-  const typed = redact(named ? named[1] : text.replace(ENVELOPE, " ")).toLowerCase().replace(/\s+/g, " ").trim();
-  if (typed.startsWith("/")) return typed.split(" ")[0];
+  const typed = redact(named ? named[1] : text.replace(ENVELOPE, " ")).split(MARKERS)
+    .map((part, index) => (index % 2 ? part : part.toLowerCase())).join("").replace(/\s+/g, " ").trim();
+  if (/^\/[^\s/]+(?:\s|$)/.test(typed)) return typed.split(" ")[0];
   return typed.replace(/[\s.!?¡¿,;:…]+$/u, "") || null;
 }
 
 // What a map file at the root, or a file one of them imports with @, names: each inline code span, each line of a
-// fenced block and each link target, whitespace collapsed. A step is named only as one of them whole.
+// fenced block and each link target, whitespace collapsed. A step is named only as one of them whole. `rows` holds
+// each prose line with its inline code spans, so a command can be named beside the folder it runs from.
 function mapSpans(root) {
   const texts = [];
   for (const name of MAP_FILES) {
@@ -248,6 +252,7 @@ function mapSpans(root) {
     }
   }
   const spans = [];
+  const rows = [];
   for (const text of texts) {
     const prose = text.replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n([\s\S]*?)^ {0,3}\1[^\n]*$/gm, (block, fence, body) => {
       spans.push(...body.split("\n"));
@@ -255,8 +260,24 @@ function mapSpans(root) {
     });
     for (const [, span] of prose.matchAll(/`([^`\n]+)`/g)) spans.push(span);
     for (const [, target] of prose.matchAll(/\]\(\s*<?([^)\s>]+)/g)) spans.push(target.replace(/#.*$/, "").replace(/^\.\//, ""));
+    for (const line of prose.split("\n")) {
+      const code = [...line.matchAll(/`([^`\n]+)`/g)].map(([, span]) => span);
+      if (code.length) rows.push({ spans: code, text: line });
+    }
   }
-  return new Set(spans.map((span) => span.trim().replace(/\s+/g, " ")).filter(Boolean));
+  const collapse = (span) => span.trim().replace(/\s+/g, " ");
+  return { spans: new Set(spans.map(collapse).filter(Boolean)), rows: rows.map((row) => ({ spans: row.spans.map(collapse), text: row.text })) };
+}
+
+// Whether the map names a command whole, or names a command run from a folder, `cd <folder> && <command>`, as the bare
+// command in a row whose text names the folder as a path: `<folder>`, `<folder>/` or `./<folder>`.
+function namesCommand(map, command) {
+  if (map.spans.has(command)) return true;
+  const keyed = /^cd ("(?:[^"\\]|\\.)*"|\S+) && (.+)$/.exec(command);
+  if (!keyed) return false;
+  const folder = keyed[1].startsWith('"') ? JSON.parse(keyed[1]) : keyed[1];
+  const named = new RegExp(String.raw`(?<![\w./-])(?:\./)?${escape(folder)}/?(?![\w-]|[./][\w-])`, WINDOWS ? "i" : "");
+  return map.rows.some((row) => row.spans.includes(keyed[2]) && named.test(row.text));
 }
 
 // The root package.json script a command runs by name, or whose own text is the command.
@@ -270,7 +291,8 @@ function scriptsOf(root) {
 }
 
 function projectScript(command, scripts, byName = true) {
-  const run = byName && /^(?:npm|pnpm|yarn|bun)(?: run(?:-script)?)? ([\w:.-]+)\b|^node --run ([\w:.-]+)\b/.exec(command);
+  // `bun test` runs Bun's own test runner, whatever the scripts hold, so a Bun script runs by name only with `bun run`.
+  const run = byName && /^(?:(?:npm|pnpm|yarn)(?: run(?:-script)?)?|bun run) ([\w:.-]+)\b|^node --run ([\w:.-]+)\b/.exec(command);
   const name = run && (run[1] || run[2]);
   if (name && Object.hasOwn(scripts, name)) return name;
   return Object.keys(scripts).sort().find((key) => scripts[key] === command) ?? null;
@@ -330,13 +352,14 @@ function main(argv, env = process.env) {
   const normalize = normalizer(repositories[0].paths);
   // A script's text and what the map names are normalized as a step is, so that they compare with its key.
   const scripts = Object.fromEntries(Object.entries(scriptsOf(root)).map(([key, text]) => [key, typeof text === "string" ? normalize(text) : null]));
-  const map = new Set([...mapSpans(root)].map(normalize));
+  const spans = mapSpans(root);
+  const map = { spans: new Set([...spans.spans].map(normalize)), rows: spans.rows.map((row) => ({ spans: row.spans.map(normalize), text: normalize(row.text) })) };
   const tallies = Object.fromEntries(KINDS.map((kind) => [kind, new Map()]));
   const skipped = [];
   const read = { claude: 0, codex: 0, subagentTranscripts: 0 };
   // The earliest and the latest typed prompt of the sessions read, as their records time them.
   const dates = { first: null, last: null };
-  let cut = 0;
+  let cutSteps = 0;
   // The uuids of the Claude Code records already counted. A resumed session's transcript copies earlier records with
   // their uuids, and a copy another transcript already gave is not counted again.
   const counted = new Set();
@@ -345,8 +368,11 @@ function main(argv, env = process.env) {
     own.add(item.uuid);
     return !counted.has(item.uuid);
   };
-  const count =(kind, key, session, file, line, subagent, repository) => {
-    if (!tallies[kind].has(key)) tallies[kind].set(key, { sessions: new Set(), occurrences: 0, inSubagents: 0, first: new Map(), repositories: new Set() });
+  // `parts` are a sequence's commands, kept apart since a command's own text can hold the ` -> ` that joins them.
+  const count = (kind, key, session, file, line, subagent, repository, parts = [key]) => {
+    if (!tallies[kind].has(key)) {
+      tallies[kind].set(key, { sessions: new Set(), occurrences: 0, inSubagents: 0, first: new Map(), repositories: new Set(), parts });
+    }
     const tally = tallies[kind].get(key);
     tally.sessions.add(session);
     tally.occurrences += 1;
@@ -415,6 +441,9 @@ function main(argv, env = process.env) {
     const steps = [];
     let prompts = [];
     let readOne = false;
+    // The Codex call ids this session's rollouts already gave: a fork that marks no start of its own history copies
+    // its parent's calls with their ids.
+    const callIds = new Set();
     for (const transcript of transcripts) {
       const calls = [];
       const typed = [];
@@ -442,6 +471,10 @@ function main(argv, env = process.env) {
       else read[host] += 1;
       const own = new Set();
       for (const call of calls) {
+        if (call.callId != null) {
+          if (callIds.has(call.callId)) continue;
+          callIds.add(call.callId);
+        }
         const step = repository.own && fresh(call, own) ? stepOf(call, host, normalize) : null;
         if (step) steps.push({ ...step, file: transcript.file, line: call.callLine, actor: call.actor, promptLine: call.promptLine, subagent: transcript.subagent });
       }
@@ -462,10 +495,10 @@ function main(argv, env = process.env) {
       if (prompt.timestamp && (dates.first === null || prompt.timestamp < dates.first)) dates.first = prompt.timestamp;
       if (prompt.timestamp && (dates.last === null || prompt.timestamp > dates.last)) dates.last = prompt.timestamp;
       const key = promptKey(prompt.text);
-      if (key) count("prompts", excerpt(key, 120), session, file, prompt.line, false, repository.root);
+      if (key) count("prompts", cut(key, 120), session, file, prompt.line, false, repository.root);
     }
     for (const step of steps) {
-      if (step.key.endsWith(CUT)) cut += 1;
+      if (step.key.endsWith(CUT)) cutSteps += 1;
       count(step.kind, step.key, session, step.file, step.line, step.subagent, repository.root);
     }
     // Two or three consecutive commands by one actor for one prompt, in call order; a command run again at once counts
@@ -481,7 +514,8 @@ function main(argv, env = process.env) {
       for (let size = 2; size <= 3; size++) {
         for (let i = 0; i + size <= run.length; i++) {
           const part = run.slice(i, i + size);
-          count("sequences", part.map((step) => step.key).join(" -> "), session, part[0].file, part[0].line, part[0].subagent, repository.root);
+          const keys = part.map((step) => step.key);
+          count("sequences", keys.join(" -> "), session, part[0].file, part[0].line, part[0].subagent, repository.root, keys);
         }
       }
     }
@@ -491,32 +525,38 @@ function main(argv, env = process.env) {
   }
 
   const findings = {};
+  let shortened = 0;
   for (const kind of KINDS) {
-    findings[kind] = [...tallies[kind].entries()]
+    const listed = [...tallies[kind].entries()]
       .filter(([, tally]) => tally.sessions.size >= minimum)
       .map(([key, tally]) => {
+        // A prompt's key is already redacted and cut to its bound.
         const finding = {
-          kind, step: excerpt(key, kind === "prompts" ? 120 : 240), sessions: tally.sessions.size, occurrences: tally.occurrences,
+          kind, step: kind === "prompts" ? key : excerpt(key, SHOWN), sessions: tally.sessions.size, occurrences: tally.occurrences,
           inSubagents: tally.inSubagents,
           examples: [...tally.first.values()].sort((a, b) => (a.sessionFile < b.sessionFile ? -1 : a.sessionFile > b.sessionFile ? 1 : a.line - b.line)).slice(0, 3),
         };
         if (kind === "commands" || kind === "sequences") {
-          const parts = key.split(" -> ");
-          finding.namedInMap = parts.every((part) => map.has(part));
+          finding.namedInMap = tally.parts.every((part) => namesCommand(map, part));
           // A sequence is a script's only when the script's own text runs exactly its commands.
-          finding.projectScript = kind === "commands" ? projectScript(key, scripts) : projectScript(parts.join(" && "), scripts, false);
+          finding.projectScript = kind === "commands" ? projectScript(key, scripts) : projectScript(tally.parts.join(" && "), scripts, false);
         }
         // A lookup is named when the map names its path, also from the root as ./<path>, or its pattern.
         const target = key.slice(key.indexOf(" ") + 1);
-        if (kind === "lookups") finding.namedInMap = map.has(target) || map.has(`./${target}`);
+        if (kind === "lookups") finding.namedInMap = map.spans.has(target) || map.spans.has(`./${target}`);
         if (kind === "prompts") finding.repositories = tally.repositories.size;
-        return finding;
+        return { key, finding };
       })
-      .sort((a, b) => b.sessions - a.sessions || b.occurrences - a.occurrences || (a.step < b.step ? -1 : a.step > b.step ? 1 : 0))
+      .sort(({ finding: a }, { finding: b }) => b.sessions - a.sessions || b.occurrences - a.occurrences || (a.step < b.step ? -1 : a.step > b.step ? 1 : 0))
       .slice(0, limit);
+    shortened += listed.filter(({ key }) => kind !== "prompts" && key.length > SHOWN).length;
+    findings[kind] = listed.map(({ finding }) => finding);
   }
   const warnings = [];
-  if (cut) warnings.push(`${cut} steps were cut at the evidence's 480-character bound; steps that differ only after the cut share a key.`);
+  if (cutSteps) warnings.push(`${cutSteps} steps were cut at the evidence's 480-character bound; steps that differ only after the cut share a key.`);
+  if (shortened) {
+    warnings.push(`${shortened} listed steps are printed cut to ${SHOWN} characters; findings whose steps differ only after that print the same step.`);
+  }
   const output = {
     root: directory(root), repositories: repositories.map((repository) => directory(repository.root)), sessionsRead: read, dates,
     skipped, findings, warnings,

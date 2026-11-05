@@ -290,7 +290,8 @@ function recordNote({ commands, tools }) {
 
 // The tools that run a shell command: a call to any other tool, a server's included, is no command even when its
 // arguments carry `cmd` or `command`.
-const SHELL_TOOLS = new Set(["exec_command", "shell_command", "shell", "exec"]);
+// The legacy shell takes an argument array, and a code-mode exec script calls the others.
+const CODEX_SHELL_TOOLS = new Set(["exec_command", "shell_command", "shell", "exec"]);
 
 // Codex runs shell commands through exec_command {cmd} and shell_command {command}, called directly or
 // from a code-mode exec script; apply_patch edits.
@@ -303,7 +304,7 @@ function codexShape(payload, input, cwd) {
   } catch {
     args = null;
   }
-  const shape = args && typeof args === "object" && SHELL_TOOLS.has(payload.name) ? commandShape(args, cwd) : null;
+  const shape = args && typeof args === "object" && CODEX_SHELL_TOOLS.has(payload.name) ? commandShape(args, cwd) : null;
   return shape || { operation: "other", path: null, opaque: OPAQUE.test(String(payload.name)) };
 }
 
@@ -350,7 +351,9 @@ function analyzeCodex(file, before = null, limit = 6, { onCall = null, onPrompt 
   const track = tracker();
   // Only a rollout can carry the host's own records, so only its coverage counts the outcomes they settled.
   track.coverage.recordedOutcomes = 0;
-  const nav = navigator(limit, onCall);
+  // onCall receives each issued call with its working directory and its call id, which a fork's copy of its parent's
+  // history repeats.
+  const nav = navigator(limit);
   const stalls = stallTracker(limit, onPrompt);
   const failures = [];
   const counts = {};
@@ -451,7 +454,10 @@ function analyzeCodex(file, before = null, limit = 6, { onCall = null, onPrompt 
       const shape = codexShape(payload, input, cwd);
       worked(stalls);
       const call = callEntry(payload.name, "main", line, promptLine, phaseOf(nav, "main", promptLine, null), shape, input);
-      if (issue(track, payload.call_id, call, shape.opaque)) called(nav, call, shape, { actor: "main", key: payload.call_id, message: null, cwd });
+      if (issue(track, payload.call_id, call, shape.opaque)) {
+        called(nav, call, shape, { actor: "main", key: payload.call_id, message: null, cwd });
+        if (onCall) onCall({ ...call, cwd, uuid: null, callId: payload.call_id ?? null });
+      }
       if (payload.type === "custom_tool_call" && payload.name === "exec") {
         scripts.set(`call ${payload.call_id}`, vouches(input));
         const makes = callsIn(input);
@@ -604,4 +610,4 @@ function analyzeCodex(file, before = null, limit = 6, { onCall = null, onPrompt 
   };
 }
 
-module.exports = { analyzeCodex };
+module.exports = { CODEX_SHELL_TOOLS, analyzeCodex };

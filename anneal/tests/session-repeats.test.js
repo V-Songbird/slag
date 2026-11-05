@@ -285,6 +285,16 @@ describe("prompts", () => {
     assert.strictEqual(promptKey("/shop:check all of it"), "/shop:check");
   });
 
+  test("a prompt that starts with an absolute path is keyed whole, as one that starts with the home is", () => {
+    assert.strictEqual(promptKey("/var/log/app.txt explain this."), "/var/log/app.txt explain this");
+    assert.notStrictEqual(promptKey("/var/log/app.txt explain this"), promptKey("/var/log/app.txt delete it"));
+  });
+
+  test("redaction's markers keep their case in a prompt's key", () => {
+    assert.strictEqual(promptKey("Use Password=Hunter22 Now"), "use password=[REDACTED] now");
+    assert.strictEqual(promptKey(`Fix${String.fromCodePoint(0x200b)}It`), "fix<U+200B>it");
+  });
+
   test("a prompt is redacted before it is lower cased, so a POSIX home and its account name never reach the key", () => {
     // The home and the user name are read when the script loads, so this home gets a process of its own.
     const script = `const os = require("node:os"); os.homedir = () => "/Users/Alice"; os.userInfo = () => ({ username: "Alice" });`
@@ -352,6 +362,43 @@ describe("what the map and the manifest already hold", () => {
     assert.deepStrictEqual(named("lookups"), { "read src/cart.js": true, "read src/car.js": false });
   });
 
+  test("a command run from a folder is named by a row that holds the bare command and names that folder", () => {
+    const root = shop({ files: { "AGENTS.md": "# shop\n\n| `node --test` from `anneal/` or ./collet | one suite |\n\nThe `tools/` folder.\n" } });
+    const dir = tempDir();
+    for (const index of [0, 1, 2]) {
+      claude(dir, root, index, [], {
+        rows: ["anneal", "collet", "tools", "annealing"].flatMap((folder, n) => [
+          { ...use(`${folder}${index}`, "Bash", { command: "node --test" }, 20 + n * 2), cwd: path.join(root, folder) }, result(`${folder}${index}`, "ok", 21 + n * 2),
+        ]),
+      });
+    }
+    const out = repeats(["--root", root, "--sessions-dir", dir]);
+    assert.deepStrictEqual(Object.fromEntries(out.findings.commands.map((finding) => [finding.step, finding.namedInMap])), {
+      "cd anneal && node --test": true, "cd collet && node --test": true, "cd tools && node --test": false, "cd annealing && node --test": false,
+    });
+    const sequences = Object.fromEntries(out.findings.sequences.map((finding) => [finding.step, finding.namedInMap]));
+    assert.strictEqual(sequences["cd anneal && node --test -> cd collet && node --test"], true);
+    assert.strictEqual(sequences["cd collet && node --test -> cd tools && node --test"], false);
+  });
+
+  test("a command whose own text holds ' -> ' is matched against the map and the scripts whole", () => {
+    const step = 'node x.js --arrow "a -> b"';
+    const root = shop({ files: { "AGENTS.md": `# shop\n\nRun \`${step}\`.\n`, "package.json": JSON.stringify({ scripts: { arrow: step } }) } });
+    const dir = tempDir();
+    for (const index of [0, 1, 2]) claude(dir, root, index, [step]);
+    const out = repeats(["--root", root, "--sessions-dir", dir]);
+    assert.deepStrictEqual(out.findings.commands.map((finding) => [finding.step, finding.namedInMap, finding.projectScript]), [[step, true, "arrow"]]);
+  });
+
+  test("bun test is Bun's own runner, never the test script; bun run test is the script", () => {
+    const root = shop({ files: { "package.json": JSON.stringify({ scripts: { test: "vitest" } }) } });
+    const dir = tempDir();
+    for (const index of [0, 1, 2]) claude(dir, root, index, ["bun test", "bun run test"]);
+    const out = repeats(["--root", root, "--sessions-dir", dir]);
+    assert.deepStrictEqual(Object.fromEntries(out.findings.commands.map((finding) => [finding.step, finding.projectScript])),
+      { "bun test": null, "bun run test": "test" });
+  });
+
   test("the map's spans and the scripts' text are normalized as steps are, temporary paths and the root included", () => {
     const check = "node scripts/check.js --out /tmp/check.txt";
     const dir = tempDir();
@@ -384,6 +431,19 @@ describe("arguments the evidence cut", () => {
     assert.strictEqual(codexCommand(shell), `${long.slice(0, 480 - '{"command":["bash","-lc","'.length)} [excerpt truncated]`);
     assert.strictEqual(argument(excerpt(JSON.stringify({ pattern: long, path: "/r" })), "pattern"), kept("pattern"));
     assert.strictEqual(codexCommand(excerpt(`*** Begin Patch\n${"x".repeat(500)}`)), null, "a cut patch is no command");
+  });
+
+  test("a listed step longer than the printed bound is printed cut, and warnings say so", () => {
+    const root = shop();
+    const dir = tempDir();
+    const long = `npm test -- ${"x".repeat(300)}`;
+    for (const index of [0, 1, 2]) claude(dir, root, index, [`${long} a`, `${long} b`, "npm run lint"]);
+    const out = repeats(["--root", root, "--sessions-dir", dir]);
+    const printed = out.findings.commands.map((finding) => finding.step);
+    assert.strictEqual(printed.filter((step) => step === `${long.slice(0, 240)} [excerpt truncated]`).length, 2);
+    // The two commands, and the three sequences that hold one of them.
+    assert.deepStrictEqual(out.warnings.filter((warning) => /printed cut/.test(warning)),
+      ["5 listed steps are printed cut to 240 characters; findings whose steps differ only after that print the same step."]);
   });
 });
 
@@ -440,7 +500,8 @@ describe("Codex rollouts", () => {
     transcript(fork("thread-b", "thread-a"), { dir, name: name(3) });
     const out = repeats(["--root", root, "--sessions-dir", dir, "--min-sessions", "2"]);
     assert.deepStrictEqual(out.sessionsRead, { claude: 0, codex: 2, subagentTranscripts: 2 });
-    assert.deepStrictEqual(out.findings.commands.map((finding) => [finding.step, finding.sessions, finding.inSubagents]), [["npm test", 2, 3]]);
+    // The second fork's copy of the first fork's call carries that call's id, and counts once.
+    assert.deepStrictEqual(out.findings.commands.map((finding) => [finding.step, finding.sessions, finding.inSubagents]), [["npm test", 2, 2]]);
     assert.deepStrictEqual(out.findings.prompts.map((finding) => [finding.step, finding.sessions, finding.occurrences]), [["fix the checkout", 2, 2]]);
     // Forks whose thread is not read share one session of their own.
     const forks = repeats(["--root", root, "--session-file", path.join(dir, name(2)), "--session-file", path.join(dir, name(3)), "--min-sessions", "2"]);
@@ -490,6 +551,7 @@ describe("the evidence hooks", () => {
       assert.strictEqual(calls.length, hooked.coverage.calls);
       assert.ok(typed.length >= prompts);
       assert.ok(calls.every((seen) => seen.cwd === root && typeof seen.callLine === "number"));
+      if (analyze === analyzeCodex) assert.deepStrictEqual(calls.map((seen) => seen.callId), ["c1"]);
     }
   });
 });
