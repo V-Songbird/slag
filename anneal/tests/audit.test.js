@@ -937,6 +937,11 @@ describe("start context", () => {
     assert.match(evidence(observed(indented), "map-routes")[0], /^CLAUDE\.md: 7 lines, imports docs\/listed\.md; /);
   });
 
+  test("an @path indented right after a heading or a thematic break is code, not an import", () => {
+    const tracked = { "CLAUDE.md": "# Shop\n    @docs/a.md\n\n- - -\n    @docs/b.md\n\nText\n    @docs/c.md\n", "docs/a.md": "a\n", "docs/b.md": "b\n", "docs/c.md": "c\n" };
+    assert.deepStrictEqual(rows(audit(repo({ tracked }))), [["CLAUDE.md", "project"], ["docs/c.md", "import of CLAUDE.md"]]);
+  });
+
   test("map-routes counts an @path in an indented code block as a path it names", () => {
     const tracked = { "CLAUDE.md": "# Shop\n\n    @docs/x.md\n", "docs/x.md": "x\n" };
     assert.match(evidence(observed(tracked), "map-routes")[0], /^CLAUDE\.md: 3 lines; names 1 path \(1 document\)/);
@@ -1026,6 +1031,18 @@ describe("start context", () => {
     assert.deepStrictEqual(audit(root, { transcripts: [dir] }).startContext.hookText.hooks, [
       row("hook.js", { UserPromptSubmit: "Flagged".length }),
       row("start.sh", { SessionStart: "Quoted".length }),
+    ]);
+
+    // Two commands whose scripts share a file name stay two rows.
+    write(dir, { "s.jsonl": `${[
+      attachment(5, { type: "hook_success", hookName: "SessionStart:startup", command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js", stdout: "Four" }),
+      attachment(6, { type: "hook_success", hookName: "SessionStart:startup", command: "node ${CLAUDE_PLUGIN_ROOT}/scripts/session-start.js", stdout: "Tw" }),
+      attachment(7, { type: "hook_additional_context", hookName: "SessionStart:startup", content: "Four" }),
+      attachment(8, { type: "hook_additional_context", hookName: "SessionStart:startup", content: "Tw" }),
+    ].join("\n")}\n` });
+    assert.deepStrictEqual(audit(root, { transcripts: [dir] }).startContext.hookText.hooks, [
+      row("session-start.js", { SessionStart: "Four".length }),
+      row("session-start.js", { SessionStart: "Tw".length }),
     ]);
 
     const original = fs.readFileSync;

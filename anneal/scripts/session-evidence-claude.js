@@ -455,12 +455,13 @@ function hookTextOf(dirs) {
     const name = String(context.hookName || "");
     const same = runs.filter((run) => String(run.hookName || "") === name);
     const run = same.find((candidate) => text.trim() && added(candidate).includes(text.trim())) || (same.length === 1 ? same[0] : null);
-    const hook = scriptOf(run?.command);
+    // One row per distinct command, shown by its script's file name alone.
+    const command = String(run?.command || "");
     const event = context.hookEvent || name.split(":")[0];
     const column = event === "SessionStart" && name.endsWith(":compact") ? "compact" : ["SessionStart", "UserPromptSubmit"].includes(event) ? event : "other";
-    if (!rows.has(hook)) rows.set(hook, { hook, ...Object.fromEntries(HOOK_EVENTS.map((key) => [key, 0])), characters: 0 });
-    rows.get(hook)[column] += text.length;
-    rows.get(hook).characters += text.length;
+    if (!rows.has(command)) rows.set(command, { hook: scriptOf(command), ...Object.fromEntries(HOOK_EVENTS.map((key) => [key, 0])), characters: 0 });
+    rows.get(command)[column] += text.length;
+    rows.get(command).characters += text.length;
   }
   return { file, hooks: [...rows.values()].sort((a, b) => b.characters - a.characters || a.hook.localeCompare(b.hook)) };
 }

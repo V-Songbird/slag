@@ -45,6 +45,7 @@ const decode = (text) => {
 };
 
 const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s+/;
+const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 const closes = (fence, marker, line) => marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !line.slice(marker[0].length).trim();
 
 // The @path targets of a Markdown text, each with its line, outside the frontmatter, fenced and indented
@@ -77,6 +78,13 @@ function importTargets(text) {
     code = indent >= 4 && !list && (blank || code);
     blank = false;
     if (code) continue;
+    // The line after a heading or a thematic break starts a block, as after a blank line.
+    if (THEMATIC_BREAK.test(line)) {
+      list = false;
+      blank = true;
+      continue;
+    }
+    blank = ATX_HEADING.test(line);
     if (LIST_ITEM.test(line)) list = true;
     else if (!indent) list = false;
     const prose = line.split("`").filter((_, k) => k % 2 === 0).join(" ");
