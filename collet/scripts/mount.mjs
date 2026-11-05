@@ -349,7 +349,8 @@ function blockIn(text) {
 // indented less than four columns past its container, at a line with fewer quote markers than its
 // opener, or at a non-blank line left of its list item's content. A backtick fence opener has no
 // backtick after it on its line, and a code span closes on a run of the same length before a blank
-// line. HTML comments and blocks are read as ordinary Markdown. A name in another case counts only
+// line. A quote or second marker on a list marker's line, a setext underline and a thematic break
+// are read as text, and HTML comments and blocks as ordinary Markdown. A name in another case counts only
 // where the filesystem resolves it to the AGENTS.md the mount wrote.
 function importsAgents(text) {
   const width = (s) => [...s].reduce((n, c) => n + (c === '\t' ? 4 - (n % 4) : 1), 0);
