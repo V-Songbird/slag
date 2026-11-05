@@ -834,12 +834,20 @@ function hostDefaults(root, env = process.env) {
 
 const projectKey = (dir) => path.resolve(dir).replace(/[^A-Za-z0-9]/g, "-");
 
-// The primary checkout of the repository that holds root, the first one `git worktree list` names,
-// or root itself when Git names none.
+// The primary checkout, the first worktree `git worktree list` names, when root is one of the
+// worktrees it names; otherwise, as for a subdirectory, root itself.
 function primaryCheckout(root) {
   const listed = spawnSync("git", ["-C", root, "worktree", "list", "--porcelain"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  const first = listed.status === 0 ? /^worktree (.+)$/m.exec(listed.stdout) : null;
-  return path.resolve(first ? first[1] : root);
+  const worktrees = listed.status === 0 ? [...listed.stdout.matchAll(/^worktree (.+)$/gm)].map((match) => match[1]) : [];
+  const real = (dir) => {
+    try {
+      return fs.realpathSync.native(dir);
+    } catch {
+      return path.resolve(dir);
+    }
+  };
+  const same = (a, b) => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+  return worktrees.some((dir) => same(real(dir), real(root))) ? path.resolve(worktrees[0]) : path.resolve(root);
 }
 
 // Whether a Claude Code project folder belongs to root: the folder of root or of its primary
@@ -850,7 +858,8 @@ function ownFolders(root, primary) {
   return (name) => keys.some((key) => fold(name) === key || fold(name).startsWith(`${key}--claude-worktrees-`));
 }
 
-// When the root's own Claude Code project folder keeps no memory, the other project folders whose
+// When no .md file is in the memory folder hostDefaults resolved, in the root's project folder's
+// memory/ or in the primary checkout's project folder's memory/, the other project folders whose
 // memory/ holds a .md file and whose transcripts name this repository: a remote URL, as host/owner/repo,
 // or the path of the root or its primary checkout. Each folder's top-level transcripts are read
 // newest first until one matches. Null when there is no projects folder to read. It reads and moves nothing else.
@@ -864,19 +873,21 @@ function strandedMemory(root, defaults) {
   } catch {
     return null;
   }
-  const notes = (folder) => {
+  const notes = (memory) => {
     try {
-      return fs.readdirSync(path.join(folder, "memory")).filter((name) => name.endsWith(".md"));
+      return fs.readdirSync(memory).filter((name) => name.endsWith(".md"));
     } catch {
       return [];
     }
   };
-  const folder = directory(path.join(defaults.project, "memory"));
-  if (notes(defaults.project).length) return { folder, candidates: [] };
-
-  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const absolute = path.resolve(root);
   const primary = primaryCheckout(root);
+  const memoryFolder = defaults.memory || path.join(defaults.project, "memory");
+  const folder = directory(memoryFolder);
+  const kept = [memoryFolder, path.join(defaults.project, "memory"), path.join(projects, projectKey(primary), "memory")];
+  if (kept.some((dir) => notes(dir).length)) return { folder, candidates: [] };
+
+  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const own = ownFolders(absolute, primary);
   let config = "";
   try {
@@ -896,7 +907,7 @@ function strandedMemory(root, defaults) {
   const candidates = [];
   for (const name of names) {
     const dir = path.join(projects, name);
-    const memory = notes(dir);
+    const memory = notes(path.join(dir, "memory"));
     if (own(name) || !memory.length) continue;
     let transcripts = [];
     try {

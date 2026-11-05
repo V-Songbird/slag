@@ -934,7 +934,7 @@ describe("start context", () => {
       const home = path.join(homes, "home");
       const env = { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: claude, CODEX_HOME: path.join(homes, "codex") };
       const run = (...args) => spawnSync(process.execPath, [CLI, "--root", root, ...args], { encoding: "utf-8", env });
-      return { root, projects, key, run };
+      return { root, homes, projects, key, env, run };
     }
 
     test("names other project folders with memory whose transcripts name the repository's path or remote", () => {
@@ -967,6 +967,38 @@ describe("start context", () => {
       write(root, { "notes/MEMORY.md": "- one memory\n" });
       assert.strictEqual(JSON.parse(run("--json", "--memory", path.join(root, "notes", "MEMORY.md")).stdout).strandedMemory, null);
     });
+
+    test("names nothing when autoMemoryDirectory names a folder that holds memory", () => {
+      const { root, run } = setup();
+      write(root, { ".claude/settings.local.json": JSON.stringify({ autoMemoryDirectory: ".claude/memory" }), ".claude/memory/MEMORY.md": "- one memory\n" });
+      const json = run("--json");
+      assert.strictEqual(json.status, 0, json.stderr);
+      assert.deepStrictEqual(JSON.parse(json.stdout).strandedMemory, { folder: path.join(root, ".claude", "memory"), candidates: [] });
+    });
+
+    test("in a linked worktree, names nothing when the primary checkout's folder has memory", () => {
+      const { root, homes, projects, env } = setup();
+      execFileSync("git", ["-C", root, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"], { stdio: "ignore" });
+      const worktree = path.join(homes, "wt");
+      execFileSync("git", ["-C", root, "worktree", "add", "-q", worktree, "-b", "side"], { stdio: "ignore" });
+      const primary = /^worktree (.+)$/m.exec(execFileSync("git", ["-C", worktree, "worktree", "list", "--porcelain"], { encoding: "utf8" }))[1];
+      write(projects, { [`${path.resolve(primary).replace(/[^A-Za-z0-9]/g, "-")}/memory/MEMORY.md`]: "- one memory\n" });
+      const json = spawnSync(process.execPath, [CLI, "--root", worktree, "--json"], { encoding: "utf-8", env });
+      assert.strictEqual(json.status, 0, json.stderr);
+      assert.deepStrictEqual(JSON.parse(json.stdout).strandedMemory.candidates, []);
+    });
+  });
+
+  test("a subdirectory root reads only its own transcript folders, not the checkout's", () => {
+    const root = repo({ tracked: { "CLAUDE.md": "# Shop\n", "sub/CLAUDE.md": "# Sub\n" } });
+    const outer = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-subdir-"));
+    created.push(outer);
+    const claude = path.join(outer, "claude");
+    const key = (dir) => path.resolve(dir).replace(/[^A-Za-z0-9]/g, "-");
+    const top = execFileSync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+    for (const name of [key(top), `${key(top)}--claude-worktrees-x`, key(path.join(root, "sub"))]) fs.mkdirSync(path.join(claude, "projects", name), { recursive: true });
+    const { transcripts } = hostDefaults(path.join(root, "sub"), { CLAUDE_CONFIG_DIR: claude, CODEX_HOME: path.join(outer, "codex") });
+    assert.deepStrictEqual(transcripts, [path.join(claude, "projects", key(path.join(root, "sub")))]);
   });
 
   test("rules without paths frontmatter load, rules with it do not", () => {
