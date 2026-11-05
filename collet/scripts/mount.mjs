@@ -343,9 +343,10 @@ function blockIn(text) {
 }
 
 // Whether CLAUDE.md imports AGENTS.md: `@AGENTS.md` or `@./AGENTS.md` anywhere in its text outside
-// a code block or code span, where the host reads no import. This approximates CommonMark. A fence opens at most three spaces in, after any
-// blockquote markers, and holds the following lines that start with the opener's exact markers, or
-// with them and nothing else, up to a closer behind them. A backtick fence opener has no backtick
+// a code block or code span, where the host reads no import. This approximates CommonMark, with
+// CRLF read as LF. A fence opens at most three spaces in, after any blockquote markers, and holds
+// the following lines that start with the opener's exact markers, up to a closer behind them and
+// one optional space. A backtick fence opener has no backtick
 // after it on its line. An indented code line is four columns in, after a blank line, a heading or
 // another such line; it is recognized only before the first line that starts with a list marker,
 // `>` or `<`. A code span closes on a run of the same length before a blank line. A fence on a list
@@ -359,7 +360,8 @@ function importsAgents(text) {
   let prev = '';
   let prevCode = false;
   const kept = text
-    .replace(/^(?:((?: {0,3}>[ \t]?)* {0,3}>)([ \t]?))? {0,3}((`|~)\4{2,})(?:(?<=~)|(?![^\n]*`))[^\n]*(?:\n\1(?:\2(?! {0,3}\3\4*[ \t]*$)[^\n]*|[ \t]*$))*(?:\n\1\2 {0,3}\3\4*[ \t]*$)?/gm, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/^(?:( {0,3}>(?:[ \t]{0,4}>)*)[ \t]?)? {0,3}((`|~)\3{2,})(?:(?<=~)|(?![^\n]*`))[^\n]*(?:\n\1(?!(?:(?<=>)[ \t])? {0,3}\2\3*[ \t]*$)[^\n]*)*(?:\n\1(?:(?<=>)[ \t])? {0,3}\2\3*[ \t]*$)?/gm, '')
     .split('\n')
     .map((line) => {
       const code = plain && !!line.trim() && /^(?: {4}| {0,3}\t)/.test(line)

@@ -3,10 +3,11 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { checks, CONFIG, git, mount, project, repo, task, TEMPLATES, TREE } from './temp-project.js';
+import { checks, CONFIG, git, mount, PLUGIN, project, repo, task, TEMPLATES, TREE } from './temp-project.js';
 
 test('the rules block reaches every surface an agent reads', () => {
   const root = project({ ...TREE, 'CLAUDE.md': '# House rules\n', '.cursor/rules/.keep': '' });
@@ -73,6 +74,7 @@ for (const [label, text] of [
   ['a fence whose indented closer is content', '~~~\n    ~~~\n@AGENTS.md\n~~~\n'],
   ['a fence whose quoted closer is content', '~~~\n> ~~~\n@AGENTS.md\n~~~\n'],
   ['a blockquote fence with a bare quote line', '# Notes\n\n> ```\n> x\n>\n> @AGENTS.md\n> ```\n'],
+  ['a CRLF blockquote fence with a bare quote line', '# Notes\r\n\r\n> ```\r\n> x\r\n>\r\n> @AGENTS.md\r\n> ```\r\n'],
 ]) {
   test(`an import inside ${label} does not count`, () => {
     const root = project({ ...TREE, 'CLAUDE.md': text });
@@ -93,6 +95,9 @@ for (const [label, text] of [
   ['a blockquote in a list item', '- a\n\n  > q\n\n    @AGENTS.md\n'],
   ['an indented marker in a paragraph', 'Text\n    - ~~~\n      @AGENTS.md\n'],
   ['an indented code line', '    ```\n@AGENTS.md\n    ```\n'],
+  ['a blockquote fence closed without the space after its marker', '> ~~~\n> x\n>~~~\n> @AGENTS.md\n'],
+  ['a backtick blockquote fence closed without the space after its marker', '> ```\n> x\n>```\n> See @AGENTS.md\n'],
+  ['a CRLF empty list item', '-\r\n  foo\r\n\r\n    @AGENTS.md\r\n'],
 ]) {
   test(`an import after ${label} still counts`, () => {
     const root = project({ ...TREE, 'CLAUDE.md': text });
@@ -100,6 +105,14 @@ for (const [label, text] of [
     assert.equal(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), text, JSON.stringify(text));
   });
 }
+
+test('a deeply nested blockquote line is read in linear time', () => {
+  const text = `${'> '.repeat(40)}x\n\n@AGENTS.md\n`;
+  const root = project({ ...TREE, 'CLAUDE.md': text });
+  const out = spawnSync(process.execPath, [join(PLUGIN, 'scripts', 'mount.mjs'), root], { encoding: 'utf8', timeout: 10000 });
+  assert.equal(out.signal, null);
+  assert.equal(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), text);
+});
 
 // `@agents.md` loads AGENTS.md only where the filesystem resolves both names to one file.
 test('an import that differs from AGENTS.md in case counts only where it names the same file', () => {

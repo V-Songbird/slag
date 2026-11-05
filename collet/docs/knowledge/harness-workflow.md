@@ -171,7 +171,7 @@ The rules block always goes into `AGENTS.md`. It also goes into `CLAUDE.md` when
 The mount reads Markdown approximately. It recognizes fenced blocks at the top level and behind blockquote markers, and indented code blocks before the first line that starts with a list marker, `>` or `<`. It does not recognize these code blocks, so an `@AGENTS.md` in one counts as the import:
 
 - a fence that opens on a list marker's line, or more than three spaces in, such as in a nested list item
-- a quoted fence after a line with different quote markers, such as `>x` under `> ~~~`
+- a quoted fence after a line whose quote markers are spaced differently, such as `>> x` under `> > ~~~`
 - indented code after a line that starts with a list marker, `>` or `<`, such as `<!--`
 - indented code right after a setext heading underline or a thematic break
 
