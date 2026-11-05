@@ -166,14 +166,16 @@ A fresh mount without `--checks` adds only scope. A later mount preserves each i
 | `exclude` | no | absent unless the mount got `--exclude` | Path globs that no bundle check reads, at write time or at close, such as a committed generated mirror |
 | `removed_checks` | no | absent unless the mount got `--remove` | Bundle checks the project took out; a remount keeps them out until `--restore` |
 
-The rules block always goes into `AGENTS.md`. It also goes into `CLAUDE.md` when that file exists, and into `.cursor/rules/collet.md` when `.cursor/` exists. The mount does not create a new `CLAUDE.md`. A `CLAUDE.md` that imports `AGENTS.md` gets no copy, because it already loads the block from there: an `@AGENTS.md` or `@./AGENTS.md` anywhere outside a code block or code span counts as that import. The mount reads Markdown approximately, and where it is unsure it counts the import. It recognizes fenced blocks at the top level and behind blockquote markers, and indented code blocks before the first line that starts with a list marker, `>` or `<`. These are read as text, so an `@AGENTS.md` in them counts:
+The rules block always goes into `AGENTS.md`. It also goes into `CLAUDE.md` when that file exists, and into `.cursor/rules/collet.md` when `.cursor/` exists. The mount does not create a new `CLAUDE.md`. A `CLAUDE.md` that imports `AGENTS.md` gets no copy, because it already loads the block from there: an `@AGENTS.md` or `@./AGENTS.md` anywhere outside a code block or code span counts as that import. The mount empties a block an earlier mount left in such a file down to an empty pair of markers, keeps the text around them, and prints a `kept` line for it.
+
+The mount reads Markdown approximately. It recognizes fenced blocks at the top level and behind blockquote markers, and indented code blocks before the first line that starts with a list marker, `>` or `<`. It does not recognize these code blocks, so an `@AGENTS.md` in one counts as the import:
 
 - a fence that opens on a list marker's line, or more than three spaces in, such as in a nested list item
 - a quoted fence after a line with different quote markers, such as `>x` under `> ~~~`
-- indented code after a list, a blockquote or an HTML line, such as `<!--`
+- indented code after a line that starts with a list marker, `>` or `<`, such as `<!--`
 - indented code right after a setext heading underline or a thematic break
 
-HTML comments are read as ordinary Markdown, so an `@AGENTS.md` inside one counts unless its lines form a code block or code span. The mount empties a block an earlier mount left in such a file down to an empty pair of markers, keeps the text around them, and prints a `kept` line for it.
+In the other direction, an unclosed fence in a list item and a code span opened inside indented code run past where the host ends them, so an `@AGENTS.md` after them does not count. HTML comments are read as ordinary Markdown, so an `@AGENTS.md` inside one counts unless its lines form a code block or code span.
 
 On Claude Code, the skill offers two permission ask rules for each `ask_first` item with a clear command, such as `Bash(npm publish *)` and `PowerShell(npm publish *)`, and says which items get none. A rule guards only the shell tool it names, and the project's settings are shared by contributors whose Claude Code may run commands through either tool, so both are offered and you confirm each one. It passes the rules you confirm as `--ask-rule "<rule>"`, and the mount adds them to `permissions.ask` in the project's `.claude/settings.json`, keeping everything already there. A headless or automated run cannot answer that prompt and stops at the matching command. With no confirmed rule, no settings file is written, and the mount never touches your user settings, `.claude/settings.local.json` or another host's configuration. There are no environment variables and no secrets.
 

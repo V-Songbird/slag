@@ -343,8 +343,7 @@ function blockIn(text) {
 }
 
 // Whether CLAUDE.md imports AGENTS.md: `@AGENTS.md` or `@./AGENTS.md` anywhere in its text outside
-// a code block or code span, where the host reads no import. This is an approximation of CommonMark
-// that never reads code where the host reads text. A fence opens at most three spaces in, after any
+// a code block or code span, where the host reads no import. This approximates CommonMark. A fence opens at most three spaces in, after any
 // blockquote markers, and holds the following lines that start with the opener's exact markers, or
 // with them and nothing else, up to a closer behind them. A backtick fence opener has no backtick
 // after it on its line. An indented code line is four columns in, after a blank line, a heading or
@@ -352,7 +351,8 @@ function blockIn(text) {
 // `>` or `<`. A code span closes on a run of the same length before a blank line. A fence on a list
 // marker's line or more than three spaces in, a quoted fence past a line with other markers, and
 // indented code after a setext underline or a thematic break are read as text, and HTML comments
-// as ordinary Markdown. A name in another case counts only where the filesystem resolves it to the
+// as ordinary Markdown. An unclosed fence in a list item, and a code span opened inside indented
+// code, run past where the host ends them, so an import after them does not count. A name in another case counts only where the filesystem resolves it to the
 // AGENTS.md the mount wrote.
 function importsAgents(text) {
   let plain = true;

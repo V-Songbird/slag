@@ -62,7 +62,7 @@ All notable changes to collet are documented here. The format follows
   once, from `AGENTS.md`, and the first task after the remount still closes. An `@AGENTS.md` or
   `@./AGENTS.md` anywhere outside a code block or code span counts as the import, including a
   fenced block behind blockquote markers and an indented code block before any list, blockquote or
-  HTML line; where the mount is unsure, it counts the import. A name in another case counts where the filesystem resolves it to `AGENTS.md`. The mount prints a `kept`
+  HTML line. A name in another case counts where the filesystem resolves it to `AGENTS.md`. The mount prints a `kept`
   line for such a file, and leaves its empty markers alone after Git turns them into CRLF.
 - A remount over a rules surface with a collet end marker above the block replaces only the
   block. Before, it copied the text between that marker and the block a second time, and the scope
