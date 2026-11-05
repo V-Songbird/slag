@@ -344,28 +344,30 @@ function blockIn(text) {
 
 // Whether CLAUDE.md imports AGENTS.md: `@AGENTS.md` or `@./AGENTS.md` anywhere in its text outside
 // a code block or code span, where the host reads no import. This approximates CommonMark, with
-// CRLF read as LF. A fence opens at most three spaces in, after any blockquote markers, and holds
-// the following lines that start with the opener's exact markers, up to a closer behind them and
-// one optional space. A backtick fence opener has no backtick
-// after it on its line. An indented code line is four columns in, after a blank line, a heading or
-// another such line; it is recognized only before the first line that starts with a list marker,
-// `>` or `<`. A code span closes on a run of the same length before a blank line. A fence on a list
-// marker's line or more than three spaces in, a quoted fence past a line with other markers, and
-// indented code after a setext underline or a thematic break are read as text, and HTML comments
-// as ordinary Markdown. An unclosed fence in a list item, and a code span opened inside indented
-// code, run past where the host ends them, so an import after them does not count. A name in another case counts only where the filesystem resolves it to the
-// AGENTS.md the mount wrote.
+// CRLF and CR read as LF, and only spaces and tabs counted as blank. A fence opens at most three
+// spaces in, after any blockquote markers, and holds the following lines that start with the
+// opener's markers, each up to three spaces in, up to a closer behind them and one optional space.
+// A backtick fence opener has no backtick after it on its line. An indented code line is four
+// columns in, after a blank line, a heading or another such line; it is recognized only before the
+// first line that starts with a list marker, `>` or `<`. A code span closes on a run of the same
+// length before a blank line. A fence on a list marker's line or more than three spaces in, a
+// quoted fence past a line with other markers, and indented code after a setext underline or a
+// thematic break are read as text, and HTML comments as ordinary Markdown. An unclosed fence in a
+// list item, a code span opened inside indented code, and a fence inside an HTML block run past
+// where the host ends them or are read as code, so an import after or in them does not count. A
+// name in another case counts only where the filesystem resolves it to the AGENTS.md the mount
+// wrote.
 function importsAgents(text) {
   let plain = true;
   let prev = '';
   let prevCode = false;
   const kept = text
-    .replace(/\r\n/g, '\n')
-    .replace(/^(?:( {0,3}>(?:[ \t]{0,4}>)*)[ \t]?)? {0,3}((`|~)\3{2,})(?:(?<=~)|(?![^\n]*`))[^\n]*(?:\n\1(?!(?:(?<=>)[ \t])? {0,3}\2\3*[ \t]*$)[^\n]*)*(?:\n\1(?:(?<=>)[ \t])? {0,3}\2\3*[ \t]*$)?/gm, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/^(?: {0,3}(>(?:[ \t]{0,4}>)*)[ \t]?)? {0,3}((`|~)\3{2,})(?:(?<=~)|(?![^\n]*`))[^\n]*(?:\n(?: {0,3}(?=>))?\1(?!(?:(?<=>)[ \t])? {0,3}\2\3*[ \t]*$)[^\n]*)*(?:\n(?: {0,3}(?=>))?\1(?:(?<=>)[ \t])? {0,3}\2\3*[ \t]*$)?/gm, '')
     .split('\n')
     .map((line) => {
-      const code = plain && !!line.trim() && /^(?: {4}| {0,3}\t)/.test(line)
-        && (prevCode || !prev.trim() || /^ {0,3}#{1,6}(?:[ \t]|$)/.test(prev));
+      const code = plain && /[^ \t]/.test(line) && /^(?: {4}| {0,3}\t)/.test(line)
+        && (prevCode || !/[^ \t]/.test(prev) || /^ {0,3}#{1,6}(?:[ \t]|$)/.test(prev));
       if (!code && /^ {0,3}(?:(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)|[<>])/.test(line)) plain = false;
       prev = line;
       prevCode = code;

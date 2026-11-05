@@ -75,6 +75,8 @@ for (const [label, text] of [
   ['a fence whose quoted closer is content', '~~~\n> ~~~\n@AGENTS.md\n~~~\n'],
   ['a blockquote fence with a bare quote line', '# Notes\n\n> ```\n> x\n>\n> @AGENTS.md\n> ```\n'],
   ['a CRLF blockquote fence with a bare quote line', '# Notes\r\n\r\n> ```\r\n> x\r\n>\r\n> @AGENTS.md\r\n> ```\r\n'],
+  ['an indented code block with CR line endings', 'Text\r\r    @AGENTS.md\r'],
+  ['a blockquote fence whose opener is indented', ' > ```\n> @AGENTS.md\n> ```\n'],
 ]) {
   test(`an import inside ${label} does not count`, () => {
     const root = project({ ...TREE, 'CLAUDE.md': text });
@@ -98,6 +100,10 @@ for (const [label, text] of [
   ['a blockquote fence closed without the space after its marker', '> ~~~\n> x\n>~~~\n> @AGENTS.md\n'],
   ['a backtick blockquote fence closed without the space after its marker', '> ```\n> x\n>```\n> See @AGENTS.md\n'],
   ['a CRLF empty list item', '-\r\n  foo\r\n\r\n    @AGENTS.md\r\n'],
+  ['a line holding only a no-break space', 'Text\n\xa0\n    @AGENTS.md\n'],
+  ['a line holding only a form feed', 'Text\n\f\n    @AGENTS.md\n'],
+  ['a fence with CR line endings', '~~~\rx\r~~~\r@AGENTS.md\r'],
+  ['a blockquote fence whose opener is indented', ' > ~~~\n> x\n> ~~~\n> @AGENTS.md\n'],
 ]) {
   test(`an import after ${label} still counts`, () => {
     const root = project({ ...TREE, 'CLAUDE.md': text });
