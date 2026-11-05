@@ -343,13 +343,46 @@ function blockIn(text) {
 }
 
 // Whether CLAUDE.md imports AGENTS.md: `@AGENTS.md` or `@./AGENTS.md` anywhere in its text outside
-// a fenced code block or code span, where the host reads no import. A backtick fence opener has no
-// backtick after it on its line, and a code span closes on a run of the same length before a blank
-// line. A name in another case counts only where the filesystem resolves it to the AGENTS.md the
-// mount wrote.
+// a code block or code span, where the host reads no import. Code blocks are fenced blocks,
+// including ones inside a blockquote or list item, and indented blocks: four columns past the
+// content of the last list item, after a blank line. A fence inside a blockquote ends with the
+// quote. A backtick fence opener has no backtick after it on its line, and a code span closes on a
+// run of the same length before a blank line. A name in another case counts only where the
+// filesystem resolves it to the AGENTS.md the mount wrote.
 function importsAgents(text) {
-  const prose = text
-    .replace(/^ {0,3}((`|~)\2{2,})(?:(?<=~)|(?![^\n]*`))[^]*?(?:^ {0,3}\1\2*[ \t]*$|(?![^]))/gm, '')
+  const kept = [];
+  let fence = null;
+  let base = 0;
+  let prevBlank = true;
+  let prevCode = false;
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    const quoted = /^ {0,3}>/.test(line);
+    const body = line.replace(/^(?: {0,3}>[ \t]?)+/, '');
+    const lead = body.match(/^[ \t]*/)[0].replace(/\t/g, '    ').length;
+    const blank = !body.trim();
+    let code = false;
+    if (fence && fence.quoted && !quoted) fence = null;
+    if (fence) {
+      code = true;
+      if (fence.end.test(body)) fence = null;
+    } else if (!blank && lead >= base + 4 && (prevBlank || prevCode)) code = true;
+    else {
+      const open = lead < base + 4 && body.match(/^[ \t]*(?:(`{3,})(?!.*`)|(~{3,}))/);
+      const item = body.match(/^( *)([-+*]|\d{1,9}[.)])( {1,4}|$)/);
+      if (open) {
+        const run = open[1] ?? open[2];
+        fence = { end: new RegExp(`^[ \\t]*${run}${run[0]}*[ \\t]*$`), quoted };
+        code = true;
+      } else if (item) base = item[0].length + (item[3] ? 0 : 1);
+      else if (!blank && prevBlank && lead < base) base = lead;
+    }
+    kept.push(code ? '' : body);
+    prevBlank = blank;
+    prevCode = code;
+  }
+  const prose = kept
+    .join('\n')
     .replace(/(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\r?\n)[^])*?(?<!`)\1(?!`)/g, '');
   const agents = statSync(join(target, 'AGENTS.md'), { bigint: true });
   return [...prose.matchAll(/(?<=^|\s)@(?:\.\/)?(agents\.md)(?=\s|$)/gim)].some(([, name]) => {

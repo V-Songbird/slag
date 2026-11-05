@@ -58,6 +58,34 @@ test('an import after a backtick that opens no code counts', () => {
   }
 });
 
+for (const [label, text] of [
+  ['an indented code block', '# Notes\n\n    @AGENTS.md\n'],
+  ['a tab-indented code block', '# Notes\n\n\t@AGENTS.md\n'],
+  ['a fence in a blockquote', '# Notes\n\n> ~~~\n> @AGENTS.md\n> ~~~\n'],
+  ['a fence in a nested list item', '- a\n  - b\n\n        ~~~\n        @AGENTS.md\n        ~~~\n'],
+  ['a blockquote fence with a bare quote line', '# Notes\n\n> ```\n> x\n>\n> @AGENTS.md\n> ```\n'],
+]) {
+  test(`an import inside ${label} does not count`, () => {
+    const root = project({ ...TREE, 'CLAUDE.md': text });
+    mount(root);
+    assert.match(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), /Change only the files/, JSON.stringify(text));
+  });
+}
+
+for (const [label, text] of [
+  ['an indented list paragraph', '- item\n\n    @AGENTS.md\n'],
+  ['a paragraph continuation line', 'Text\n    @AGENTS.md\n'],
+  ['a nested list paragraph', '- a\n  - b\n\n      @AGENTS.md\n'],
+  ['an indented line that looks like a fence', 'Example:\n\n    ```\n\n@AGENTS.md\n'],
+  ['a blockquote fence the quote ends', '> ~~~\n> x\n\n@AGENTS.md\n'],
+]) {
+  test(`an import after ${label} still counts`, () => {
+    const root = project({ ...TREE, 'CLAUDE.md': text });
+    mount(root);
+    assert.equal(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), text, JSON.stringify(text));
+  });
+}
+
 // `@agents.md` loads AGENTS.md only where the filesystem resolves both names to one file.
 test('an import that differs from AGENTS.md in case counts only where it names the same file', () => {
   const root = project({ ...TREE, 'CLAUDE.md': '@agents.md\n' });
