@@ -173,6 +173,7 @@ The mount reads Markdown approximately. It recognizes fenced blocks at the top l
 - a fence that opens on a list marker's line, or more than three spaces in, such as in a nested list item
 - a quoted fence after a line whose quote markers are spaced differently, such as `>> x` under `> > ~~~`
 - indented code after a line that starts with a list marker, `>` or `<`, such as `<!--`
+- indented code behind blockquote markers, such as `>     @AGENTS.md`
 - indented code right after a setext heading underline or a thematic break
 
 In the other direction, an unclosed fence in a list item and a code span opened inside indented code run past where the host ends them, so an `@AGENTS.md` after them does not count. A fence inside an HTML block, such as a quoted fence between `<div>` and `</div>`, is read as code, so an `@AGENTS.md` in it does not count either. HTML comments are read as ordinary Markdown, so an `@AGENTS.md` inside one counts unless its lines form a code block or code span.
