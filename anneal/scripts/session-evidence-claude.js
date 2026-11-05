@@ -174,12 +174,12 @@ function commandPairs(command) {
 
 // A later call retries a refused one when it reaches the same path by the same operation, or, for a shell command that
 // names no path, when a shell command runs the same program with the same first argument, whatever flags or wrapping
-// come between. Any other tool retries only with the same input. A hook judges an identical call again itself, so after a
-// hook's denial only a call whose full input differs retries it.
-function retries(refused, call, resentToHook) {
-  if (resentToHook) return false;
+// come between. Any other tool retries only with the same tool and full input. A hook judges an identical call again
+// itself, so after a hook's denial only a call whose full input differs retries it.
+function retries(refused, call, sameInput, hookDenied) {
+  if (hookDenied && sameInput) return false;
   if (refused.path !== null) return call.path === refused.path && call.operation === refused.operation;
-  if (!SHELL_TOOLS.has(refused.tool)) return call.tool === refused.tool && call.commandOrArguments === refused.commandOrArguments;
+  if (!SHELL_TOOLS.has(refused.tool)) return sameInput;
   if (!SHELL_TOOLS.has(call.tool) || typeof call.commandOrArguments !== "string") return false;
   const words = new Set(call.commandOrArguments.split(/[\s;&|()<>`"']+/));
   const programs = new Set(commandPairs(call.commandOrArguments).map(([program]) => program));
@@ -299,7 +299,7 @@ function analyzeClaude(file, before = null, limit = 6, { onCall = null, onPrompt
             if (failure.retriesAfterRefusal && failure.actor === call.actor && failure.promptLine === call.promptLine
               && !siblings(nav, failedCalls.get(failure), call)
               && failure.retriesAfterRefusal.length < 2
-              && retries(failure, call, hookDenied.has(failure) && rawInputs.get(failedCalls.get(failure)) === rawInputs.get(call))) {
+              && retries(failure, call, rawInputs.get(failedCalls.get(failure)) === rawInputs.get(call), hookDenied.has(failure))) {
               failure.retriesAfterRefusal.push({ ...call });
             }
           }

@@ -1100,6 +1100,27 @@ describe("a refused call and what followed it", () => {
     assert.deepStrictEqual(report.candidates.map((c) => [c.callLine, c.retriesAfterRefusal.map((r) => r.callLine)]), [[2, [4]], [6, [8]]]);
   });
 
+  test("a refused call of another tool is retried only by the same full input", () => {
+    const long = "x".repeat(600);
+    const declined = "The user doesn't want to proceed with this tool use. The tool use was rejected.";
+    const report = analyzeClaude(transcript([
+      human("deploy it", 1),
+      use("t1", "mcp__ops__run", { command: "deploy", target: "prod" }, 2),
+      result("t1", declined, 3, true),
+      use("t2", "mcp__ops__run", { command: "deploy", target: "staging" }, 4),
+      result("t2", "deployed", 5),
+      use("t3", "mcp__ops__run", { command: "deploy", target: "prod" }, 6),
+      result("t3", "deployed", 7),
+      human("post the note", 8),
+      use("t4", "mcp__chat__post", { text: `${long}a` }, 9),
+      result("t4", declined, 10, true),
+      use("t5", "mcp__chat__post", { text: `${long}b` }, 11),
+      result("t5", "posted", 12),
+      human("audit", 13),
+    ]));
+    assert.deepStrictEqual(report.candidates.map((c) => [c.callLine, c.retriesAfterRefusal.map((r) => r.callLine)]), [[2, [6]], [9, []]]);
+  });
+
   test("a hook's denial of a read is blocked even when its message reads like a missing file", () => {
     const report = analyzeClaude(transcript([
       human("read the notes", 1),
