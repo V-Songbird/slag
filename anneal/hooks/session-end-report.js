@@ -18,12 +18,14 @@ const { hostDefaults } = require("../scripts/audit.js");
 const FILE_TOOL = /^(Write|Edit|MultiEdit|NotebookEdit)$/;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-function reportLine(counts) {
+// A completed note is called unread only when transcripts were read: without them, nobody could
+// check whether another session opened it.
+function reportLine(counts, readTranscripts = true) {
   const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
   if (!total) return null;
   const parts = [];
   if (counts["memory-stale-state"]) parts.push(plural(counts["memory-stale-state"], "stale memory", "stale memories"));
-  if (counts["fold-completed"]) parts.push(plural(counts["fold-completed"], "unread note", "unread notes"));
+  if (readTranscripts && counts["fold-completed"]) parts.push(plural(counts["fold-completed"], "unread note", "unread notes"));
   const including = parts.length ? `, including ${parts.join(" and ")}` : "";
   return `anneal: ${plural(total, "documentation proposal", "documentation proposals")}${including}. See them with /anneal:repo-docs maintain.`;
 }
@@ -63,20 +65,22 @@ function wroteDocs(transcript, root, memory) {
 function main() {
   if (/^(off|0|false)$/i.test((process.env.ANNEAL_SESSION_REPORT || "").trim())) return;
   const data = JSON.parse(fs.readFileSync(0, "utf8"));
-  const root = typeof data.cwd === "string" && data.cwd ? data.cwd : process.cwd();
+  const root = process.env.CLAUDE_PROJECT_DIR || (typeof data.cwd === "string" && data.cwd ? data.cwd : process.cwd());
   const defaults = hostDefaults(root);
   const transcript = typeof data.transcript_path === "string" && data.transcript_path
     ? data.transcript_path
     : typeof data.session_id === "string" && defaults.project ? path.join(defaults.project, `${data.session_id}.jsonl`) : null;
   if (!transcript || !wroteDocs(fs.readFileSync(transcript, "utf8"), root, defaults.memory)) return;
+  // GIT_OPTIONAL_LOCKS=0 keeps `git status` from refreshing and rewriting the index.
   const run = spawnSync(process.execPath, [path.join(__dirname, "..", "scripts", "docs-maintenance.js"), "--root", root, "--json"], {
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
     encoding: "utf8",
     timeout: 10000,
     stdio: ["ignore", "pipe", "pipe"],
     maxBuffer: 64 * 1024 * 1024,
   });
   if (run.error || run.status !== 0) return;
-  const line = reportLine(JSON.parse(run.stdout).counts || {});
+  const line = reportLine(JSON.parse(run.stdout).counts || {}, defaults.transcripts.length > 0);
   if (line) process.stdout.write(JSON.stringify({ systemMessage: line }));
 }
 

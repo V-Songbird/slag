@@ -18,6 +18,7 @@ const HOOK = path.join(__dirname, "..", "hooks", "session-end-report.js");
 const DAY = 86400 * 1000;
 
 delete process.env.ANNEAL_SESSION_REPORT;
+delete process.env.CLAUDE_PROJECT_DIR;
 process.env.GIT_CEILING_DIRECTORIES = os.tmpdir();
 process.env.CODEX_HOME = path.join(os.tmpdir(), "no-codex-home");
 
@@ -56,8 +57,11 @@ function project() {
 
 const call = (name, input) => ({ type: "assistant", timestamp: new Date().toISOString(), message: { content: [{ type: "tool_use", name, input }] } });
 
-function transcript(records) {
-  const file = path.join(temp("anneal-transcript-"), "session.jsonl");
+// The session's transcript, by default in a folder of its own; in the project's Claude Code folder
+// it is also the transcript docs-maintenance reads.
+function transcript(records, dir = temp("anneal-transcript-")) {
+  const file = path.join(dir, "session.jsonl");
+  fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(file, records.map((r) => JSON.stringify(r)).join("\n") + "\n");
   return file;
 }
@@ -71,12 +75,45 @@ function run({ root, env }, transcriptPath, extraEnv = {}, input) {
 
 test("a session that wrote under docs/ gets one line with the counts and the command", () => {
   const fixture = project();
-  const stdout = run(fixture, transcript([call("Write", { file_path: path.join(fixture.root, "docs", "knowledge", "x.md") })]));
+  const { project: folder } = hostDefaults(fixture.root, fixture.env);
+  const stdout = run(fixture, transcript([call("Write", { file_path: path.join(fixture.root, "docs", "knowledge", "x.md") })], folder));
   const { systemMessage, ...rest } = JSON.parse(stdout);
   assert.deepStrictEqual(rest, {});
   assert.doesNotMatch(systemMessage, /\n/);
-  assert.match(systemMessage, /including 1 unread note\b/);
-  assert.match(systemMessage, /\/anneal:repo-docs maintain/);
+  assert.strictEqual(systemMessage, "anneal: 1 documentation proposal, including 1 unread note. See them with /anneal:repo-docs maintain.");
+});
+
+test("without transcripts to read, a completed note is counted but not called unread", () => {
+  const fixture = project();
+  const stdout = run(fixture, transcript([call("Write", { file_path: path.join(fixture.root, "docs", "knowledge", "x.md") })]));
+  assert.strictEqual(JSON.parse(stdout).systemMessage, "anneal: 1 documentation proposal. See them with /anneal:repo-docs maintain.");
+});
+
+test("the project comes from CLAUDE_PROJECT_DIR when the session's cwd is a subfolder", () => {
+  const fixture = project();
+  const payload = JSON.stringify({
+    session_id: "fixture",
+    transcript_path: transcript([call("Write", { file_path: path.join(fixture.root, "docs", "knowledge", "x.md") })]),
+    cwd: path.join(fixture.root, "src"),
+    hook_event_name: "SessionEnd",
+  });
+  assert.match(JSON.parse(run(fixture, null, { CLAUDE_PROJECT_DIR: fixture.root }, payload)).systemMessage, /1 documentation proposal/);
+});
+
+test("a stale Git index is left as it was", () => {
+  const fixture = project();
+  const git = (...args) => execFileSync("git", ["-C", fixture.root, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", ...args]);
+  write(fixture.root, { "docs/guide.md": "---\ntype: guide\nsummary: \"Synthetic fixture.\"\nrelated_files: []\n---\n" });
+  git("add", ".");
+  git("commit", "-qm", "fixture");
+  // Same content with a new file time, so `git status` would refresh the index.
+  const later = new Date(Date.now() + 5000);
+  fs.utimesSync(path.join(fixture.root, "docs/guide.md"), later, later);
+  const index = path.join(fixture.root, ".git", "index");
+  const before = fs.readFileSync(index);
+  const stdout = run(fixture, transcript([call("Edit", { file_path: path.join(fixture.root, "docs", "guide.md") })]));
+  assert.match(JSON.parse(stdout).systemMessage, /documentation proposal/);
+  assert.ok(fs.readFileSync(index).equals(before), "the index was rewritten");
 });
 
 test("a docs/ folder inside a package counts, as docs-maintenance reads it", () => {
@@ -126,5 +163,9 @@ test("the line counts proposals in words, and there is none without proposals", 
   assert.strictEqual(
     reportLine({ "memory-stale-state": 3 }),
     "anneal: 3 documentation proposals, including 3 stale memories. See them with /anneal:repo-docs maintain."
+  );
+  assert.strictEqual(
+    reportLine({ "memory-stale-state": 1, "fold-completed": 2 }, false),
+    "anneal: 3 documentation proposals, including 1 stale memory. See them with /anneal:repo-docs maintain."
   );
 });

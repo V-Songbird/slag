@@ -575,11 +575,11 @@ anneal: 5 documentation proposals, including 1 stale memory and 2 unread notes. 
 The line names two kinds of proposal when they are present:
 
 - A **stale memory** is a note the agent saved about the project. It is older than 14 days and says something is true now, such as "still failing", that may no longer be true.
-- An **unread note** is a finished task note that no other session opened within 3 days of its last change. Its findings belong in the topic docs, and the note can then be deleted.
+- An **unread note** is a finished task note that no other session opened within 3 days of its last change. Its findings belong in the topic docs, and the note can then be deleted. When Claude Code has no session records for the project, nobody can tell whether a note was read, so such notes count only in the total.
 
 Run `/anneal:repo-docs maintain` to see every proposal and approve the ones you want.
 
-The hook only reads; it writes nothing. It stays silent in these cases:
+The project is the folder in `CLAUDE_PROJECT_DIR`, or the session's working folder when that is unset. The hook only reads; it writes nothing, and its Git commands leave the index as it is. It stays silent in these cases:
 
 - the session wrote nothing under `docs/` or the memory folder;
 - there are no proposals;
