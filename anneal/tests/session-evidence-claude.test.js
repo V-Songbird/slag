@@ -348,6 +348,19 @@ describe("a Claude Code transcript", () => {
       { file: path.join(folder, "agent-1.jsonl"), agentType: "Explore", description: "find the cart" },
     ]);
   });
+
+  test("a workflow's subagent transcripts are listed from its own folder, and its journal is not", () => {
+    const dir = tempDir();
+    const file = transcript([human("go", 1), human("audit", 2)], { dir });
+    const folder = path.join(dir, SESSION, "subagents", "workflows", "wf_1");
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, "journal.jsonl"), "");
+    fs.writeFileSync(path.join(folder, "agent-a1.jsonl"), "");
+    fs.writeFileSync(path.join(folder, "agent-a1.meta.json"), JSON.stringify({ agentType: "worker", description: "fix the cart" }));
+    assert.deepStrictEqual(analyzeClaude(file).subagentTranscripts, [
+      { file: path.join(folder, "agent-a1.jsonl"), agentType: "worker", description: "fix the cart" },
+    ]);
+  });
 });
 
 describe("identity and chronology in a Claude Code transcript", () => {
@@ -1119,6 +1132,35 @@ describe("a refused call and what followed it", () => {
       human("audit", 13),
     ]));
     assert.deepStrictEqual(report.candidates.map((c) => [c.callLine, c.retriesAfterRefusal.map((r) => r.callLine)]), [[2, [6]], [9, []]]);
+  });
+
+  test("a refused call of another tool is retried by its input with the keys in another order", () => {
+    const report = analyzeClaude(transcript([
+      human("deploy it", 1),
+      use("t1", "mcp__ops__run", { command: "deploy", target: "prod" }, 2),
+      result("t1", "The user doesn't want to proceed with this tool use. The tool use was rejected.", 3, true),
+      use("t2", "mcp__ops__run", { target: "prod", command: "deploy" }, 4),
+      result("t2", "deployed", 5),
+      human("audit", 6),
+    ]));
+    assert.deepStrictEqual(report.candidates[0].retriesAfterRefusal.map((r) => r.callLine), [4]);
+  });
+
+  test("after a hook's denial of another tool, the same tool with another input retries it, and its keys reordered do not", () => {
+    const report = analyzeClaude(transcript([
+      human("deploy it", 1),
+      use("t1", "mcp__ops__run", { command: "deploy", target: "prod" }, 2),
+      result("t1", "PreToolUse:mcp__ops__run hook error: [node guard.js]: guard: asks once", 3, true),
+      use("t2", "mcp__ops__run", { target: "prod", command: "deploy" }, 4),
+      result("t2", "deployed", 5),
+      use("t3", "mcp__ops__run", { command: "deploy", target: "prod", force: true }, 6),
+      result("t3", "deployed", 7),
+      use("t4", "mcp__ops__status", { command: "deploy", target: "prod" }, 8),
+      result("t4", "ok", 9),
+      human("audit", 10),
+    ]));
+    assert.deepStrictEqual(report.candidates.map((c) => [c.callLine, c.category]), [[2, "blocked"]]);
+    assert.deepStrictEqual(report.candidates[0].retriesAfterRefusal.map((r) => r.callLine), [6]);
   });
 
   test("a hook's denial of a read is blocked even when its message reads like a missing file", () => {

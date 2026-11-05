@@ -174,12 +174,13 @@ function commandPairs(command) {
 
 // A later call retries a refused one when it reaches the same path by the same operation, or, for a shell command that
 // names no path, when a shell command runs the same program with the same first argument, whatever flags or wrapping
-// come between. Any other tool retries only with the same tool and full input. A hook judges an identical call again
-// itself, so after a hook's denial only a call whose full input differs retries it.
+// come between. Any other tool retries with the same tool and full input, in any key order. A hook judges an identical
+// call again itself, so after a hook's denial the identical call is no retry, and for any other tool a call of the same
+// tool with a different input is one.
 function retries(refused, call, sameInput, hookDenied) {
   if (hookDenied && sameInput) return false;
   if (refused.path !== null) return call.path === refused.path && call.operation === refused.operation;
-  if (!SHELL_TOOLS.has(refused.tool)) return sameInput;
+  if (!SHELL_TOOLS.has(refused.tool)) return hookDenied ? call.tool === refused.tool : sameInput;
   if (!SHELL_TOOLS.has(call.tool) || typeof call.commandOrArguments !== "string") return false;
   const words = new Set(call.commandOrArguments.split(/[\s;&|()<>`"']+/));
   const programs = new Set(commandPairs(call.commandOrArguments).map(([program]) => program));
@@ -187,11 +188,19 @@ function retries(refused, call, sameInput, hookDenied) {
     argument === null ? programs.has(program) : words.has(program) && words.has(argument)));
 }
 
+// A JSON.stringify replacer that writes an object's keys in sorted order, so key order does not change an input.
+function sortedKeys(_key, value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]]));
+}
+
+// The session's subagent transcripts, agent-*.jsonl at any depth of its subagents folder, as a workflow keeps its
+// agents' transcripts in a folder of its own there.
 function subagentTranscripts(file) {
   const folder = path.join(path.dirname(file), path.basename(file, ".jsonl"), "subagents");
   let names = [];
   try {
-    names = fs.readdirSync(folder).filter((name) => name.endsWith(".jsonl")).sort();
+    names = fs.readdirSync(folder, { recursive: true }).filter((name) => /^agent-.*\.jsonl$/.test(path.basename(name))).sort();
   } catch {
     return [];
   }
@@ -286,7 +295,7 @@ function analyzeClaude(file, before = null, limit = 6, { onCall = null, onPrompt
         const shape = claudeShape(block.name, fields, state.cwd);
         const key = JSON.stringify([actor, block.id]);
         const call = callEntry(block.name, actor, line, state.promptLine, phaseOf(nav, actor, state.promptLine, messageId), shape, input);
-        rawInputs.set(call, JSON.stringify([block.name, block.input ?? {}]));
+        rawInputs.set(call, JSON.stringify([block.name, block.input ?? {}], sortedKeys));
         if (issue(track, key, call, shape.opaque)) {
           const task = fields.task_id ?? fields.bash_id;
           called(nav, call, shape, {
