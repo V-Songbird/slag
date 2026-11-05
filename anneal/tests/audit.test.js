@@ -938,7 +938,10 @@ describe("start context", () => {
   });
 
   test("an @path indented right after a heading or a thematic break is code, not an import", () => {
-    const tracked = { "CLAUDE.md": "# Shop\n    @docs/a.md\n\n- - -\n    @docs/b.md\n\nText\n    @docs/c.md\n", "docs/a.md": "a\n", "docs/b.md": "b\n", "docs/c.md": "c\n" };
+    const tracked = {
+      "CLAUDE.md": "# Shop\n    @docs/a.md\n\n- - -\n    @docs/b.md\n\nText\n    @docs/c.md\n\nTitle\n=\n    @docs/d.md\n\nTitle\n--\n    @docs/e.md\n",
+      "docs/a.md": "a\n", "docs/b.md": "b\n", "docs/c.md": "c\n", "docs/d.md": "d\n", "docs/e.md": "e\n",
+    };
     assert.deepStrictEqual(rows(audit(repo({ tracked }))), [["CLAUDE.md", "project"], ["docs/c.md", "import of CLAUDE.md"]]);
   });
 
@@ -1043,6 +1046,24 @@ describe("start context", () => {
     assert.deepStrictEqual(audit(root, { transcripts: [dir] }).startContext.hookText.hooks, [
       row("session-start.js", { SessionStart: "Four".length }),
       row("session-start.js", { SessionStart: "Tw".length }),
+    ]);
+
+    // An exact output wins over one that holds the text, each run gives one text its command, the remaining runs
+    // of one command take an unmatched text, and an environment assignment is no script.
+    write(dir, { "s.jsonl": `${[
+      attachment(9, { type: "hook_success", hookName: "SessionStart:startup", command: "node a.js", stdout: "Read the map. Also run tests." }),
+      attachment(10, { type: "hook_success", hookName: "SessionStart:startup", command: "node b.js", stdout: "Read the map." }),
+      attachment(11, { type: "hook_additional_context", hookName: "SessionStart:startup", content: "Read the map." }),
+      attachment(12, { type: "hook_additional_context", hookName: "SessionStart:startup", content: "Read the map. Also run tests." }),
+      attachment(13, { type: "hook_success", hookName: "UserPromptSubmit", command: "NODE_OPTIONS=--x.y node prompt.js", stdout: "R1" }),
+      attachment(14, { type: "hook_additional_context", hookName: "UserPromptSubmit", content: "R1" }),
+      attachment(15, { type: "hook_success", hookName: "UserPromptSubmit", command: "NODE_OPTIONS=--x.y node prompt.js", stdout: "R2" }),
+      attachment(16, { type: "hook_additional_context", hookName: "UserPromptSubmit", content: "Rewritten" }),
+    ].join("\n")}\n` });
+    assert.deepStrictEqual(audit(root, { transcripts: [dir] }).startContext.hookText.hooks, [
+      row("a.js", { SessionStart: "Read the map. Also run tests.".length }),
+      row("b.js", { SessionStart: "Read the map.".length }),
+      row("prompt.js", { UserPromptSubmit: "R1".length + "Rewritten".length }),
     ]);
 
     const original = fs.readFileSync;

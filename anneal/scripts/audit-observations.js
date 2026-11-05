@@ -75,20 +75,21 @@ function importTargets(text) {
       continue;
     }
     const indent = /^[ \t]*/.exec(line)[0].replace(/\t/g, "    ").length;
+    const prose = !blank && !code;
     code = indent >= 4 && !list && (blank || code);
     blank = false;
     if (code) continue;
-    // The line after a heading or a thematic break starts a block, as after a blank line.
+    // The line after a heading, a setext underline or a thematic break starts a block, as after a blank line.
     if (THEMATIC_BREAK.test(line)) {
       list = false;
       blank = true;
       continue;
     }
-    blank = ATX_HEADING.test(line);
+    blank = ATX_HEADING.test(line) || (prose && SETEXT_UNDERLINE.test(line));
     if (LIST_ITEM.test(line)) list = true;
     else if (!indent) list = false;
-    const prose = line.split("`").filter((_, k) => k % 2 === 0).join(" ");
-    for (const match of prose.replace(LINK, " ").matchAll(IMPORT)) targets.push({ target: match[1].replace(/[.,:;!?]+$/, ""), line: i + 1 });
+    const outside = line.split("`").filter((_, k) => k % 2 === 0).join(" ");
+    for (const match of outside.replace(LINK, " ").matchAll(IMPORT)) targets.push({ target: match[1].replace(/[.,:;!?]+$/, ""), line: i + 1 });
   }
   return targets;
 }

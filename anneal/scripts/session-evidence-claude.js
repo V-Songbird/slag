@@ -389,9 +389,9 @@ const HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "compact", "other"];
 
 // The script a hook command runs, by file name only, as a transcript records the command unexpanded:
 // `node ${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js` is session-start.js. It is the first word, other than a
-// flag or an interpreter, whose name has an extension.
+// flag, an environment assignment or an interpreter, whose name has an extension.
 function scriptOf(command) {
-  const words = String(command || "").split(/\s+/).map((word) => word.replace(/^["']+|["']+$/g, "")).filter((word) => word && !word.startsWith("-"));
+  const words = String(command || "").split(/\s+/).map((word) => word.replace(/^["']+|["']+$/g, "")).filter((word) => word && !word.startsWith("-") && !/^\w+=/.test(word));
   return words.map((word) => word.split(/[\\/]/).pop())
     .find((word) => /.\.[A-Za-z]\w*$/.test(word) && !INTERPRETERS.has(word.replace(/\.exe$/i, "").toLowerCase())) || "unnamed hook";
 }
@@ -399,7 +399,9 @@ function scriptOf(command) {
 // The text of the newest top-level transcript in `dirs` that hooks added to the context, the content of its
 // hook_additional_context records, summed per hook and per event: SessionStart, UserPromptSubmit, compact for
 // SessionStart after a compaction, and other. Such a record names no command, so its hook is the hook_success
-// of the same hookName whose output holds its text, else the only one, else unnamed. The transcript records
+// of the same hookName whose output is its text, else holds it, each hook_success giving one record its
+// command; else the hookName's remaining hook_success records, or all of them when none remain, when they run
+// one command; else unnamed. The transcript records
 // no plugin. A line that is not JSON is skipped, and a transcript that cannot be read gives hooks null. Only file
 // names and counts are returned, never hook text or commands.
 function hookTextOf(dirs) {
@@ -450,11 +452,17 @@ function hookTextOf(dirs) {
     return output.trim();
   };
   const rows = new Map();
+  const used = new Set();
   for (const context of contexts) {
     const text = textBlocks(context.content).join("\n");
     const name = String(context.hookName || "");
-    const same = runs.filter((run) => String(run.hookName || "") === name);
-    const run = same.find((candidate) => text.trim() && added(candidate).includes(text.trim())) || (same.length === 1 ? same[0] : null);
+    const all = runs.filter((run) => String(run.hookName || "") === name);
+    const same = all.filter((run) => !used.has(run));
+    const want = text.trim();
+    const pool = same.length ? same : all;
+    const run = (want && (same.find((candidate) => added(candidate) === want) || same.find((candidate) => added(candidate).includes(want))))
+      || (new Set(pool.map((candidate) => String(candidate.command || ""))).size === 1 ? pool[0] : null);
+    if (run) used.add(run);
     // One row per distinct command, shown by its script's file name alone.
     const command = String(run?.command || "");
     const event = context.hookEvent || name.split(":")[0];
