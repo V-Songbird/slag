@@ -49,9 +49,11 @@ const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 const closes = (fence, marker, line) => marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !line.slice(marker[0].length).trim();
 
 // The @path targets of a Markdown text, each with its line, outside the frontmatter, fenced and indented
-// code blocks, code spans and links. A line indented four columns or more is code after a blank line, the
-// start of the body or more code, unless a list item is open: a list item stays open across blank lines
-// until a line at the margin that is no list item. Nothing is resolved; each caller decides what a target names.
+// code blocks, code spans and link destinations. A fence starts at most three spaces in, so a fence indented
+// four or more inside a list item is read as the item's text. A line indented four columns or more is code
+// after a blank line, the start of the body or more code, unless a list item is open: a list item stays open
+// across blank lines until a line at the margin that is no list item, a fence among them. Nothing is resolved;
+// each caller decides what a target names.
 function importTargets(text) {
   const targets = [];
   // A leading byte order mark, U+FEFF, is no part of the first line.
@@ -65,6 +67,7 @@ function importTargets(text) {
     const line = lines[i];
     const marker = FENCE.exec(line);
     if (fence || marker) {
+      if (!fence && marker[0] === marker[1]) list = false;
       fence = fence ? (closes(fence, marker, line) ? null : fence) : marker[1];
       code = false;
       blank = true;

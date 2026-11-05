@@ -945,6 +945,11 @@ describe("start context", () => {
     assert.deepStrictEqual(rows(audit(repo({ tracked }))), [["CLAUDE.md", "project"], ["docs/c.md", "import of CLAUDE.md"]]);
   });
 
+  test("a fence at the margin closes a list, so a later indented @path is code", () => {
+    const tracked = { "CLAUDE.md": "1. one\n\n```\n@docs/inside.md\n```\n\n    @docs/code.md\n", "docs/inside.md": "i\n", "docs/code.md": "c\n" };
+    assert.deepStrictEqual(rows(audit(repo({ tracked }))), [["CLAUDE.md", "project"]]);
+  });
+
   test("map-routes counts an @path in an indented code block as a path it names", () => {
     const tracked = { "CLAUDE.md": "# Shop\n\n    @docs/x.md\n", "docs/x.md": "x\n" };
     assert.match(evidence(observed(tracked), "map-routes")[0], /^CLAUDE\.md: 3 lines; names 1 path \(1 document\)/);
