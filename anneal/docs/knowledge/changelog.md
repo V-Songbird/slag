@@ -16,6 +16,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- `docs-check.js --index` prints a record index for `docs/index.md`: the path and summary of every maintained record, grouped by type, leaving out private records when the project ignores them. `repo-docs adopt` offers to write it and point the map file's `Start here` at it, and `maintain` regenerates it and proposes the difference.
+
 ### Changed
 
 - The session close-out reports a tracked file that is gone from disk with uncommitted changes as `tracked-missing`, at risk, so the turn that wrote it is `transcript-only`; it was reported as `tracked` and safe to delete. The `missing` location is described as a file Git no longer tracks, including one a commit removed, whose uncommitted edits only the transcript holds. Git commands inside a here-document body, a PowerShell here-string or a block comment no longer count toward the cleanup flag, and a here-document with an empty body no longer hides the commands after it.

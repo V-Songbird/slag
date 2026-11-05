@@ -471,7 +471,7 @@ Adopt never untracks a file and never ignores all of `docs/`, `docs/knowledge/` 
 
 ### The documentation check
 
-`node anneal/scripts/docs-check.js --root <project> [--json]` reads a Git working tree and reports where its documentation breaks the documentation policy. It changes nothing. It exits 1 when a high finding exists, 0 otherwise, and 2 for bad arguments or a directory outside a Git working tree. repo-docs' adopt mode runs it before and after writing a project's files, so its exit codes and output are part of adopt's procedure.
+`node anneal/scripts/docs-check.js --root <project> [--json | --index]` reads a Git working tree and reports where its documentation breaks the documentation policy. It changes nothing. It exits 1 when a high finding exists, 0 otherwise, and 2 for bad arguments or a directory outside a Git working tree. repo-docs' adopt mode runs it before and after writing a project's files, so its exit codes and output are part of adopt's procedure.
 
 It reads every Markdown file under a directory named `docs`, at any depth and ignored files included, skipping dot directories and `node_modules`. The profile comes from the ignore rules in the repository's `.gitignore` files; `core.excludesFile` and `.git/info/exclude` do not count, since a clone does not carry them. A `.git/info/exclude` rule on a parent directory, such as `docs/`, masks a committed rule beneath it, so that directory reads as not ignored. When a `.gitignore` ignores any of `docs/tasks/`, `docs/decisions/`, `docs/knowledge/private/` and `docs/apis/private/`, private documentation is ignored. When it ignores none, private documentation is versioned, as in a private repository whose cloud sessions read it. `.private/` must stay ignored by a `.gitignore` in both.
 
@@ -490,6 +490,17 @@ It reads every Markdown file under a directory named `docs`, at any depth and ig
 | low | `filename` | Not kebab-case, a bare id such as `240.md`, or a date; `<id>-<slug>` is allowed |
 
 Ignored directories outside a `docs` tree, such as build output, are skipped. In the versioned profile, tracked files in the private documentation directories and links to them are not findings. A `README.md`, `AGENTS.md`, `CLAUDE.md` or `SKILL.md` needs no frontmatter. `related_files` entries with glob characters are not checked. The frontmatter reader handles top-level keys and the `related_files` list, not full YAML.
+
+### The record index
+
+`node anneal/scripts/docs-check.js --root <project> --index` prints the record index: Markdown for `docs/index.md` with one line per maintained record, giving its path and its `summary`. An agent reads this file to find a record instead of guessing a path. The command changes nothing; save its output as `docs/index.md` yourself.
+
+- Records are grouped by their frontmatter `type`, in this order: `adr`, `api_spec`, `knowledge`, `task_summary`. A record with no frontmatter or another type goes under `other`.
+- A record with no `summary` shows `(no summary)`.
+- `README.md`, `AGENTS.md`, `CLAUDE.md`, `SKILL.md` and `docs/index.md` itself are left out.
+- When private documentation is ignored, private records are left out, so you can commit the index. When it is versioned, they are listed. `.private/` is never listed.
+
+It exits 0 whatever the documentation check would find, and 2 for bad arguments, including `--index` with `--json`, or a directory outside a Git working tree. repo-docs' adopt mode offers to write the index and point the map file's `Start here` at it; maintain mode regenerates it and proposes the difference.
 
 ### Maintenance proposals
 

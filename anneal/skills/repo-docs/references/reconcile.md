@@ -60,6 +60,8 @@ Add `--store <file>` for each orphaned knowledge store the owner names: a JSONL 
 - `merge-per-entry`: several docs in one folder, each one roadmap entry's evidence. Merge them into one topic doc and update incoming links.
 - `fold-store`: a store record and the docs whose `related_files` most narrowly list its paths. Write a still-true record as a line in that doc, or as a code comment beside its path when no doc lists it; drop the rest with a reason.
 
+When the project has `docs/index.md`, regenerate it with `node "<plugin root>/scripts/docs-check.js" --root "<project root>" --index` and propose the difference as its own group, `index`; an unchanged index is no proposal. When it has none, offer to create it and its `Start here` line as the contract's Adopt section describes. Either waits for approval like every group.
+
 Add `--memory <folder>` for the project's native memory folder, the one holding `MEMORY.md`, and pass the checkout the memories describe as `--root`, not a worktree, so ignored paths they name are present. Its proposals:
 
 - `memory-index-orphan` and `memory-unindexed`: an index line with no file, or a file no index line links. Propose dropping the line, or indexing or deleting the file.
