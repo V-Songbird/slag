@@ -36,6 +36,8 @@ related_files:
   - anneal/tests/session-evidence-navigation.test.js
   - anneal/tests/session-transcripts.js
   - anneal/hooks/safety-guard.js
+  - anneal/hooks/session-end-report.js
+  - anneal/tests/session-end-report.test.js
   - anneal/evals/
   - anneal/evals/heldout-fixture.js
   - anneal/tests/eval-graders.test.js
@@ -562,6 +564,31 @@ It reads the subcommand past git's global flags, such as `--no-pager` or `-C <pa
 
 The hook matches command text, so it cannot see every rewrite, such as git run through a variable. Its denial says that the same command in another form would discard or rewrite the same work.
 
+## The session-end report
+
+On Claude Code, a second hook runs when a session ends. If the session wrote a file under a `docs/` folder of the project, or into the project's Claude Code memory folder, it runs [the maintenance script](#maintenance-proposals) with its defaults. Then it shows one line, for example:
+
+```text
+anneal: 5 documentation proposals, including 1 stale memory and 2 unread notes. See them with /anneal:repo-docs maintain.
+```
+
+The line names two kinds of proposal when they are present:
+
+- A **stale memory** is a note the agent saved about the project. It is older than 14 days and says something is true now, such as "still failing", that may no longer be true.
+- An **unread note** is a finished task note that no other session opened within 3 days of its last change. Its findings belong in the topic docs, and the note can then be deleted.
+
+Run `/anneal:repo-docs maintain` to see every proposal and approve the ones you want.
+
+The hook only reads; it writes nothing. It stays silent in these cases:
+
+- the session wrote nothing under `docs/` or the memory folder;
+- there are no proposals;
+- the script fails or takes more than 10 seconds.
+
+To turn the report off, set `ANNEAL_SESSION_REPORT` to `off` in the `env` block of Claude Code's `settings.json`, or in the shell that starts Claude Code. The values `0` and `false` also turn it off.
+
+The hook sees only writes made with file tools such as `Write` or `Edit`. A file written by a shell command, such as `echo text > docs/a.md`, does not count. Codex and Antigravity have no such hook.
+
 ## Limits
 
 - The scan is a heuristic. A flagged `index` file may be exactly what your framework expects, which is why nothing moves without your approval.
@@ -583,6 +610,8 @@ The published package installs on all three hosts, and its skills are discovered
 A complete migration and the Git guard's refusal on its branch have been observed in interactive sessions on Claude Code 2.1.278, with a script rather than a person answering the prompts, and in the Antigravity IDE 2.17.0, with a person answering. On Codex CLI 0.155.1 a complete migration and the Git guard's refusal have been observed with a script answering and the project's `.git` added as a writable root (`codex exec --add-dir <project>/.git`, because the `workspace-write` sandbox keeps `.git` read-only); that plan only changed the map file, so a migration that moves files remains unverified on Codex.
 
 The audits and session review have run from the published package in Claude Code, headless Codex CLI 0.155.1 and headless Antigravity CLI 1.2.8 and 1.2.9 without `--sandbox`, and a repo-layout audit has run in the Antigravity IDE and the Codex desktop app 26.917. The other flows in the Antigravity IDE remain unverified.
+
+The session-end report is held by tests that run the hook as a separate process. Whether Claude Code shows its line in a live session is unverified.
 
 ## Running the evals
 

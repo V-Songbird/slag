@@ -36,7 +36,7 @@ agy plugin list
 
 The list names `anneal`. If it does not, the install did not register: run the install command again with the clone path. With `--sandbox`, headless `agy` runs no shell command.
 
-anneal acts on your request. Its enabled hook inspects shell commands and stays silent outside a migration branch.
+anneal acts on your request. Its guard hook inspects shell commands and stays silent outside a migration branch. On Claude Code, a second hook shows one line at session end when the session changed `docs/` or the memory folder and there are documentation proposals.
 
 ## Quick start
 
@@ -83,7 +83,7 @@ The [workflow guide](docs/knowledge/workflows.md) covers every audit finding, ap
 
 ## Configuration
 
-anneal has no settings. Choose a skill and its mode.
+Choose a skill and its mode. To turn off the [session-end report](docs/knowledge/workflows.md#the-session-end-report), set `ANNEAL_SESSION_REPORT=off` in the `env` block of Claude Code's `settings.json` or in your shell.
 
 ## Limits
 
