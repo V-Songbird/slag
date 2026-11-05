@@ -18,7 +18,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
-- `docs-check.js --index` prints a record index for `docs/index.md`: the path and summary of every maintained record, grouped by type, leaving out private records when the project ignores them. `repo-docs adopt` offers to write it and point the map file's `Start here` at it, and `maintain` regenerates it and proposes the difference.
+- `docs-check.js --index` prints a record index for `docs/index.md`: the path and summary of every maintained record, grouped by type, listing only files Git does not ignore and leaving out private records when the project ignores them. `repo-docs adopt` offers to write it and point the map file's `Start here` at it, and `maintain` regenerates it and proposes the difference.
 
 ### Changed
 

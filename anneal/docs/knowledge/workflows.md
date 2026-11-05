@@ -497,8 +497,9 @@ Ignored directories outside a `docs` tree, such as build output, are skipped. In
 
 - Records are grouped by their frontmatter `type`, in this order: `adr`, `api_spec`, `knowledge`, `task_summary`. A record with no frontmatter or another type goes under `other`.
 - A record with no `summary` shows `(no summary)`.
-- `README.md`, `AGENTS.md`, `CLAUDE.md`, `SKILL.md` and `docs/index.md` itself are left out.
-- When private documentation is ignored, private records are left out, so you can commit the index. When it is versioned, they are listed. `.private/` is never listed.
+- `README.md`, `AGENTS.md`, `CLAUDE.md`, `SKILL.md` and every `docs/index.md`, at any depth, are left out.
+- Only files Git does not ignore are listed: tracked files, and untracked files no `.gitignore`, `.git/info/exclude` or `core.excludesFile` rule matches. A local draft you ignored never reaches the index.
+- When private documentation is ignored, private records are left out even when tracked, so you can commit the index. When it is versioned, they are listed. `.private/` is never listed.
 
 It exits 0 whatever the documentation check would find, and 2 for bad arguments, including `--index` with `--json`, or a directory outside a Git working tree. repo-docs' adopt mode offers to write the index and point the map file's `Start here` at it; maintain mode regenerates it and proposes the difference.
 

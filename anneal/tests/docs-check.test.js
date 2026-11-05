@@ -11,7 +11,7 @@ const os = require("node:os");
 require("./temp-root.js");
 const path = require("node:path");
 const { spawnSync, execFileSync } = require("node:child_process");
-const { check, frontmatter, linkTargets, recordIndex } =require("../scripts/docs-check.js");
+const { check, frontmatter, linkTargets, recordIndex } = require("../scripts/docs-check.js");
 
 const CLI = path.join(__dirname, "..", "scripts", "docs-check.js");
 
@@ -248,11 +248,16 @@ const RECORDS = {
   "docs/README.md": "# Docs\n",
   "docs/index.md": "stale\n",
   "pkg/docs/knowledge/plugin.md": RECORD("knowledge", "Plugin."),
+  "pkg/docs/index.md": "stale\n",
   ".private/docs/knowledge/local.md": RECORD("knowledge", "Local."),
+  "docs/knowledge/draft-secret.md": RECORD("knowledge", "Draft."),
+  "docs/knowledge/excluded.md": RECORD("knowledge", "Excluded."),
 };
 
 test("the record index lists each public record's summary, grouped by type", () => {
-  const root = repo({ files: RECORDS });
+  // A tracked file stays listed though a rule matches it; ignored untracked files never are.
+  const root = repo({ ignore: `${IGNORE}docs/knowledge/draft-*.md\n`, tracked: { "docs/knowledge/draft-kept.md": RECORD("knowledge", "Kept.") }, files: RECORDS });
+  fs.appendFileSync(path.join(root, ".git", "info", "exclude"), "docs/knowledge/excluded.md\n");
   const before = git(root, ["status", "--short", "--ignored"]);
   const result = cli(["--root", root, "--index"]);
   assert.strictEqual(result.status, 0, result.stderr);
@@ -264,6 +269,7 @@ test("the record index lists each public record's summary, grouped by type", () 
 ## knowledge
 
 - \`docs/knowledge/alpha.md\`: Alpha.
+- \`docs/knowledge/draft-kept.md\`: Kept.
 - \`docs/knowledge/zeta.md\`: Zeta.
 - \`pkg/docs/knowledge/plugin.md\`: Plugin.
 
