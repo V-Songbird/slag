@@ -32,6 +32,9 @@ const COMMAND_NAME = /<command-name>\s*(\/[^\s<]+)\s*<\/command-name>/;
 const CUT = " [excerpt truncated]";
 // What redaction writes in place of a secret or a character a reader cannot see.
 const MARKERS = /(\[REDACTED\]|<U\+[0-9A-F]{4,6}>|<\d+ Unicode tag characters?>)/;
+// Bun's own commands, which run before a package.json script of the same name.
+const BUN_COMMANDS = new Set(["a", "add", "audit", "build", "c", "create", "exec", "i", "info", "init", "install", "link", "outdated", "patch",
+  "pm", "publish", "remove", "repl", "rm", "run", "test", "unlink", "update", "upgrade", "why", "x"]);
 // A printed step's bound, below the key's.
 const SHOWN = 240;
 
@@ -225,13 +228,14 @@ function stepOf(call, host, normalize) {
 // A typed prompt's key, read from the redacted prompt, so a home path or account name that redaction matches by case
 // is gone before lower casing: a slash command, a first word whose only slash leads it, by its name; any other prompt
 // lower case outside redaction's markers, without host envelopes, with its whitespace collapsed and its closing
-// punctuation removed. A prompt that starts with an absolute path is keyed whole.
+// punctuation removed. A prompt that starts with an absolute path is keyed whole. The key is redacted again, since a
+// secret that redaction matches only in lower case, such as an upper-case `SK-` key, takes that shape here.
 function promptKey(text) {
   const named = COMMAND_NAME.exec(text);
   const typed = redact(named ? named[1] : text.replace(ENVELOPE, " ")).split(MARKERS)
     .map((part, index) => (index % 2 ? part : part.toLowerCase())).join("").replace(/\s+/g, " ").trim();
-  if (/^\/[^\s/]+(?:\s|$)/.test(typed)) return typed.split(" ")[0];
-  return typed.replace(/[\s.!?¡¿,;:…]+$/u, "") || null;
+  const key = /^\/[^\s/]+(?:\s|$)/.test(typed) ? typed.split(" ")[0] : typed.replace(/[\s.!?¡¿,;:…]+$/u, "");
+  return key ? redact(key) : null;
 }
 
 // What a map file at the root, or a file one of them imports with @, names: each inline code span, each line of a
@@ -270,14 +274,25 @@ function mapSpans(root) {
 }
 
 // Whether the map names a command whole, or names a command run from a folder, `cd <folder> && <command>`, as the bare
-// command in a row whose text names the folder as a path: `<folder>`, `<folder>/` or `./<folder>`.
+// command in a row that names the folder as a path: a code span `<folder>`, or `<folder>/` or `./<folder>` in its text.
+// A bare word in prose names no folder.
 function namesCommand(map, command) {
   if (map.spans.has(command)) return true;
   const keyed = /^cd ("(?:[^"\\]|\\.)*"|\S+) && (.+)$/.exec(command);
   if (!keyed) return false;
-  const folder = keyed[1].startsWith('"') ? JSON.parse(keyed[1]) : keyed[1];
-  const named = new RegExp(String.raw`(?<![\w./-])(?:\./)?${escape(folder)}/?(?![\w-]|[./][\w-])`, WINDOWS ? "i" : "");
-  return map.rows.some((row) => row.spans.includes(keyed[2]) && named.test(row.text));
+  let folder = keyed[1];
+  if (folder.startsWith('"')) {
+    // A typed `cd "src\lib"` is no JSON string.
+    try {
+      folder = JSON.parse(folder);
+    } catch {
+      folder = folder.slice(1, -1);
+    }
+  }
+  const flags = WINDOWS ? "i" : "";
+  const span = new RegExp(String.raw`^(?:\./)?${escape(folder)}/?$`, flags);
+  const named = new RegExp(String.raw`(?<![\w./-])(?:\./${escape(folder)}/?|${escape(folder)}/)(?![\w-]|[./][\w-])`, flags);
+  return map.rows.some((row) => row.spans.includes(keyed[2]) && (row.spans.some((code) => span.test(code)) || named.test(row.text)));
 }
 
 // The root package.json script a command runs by name, or whose own text is the command.
@@ -291,9 +306,9 @@ function scriptsOf(root) {
 }
 
 function projectScript(command, scripts, byName = true) {
-  // `bun test` runs Bun's own test runner, whatever the scripts hold, so a Bun script runs by name only with `bun run`.
-  const run = byName && /^(?:(?:npm|pnpm|yarn)(?: run(?:-script)?)?|bun run) ([\w:.-]+)\b|^node --run ([\w:.-]+)\b/.exec(command);
-  const name = run && (run[1] || run[2]);
+  // Bun runs a script by its bare name unless the name is one of its own commands, as `bun test` runs its test runner.
+  const run = byName && /^(?:npm|pnpm|yarn|(bun))( run(?:-script)?)? ([\w:.-]+)\b|^node --run ([\w:.-]+)\b/.exec(command);
+  const name = run && !(run[1] && !run[2] && BUN_COMMANDS.has(run[3])) && (run[3] || run[4]);
   if (name && Object.hasOwn(scripts, name)) return name;
   return Object.keys(scripts).sort().find((key) => scripts[key] === command) ?? null;
 }

@@ -293,6 +293,8 @@ describe("prompts", () => {
   test("redaction's markers keep their case in a prompt's key", () => {
     assert.strictEqual(promptKey("Use Password=Hunter22 Now"), "use password=[REDACTED] now");
     assert.strictEqual(promptKey(`Fix${String.fromCodePoint(0x200b)}It`), "fix<U+200B>it");
+    // A secret that redaction matches only once it is lower cased is redacted in the key too.
+    assert.strictEqual(promptKey("Use SK-ABCDEFGHIJKLMNOPQRSTUV now"), "use [REDACTED] now");
   });
 
   test("a prompt is redacted before it is lower cased, so a POSIX home and its account name never reach the key", () => {
@@ -363,11 +365,11 @@ describe("what the map and the manifest already hold", () => {
   });
 
   test("a command run from a folder is named by a row that holds the bare command and names that folder", () => {
-    const root = shop({ files: { "AGENTS.md": "# shop\n\n| `node --test` from `anneal/` or ./collet | one suite |\n\nThe `tools/` folder.\n" } });
+    const root = shop({ files: { "AGENTS.md": "# shop\n\n| `node --test` from `anneal/` or ./collet | one suite |\n| `node --test` | Runs the app tests |\n\nThe `tools/` folder.\n" } });
     const dir = tempDir();
     for (const index of [0, 1, 2]) {
       claude(dir, root, index, [], {
-        rows: ["anneal", "collet", "tools", "annealing"].flatMap((folder, n) => [
+        rows: ["anneal", "collet", "tools", "annealing", "app"].flatMap((folder, n) => [
           { ...use(`${folder}${index}`, "Bash", { command: "node --test" }, 20 + n * 2), cwd: path.join(root, folder) }, result(`${folder}${index}`, "ok", 21 + n * 2),
         ]),
       });
@@ -375,6 +377,8 @@ describe("what the map and the manifest already hold", () => {
     const out = repeats(["--root", root, "--sessions-dir", dir]);
     assert.deepStrictEqual(Object.fromEntries(out.findings.commands.map((finding) => [finding.step, finding.namedInMap])), {
       "cd anneal && node --test": true, "cd collet && node --test": true, "cd tools && node --test": false, "cd annealing && node --test": false,
+      // A bare word in prose names no folder.
+      "cd app && node --test": false,
     });
     const sequences = Object.fromEntries(out.findings.sequences.map((finding) => [finding.step, finding.namedInMap]));
     assert.strictEqual(sequences["cd anneal && node --test -> cd collet && node --test"], true);
@@ -390,13 +394,22 @@ describe("what the map and the manifest already hold", () => {
     assert.deepStrictEqual(out.findings.commands.map((finding) => [finding.step, finding.namedInMap, finding.projectScript]), [[step, true, "arrow"]]);
   });
 
-  test("bun test is Bun's own runner, never the test script; bun run test is the script", () => {
-    const root = shop({ files: { "package.json": JSON.stringify({ scripts: { test: "vitest" } }) } });
+  test("bun test is Bun's own runner, never the test script; bun run test and bun lint are scripts", () => {
+    const root = shop({ files: { "package.json": JSON.stringify({ scripts: { test: "vitest", lint: "eslint ." } }) } });
     const dir = tempDir();
-    for (const index of [0, 1, 2]) claude(dir, root, index, ["bun test", "bun run test"]);
+    for (const index of [0, 1, 2]) claude(dir, root, index, ["bun test", "bun run test", "bun lint"]);
     const out = repeats(["--root", root, "--sessions-dir", dir]);
     assert.deepStrictEqual(Object.fromEntries(out.findings.commands.map((finding) => [finding.step, finding.projectScript])),
-      { "bun test": null, "bun run test": "test" });
+      { "bun test": null, "bun run test": "test", "bun lint": "lint" });
+  });
+
+  test("a typed quoted folder that is no JSON string is no error", () => {
+    const step = String.raw`cd "src\lib" && npm test`;
+    const root = shop({ files: { "AGENTS.md": "# shop\n\n`npm test` from `src/`\n" } });
+    const dir = tempDir();
+    for (const index of [0, 1, 2]) claude(dir, root, index, [step]);
+    const out = repeats(["--root", root, "--sessions-dir", dir]);
+    assert.deepStrictEqual(out.findings.commands.map((finding) => [finding.step, finding.namedInMap]), [[step, false]]);
   });
 
   test("the map's spans and the scripts' text are normalized as steps are, temporary paths and the root included", () => {
