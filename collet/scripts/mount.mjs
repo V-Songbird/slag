@@ -343,62 +343,32 @@ function blockIn(text) {
 }
 
 // Whether CLAUDE.md imports AGENTS.md: `@AGENTS.md` or `@./AGENTS.md` anywhere in its text outside
-// a code block or code span, where the host reads no import. Code blocks are fenced blocks, at the
-// top level or inside a blockquote or list item, and indented blocks: four columns past the content
-// of the last list item, on a line that does not continue a paragraph. A fence ends at a closer
-// indented less than four columns past its container, at a line with fewer quote markers than its
-// opener, or at a non-blank line left of its list item's content. A backtick fence opener has no
-// backtick after it on its line, and a code span closes on a run of the same length before a blank
-// line. A quote or second marker on a list marker's line, a setext underline and a thematic break
-// are read as text, and HTML comments and blocks as ordinary Markdown. A name in another case counts only
-// where the filesystem resolves it to the AGENTS.md the mount wrote.
+// a code block or code span, where the host reads no import. This is an approximation of CommonMark
+// that never reads code where the host reads text. A fence opens at most three spaces in, after any
+// blockquote markers, and holds the following lines that start with the opener's exact markers, or
+// with them and nothing else, up to a closer behind them. A backtick fence opener has no backtick
+// after it on its line. An indented code line is four columns in, after a blank line, a heading or
+// another such line; it is recognized only before the first line that starts with a list marker,
+// `>` or `<`. A code span closes on a run of the same length before a blank line. A fence on a list
+// marker's line or more than three spaces in, a quoted fence past a line with other markers, and
+// indented code after a setext underline or a thematic break are read as text, and HTML comments
+// as ordinary Markdown. A name in another case counts only where the filesystem resolves it to the
+// AGENTS.md the mount wrote.
 function importsAgents(text) {
-  const width = (s) => [...s].reduce((n, c) => n + (c === '\t' ? 4 - (n % 4) : 1), 0);
-  const kept = [];
-  let fence = null;
-  let base = 0;
-  let prevBlank = true;
-  let prevPara = false;
-  for (const raw of text.split('\n')) {
-    const line = raw.replace(/\r$/, '');
-    const marks = line.match(/^(?: {0,3}>[ \t]?)*/)[0];
-    if (fence && marks.split('>').length - 1 < fence.depth) fence = null;
-    const body = fence
-      ? line.replace(new RegExp(`^(?: {0,3}>[ \\t]?){${fence.depth}}`), '')
-      : line.slice(marks.length);
-    const lead = width(body.match(/^[ \t]*/)[0]);
-    const blank = !body.trim();
-    let code = false;
-    let para = false;
-    if (fence && !blank && lead < fence.base) {
-      fence = null;
-      base = lead;
-    }
-    if (fence) {
-      code = true;
-      if (lead < fence.base + 4 && fence.end.test(body)) fence = null;
-    } else if (!blank && lead >= base + 4 && !prevPara) code = true;
-    else {
-      const item = body.match(/^ *(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$)/);
-      let rest = body;
-      if (item) {
-        const pad = body.slice(item[0].length).match(/^[ \t]*/)[0];
-        rest = body.slice(item[0].length + pad.length);
-        const gap = width(item[0] + pad) - width(item[0]);
-        base = width(item[0]) + (!rest || gap > 4 ? 1 : gap);
-      }
-      const open = (item || lead < base + 4) && rest.match(/^[ \t]*(?:(`{3,})(?!.*`)|(~{3,}))/);
-      if (!item && !blank && (prevBlank || open) && lead < base) base = lead;
-      if (open) {
-        const run = open[1] ?? open[2];
-        fence = { end: new RegExp(`^[ \\t]*${run}${run[0]}*[ \\t]*$`), depth: marks.split('>').length - 1, base };
-        code = true;
-      } else para = !!rest.trim() && !/^ {0,3}#{1,6}(?:[ \t]|$)/.test(rest);
-    }
-    kept.push(code ? '' : body);
-    prevBlank = blank;
-    prevPara = para;
-  }
+  let plain = true;
+  let prev = '';
+  let prevCode = false;
+  const kept = text
+    .replace(/^(?:((?: {0,3}>[ \t]?)* {0,3}>)([ \t]?))? {0,3}((`|~)\4{2,})(?:(?<=~)|(?![^\n]*`))[^\n]*(?:\n\1(?:\2(?! {0,3}\3\4*[ \t]*$)[^\n]*|[ \t]*$))*(?:\n\1\2 {0,3}\3\4*[ \t]*$)?/gm, '')
+    .split('\n')
+    .map((line) => {
+      const code = plain && !!line.trim() && /^(?: {4}| {0,3}\t)/.test(line)
+        && (prevCode || !prev.trim() || /^ {0,3}#{1,6}(?:[ \t]|$)/.test(prev));
+      if (!code && /^ {0,3}(?:(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)|[<>])/.test(line)) plain = false;
+      prev = line;
+      prevCode = code;
+      return code ? '' : line;
+    });
   const prose = kept
     .join('\n')
     .replace(/(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\r?\n)[^])*?(?<!`)\1(?!`)/g, '');
