@@ -343,7 +343,7 @@ function blockIn(text) {
 }
 
 // Whether CLAUDE.md imports AGENTS.md: `@AGENTS.md` or `@./AGENTS.md` anywhere in its text outside
-// a code block or code span, where the host reads no import. A backtick fence opener has no
+// a fenced code block or code span, where the host reads no import. A backtick fence opener has no
 // backtick after it on its line, and a code span closes on a run of the same length before a blank
 // line. A name in another case counts only where the filesystem resolves it to the AGENTS.md the
 // mount wrote.

@@ -51,14 +51,16 @@ All notable changes to collet are documented here. The format follows
   ignores and that holds no tracked file, as the close-time check already did. Other ignored paths,
   tracked files, `.collet/`, any path with a file or directory name that starts with a dot, any
   `AGENTS*.md` or `CLAUDE*.md`, any name holding a colon or ending in a dot or space, and an ignored
-  link that resolves to any of these stay guarded.
+  link that resolves to any of these stay guarded. A private-record location whose path above its
+  `docs/` folder lies inside an ignored directory, such as a dependency's own `docs/tasks/`, holds
+  no private records, so a write there stays guarded.
 
 ### Fixed
 
 - The mount leaves a `CLAUDE.md` that imports `AGENTS.md` without its own rules block, and
   empties a block an earlier mount left there down to its markers, so the host loads the block
   once, from `AGENTS.md`, and the first task after the remount still closes. An `@AGENTS.md` or
-  `@./AGENTS.md` anywhere outside a code block or code span counts as the import, and a name in
+  `@./AGENTS.md` anywhere outside a fenced code block or code span counts as the import, and a name in
   another case counts where the filesystem resolves it to `AGENTS.md`. The mount prints a `kept`
   line for such a file, and leaves its empty markers alone after Git turns them into CRLF.
 - A remount over a rules surface with a collet end marker above the block replaces only the
