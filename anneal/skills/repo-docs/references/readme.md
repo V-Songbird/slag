@@ -111,7 +111,7 @@ A small project can merge items 4 to 6 into one Quick start. Status, limitations
 Apply [the writing rules](writing.md) to every line you write: its Language, Tone, Structure and accessibility sections and its wording flags. A README adds these:
 
 - Link every destination whose address you have. When you do not have it, keep the sentence and name the destination anyway, then list the missing address in the report. Dropping the route is worse than an unlinked one.
-- Use one H1 and a regular H2/H3 hierarchy, so every task can be found by its heading. GitHub builds an outline from headings, so add a manual table of contents only when the README is long, is read mostly outside GitHub, or needs visible in-page navigation.
+- GitHub builds an outline from headings, so add a manual table of contents only when the README is long, is read mostly outside GitHub, or needs visible in-page navigation.
 - Keep diagrams to a handful of boxes. GitHub renders diagrams written as text in a code block, and that text is reviewed with the code. Link a full architecture document for the rest.
 - Keep one source of truth for versions and other facts that change. Link it instead of copying it.
 

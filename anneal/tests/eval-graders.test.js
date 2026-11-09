@@ -1752,6 +1752,24 @@ describe("writing cases", () => {
       assert.deepStrictEqual(failed({ reply: run.reply.replace("The steps are bullets, not numbered.", "It shows the number of rows.") }), ["names-unnumbered-steps"]);
       assert.deepStrictEqual(failed({ calls: bash(`cat ${PAGE}`) }), ["skill-fired", "writing-read"]);
     });
+
+    test("the two reply graders pass other ways to name each planted defect, and fail a reply that names neither", () => {
+      for (const reply of [
+        "Number the steps.",
+        "Use an ordered list for the steps.",
+        "The steps aren't numbered.",
+        "The bullets should be a numbered list.",
+      ]) assert.strictEqual(passes(checks["names-unnumbered-steps"], { reply }), true, reply);
+      for (const reply of [
+        "The overwrite warning comes after the command; move it before the Run step.",
+        "Warn that --output overwrites the file above the command that runs it.",
+        "The overwrite note comes too late.",
+      ]) assert.strictEqual(passes(checks["names-overwrite-order"], { reply }), true, reply);
+      const missed = "Findings, numbered by severity: --output overwrites export.csv. Before you publish, fix the title.";
+      assert.deepStrictEqual(failed({ reply: missed }), ["names-overwrite-order", "names-unnumbered-steps"]);
+      const quoted = "The page says this overwrites the file you name after --output.";
+      assert.strictEqual(passes(checks["names-overwrite-order"], { reply: quoted }), false);
+    });
   });
 
   describe("writing-page-without-the-word", () => {
@@ -1805,6 +1823,42 @@ describe("writing cases", () => {
       write(fixed, PAGE, FIXED);
       assert.deepStrictEqual(failed({ dir: fixed, created: PAGE }), []);
       assert.deepStrictEqual(failed({ dir: fixed, created: `LICENSE\n${PAGE}` }), ["only-the-page"]);
+    });
+
+    test("an edit to a scaffold file fails the grader that pins it", () => {
+      const pins = { "README.md": "readme-unchanged", "package.json": "package-unchanged", "bin/csv-tidy.js": "cli-unchanged" };
+      for (const [file, grader] of Object.entries(pins)) {
+        const edited = tempDir("anneal-graders-writing-pin-");
+        fs.cpSync(run.dir, edited, { recursive: true });
+        write(edited, PAGE, FIXED);
+        write(edited, file, `${read(edited, file)}\nSee [Remove empty rows](${PAGE}).\n`);
+        assert.deepStrictEqual(failed({ dir: edited, created: PAGE }), [grader], file);
+      }
+    });
+
+    test("each page grader passes the variants a correct page may take", () => {
+      const variants = [
+        FIXED.replace("   Removed 2 empty rows\n", "   Removed <n> empty rows\n"),
+        FIXED.replace("   Removed 2 empty rows\n", "   Removed N empty rows\n"),
+        FIXED.replace("1. Install csv-tidy:\n\n   ```bash\n   npm install -g csv-tidy\n   ```\n", "1. Install csv-tidy as its [install steps](../README.md#install) describe.\n"),
+        FIXED.replace("Clean your export:", "Clean the export you just downloaded:"),
+        FIXED.replace("Clean your export:", "Clean your export just before you open it:"),
+        FIXED.replace("   When it worked, you see:", "   An empty row is easy to miss, so check the count. When it worked, you see:"),
+      ];
+      for (const text of variants) {
+        const dir = tempDir("anneal-graders-writing-pass-");
+        write(dir, PAGE, text);
+        assert.notStrictEqual(text, FIXED);
+        assert.deepStrictEqual(failedGraders(Object.fromEntries(PAGE_GRADERS.map((name) => [name, checks[name]])), { dir }), [], text);
+      }
+    });
+
+    test("no-click-here fails every vague label, inline or by reference", () => {
+      for (const link of ["[learn more](https://example.com/docs)", "[Read this](https://example.com/docs)", "[read more](https://example.com/docs)", "[here][docs]", "[click here][]", "[here]\n\n[here]: https://example.com/docs"]) {
+        const dir = tempDir("anneal-graders-writing-link-");
+        write(dir, PAGE, FIXED.replace("the [csv-tidy documentation](https://example.com/docs)", link));
+        assert.strictEqual(passes(checks["no-click-here"], { dir }), false, link);
+      }
     });
 
     test("each page grader fails the one fault it exists for", () => {

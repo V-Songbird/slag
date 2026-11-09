@@ -113,7 +113,7 @@ Calm, direct, respectful. Warmth is a quiet choice of words, not jokes, exclamat
 - One `#` H1, then headings in order without skipped levels. Headings describe their topic in the reader's words and still make sense in a table of contents.
 - Put the meaningful words first in headings, paragraphs and list items.
 - At most three sentences per paragraph. A paragraph longer than four lines on a narrow screen is a list not yet written.
-- Link text says where it goes: "[Reset your password](https://example.com/reset)", never "click here", "here", "learn more" or the URL itself. Write `[API reference](https://example.com/retry)`, not `[example.com/retry](https://example.com/retry)`.
+- Link text says where it goes: "[Reset your password](https://example.com/reset)", never "click here", "here", "learn more", "read more" or the URL itself. Write `[API reference](https://example.com/retry)`, not `[example.com/retry](https://example.com/retry)`.
 - Images get alt text that carries their information: `![Request flow: client to API to queue to worker](docs/architecture.png)`, not `![diagram](docs/architecture.png)`. Never put an instruction, command, error or setting only inside an image, and never put paragraphs of text inside a screenshot.
 - Use a screenshot only when the reader must recognise a place, icon or state that words describe poorly. Crop it but keep a landmark, place it next to its step, and use the localized interface.
 - Video supplements text for motion or timing; it never replaces the text route. Captions and a text equivalent are required.
@@ -154,7 +154,7 @@ Flags, not a banned list. A word can be right as an exact UI label, in another s
 | noun stacks: "account access permission configuration" | the reader must rebuild the relationships | "Change who can access your account" |
 | ambiguous "it", "this", "that" | the instruction attaches to the wrong object | repeat the noun |
 | "click the green button on the right", "see below" | depends on colour, position and layout | "Select **Save**", "under **Privacy**" |
-| "click here", "learn more", "read this" | meaningless out of context | "Learn how to recover your account" |
+| "click here", "learn more", "read more", "read this" | meaningless out of context | "Learn how to recover your account" |
 | double negatives, nested exceptions | hard to parse | state the permitted condition; keep real prohibitions |
 | bare "should", "may" | blurs requirement, option and probability | "must", "can", "might", plus the condition |
 | "soon", "in a moment" | promises without a signal | "Wait until **Upload complete** appears." |
