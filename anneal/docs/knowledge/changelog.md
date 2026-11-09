@@ -19,7 +19,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 ### Added
 
 - `docs-check.js --index` prints a record index for `docs/index.md`: the path and summary of every maintained record, grouped by type, listing only files Git does not ignore and leaving out private records when the project ignores them. `repo-docs adopt` offers to write it and point the map file's `Start here` at it, and `maintain` regenerates it and proposes the difference.
-- On Claude Code, a `SessionEnd` hook shows one line when the session wrote under a `docs/` folder or the project's memory folder with a file tool: the number of documentation proposals, the stale memories and unread task notes among them, and the command `/anneal:repo-docs maintain` that lists them. It writes nothing and stays silent without proposals. Set `ANNEAL_SESSION_REPORT=off` to turn it off.
+- On Claude Code, a `SessionEnd` hook shows one line when the session wrote under a `docs/` folder or the project's memory folder with a file tool: the number of documentation proposals, the stale memories and unread task notes among them, and the command `/anneal:repo-docs maintain` that lists them. It counts writes made by the session's subagents, read from their transcripts, as well as the main transcript's. It writes nothing and stays silent without proposals. Set `ANNEAL_SESSION_REPORT=off` to turn it off.
 
 ### Changed
 

@@ -14,6 +14,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { hostDefaults } = require("../scripts/audit.js");
+const { subagentTranscripts } = require("../scripts/session-evidence-claude.js");
 
 const FILE_TOOL = /^(Write|Edit|MultiEdit|NotebookEdit)$/;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -70,7 +71,15 @@ function main() {
   const transcript = typeof data.transcript_path === "string" && data.transcript_path
     ? data.transcript_path
     : typeof data.session_id === "string" && defaults.project ? path.join(defaults.project, `${data.session_id}.jsonl`) : null;
-  if (!transcript || !wroteDocs(fs.readFileSync(transcript, "utf8"), root, defaults.memory)) return;
+  if (!transcript) return;
+  const wrote = (file) => {
+    try {
+      return wroteDocs(fs.readFileSync(file, "utf8"), root, defaults.memory);
+    } catch {
+      return false;
+    }
+  };
+  if (!wrote(transcript) && !subagentTranscripts(transcript).some((agent) => wrote(agent.file))) return;
   // GIT_OPTIONAL_LOCKS=0 keeps `git status` from refreshing and rewriting the index.
   const run = spawnSync(process.execPath, [path.join(__dirname, "..", "scripts", "docs-maintenance.js"), "--root", root, "--json"], {
     env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },

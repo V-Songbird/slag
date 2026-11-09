@@ -146,6 +146,18 @@ test("a write into the project's memory folder gets the line", () => {
   assert.match(JSON.parse(stdout).systemMessage, /documentation proposal/);
 });
 
+test("a docs/ write made only by a subagent gets the line, and a session with no subagent folder stays silent", () => {
+  const fixture = project();
+  const { project: folder } = hostDefaults(fixture.root, fixture.env);
+  const main = transcript([call("Read", { file_path: path.join(fixture.root, "src", "app.js") })], folder);
+  assert.strictEqual(run(fixture, main), "");
+  const nested = path.join(folder, "session", "subagents", "workflows", "wf1");
+  fs.mkdirSync(nested, { recursive: true });
+  const written = call("Write", { file_path: path.join(fixture.root, "docs", "knowledge", "x.md") });
+  fs.writeFileSync(path.join(nested, "agent-a1.jsonl"), JSON.stringify(written) + "\n");
+  assert.match(JSON.parse(run(fixture, main)).systemMessage, /1 documentation proposal/);
+});
+
 test("a missing transcript or an unreadable payload prints nothing", () => {
   const fixture = project();
   assert.strictEqual(run(fixture, path.join(fixture.root, "absent.jsonl")), "");

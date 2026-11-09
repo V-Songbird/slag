@@ -579,6 +579,8 @@ The line names two kinds of proposal when they are present:
 
 Run `/anneal:repo-docs maintain` to see every proposal and approve the ones you want.
 
+The hook looks for those writes in the session's main transcript and in its subagent transcripts, the `agent-*.jsonl` files at any depth of the session's `subagents` folder, so a session whose only writes came from subagents is still reported. A missing or unreadable subagent folder is skipped.
+
 The project is the folder in `CLAUDE_PROJECT_DIR`, or the session's working folder when that is unset. The hook only reads; it writes nothing, and its Git commands leave the index as it is. It stays silent in these cases:
 
 - the session wrote nothing under `docs/` or the memory folder;
