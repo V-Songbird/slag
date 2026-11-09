@@ -5,7 +5,8 @@
 // index: the marketplace entry and every host manifest the plugin ships read
 // that version, <plugin>/.claude-plugin/plugin.json and the plugin's entry in
 // the Codex index carry none, and the plugin changelog has a "## [<version>] — <YYYY-MM-DD>" heading
-// with "## [Unreleased]" above it. Any other subject is not judged.
+// with "## [Unreleased]" above it. A subject whose <plugin> is not an entry in the staged
+// .claude-plugin/marketplace.json, such as "Release gate tests", is not judged, nor is any other subject.
 
 const fs = require("fs");
 const { execFileSync } = require("child_process");
@@ -23,16 +24,15 @@ function json(read, p) {
 }
 
 // read(path) returns the file's text in the commit being judged, or null when it is absent.
-// Returns null when the subject is not a release, else one line per problem.
+// Returns null when the subject does not release a marketplace plugin, else one line per problem.
 function releaseProblems(message, read) {
   const m = RELEASE.exec(String(message).split(/\r?\n/)[0].trim());
   if (!m) return null;
   const [, plugin, version] = m;
+  const entry = json(read, ".claude-plugin/marketplace.json").value?.plugins?.find((p) => p.name === plugin);
+  if (!entry) return null;
   const problems = [];
-  const market = json(read, ".claude-plugin/marketplace.json");
-  const entry = market.value?.plugins?.find((p) => p.name === plugin);
-  if (!entry) problems.push(`.claude-plugin/marketplace.json has no entry named ${plugin}`);
-  else if (entry.version !== version) problems.push(`marketplace version ${entry.version} is not ${version}`);
+  if (entry.version !== version) problems.push(`marketplace version ${entry.version} is not ${version}`);
   for (const p of [`${plugin}/.codex-plugin/plugin.json`, `${plugin}/plugin.json`]) {
     const manifest = json(read, p);
     if (manifest.missing) continue;

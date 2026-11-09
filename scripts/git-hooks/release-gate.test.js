@@ -45,6 +45,11 @@ test("a commit that is not a release is not judged", () => {
   assert.strictEqual(releaseProblems("Release anneal 0.6.0-alpha now", tree()), null);
 });
 
+test("a subject that names no marketplace plugin is not judged", () => {
+  assert.strictEqual(releaseProblems("Release gate tests", tree()), null);
+  assert.strictEqual(releaseProblems("Release anneal 0.6.0-alpha", tree({ ".claude-plugin/marketplace.json": null })), null);
+});
+
 test("a host version left behind is named", () => {
   const p = releaseProblems("Release anneal 0.6.0-alpha", tree({ "anneal/plugin.json": JSON.stringify({ name: "anneal", version: "0.5.1-alpha" }) }));
   assert.match(p.join("\n"), /anneal\/plugin.json version 0.5.1-alpha/);

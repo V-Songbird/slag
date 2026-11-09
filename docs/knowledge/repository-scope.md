@@ -82,8 +82,9 @@ runs scripts/git-hooks/release-gate.js on a commit whose subject is `Release <pl
 reading the staged files: it fails when the marketplace entry or a host manifest of that plugin
 reads another version, when `<plugin>/.claude-plugin/plugin.json` or the plugin's entry in
 `.agents/plugins/marketplace.json` carries a version, or when the plugin changelog lacks a
-`## [<version>] — <YYYY-MM-DD>` heading with `## [Unreleased]` above it. It does not run the test
-suites, and it does not judge any other subject.
+`## [<version>] — <YYYY-MM-DD>` heading with `## [Unreleased]` above it. It judges only a subject
+whose `<plugin>` is an entry in the staged `.claude-plugin/marketplace.json`, so a subject such as
+`Release gate tests` passes unjudged. It does not run the test suites.
 
 ## Contributor setup
 

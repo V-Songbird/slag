@@ -127,11 +127,17 @@ git push origin main
 audit. Run what is listed there and read its output before pushing; treat anything unfamiliar in it
 as new.
 
-The `pre-commit` and `commit-msg` gates scan for private reference names. If either blocks, reword
-generically, or — when the name is in a benchmark the release means to publish — take it off the
-private blocklist deliberately and say so. Do not bypass with `--no-verify`. The gate fails open
-when the blocklist is absent, so a clean pass is not proof it ran. See
-`.claude/rules/reference-names.md`.
+The `pre-commit` and `commit-msg` gates scan for private reference names. If a name scan blocks,
+reword generically, or — when the name is in a benchmark the release means to publish — take it off
+the private blocklist deliberately and say so. The name scans pass when the blocklist is absent, so
+a clean pass is not proof they ran. See `.claude/rules/reference-names.md`.
+
+The `commit-msg` gate also runs `scripts/git-hooks/release-gate.js` on this commit, reading the
+staged files and needing no blocklist. It fails when a manifest of the plugin reads another version,
+when `<plugin>/.claude-plugin/plugin.json` or `.agents/plugins/marketplace.json` carries a version,
+or when the changelog lacks the dated heading with `[Unreleased]` above it. Each `release gate:`
+line names one problem: fix the manifests or the changelog it names, stage them and commit again.
+Never reword the subject to get past it. Do not bypass either gate with `--no-verify`.
 
 Show the staged diff and the commit, then wait for the user's yes before
 pushing, even when the Claude settings allow `git push` without a prompt.
