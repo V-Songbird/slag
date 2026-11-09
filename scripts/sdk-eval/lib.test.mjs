@@ -6,8 +6,9 @@ import assert from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { selectCases, runFromMessages, gradersFor, gradeRun, verdict, judgeText, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, summarize, reportBatch, batchStop, BATCH_STOPPED } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, gradeRun, verdict, judgeText, sessionEnv, sessionHome, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, summarize, reportBatch, batchStop, BATCH_STOPPED } from "./lib.mjs";
 
 const COLLET = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../collet");
 const byName = (cases, name) => cases.find((c) => c.name === name);
@@ -30,6 +31,21 @@ test("a session gets the API key but no base URL, token, model or Claude Code va
     claude_config_dir: "x",
   });
   assert.deepStrictEqual(env, { PATH: "/bin", ANTHROPIC_API_KEY: "key" });
+});
+
+test("a session's fresh home gives git a fixture identity, whatever global config the runner has", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-eval-home-"));
+  try {
+    const home = sessionHome(path.join(root, "home"));
+    assert.deepStrictEqual(Object.keys(home), ["HOME", "USERPROFILE", "GIT_CONFIG_GLOBAL"]);
+    const runner = path.join(root, "runner.gitconfig");
+    fs.writeFileSync(runner, "[user]\n\tname = runner\n\temail = runner@example.invalid\n");
+    const config = (key) => execFileSync("git", ["config", key], { cwd: root, encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: runner, ...home } }).trim();
+    assert.strictEqual(config("user.email"), "fixture@example.invalid");
+    assert.strictEqual(config("user.name"), "fixture");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("collet's cases are read with their limits, tags and scaffolds", () => {

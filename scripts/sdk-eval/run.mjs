@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import Anthropic from "@anthropic-ai/sdk";
-import { selectCases, runFromMessages, gradersFor, gradeRun, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, reportBatch, batchStop } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, gradeRun, listRunFiles, createdPaths, sessionEnv, sessionHome, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, reportBatch, batchStop } from "./lib.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 // USD per million [input, output] tokens, for the judge and for a session that
@@ -142,8 +142,7 @@ async function runJob(job) {
     if (scaffold.status !== 0) return finish(runRecord(c, arm, n, runFromMessages([]), { seconds: 0, error: `scaffold failed: ${scaffold.error?.message ?? scaffold.stderr.trim().split("\n").slice(-3).join(" | ")}` }));
   }
   const before = listRunFiles(work);
-  const home = path.join(runDir, "home");
-  fs.mkdirSync(home, { recursive: true });
+  const home = sessionHome(path.join(runDir, "home"));
   const abortController = new AbortController();
   batch.live.add(abortController);
   const timer = setTimeout(() => abortController.abort(), c.timeoutSeconds * 1000);
@@ -158,9 +157,9 @@ async function runJob(job) {
         abortController,
         // A fresh home hides installed plugins (~/.claude/plugins), which a run
         // without the plugin otherwise finds and uses. It hides nothing else:
-        // Bash can still read any path on the machine.
+        // Bash can still read any path on the machine. Its .gitconfig gives git a fixture identity.
         // CLAUDE_CODE_STARTUP_FAILURE_RESULTS makes every known startup failure end in a result with its reason.
-        env: { ...SESSION_ENV, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: path.join(runDir, "config"), CLAUDE_CODE_GIT_BASH_PATH: BASH, CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1" },
+        env: { ...SESSION_ENV, ...home, CLAUDE_CONFIG_DIR: path.join(runDir, "config"), CLAUDE_CODE_GIT_BASH_PATH: BASH, CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1" },
       },
     })) {
       if (message.type === "system" && message.subtype === "init" && message.apiKeySource !== "ANTHROPIC_API_KEY") {

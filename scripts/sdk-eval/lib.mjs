@@ -22,6 +22,17 @@ const HEAD = /^---\s*\n([\s\S]*?)---\s*\n?/;
 // session to another endpoint or model.
 export const sessionEnv = (env) => Object.fromEntries(Object.entries(env).filter(([key]) => !/^CLAUDE/i.test(key) && (!/^ANTHROPIC_/i.test(key) || key === "ANTHROPIC_API_KEY")));
 
+// The environment entries of a session's fresh home, which this writes: a
+// .gitconfig with a fixture identity, so a skill that checks
+// `git config user.email` or commits finds one. GIT_CONFIG_GLOBAL points git at
+// that file, so the runner's own global git config never reaches the session.
+export function sessionHome(home) {
+  fs.mkdirSync(home, { recursive: true });
+  const gitconfig = path.join(home, ".gitconfig");
+  fs.writeFileSync(gitconfig, "[user]\n\tname = fixture\n\temail = fixture@example.invalid\n");
+  return { HOME: home, USERPROFILE: home, GIT_CONFIG_GLOBAL: gitconfig };
+}
+
 // The judge client's options. Explicit, because the client otherwise reads
 // ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN from the environment.
 export const JUDGE_CLIENT = { baseURL: "https://api.anthropic.com", authToken: null };
