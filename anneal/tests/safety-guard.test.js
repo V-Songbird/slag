@@ -178,7 +178,7 @@ describe("a migration branch that holds commits of its own", () => {
   const branch = "anneal/2026-11-09";
   const decision = (command, root) => decide("claude", claudeCall(command, root))?.hookSpecificOutput?.permissionDecision || "allow";
 
-  test("on that branch, a reset of it or a commit that skips the hooks is denied", () => {
+  test("on that branch, a command that resets, overwrites or deletes it, or skips the hooks, is denied", () => {
     const { root, git } = migrationRepo(branch);
     git("checkout", "-q", branch);
     for (const command of [
@@ -187,8 +187,22 @@ describe("a migration branch that holds commits of its own", () => {
       `git branch -f ${branch} HEAD~1`,
       `git checkout -qB ${branch} HEAD~1`,
       `git switch -qC ${branch} HEAD~1`,
+      `git switch --force-create ${branch} HEAD~1`,
+      `git branch --force ${branch} HEAD~1`,
+      `git branch -d --force ${branch}`,
+      `git branch -M main ${branch}`,
+      `git branch -C main ${branch}`,
+      `git branch -m -f main ${branch}`,
+      `git branch -c -f main ${branch}`,
+      `git update-ref refs/heads/${branch} HEAD~1`,
+      `git update-ref -m "step back" refs/heads/${branch} HEAD~1`,
+      `git push . +main:${branch}`,
+      `git push . :refs/heads/${branch}`,
       "git commit --no-verify -m x",
       "git commit -n -m x",
+      "git -c core.hooksPath=/dev/null commit -m x",
+      "git -c core.hookspath=none commit -m x",
+      "git merge --no-verify main",
     ]) {
       assert.strictEqual(decision(command, root), "deny", command);
     }
@@ -197,7 +211,7 @@ describe("a migration branch that holds commits of its own", () => {
     assert.match(reason, /reword the message/);
   });
 
-  test("from another branch, deleting or forcing it asks first", () => {
+  test("from another branch, deleting, overwriting or moving it asks first", () => {
     const { root } = migrationRepo(branch);
     for (const command of [
       `git branch -D ${branch}`,
@@ -205,6 +219,19 @@ describe("a migration branch that holds commits of its own", () => {
       `git switch -C ${branch}`,
       `git switch -qC${branch}`,
       `git branch -f ${branch} main`,
+      `git branch -d --force ${branch}`,
+      `git switch --force-create ${branch}`,
+      `git switch --force-create=${branch}`,
+      `git branch --force ${branch} main`,
+      `git branch -M main ${branch}`,
+      `git branch -C main ${branch}`,
+      `git branch -m -f main ${branch}`,
+      `git branch -c -f main ${branch}`,
+      `git update-ref -d refs/heads/${branch}`,
+      `git update-ref refs/heads/${branch} main`,
+      `git push . +main:${branch}`,
+      `git push . :${branch}`,
+      `git push --delete . ${branch}`,
     ]) {
       assert.strictEqual(decision(command, root), "ask", command);
     }
@@ -220,11 +247,18 @@ describe("a migration branch that holds commits of its own", () => {
       `git checkout -B scratch ${branch}`,
       `git switch ${branch}`,
       "git commit -m x",
+      `git branch -m ${branch} renamed`,
+      `git branch -c ${branch} copy`,
+      "git update-ref refs/heads/other main",
+      `git update-ref refs/tags/${branch} main`,
+      `git push origin +main:${branch}`,
+      "git -c core.hooksPath=/dev/null commit -m x",
+      "git merge --no-verify scratch",
     ]) {
       assert.strictEqual(decision(command, root), "allow", command);
     }
     git("checkout", "-q", branch);
-    for (const command of ["git commit -m x", "git checkout -B scratch", `git switch -c ${branch}-set-aside-2`]) {
+    for (const command of ["git commit -m x", "git checkout -B scratch", `git switch -c ${branch}-set-aside-2`, "git merge -n main", "git -c core.pager=cat commit -m x"]) {
       assert.strictEqual(decision(command, root), "allow", command);
     }
   });

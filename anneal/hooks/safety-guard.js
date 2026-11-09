@@ -9,9 +9,9 @@
 // on `anneal/<YYYY-MM-DD>` branches, so the scope is exact, needs nothing
 // written, and ends by itself the moment you switch away. From any other
 // branch, the one thing it watches is a command that deletes a migration
-// branch, or forces it to another commit, while that branch holds commits HEAD
-// lacks: that command asks first, since only the owner decides whether another
-// run's commits go. Everything else is allowed there, which is what the hook
+// branch, overwrites it or moves it to another commit, while that branch holds
+// commits HEAD lacks: that command asks first, since only the owner decides
+// whether another run's commits go. Everything else is allowed there, which is what the hook
 // does in a session that never invoked anneal.
 //
 // One file serves three hosts, because only two things differ: where the
@@ -51,7 +51,8 @@ function decision(permissionDecision, permissionDecisionReason) {
 // is left out: it refuses when the remote moved, which is the case this guard
 // exists to catch. A regex cannot see every rewrite of a command, such as git
 // run through a variable, so the denial also says what a rewrite would do.
-const GIT = String.raw`\bgit\b(?:\s+(?:-[cC]\s*\S+|--?[\w-]+(?:=\S+)?))*\s+`;
+const GLOBALS = String.raw`(?:\s+(?:-[cC]\s*\S+|--?[\w-]+(?:=\S+)?))*`;
+const GIT = String.raw`\bgit\b${GLOBALS}\s+`;
 const SEGMENT = String.raw`[^\n;|&]*`;
 const ARGS = String.raw`${SEGMENT}\s`;
 const DESTRUCTIVE_GIT = new RegExp(
@@ -73,37 +74,55 @@ const DESTRUCTIVE_GIT = new RegExp(
     ")"
 );
 
-// A commit that skips the checks a migration step has to pass: `--no-verify`, or
-// a short-flag cluster holding `n`. A message with such a word in it matches too.
-const SKIPS_HOOKS = new RegExp(GIT + String.raw`commit\b${ARGS}(?:--no-verify\b|-[a-zA-Z]*n[a-zA-Z]*\b)`);
+// A commit or merge that skips the checks a migration step has to pass:
+// `--no-verify`, a commit's short-flag cluster holding `n` (for merge, `-n` is
+// `--no-stat`), or a commit under `-c core.hooksPath=...`, a config key git reads
+// in any letter case. A message with such a word in it matches too.
+const SKIPS_HOOKS = new RegExp(
+  GIT + String.raw`(?:commit\b${ARGS}(?:--no-verify\b|-[a-zA-Z]*n[a-zA-Z]*\b)|merge\b${ARGS}--no-verify\b)`
+);
+const HOOKS_PATH = new RegExp(String.raw`\bgit\b${GLOBALS}\s+-c\s*["']?core\.hooksPath=\S*${GLOBALS}\s+commit\b`, "i");
 
 const MIGRATION_BRANCH = /^anneal\/\d{4}-\d{2}-\d{2}(-set-aside-\d+)?$/;
-const SUBCOMMAND = new RegExp(GIT + "(checkout|switch|branch)\\b(.*)");
+const SUBCOMMAND = new RegExp(GIT + "(checkout|switch|branch|update-ref|push)\\b(.*)");
 
 // A shell line continuation, `\` in POSIX shells and a backtick in PowerShell,
 // joins one command across lines; read it as the one line it runs as.
 const oneLine = (command) => command.replace(/[\\`]\r?\n/g, " ");
 const isDestructive = (command) => DESTRUCTIVE_GIT.test(oneLine(command));
 
-// The migration branches a command deletes or forces to another commit,
-// whatever they hold: the value of `checkout -B`, `switch -C` or
-// `--force-create`, the branch `branch -f` or `--force` moves, and every
-// branch a `branch -D` or forced delete removes. A start point is not a target.
-// In a short-flag cluster such as `-qB`, git takes the rest of the word after
-// `B` or `C` as the value, or the next word when nothing follows.
+// The migration branches a command deletes, overwrites or moves to another
+// commit, whatever they hold: the value of `checkout -B`, `switch -C` or
+// `--force-create`; the branch `branch -f` or `--force` moves; every branch a
+// `branch -D` or forced delete removes; the new name of a forced rename or copy
+// (`branch -M`, `-C`, or `-m`, `-c`, `--move`, `--copy` with `-f`); the
+// `refs/heads/` ref `update-ref` sets or deletes; and the destination of every
+// refspec `push .` sends, or every branch it deletes. A start point is not a
+// target. In a short-flag cluster such as `-qB`, git takes the rest of the word
+// after `B` or `C` as the value, or the next word when nothing follows.
 function forcedBranches(line) {
   const names = [];
+  const local = (ref) => ref?.replace(/^refs\/heads\//, "");
   for (const segment of line.split(/[\n;|&]/)) {
     const match = SUBCOMMAND.exec(segment);
     if (!match) continue;
-    const words = match[2].trim().split(/\s+/).map((word) => word.replace(/^["']|["']$/g, ""));
+    const words = (match[2].match(/"[^"]*"|'[^']*'|\S+/g) || []).map((word) => word.replace(/^["']|["']$/g, ""));
+    const operands = words.filter((word, i) => word && !word.startsWith("-") && !(match[1] === "update-ref" && words[i - 1] === "-m"));
     if (match[1] === "branch") {
       const short = words.filter((word) => /^-[a-zA-Z]+$/.test(word)).join("");
       const force = short.includes("f") || words.includes("--force");
       const remove = short.includes("D") || (force && (short.includes("d") || words.includes("--delete")));
-      const operands = words.filter((word) => word && !word.startsWith("-"));
+      const overwrite = /[MC]/.test(short) || (force && (/[mc]/.test(short) || words.includes("--move") || words.includes("--copy")));
       if (remove) names.push(...operands);
+      else if (overwrite) names.push(operands[operands.length - 1]);
       else if (force) names.push(operands[0]);
+    } else if (match[1] === "update-ref") {
+      if (/^refs\/heads\//.test(operands[0] || "")) names.push(local(operands[0]));
+    } else if (match[1] === "push") {
+      const [remote, ...specs] = operands;
+      if (remote !== ".") continue;
+      const remove = words.some((word) => word === "--delete" || /^-[a-zA-Z]*d[a-zA-Z]*$/.test(word));
+      names.push(...specs.map((spec) => local(remove ? spec : spec.split(":")[1])));
     } else {
       const flag = match[1] === "checkout" ? /^-[a-zA-Z]*?B(.*)$/ : /^(?:-[a-zA-Z]*?C|--force-create=?)(.*)$/;
       words.forEach((word, i) => {
@@ -147,7 +166,7 @@ function decide(host, data) {
   if (typeof command !== "string") return adapter.allow();
   const line = oneLine(command);
   const destructive = DESTRUCTIVE_GIT.test(line);
-  const skipsHooks = SKIPS_HOOKS.test(line);
+  const skipsHooks = SKIPS_HOOKS.test(line) || HOOKS_PATH.test(line);
   const forced = forcedBranches(line);
   if (!destructive && !skipsHooks && !forced.length) return adapter.allow();
 
@@ -163,9 +182,9 @@ function decide(host, data) {
   }
   if (migrating && skipsHooks) {
     return adapter.deny(
-      "anneal is mid-migration on this branch, and this commit skips the checks each migration step has to pass: " +
+      "anneal is mid-migration on this branch, and this command skips the checks each migration step has to pass: " +
         command.trim() +
-        ". Commit without `--no-verify` or `-n`, and fix what a check reports; if such a word is only part of the commit message, reword the message. The same command in another form would skip the same checks."
+        ". Run it without `--no-verify`, `-n` or a `core.hooksPath` override, and fix what a check reports; if such a word is only part of the commit message, reword the message. The same command in another form would skip the same checks."
     );
   }
   const held = forced.find((name) => holdsOwnCommits(cwd, name));

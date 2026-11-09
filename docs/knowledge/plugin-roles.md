@@ -71,8 +71,10 @@ A planning skill outside these plugins can place work across Claude products or 
 Where it meets a step that a plain script can run with no model, the script and its map-file line
 belong to anneal's `session-repeats`. Choosing where the rest of the work runs stays outside anneal.
 
-It does not limit a task's scope or decide what to work on next. Its hook stays silent outside a
-migration branch.
+It does not limit a task's scope or decide what to work on next. Its hook refuses destructive git
+commands on a migration branch; elsewhere it asks only before a command deletes, overwrites or
+moves a migration branch that holds commits of its own. Claude Code shows that question as a
+permission prompt; how Codex and Antigravity handle it is unverified.
 
 ### razor
 

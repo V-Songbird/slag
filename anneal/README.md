@@ -36,7 +36,7 @@ agy plugin list
 
 The list names `anneal`. If it does not, the install did not register: run the install command again with the clone path. With `--sandbox`, headless `agy` runs no shell command.
 
-anneal acts on your request. Its guard hook inspects shell commands and stays silent outside a migration branch. On Claude Code, a second hook shows one line at session end when the session changed `docs/` or the memory folder and there are documentation proposals.
+anneal acts on your request. Its guard hook inspects shell commands: on a migration branch it refuses the git commands that would discard or rewrite the migration's work, and on any other branch it asks first only before a command deletes, overwrites or moves a migration branch that holds commits the current branch lacks. On Claude Code that question is a permission prompt; how Codex and Antigravity handle it is unverified. On Claude Code, a second hook shows one line at session end when the session changed `docs/` or the memory folder and there are documentation proposals.
 
 ## Quick start
 
