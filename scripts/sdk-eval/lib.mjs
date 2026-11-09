@@ -191,10 +191,11 @@ export function batchStop() {
 
 // Why a session yields no grades: the batch stopping before it ended, its
 // timeout, or the runner's own error. reason is the abort signal's reason. A
-// timeout that fires after the session's result message does not count.
+// session that reached a success result that is not an error is not timed out;
+// one aborted by its timeout that then ends in an error result is.
 export function runError(messages, { aborted, reason, timeoutSeconds }) {
   if (aborted && reason === BATCH_STOPPED) return "stopped before the session ended: the batch stopped";
-  if (aborted && !messages.some((message) => message.type === "result")) return `timed out after ${timeoutSeconds} seconds`;
+  if (aborted && !messages.some((message) => message.type === "result" && message.subtype === "success" && !message.is_error)) return `timed out after ${timeoutSeconds} seconds`;
   const found = messages.find((message) => message.type === "runner_error");
   return found ? String(found.message || "runner error") : null;
 }

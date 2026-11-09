@@ -371,9 +371,13 @@ test("a session removed from the batch's live set, as one that has its result is
   assert.strictEqual(finished.signal.aborted, false);
 });
 
-test("a timeout that fires after the session's result leaves the run graded, not timed out", () => {
+test("a session with a success result is graded after an abort, and one that ends in an error result after its timeout is timed out", () => {
   assert.strictEqual(runError(finalReply("Done."), { aborted: true, reason: new AbortController().signal.reason, timeoutSeconds: 600 }), null);
   assert.strictEqual(runError([bashCall("toolu_1", "ls")], { aborted: true, timeoutSeconds: 600 }), "timed out after 600 seconds");
+  const errored = [bashCall("toolu_1", "ls"), { type: "result", subtype: "error_during_execution", is_error: true, num_turns: 2 }, { type: "runner_error", message: "session ended in error_during_execution" }];
+  assert.strictEqual(runError(errored, { aborted: true, timeoutSeconds: 600 }), "timed out after 600 seconds");
+  const apiError = [{ type: "result", subtype: "success", is_error: true, result: "API Error: 500", num_turns: 1 }];
+  assert.strictEqual(runError(apiError, { aborted: true, timeoutSeconds: 600 }), "timed out after 600 seconds");
 });
 
 test("an EPERM whose file cannot be stat'd counts as one on a new file, so the record still returns", async (t) => {
