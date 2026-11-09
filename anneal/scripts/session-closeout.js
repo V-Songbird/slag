@@ -344,7 +344,10 @@ function main(argv, env = process.env) {
   try {
     file = path.resolve(file);
     if (detectHost(file) !== "claude") return fail("session-closeout.js: only Claude Code transcripts are supported\n", 1);
-    process.stdout.write(`${JSON.stringify(closeout(file, root), null, 2)}\n`);
+    const report = closeout(file, root);
+    // A renamed copy of the running session's transcript still carries its id in the records.
+    if (isRunning(report.sessionId || "")) return fail(RUNNING, 2);
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     return 0;
   } catch (error) {
     return fail(`session-closeout.js: cannot read the transcript reliably: ${error.message}\n`, 1);

@@ -526,10 +526,12 @@ describe("the command line", () => {
     const home = tempDir();
     const file = transcript(fixTurn(dir), { dir: path.join(home, "projects", "fixture") });
     const id = path.basename(file, ".jsonl");
+    const copy = path.join(tempDir(), "copy.jsonl");
+    fs.copyFileSync(file, copy);
     const runAs = (args, running) => spawnSync(process.execPath, [CLI, ...args], {
       encoding: "utf8", env: { ...process.env, CLAUDE_CODE_SESSION_ID: running },
     });
-    for (const args of [["--session-id", id], ["--session-id", id.toUpperCase()], ["--session-file", file]]) {
+    for (const args of [["--session-id", id], ["--session-id", id.toUpperCase()], ["--session-file", file], ["--session-file", copy]]) {
       const refused = runAs([...args, "--claude-home", home, "--root", dir], id);
       assert.strictEqual(refused.status, 2, args.join(" "));
       assert.match(refused.stderr, /that is the session running this command/);

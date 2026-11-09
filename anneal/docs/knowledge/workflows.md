@@ -303,7 +303,7 @@ The output does not grow with the transcript. It holds at most `--limit` candida
 
 Deleting a Claude Code session can delete its transcript, and with it any decision or work that only the conversation holds. `/anneal:session-review closeout <session id or transcript file>` tells you, before you delete a finished session, whether anything would be lost. It only reports: it never deletes, archives, moves or edits a session, a transcript or a file, and it does not offer to save its findings.
 
-Run it on a finished session, not on the one you are in: the script refuses with exit 2 when `--session-id` is the id in `CLAUDE_CODE_SESSION_ID`, or `--session-file` is that session's transcript, `<id>.jsonl`. With a session id, the script looks for exactly one transcript with that id under your Claude Code home and stops with exit 2 when it finds none or several; the skill then asks you for the file. It exits 1 for a Codex rollout, a record that is not valid JSON, or a `--root` outside a Git work tree.
+Run it on a finished session, not on the one you are in: the script refuses with exit 2 when `--session-id` is the id in `CLAUDE_CODE_SESSION_ID`, or `--session-file` is that session's transcript: a file named `<id>.jsonl`, or any file whose records carry that session id, such as a renamed copy. With a session id, the script looks for exactly one transcript with that id under your Claude Code home and stops with exit 2 when it finds none or several; the skill then asks you for the file. It exits 1 for a Codex rollout, a record that is not valid JSON, or a `--root` outside a Git work tree.
 
 The script `anneal/scripts/session-closeout.js` reads the whole transcript with the same parser as the session evidence and prints JSON. It lists two kinds of items:
 
