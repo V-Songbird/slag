@@ -88,6 +88,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 - `instruction-hidden-characters` now reports the Mongolian vowel separator U+180E, except right after a Mongolian letter (U+1820 to U+1878 or U+1880 to U+18AA). The session evidence script spells it out as `<U+180E>`. Before, it went unreported.
 
+- `instruction-hidden-characters` no longer reports the Mongolian vowel separator U+180E right after a free variation selector U+180B to U+180D or U+180F that follows a Mongolian letter, and the session evidence script keeps it there as it is. Before, it was reported and spelled out as `<U+180E>`.
+
 - `instruction-hidden-characters` now reports Unicode tags after a black flag unless they form a subdivision flag: two lowercase letters or three digits, one to four more lowercase letters or digits, then the cancel tag. Before, any tags after a black flag were skipped, so text written as tags behind one went unreported. The session evidence now counts those tags too.
 
 - In Claude Code and Codex sessions, the session evidence script now starts the excerpt of a failed Node import (`ERR_MODULE_NOT_FOUND`) at the error's own line. This also holds after progress text rewritten with a carriage return and in a Node test runner's TAP report. A line too long for the excerpt loses its middle instead of its end, so the excerpt keeps the importing file however long the workspace path is.

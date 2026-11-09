@@ -33,8 +33,8 @@ if (!task) {
 }
 
 // Each field as session start reads it: without characters that do not show on screen, and with a
-// closing line naming the fields that held them. An id made only of them leaves the task unlinked
-// in both hooks. The id is stamped as session start matches it: stripped the same way.
+// closing line naming the fields that held them. A Foreman id made only of them leaves the task
+// unlinked in both hooks. The id is stamped as session start matches it: stripped the same way.
 const visible = withoutHidden();
 const id = visible('the id of the open task', String(task.id));
 const title = visible(`the title of task ${id}`, task.title);

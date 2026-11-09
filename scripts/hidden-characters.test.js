@@ -69,7 +69,8 @@ const fixtureFiles = {
     '#\uFE0F\u20E3 *\uFE0F\u20E3 0\uFE0F\u20E3 \u00A9\uFE0F \u{1F600}\uFE0F\n' +
     '\uFE0Fstart 1\uFE0F #\uFE0F *\uFE0E 1\uFE0E\u20E3 \u{1F44D}\u{1F3FD}\uFE0F \u{1F1FA}\u{1F1F8}\uFE0F end\uFE0F\n',
   'mongolian.md': '\u182D\u180B \u1820\u180F \u1828\u180E\u1820\na\u180Bb \u180C \u1810\u180D \u182D\u180B\u180B x\u180E \u1810\u180E\n' +
-    '\u1828\u180B\u180E\u1820 \u1828\u1885\u180B \u1828\u1886\u180C \u1828\u18A9\u180D\n',
+    '\u1828\u180B\u180E\u1820 \u1828\u1885\u180B \u1828\u1886\u180C \u1828\u18A9\u180D\n' +
+    'x\u180B\u180E\n',
 };
 const expected = [
   'mongolian.md:2: U+180B',
@@ -78,6 +79,8 @@ const expected = [
   'mongolian.md:2: U+180D',
   'mongolian.md:2: U+180E',
   'mongolian.md:2: U+180E',
+  'mongolian.md:4: U+180B',
+  'mongolian.md:4: U+180E',
   'selectors.md:2: U+E0100',
   'selectors.md:2: U+FE00',
   'selectors.md:2: U+FE0E',

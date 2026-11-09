@@ -181,7 +181,7 @@ describe("hidden characters in instruction files", () => {
   });
 
   test("Mongolian free variation selectors and the vowel separator are reported except right after a Mongolian letter", () => {
-    const skipped = "\u182D\u180B \u1820\u180C \u1828\u180D \u1873\u180F \u1887\u180B \u1885\u180C \u18AA\u180D \u1828\u180E\u1820";
+    const skipped = "\u182D\u180B \u1820\u180C \u1828\u180D \u1873\u180F \u1887\u180B \u1885\u180C \u18AA\u180D \u1828\u180E\u1820 \u1828\u180B\u180E\u1820";
     const lines = [
       ["a\u180Bb", "U+180B"],
       ["\u180Cat the start", "U+180C"],

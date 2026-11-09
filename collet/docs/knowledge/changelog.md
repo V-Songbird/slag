@@ -88,6 +88,13 @@ All notable changes to collet are documented here. The format follows
 - `task.mjs`, `mount.mjs` and the session start now treat the Mongolian vowel separator U+180E as
   hidden, except right after a Mongolian letter (U+1820-U+1878 or U+1880-U+18AA). Before, it
   passed. A project mounted by an earlier collet gets this fix only after a remount.
+- `task.mjs`, `mount.mjs` and the session start no longer treat the Mongolian vowel separator
+  U+180E as hidden right after a free variation selector U+180B-U+180D or U+180F that follows a
+  Mongolian letter. Before, they refused or left it out there. A project mounted by an earlier
+  collet gets this fix only after a remount.
+- The session start states the handoff note of a task whose id is made only of hidden
+  characters. Before, it read the line after the note's empty `task:` stamp as the id and deleted
+  the note.
 
 ## [0.5.0-alpha] — 2026-09-25
 

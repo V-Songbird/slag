@@ -195,7 +195,7 @@ test('only variation selectors that choose how an emoji shows are skipped', () =
 // letter.
 test('Mongolian free variation selectors and the vowel separator are skipped only right after a Mongolian letter', () => {
   for (const [what, text, named] of [
-    ['letter forms', '\u182D\u180B \u1820\u180C \u1828\u180D \u1873\u180F \u1887\u180B \u1885\u180C \u18AA\u180D \u1828\u180E\u1820', ''],
+    ['letter forms', '\u182D\u180B \u1820\u180C \u1828\u180D \u1873\u180F \u1887\u180B \u1885\u180C \u18AA\u180D \u1828\u180E\u1820 \u1828\u180B\u180E\u1820', ''],
     ['after a letter', 'a\u180Bb', 'U+180B'],
     ['at the start', '\u180Cstart', 'U+180C'],
     ['at the end', 'end\u180D', 'U+180D'],

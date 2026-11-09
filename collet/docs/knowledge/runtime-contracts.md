@@ -51,7 +51,7 @@ U+180B-U+180D and U+180F, the Mongolian vowel separator U+180E, and the Unicode 
 U+E0000-U+E007F. U+FE0E or U+FE0F right after an Extended_Pictographic character, and U+FE0F
 between 0-9, # or * and the keycap U+20E3, choose how an emoji shows, so they stay. U+180B-U+180F
 right after a Mongolian letter, U+1820-U+1878 or U+1880-U+18AA, shape that letter, so they stay
-too. That covers the project line, the
+too, and so does U+180E right after such a letter's selector U+180B-U+180D or U+180F. That covers the project line, the
 `ask_first` list, the conventions, the open task's id, title, scope, accept command and Foreman id,
 and `.collet/handoff.md`. The joiner inside an
 emoji and the tags of a subdivision flag render, so they stay: U+1F3F4, two lowercase letter tags
