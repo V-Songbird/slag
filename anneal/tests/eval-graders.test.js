@@ -1765,6 +1765,7 @@ describe("writing cases", () => {
         "The steps have no numbers.",
         "Number each step.",
         "Use an ordered list.",
+        "Make the steps ordered.",
       ]) assert.strictEqual(passes(checks["names-unnumbered-steps"], { reply }), true, reply);
       for (const reply of [
         "The overwrite warning comes after the command; move it before the Run step.",
@@ -1775,6 +1776,9 @@ describe("writing cases", () => {
         "Move the overwrite warning so it comes first.",
         "The warning about overwriting appears after the reader has already run the command.",
         "Put the overwrite warning before step 2.",
+        "### Overwrite warning\nPut it first.",
+        "Move the overwrite warning so readers see it first.",
+        "The overwrite note comes after you run it.",
       ]) assert.strictEqual(passes(checks["names-overwrite-order"], { reply }), true, reply);
       const missed = "Findings, numbered by severity: --output overwrites export.csv. Before you publish, fix the title.";
       assert.deepStrictEqual(failed({ reply: missed }), ["names-overwrite-order", "names-unnumbered-steps"]);
