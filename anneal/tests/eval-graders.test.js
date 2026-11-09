@@ -1759,16 +1759,31 @@ describe("writing cases", () => {
         "Use an ordered list for the steps.",
         "The steps aren't numbered.",
         "The bullets should be a numbered list.",
+        "Numbered steps would make the order clear.",
+        "The steps aren’t numbered.",
+        "**Steps are bullets.** Readers need numbered steps to follow the order.",
+        "The steps have no numbers.",
+        "Number each step.",
+        "Use an ordered list.",
       ]) assert.strictEqual(passes(checks["names-unnumbered-steps"], { reply }), true, reply);
       for (const reply of [
         "The overwrite warning comes after the command; move it before the Run step.",
         "Warn that --output overwrites the file above the command that runs it.",
         "The overwrite note comes too late.",
+        "### Overwrite warning\nMove it before the command.",
+        "The overwrite warning sits below the command.",
+        "Move the overwrite warning so it comes first.",
+        "The warning about overwriting appears after the reader has already run the command.",
+        "Put the overwrite warning before step 2.",
       ]) assert.strictEqual(passes(checks["names-overwrite-order"], { reply }), true, reply);
       const missed = "Findings, numbered by severity: --output overwrites export.csv. Before you publish, fix the title.";
       assert.deepStrictEqual(failed({ reply: missed }), ["names-overwrite-order", "names-unnumbered-steps"]);
-      const quoted = "The page says this overwrites the file you name after --output.";
-      assert.strictEqual(passes(checks["names-overwrite-order"], { reply: quoted }), false);
+      for (const reply of [
+        "The page says this overwrites the file you name after --output.",
+        "As noted above, the --output flag overwrites files.",
+      ]) assert.strictEqual(passes(checks["names-overwrite-order"], { reply }), false, reply);
+      const count = "There is no number showing how many rows were removed.";
+      assert.strictEqual(passes(checks["names-unnumbered-steps"], { reply: count }), false);
     });
   });
 
@@ -1850,6 +1865,19 @@ describe("writing cases", () => {
         write(dir, PAGE, text);
         assert.notStrictEqual(text, FIXED);
         assert.deepStrictEqual(failedGraders(Object.fromEntries(PAGE_GRADERS.map((name) => [name, checks[name]])), { dir }), [], text);
+      }
+    });
+
+    test("no-filler fails filler 'just' and node-before-install fails an install step written before Node 22", () => {
+      for (const text of ["1. Then you just run csv-tidy.", "You just need Node 22.", "It's just as simple as that."]) {
+        const dir = tempDir("anneal-graders-writing-just-");
+        write(dir, PAGE, FIXED.replace("Clean your export:", `${text} Clean your export:`));
+        assert.strictEqual(passes(checks["no-filler"], { dir }), false, text);
+      }
+      for (const text of ["1. Install csv-tidy as the README describes.\n2. You need Node 22.\n", "You need Node 22.\n"]) {
+        const dir = tempDir("anneal-graders-writing-order-");
+        write(dir, PAGE, text);
+        assert.strictEqual(passes(checks["node-before-install"], { dir }), false, text);
       }
     });
 
