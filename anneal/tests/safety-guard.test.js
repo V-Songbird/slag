@@ -190,7 +190,9 @@ describe("a migration branch that holds commits of its own", () => {
     ]) {
       assert.strictEqual(decision(command, root), "deny", command);
     }
-    assert.match(decide("claude", claudeCall("git commit -n -m x", root)).hookSpecificOutput.permissionDecisionReason, /in another form/);
+    const reason = decide("claude", claudeCall("git commit -n -m x", root)).hookSpecificOutput.permissionDecisionReason;
+    assert.match(reason, /in another form/);
+    assert.match(reason, /reword the message/);
   });
 
   test("from another branch, deleting or forcing it asks first", () => {

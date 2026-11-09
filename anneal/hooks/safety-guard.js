@@ -163,7 +163,7 @@ function decide(host, data) {
     return adapter.deny(
       "anneal is mid-migration on this branch, and this commit skips the checks each migration step has to pass: " +
         command.trim() +
-        ". Commit without `--no-verify` or `-n`, and fix what a check reports. The same command in another form would skip the same checks."
+        ". Commit without `--no-verify` or `-n`, and fix what a check reports; if such a word is only part of the commit message, reword the message. The same command in another form would skip the same checks."
     );
   }
   const held = forced.find((name) => holdsOwnCommits(cwd, name));
