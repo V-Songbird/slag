@@ -190,10 +190,11 @@ export function batchStop() {
 }
 
 // Why a session yields no grades: the batch stopping before it ended, its
-// timeout, or the runner's own error. reason is the abort signal's reason.
+// timeout, or the runner's own error. reason is the abort signal's reason. A
+// timeout that fires after the session's result message does not count.
 export function runError(messages, { aborted, reason, timeoutSeconds }) {
   if (aborted && reason === BATCH_STOPPED) return "stopped before the session ended: the batch stopped";
-  if (aborted) return `timed out after ${timeoutSeconds} seconds`;
+  if (aborted && !messages.some((message) => message.type === "result")) return `timed out after ${timeoutSeconds} seconds`;
   const found = messages.find((message) => message.type === "runner_error");
   return found ? String(found.message || "runner error") : null;
 }
@@ -267,8 +268,15 @@ const WRITE_SYSCALLS = new Set(["open", "write", "mkdir", "copyfile", "rename"])
 
 // A failed write that shows the output location cannot be written: a code in
 // UNWRITABLE, except an EPERM on a file that already exists, which a lock or a
-// read-only attribute on that one file explains.
-const isFile = (file) => typeof file === "string" && fs.statSync(file, { throwIfNoEntry: false })?.isFile() === true;
+// read-only attribute on that one file explains. A file whose stat throws,
+// such as on a denied stat, counts as not existing.
+const isFile = (file) => {
+  try {
+    return typeof file === "string" && fs.statSync(file, { throwIfNoEntry: false })?.isFile() === true;
+  } catch {
+    return false;
+  }
+};
 const unwritable = (error) => UNWRITABLE.has(error?.code) && !(error.code === "EPERM" && isFile(error.path));
 
 // The record of one job: what runJob returns, or, when it throws, such as on a

@@ -362,6 +362,29 @@ test("stopping the batch aborts every live session but the one that stopped it, 
   assert.strictEqual(own.signal.reason, BATCH_STOPPED);
 });
 
+test("a session removed from the batch's live set, as one that has its result is, is not aborted when the batch stops", () => {
+  const batch = batchStop();
+  const finished = new AbortController();
+  batch.live.add(finished);
+  batch.live.delete(finished);
+  batch.stop();
+  assert.strictEqual(finished.signal.aborted, false);
+});
+
+test("a timeout that fires after the session's result leaves the run graded, not timed out", () => {
+  assert.strictEqual(runError(finalReply("Done."), { aborted: true, reason: new AbortController().signal.reason, timeoutSeconds: 600 }), null);
+  assert.strictEqual(runError([bashCall("toolu_1", "ls")], { aborted: true, timeoutSeconds: 600 }), "timed out after 600 seconds");
+});
+
+test("an EPERM whose file cannot be stat'd counts as one on a new file, so the record still returns", async (t) => {
+  const denied = Object.assign(new Error("EPERM: operation not permitted, stat"), { code: "EPERM", syscall: "stat" });
+  t.mock.method(fs, "statSync", () => { throw denied; });
+  const thrown = Object.assign(new Error("EPERM: operation not permitted, open 'result.json'"), { code: "EPERM", syscall: "open", path: "result.json" });
+  let stops = 0;
+  const record = await recordJob({ c: { name: "x", graders: [] }, arm: "with", n: 1 }, async () => { throw thrown; }, { save: () => { throw thrown; }, stop: () => { stops++; } });
+  assert.deepStrictEqual({ stops, error: record.error }, { stops: 1, error: "runner failed: EPERM: operation not permitted, open 'result.json'; stopping every run" });
+});
+
 test("a startup failure every session shares stops every run; one tied to its own run fails only that run", () => {
   const startup = (reason, errors) => ({ type: "result", subtype: "error_during_execution", is_error: true, errors, startup_failure_reason: reason, total_cost_usd: 0, num_turns: 0 });
   for (const reason of ["cli_version_too_old", "shell_tool_missing", "proxy_invalid", "temp_dir_unusable"]) {

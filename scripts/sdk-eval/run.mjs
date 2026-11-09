@@ -168,8 +168,11 @@ async function runJob(job) {
         throw new Error(`session used ${message.apiKeySource}, not ANTHROPIC_API_KEY; stopping every run`);
       }
       messages.push(message);
-      // A session that has its result is past the batch's abort.
-      if (message.type === "result") batch.live.delete(abortController);
+      // A session that has its result is past the batch's abort and its timeout.
+      if (message.type === "result") {
+        batch.live.delete(abortController);
+        clearTimeout(timer);
+      }
       const ended = resultError(message, { aborted: abortController.signal.aborted });
       if (ended) {
         if (ended.stop) batch.stop(abortController);
