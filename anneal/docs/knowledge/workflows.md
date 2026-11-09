@@ -930,10 +930,10 @@ Read a with/without delta in three parts:
 
 With the plugin, 13 of the 15 cases passed every grader in all three runs. In the seven session-failure cases and the two repeated-step cases, the runs without the plugin failed their evidence grader in all three runs, and only two of those nine cases differ on an outcome grader.
 
-A case that passes every grader in all three runs with the plugin cannot show a later improvement. Each such case is either kept as a regression smoke test or hardened:
+A case that passes every grader in all three runs with the plugin cannot show a later improvement. Each such case is either kept as a regression smoke test or hardened. Graders that require files to stay unchanged or no file to be created count toward neither decision.
 
-- **Keep** a case when an outcome grader separates the arms, so a plugin change that loses the effect shows up, or when the case checks something the plugin must not do. A run without the plugin passes that kind of case because it never loads the skill, so only the arm with the plugin can regress.
-- **Harden** a case when it asks for a behaviour that every run without the plugin already shows. Neither arm can move, so it needs a harder fixture or prompt. Until then it counts as a smoke test, and its delta is no evidence for the plugin.
+- **Keep** a case when an outcome grader separates the arms, so a plugin change that loses the effect shows up. Also keep it when every other outcome grader checks only what the reply must not propose or name; a grader that asks the reply to say it proposes nothing counts as one of these. A run without the plugin passes that kind of case because it never loads the skill, so only the arm with the plugin can regress.
+- **Harden** a case when an outcome grader asks for a behaviour that every run without the plugin already shows. Neither arm can move on it, so the case needs a harder fixture or prompt. Until then it counts as a smoke test, and its delta is no evidence for the plugin.
 
 | Case | Outcome graders where the arms differ, with / without | Decision |
 | --- | --- | --- |
@@ -943,12 +943,12 @@ A case that passes every grader in all three runs with the plugin cannot show a 
 | `readme-review-reports-without-changes` | `names-badge-order` 3/3, 1/3 | Keep |
 | `writing-page-without-the-word` | `node-before-install` 3/3, 0/3 | Keep |
 | `plan-flags-a-wrong-importer-count` | `stale-row-flagged` 3/3, 1/3; `stale-row-not-planned` 3/3, 0/3 | Keep |
-| `session-audit-adds-no-rule-for-a-flake` | none | Keep: it checks a rule the plugin must not propose |
-| `session-audit-reports-a-refusal-workaround` | none | Keep: it checks a workaround the plugin must not propose |
+| `session-audit-adds-no-rule-for-a-flake` | none | Keep: both outcome graders check that no map-file rule is proposed |
 | `session-audit-names-no-check-writer-without-collet` | none | Keep: it is the control of the `check-writer` pair |
 | `session-repeats-skips-what-the-map-names` | none | Keep: it is the control of the repeated-step pair |
-| `session-audit-proposes-the-quiet-reporter` | none | Harden |
-| `session-audit-proposes-a-path-hint` | none | Harden |
-| `session-repeats-proposes-a-script` | none | Harden |
+| `session-audit-reports-a-refusal-workaround` | none | Harden: `safety-finding-reported` passed in every run of both arms |
+| `session-audit-proposes-the-quiet-reporter` | none | Harden: `quiet-command-for-commands` passed in every run of both arms |
+| `session-audit-proposes-a-path-hint` | none | Harden: `hint-for-where-things-live` passed in every run of both arms |
+| `session-repeats-proposes-a-script` | none | Harden: `proposes-command-and-map-line` passed in every run of both arms |
 
-`writing-review-reports-without-changes` recorded `names-overwrite-order` at 1 of 3 with the plugin and 3 of 3 without. All three replies with the plugin named the warning that comes after the command. Two of them said so in a sentence without "overwrite", such as "The warning comes after the command that causes the damage", which the grader now passes. Regraded under the current pattern, the recorded replies pass it in 3 of 3 runs in each arm; no session ran again. `names-unnumbered-steps` passed 2 of 3 in each arm, and both failed replies named the defect in a form it misses, listed under [the writing cases](#writing-cases). Read as a reviewer would, every run in both arms names both planted defects, so this case is one to harden as well.
+`writing-review-reports-without-changes` recorded `names-overwrite-order` at 1 of 3 with the plugin and 3 of 3 without. All three replies with the plugin named the warning that comes after the command. Two of them said so in a sentence without "overwrite", such as "The warning comes after the command that causes the damage", which the grader passes. Regraded under the current pattern, the recorded replies pass it in 3 of 3 runs in each arm; no session ran again. `names-unnumbered-steps` passed 2 of 3 in each arm, and both failed replies named the defect in a form it misses, listed under [the writing cases](#writing-cases). Read as a reviewer would, every run in both arms names both planted defects, so this case is one to harden as well.
