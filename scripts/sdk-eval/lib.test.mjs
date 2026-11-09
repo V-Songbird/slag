@@ -308,7 +308,7 @@ test("a runner failure stops every run only when its code shows the output canno
 });
 
 test("a runner failure whose record still saves, such as a directory read denied with EPERM, fails only its run", async () => {
-  const c = { name: "x", graders: [] };
+  const c = { name: "x", graders: [{ name: "g" }] };
   let stopped = false;
   let saved = null;
   const thrown = Object.assign(new Error("EPERM: operation not permitted, scandir 'work/.git'"), { code: "EPERM", syscall: "scandir" });
@@ -322,6 +322,7 @@ test("a runner failure whose record still saves, such as a directory read denied
   assert.strictEqual(stopped, true);
   // The error names the save failure that stopped the batch.
   assert.strictEqual(halted.error, "runner failed: EPERM: operation not permitted, scandir 'work/.git'; stopping every run: ENOSPC: no space left on device");
+  assert.deepStrictEqual(halted.grades, { g: { pass: false, reason: `not graded: ${halted.error}` } });
 });
 
 test("an EPERM on a file that already exists fails only its run; one on a new file stops every run", async (t) => {

@@ -287,18 +287,18 @@ export async function recordJob(job, runJob, { save = () => {}, stop = () => {} 
   } catch (error) {
     const session = job.session ?? { ...runFromMessages([]), seconds: 0 };
     const message = (e) => e?.message || String(e);
-    let cause = unwritable(error) && WRITE_SYSCALLS.has(error.syscall) ? error : null;
-    const build = () => runRecord(job.c, job.arm, job.n, session, { seconds: session.seconds, error: `runner failed: ${message(error)}${cause === null ? "" : cause === error ? "; stopping every run" : `; stopping every run: ${message(cause)}`}` });
-    let record = build();
+    let stops = unwritable(error) && WRITE_SYSCALLS.has(error.syscall);
+    const record = runRecord(job.c, job.arm, job.n, session, { seconds: session.seconds, error: `runner failed: ${message(error)}${stops ? "; stopping every run" : ""}` });
     try {
       save(job, record);
     } catch (saveError) {
-      if (cause === null && unwritable(saveError)) {
-        cause = saveError;
-        record = build();
+      if (!stops && unwritable(saveError)) {
+        stops = true;
+        record.error += saveError === error ? "; stopping every run" : `; stopping every run: ${message(saveError)}`;
+        for (const grade of Object.values(record.grades)) grade.reason = `not graded: ${record.error}`;
       }
     }
-    if (cause !== null) stop();
+    if (stops) stop();
     return record;
   }
 }

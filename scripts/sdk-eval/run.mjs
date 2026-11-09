@@ -121,8 +121,8 @@ async function judgeGrader(grader, text) {
 }
 
 const runDirOf = ({ c, arm, n }) => path.join(outDir, c.name, `${arm}-${n}`);
-// Creates the run folder too, so a save after a failed mkdirSync in runJob
-// fails with the code that shows why the output cannot be written.
+// Recreates a missing run folder, such as one the session removed, so the
+// record still saves.
 const saveRecord = (job, record) => {
   fs.mkdirSync(runDirOf(job), { recursive: true });
   fs.writeFileSync(path.join(runDirOf(job), "result.json"), `${JSON.stringify(record, null, 2)}\n`);
@@ -168,6 +168,8 @@ async function runJob(job) {
         throw new Error(`session used ${message.apiKeySource}, not ANTHROPIC_API_KEY; stopping every run`);
       }
       messages.push(message);
+      // A session that has its result is past the batch's abort.
+      if (message.type === "result") batch.live.delete(abortController);
       const ended = resultError(message, { aborted: abortController.signal.aborted });
       if (ended) {
         if (ended.stop) batch.stop(abortController);
