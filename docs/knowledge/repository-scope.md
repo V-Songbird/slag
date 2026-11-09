@@ -42,10 +42,13 @@ suite validates marketplace sources, local resource paths, host metadata and ver
 The navigation audit is heuristic; its runtime-name matches in anneal/tests/audit.test.js are
 intentional fixture strings and must retain their detector coverage.
 scripts/hidden-characters.test.js fails on raw zero-width, bidi-control, tag, misplaced
-byte-order-mark and variation-selector characters in tracked text files, naming file, line and
-code point. U+FE0E and U+FE0F are allowed right after an Extended_Pictographic character, and
-U+FE0F between 0-9, # or * and the keycap U+20E3. U+180B-U+180F are allowed right after a
-Mongolian letter, U+1820-U+1878 or U+1880-U+18AA, and fail anywhere else. It walks the tree
+byte-order-mark, variation-selector and Mongolian vowel separator characters in tracked text
+files, naming file, line and code point. U+FE0E and U+FE0F are allowed right after an
+Extended_Pictographic character, and U+FE0F between 0-9, # or * and the keycap U+20E3. The
+Mongolian variation selectors U+180B-U+180D and U+180F are allowed right after a Mongolian letter
+or one of its combining marks U+1885, U+1886 or U+18A9, all in U+1820-U+1878 or U+1880-U+18AA.
+The vowel separator U+180E is allowed in the same place or right after such a selector. Both
+fail anywhere else. It walks the tree
 instead when there is no Git work tree. It also fails when collet/templates/state.mjs's
 HIDDEN_CHARACTERS differs from anneal/scripts/audit.js's. Write such characters as escapes (\u200B, \u{E0041}).
 scripts/markdown-links.test.js fails on a relative link or #anchor in a tracked public Markdown

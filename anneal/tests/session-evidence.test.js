@@ -97,7 +97,8 @@ describe("redaction", () => {
     assert.strictEqual(redact(`ok.${tags.join("")} done${tags.slice(0, 2).join("")}\u200B`), "ok.<9 Unicode tag characters> done<2 Unicode tag characters><U+200B>");
     assert.strictEqual(redact("x\u{E0100}\u{E0101}y"), "x<U+E0100><U+E0101>y");
     assert.strictEqual(redact("a\u{E0041}\u{E0100}\u{E0042}\u{FE00}"), "a<1 Unicode tag character><U+E0100><1 Unicode tag character><U+FE00>");
-    for (const text of ["pair \u{1F468}\u200D\u{1F4BB}", `team \u{1F3F4}${tags.slice(0, 4).join("")}\u{E007F}`, "plain text"]) {
+    assert.strictEqual(redact("x\u180Ey \u1810\u180E"), "x<U+180E>y \u1810<U+180E>");
+    for (const text of ["\u1828\u180E\u1820", "\u1828\u180B\u180E\u1820", "pair \u{1F468}\u200D\u{1F4BB}",`team \u{1F3F4}${tags.slice(0, 4).join("")}\u{E007F}`, "plain text"]) {
       assert.strictEqual(redact(text), text);
     }
     assert.strictEqual(redact("password: hunter22\u200B"), "password: [REDACTED]");
