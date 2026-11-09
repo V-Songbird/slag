@@ -122,25 +122,39 @@ export const gradersFor = (graders, arm) => graders.filter((grader) => grader.ar
 // A failure every later API call would repeat, so it stops every run: an auth
 // or permission status (401, 403), or a credit balance that is too low.
 const CREDIT_LOW = /credit balance is too low/i;
-const sharedFailure = (status, text) => [401, 403].includes(status) || CREDIT_LOW.test(text);
+const sharedStatus = (status) => [401, 403].includes(status);
+const sharedFailure = (status, text) => sharedStatus(status) || CREDIT_LOW.test(text);
 
 // The result subtypes of a session that reached one of its own limits.
 const RUN_LIMITS = new Set(["error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"]);
 
+// The startup failure reasons that depend on one run's own workspace, home or
+// config folder, or that a retry may clear. Every other reason, such as
+// cli_version_too_old, shell_tool_missing or proxy_invalid, comes from the
+// machine or the account that every session shares.
+const RUN_STARTUP_FAILURES = new Set(["cwd_unavailable", "config_file_invalid", "worktree_unverified", "worktree_resume_refused", "session_held_by_background"]);
+
 // How a session's result message ends its run in error, or null. A run limit
-// errors only its run, whatever its text. A shared failure on an error result,
-// read from the success arm's api_error_status and the result or errors text,
-// stops every run, and so does a result that is not an error when its text says
-// the credit balance is too low; any other success result that is not an error
-// is null, whatever its status. Any other subtype, such as an error during
-// execution, errors only its run, named by its subtype, and so does any other
-// API error, such as a transient 500 or 529; an API error with no text and no
-// status is named by its subtype. A session already aborted by its timeout
-// never stops the batch.
+// errors only its run, whatever its text. A startup failure, an error during
+// execution with a startup_failure_reason, stops every run, named by its reason
+// and errors text, unless its reason is one of RUN_STARTUP_FAILURES. A shared
+// failure on an error result, read from the success arm's api_error_status and
+// the result or errors text, stops every run, and so does a result that is not
+// an error when its text says the credit balance is too low; any other success
+// result that is not an error is null, whatever its status. Any other subtype,
+// such as an error during execution, errors only its run, named by its subtype,
+// and so does any other API error, such as a transient 500 or 529; an API error
+// with no text and no status is named by its subtype. A session already aborted,
+// by its timeout or by the batch stopping, never stops the batch.
 export function resultError(message, { aborted = false } = {}) {
   if (message.type !== "result") return null;
   if (RUN_LIMITS.has(message.subtype)) return { stop: false, message: `session ended in ${message.subtype}` };
   const text = [message.result, ...(message.errors ?? [])].filter(Boolean).join(" | ");
+  const reason = message.startup_failure_reason;
+  if (reason) {
+    const stop = !aborted && !RUN_STARTUP_FAILURES.has(reason);
+    return { stop, message: `session failed to start: ${reason}${text ? `: ${text}` : ""}${stop ? "; stopping every run" : ""}` };
+  }
   if (!aborted && (message.is_error ? sharedFailure(message.api_error_status, text) : CREDIT_LOW.test(text))) return { stop: true, message: `session ended in error, stopping every run: ${text || message.subtype}` };
   if (!message.is_error && message.subtype === "success") return null;
   if (message.subtype !== "success") return { stop: false, message: `session ended in ${message.subtype}` };
@@ -157,8 +171,28 @@ export function sessionSpend(run, [inPrice, outPrice]) {
   return run.usage.reduce((sum, u) => sum + tokens(u), 0) / 1e6;
 }
 
-// Why a session yields no grades: its timeout, or the runner's own error.
-export function runError(messages, { aborted, timeoutSeconds }) {
+// The abort reason of a session the batch stopped before it ended.
+export const BATCH_STOPPED = "batch stopped";
+
+// The batch's stop: stop() sets stopped and aborts every session in live with
+// the reason BATCH_STOPPED, except the controller it is given, which is the
+// session whose own result stopped the batch.
+export function batchStop() {
+  const batch = {
+    stopped: false,
+    live: new Set(),
+    stop(own = null) {
+      batch.stopped = true;
+      for (const controller of batch.live) if (controller !== own) controller.abort(BATCH_STOPPED);
+    },
+  };
+  return batch;
+}
+
+// Why a session yields no grades: the batch stopping before it ended, its
+// timeout, or the runner's own error. reason is the abort signal's reason.
+export function runError(messages, { aborted, reason, timeoutSeconds }) {
+  if (aborted && reason === BATCH_STOPPED) return "stopped before the session ended: the batch stopped";
   if (aborted) return `timed out after ${timeoutSeconds} seconds`;
   const found = messages.find((message) => message.type === "runner_error");
   return found ? String(found.message || "runner error") : null;
@@ -218,7 +252,7 @@ export async function gradeRun(graders, run, judge) {
       grades[grader.name] = await judge(grader, text);
     } catch (error) {
       const message = error?.message || String(error);
-      return { error: `judge failed: ${message}`, stop: [401, 403].includes(error?.status) || /credit balance/i.test(message) };
+      return { error: `judge failed: ${message}`, stop: sharedStatus(error?.status) || /credit balance/i.test(message) };
     }
   }
   return { grades };
@@ -231,32 +265,40 @@ const UNWRITABLE = new Set(["ENOSPC", "EACCES", "EPERM", "EROFS"]);
 // UNWRITABLE also shows the output location cannot be written.
 const WRITE_SYSCALLS = new Set(["open", "write", "mkdir", "copyfile", "rename"]);
 
+// A failed write that shows the output location cannot be written: a code in
+// UNWRITABLE, except an EPERM on a file that already exists, which a lock or a
+// read-only attribute on that one file explains.
+const isFile = (file) => typeof file === "string" && fs.statSync(file, { throwIfNoEntry: false })?.isFile() === true;
+const unwritable = (error) => UNWRITABLE.has(error?.code) && !(error.code === "EPERM" && isFile(error.path));
+
 // The record of one job: what runJob returns, or, when it throws, such as on a
 // failed file write, a run error "runner failed: <message>" that fails every
 // grader of its arm, so the batch still reaches its summary. A session that
 // ran before the failure keeps its subtype, cost, turns, seconds and reply,
 // which runJob leaves in job.session. The record is passed to save, such as a
-// result.json write. A save that fails with a code in UNWRITABLE, or a runJob
-// error with such a code from one of WRITE_SYSCALLS, calls stop and adds
-// "; stopping every run" to the error; any other failure, such as an EPERM from
-// a directory read, fails only its run.
+// result.json write. A runJob error from one of WRITE_SYSCALLS that shows the
+// output location cannot be written adds "; stopping every run" to the error;
+// otherwise a save that shows it adds "; stopping every run: <save error>".
+// Either calls stop once. Any other failure, such as an EPERM from a directory
+// read or on a file that already exists, fails only its run.
 export async function recordJob(job, runJob, { save = () => {}, stop = () => {} } = {}) {
   try {
     return await runJob(job);
   } catch (error) {
     const session = job.session ?? { ...runFromMessages([]), seconds: 0 };
-    const failed = (suffix) => runRecord(job.c, job.arm, job.n, session, { seconds: session.seconds, error: `runner failed: ${error?.message || String(error)}${suffix}` });
-    const unwritable = UNWRITABLE.has(error?.code) && WRITE_SYSCALLS.has(error?.syscall);
-    const record = failed(unwritable ? "; stopping every run" : "");
+    const message = (e) => e?.message || String(e);
+    let cause = unwritable(error) && WRITE_SYSCALLS.has(error.syscall) ? error : null;
+    const build = () => runRecord(job.c, job.arm, job.n, session, { seconds: session.seconds, error: `runner failed: ${message(error)}${cause === null ? "" : cause === error ? "; stopping every run" : `; stopping every run: ${message(cause)}`}` });
+    let record = build();
     try {
       save(job, record);
     } catch (saveError) {
-      if (!unwritable && UNWRITABLE.has(saveError?.code)) {
-        stop();
-        return failed("; stopping every run");
+      if (cause === null && unwritable(saveError)) {
+        cause = saveError;
+        record = build();
       }
     }
-    if (unwritable) stop();
+    if (cause !== null) stop();
     return record;
   }
 }

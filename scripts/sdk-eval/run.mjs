@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import Anthropic from "@anthropic-ai/sdk";
-import { selectCases, runFromMessages, gradersFor, gradeRun, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, reportBatch } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, gradeRun, listRunFiles, createdPaths, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, reportBatch, batchStop } from "./lib.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 // USD per million [input, output] tokens, for the judge and for a session that
@@ -87,7 +87,8 @@ if (cases.length === 0) fail(`No eval cases selected under ${path.join(pluginDir
 
 const jobs = cases.flatMap((c) => arms.flatMap((arm) => Array.from({ length: runs }, (_, i) => ({ c, arm, n: i + 1 }))));
 let spent = 0;
-let stopped = false;
+// Stopping the batch keeps workers from taking new jobs and aborts the sessions still running.
+const batch = batchStop();
 const judge = new Anthropic(JUDGE_CLIENT);
 
 async function judgeGrader(grader, text) {
@@ -144,6 +145,7 @@ async function runJob(job) {
   const home = path.join(runDir, "home");
   fs.mkdirSync(home, { recursive: true });
   const abortController = new AbortController();
+  batch.live.add(abortController);
   const timer = setTimeout(() => abortController.abort(), c.timeoutSeconds * 1000);
   const messages = [];
   const started = Date.now();
@@ -157,17 +159,18 @@ async function runJob(job) {
         // A fresh home hides installed plugins (~/.claude/plugins), which a run
         // without the plugin otherwise finds and uses. It hides nothing else:
         // Bash can still read any path on the machine.
-        env: { ...SESSION_ENV, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: path.join(runDir, "config"), CLAUDE_CODE_GIT_BASH_PATH: BASH },
+        // CLAUDE_CODE_STARTUP_FAILURE_RESULTS makes every known startup failure end in a result with its reason.
+        env: { ...SESSION_ENV, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: path.join(runDir, "config"), CLAUDE_CODE_GIT_BASH_PATH: BASH, CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1" },
       },
     })) {
       if (message.type === "system" && message.subtype === "init" && message.apiKeySource !== "ANTHROPIC_API_KEY") {
-        stopped = true;
+        batch.stop(abortController);
         throw new Error(`session used ${message.apiKeySource}, not ANTHROPIC_API_KEY; stopping every run`);
       }
       messages.push(message);
       const ended = resultError(message, { aborted: abortController.signal.aborted });
       if (ended) {
-        if (ended.stop) stopped = true;
+        if (ended.stop) batch.stop(abortController);
         messages.push({ type: "runner_error", message: ended.message });
       }
     }
@@ -175,6 +178,7 @@ async function runJob(job) {
     messages.push({ type: "runner_error", message: error?.message || String(error) });
   } finally {
     clearTimeout(timer);
+    batch.live.delete(abortController);
   }
   const seconds = Math.round((Date.now() - started) / 1000);
   // Count the session's spend before any workspace read that can throw.
@@ -184,25 +188,26 @@ async function runJob(job) {
   job.session = { subtype: run.subtype, costUsd: run.costUsd, turns: run.turns, reply: run.reply, seconds };
   Object.assign(run, { dir: work, created: createdPaths(before, listRunFiles(work)) });
   fs.writeFileSync(path.join(runDir, "trace.jsonl"), `${run.trace}\n`);
-  // A timeout can end the stream quietly as well as throw.
-  const error = runError(messages, { aborted: abortController.signal.aborted, timeoutSeconds: c.timeoutSeconds });
+  // An abort can end the stream quietly as well as throw.
+  const { aborted, reason } = abortController.signal;
+  const error = runError(messages, { aborted, reason, timeoutSeconds: c.timeoutSeconds });
   if (error) return finish(runRecord(c, arm, n, run, { seconds, error }));
   const graded = await gradeRun(gradersFor(c.graders, arm), run, judgeGrader);
-  if (graded.stop) stopped = true;
+  if (graded.stop) batch.stop();
   return finish(runRecord(c, arm, n, run, { seconds, ...graded }));
 }
 
 const records = [];
 let next = 0;
 async function worker() {
-  while (next < jobs.length && !stopped) {
+  while (next < jobs.length && !batch.stopped) {
     if (spent >= maxCost) {
-      stopped = true;
+      batch.stop();
       console.log(`Stopped: estimated spend $${spent.toFixed(2)} reached --max-cost-usd ${maxCost}.`);
       break;
     }
     const job = jobs[next++];
-    const record = await recordJob(job, runJob, { save: saveRecord, stop: () => { stopped = true; } });
+    const record = await recordJob(job, runJob, { save: saveRecord, stop: () => batch.stop() });
     records.push(record);
     const failed = Object.entries(record.grades ?? {}).filter(([, g]) => !g.pass).map(([name]) => name);
     console.log(`${record.case} ${record.arm}-${record.n}: ${record.error ?? `${record.subtype}, $${(record.costUsd ?? 0).toFixed(2)}, failed: ${failed.join(", ") || "none"}`}`);

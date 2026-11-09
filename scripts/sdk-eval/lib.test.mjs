@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { selectCases, runFromMessages, gradersFor, gradeRun, verdict, judgeText, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, summarize, reportBatch } from "./lib.mjs";
+import { selectCases, runFromMessages, gradersFor, gradeRun, verdict, judgeText, sessionEnv, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, summarize, reportBatch, batchStop, BATCH_STOPPED } from "./lib.mjs";
 
 const COLLET = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../collet");
 const byName = (cases, name) => cases.find((c) => c.name === name);
@@ -45,26 +45,17 @@ test("collet's cases are read with their limits, tags and scaffolds", () => {
   assert.deepStrictEqual(selectCases(COLLET, { tags: ["safety"] }).map((c) => c.name), ["guard-refuses-out-of-scope-write"]);
 });
 
-test("anneal's paired navigation cases are read with their scaffolds and no Skill tool", () => {
-  const cases = selectCases(path.join(COLLET, "../anneal"), { tags: ["navigation"] });
-  assert.strictEqual(cases.length, 6);
-  for (const c of cases) {
-    assert.match(c.scaffold, /^[a-z-]+-(original|oriented)\.sh$/);
-    assert.ok(!c.allowedTools.includes("Skill"));
-    assert.match(c.prompt, /^Before anything else, read `AGENTS\.md`\./);
-    // The map reaches a session only through that read: no fixture CLAUDE.md loads.
-    assert.deepStrictEqual(sessionOptions(c, "with", { pluginDir: "anneal", model: "m" }).settingSources, ["user"]);
-  }
-});
-
-test("anneal's held-out cases are read with their scaffolds and no Skill tool", () => {
-  const cases = selectCases(path.join(COLLET, "../anneal"), { tags: ["heldout"] });
-  assert.strictEqual(cases.length, 6);
-  for (const c of cases) {
-    assert.match(c.scaffold, /^heldout-[a-z-]+-(original|oriented)\.sh$/);
-    assert.ok(!c.allowedTools.includes("Skill"));
-    assert.match(c.prompt, /^Before anything else, read `AGENTS\.md`\./);
-    assert.deepStrictEqual(sessionOptions(c, "with", { pluginDir: "anneal", model: "m" }).settingSources, ["user"]);
+test("anneal's paired navigation and held-out cases are read with their scaffolds and no Skill tool", () => {
+  for (const [tag, prefix] of [["navigation", ""], ["heldout", "heldout-"]]) {
+    const cases = selectCases(path.join(COLLET, "../anneal"), { tags: [tag] });
+    assert.strictEqual(cases.length, 6, tag);
+    for (const c of cases) {
+      assert.match(c.scaffold, new RegExp(`^${prefix}(package-lookup|contract-section|explicit-path)-(original|oriented)\\.sh$`));
+      assert.ok(!c.allowedTools.includes("Skill"));
+      assert.match(c.prompt, /^Before anything else, read `AGENTS\.md`\./);
+      // The map reaches a session only through that read: no fixture CLAUDE.md loads.
+      assert.deepStrictEqual(sessionOptions(c, "with", { pluginDir: "anneal", model: "m" }).settingSources, ["user"]);
+    }
   }
 });
 
@@ -329,7 +320,56 @@ test("a runner failure whose record still saves, such as a directory read denied
   const full = Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
   const halted = await recordJob({ c, arm: "with", n: 2 }, async () => { throw thrown; }, { save: () => { throw full; }, stop: () => { stopped = true; } });
   assert.strictEqual(stopped, true);
-  assert.strictEqual(halted.error, "runner failed: EPERM: operation not permitted, scandir 'work/.git'; stopping every run");
+  // The error names the save failure that stopped the batch.
+  assert.strictEqual(halted.error, "runner failed: EPERM: operation not permitted, scandir 'work/.git'; stopping every run: ENOSPC: no space left on device");
+});
+
+test("an EPERM on a file that already exists fails only its run; one on a new file stops every run", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-eval-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const existing = path.join(dir, "result.json");
+  fs.writeFileSync(existing, "{}\n");
+  const c = { name: "x", graders: [] };
+  const outcome = async (file, syscall) => {
+    let stops = 0;
+    const thrown = Object.assign(new Error(`EPERM: operation not permitted, ${syscall} '${file}'`), { code: "EPERM", syscall, path: file });
+    const record = await recordJob({ c, arm: "with", n: 1 }, async () => { throw thrown; }, { save: () => { throw thrown; }, stop: () => { stops++; } });
+    return { stops, error: record.error };
+  };
+  assert.deepStrictEqual(await outcome(existing, "open"), { stops: 0, error: `runner failed: EPERM: operation not permitted, open '${existing}'` });
+  const fresh = path.join(dir, "trace.jsonl");
+  assert.deepStrictEqual(await outcome(fresh, "open"), { stops: 1, error: `runner failed: EPERM: operation not permitted, open '${fresh}'; stopping every run` });
+});
+
+test("stopping the batch aborts every live session but the one that stopped it, and their runs say the batch stopped", () => {
+  const batch = batchStop();
+  const [own, other, done] = [new AbortController(), new AbortController(), new AbortController()];
+  batch.live.add(own);
+  batch.live.add(other);
+  batch.stop(own);
+  assert.strictEqual(batch.stopped, true);
+  assert.strictEqual(own.signal.aborted, false);
+  assert.deepStrictEqual([other.signal.aborted, other.signal.reason], [true, BATCH_STOPPED]);
+  assert.strictEqual(done.signal.aborted, false);
+  assert.strictEqual(runError([], { aborted: true, reason: other.signal.reason, timeoutSeconds: 600 }), "stopped before the session ended: the batch stopped");
+  // A timeout keeps its own reason when the batch stops after it.
+  const timed = new AbortController();
+  timed.abort();
+  batch.live.add(timed);
+  batch.stop();
+  assert.strictEqual(runError([], { aborted: true, reason: timed.signal.reason, timeoutSeconds: 600 }), "timed out after 600 seconds");
+  assert.strictEqual(own.signal.reason, BATCH_STOPPED);
+});
+
+test("a startup failure every session shares stops every run; one tied to its own run fails only that run", () => {
+  const startup = (reason, errors) => ({ type: "result", subtype: "error_during_execution", is_error: true, errors, startup_failure_reason: reason, total_cost_usd: 0, num_turns: 0 });
+  for (const reason of ["cli_version_too_old", "shell_tool_missing", "proxy_invalid", "temp_dir_unusable"]) {
+    assert.deepStrictEqual(resultError(startup(reason, ["Startup failed."])), { stop: true, message: `session failed to start: ${reason}: Startup failed.; stopping every run` }, reason);
+    assert.strictEqual(resultError(startup(reason, []), { aborted: true }).stop, false, reason);
+  }
+  for (const reason of ["cwd_unavailable", "config_file_invalid", "worktree_unverified"]) {
+    assert.deepStrictEqual(resultError(startup(reason, [])), { stop: false, message: `session failed to start: ${reason}` }, reason);
+  }
 });
 
 test("a runner failure from an unwritable file write stops every run even when its record saves", async () => {
