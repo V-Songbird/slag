@@ -141,6 +141,18 @@ test('a hook file that is not JSON is unreadable, unless both sides hold the sam
   assert.deepEqual(compare(source, installed), { changed: [], added: [], missing: [], hooks: [] });
 });
 
+test('the command exits 2 when the source is not in a repository or has no plugin name', async () => {
+  const { source, installed } = await fixture();
+  const run = (args, env = process.env) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', env });
+  const untracked = run([installed, installed], { ...process.env, GIT_CEILING_DIRECTORIES: path.dirname(installed) });
+  assert.equal(untracked.status, 2);
+  assert.match(untracked.stderr, /^git ls-files failed in /);
+  writeFileSync(path.join(source, '.claude-plugin', 'plugin.json'), '{}\n');
+  const unnamed = run([source, installed]);
+  assert.equal(unnamed.status, 2);
+  assert.match(unnamed.stderr, /^cannot read the plugin name from /);
+});
+
 test('the command exits 2 on a usage error, an unreadable directory and a git that cannot start', async () => {
   const { source, installed } = await fixture();
   const run = (args, env = process.env) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', env });

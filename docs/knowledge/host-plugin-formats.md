@@ -96,7 +96,9 @@ track, each tracked file the install lacks, and each hook event in `hooks/hooks.
 `hooks/codex-hooks.json` or the plugin-root `hooks.json` whose definition differs. The plugin-root
 file is read under the plugin's name from the source's `.claude-plugin/plugin.json`. A hook file
 that is not valid JSON on either side is reported as `unreadable`, unless both sides hold the same
-bytes. A tracked file deleted from the work tree is skipped, so it is never reported as missing. It
+bytes. A tracked file deleted from the work tree is skipped in the file comparison, so an installed
+copy of it goes unreported; a deleted hook file counts as absent, so each of its installed events
+is reported as `added` and the run exits 1. It
 prints `parity: no differences` and exits 0 when the copy matches, exits 1 on any difference, and
 exits 2 on a usage error, when Git cannot list the source's tracked files, or when a directory or
 the source's plugin name cannot be read. It only reads: it never edits a cache, a configuration, a
@@ -114,5 +116,7 @@ Run npm run check from the repository root. The public scripts/plugin-integrity.
 Slag's current manifests, paths, identity and version placement, and scripts/plugin-parity.test.js
 checks the installed-copy comparison against fixtures for a matching copy, a changed file, an added
 file, changed events in each of the three hook files, an added or missing hook file, a hook file
-that is not JSON, and each exit-2 case. Host subprocess tests verify
+that is not JSON, a hook file deleted in the work tree, and exit 2 on a usage error, an unreadable
+installed directory, Git failing to start, a source outside a repository and a source without a
+plugin name. Host subprocess tests verify
 payload handling; they do not establish installed-host trust or interactive behavior.

@@ -6,9 +6,10 @@
 // or the plugin-root hooks.json. The plugin-root file's events sit under the plugin's name, read
 // from the source's .claude-plugin/plugin.json. A hook file that is not JSON on either side is
 // reported as unreadable unless both sides hold the same bytes. A tracked file deleted in the work
-// tree is skipped, so the install is compared only with the files the work tree holds. The
-// host-owned .in_use folder inside an installed copy is not part of the plugin and is ignored. The
-// check only reads: it never writes to either directory.
+// tree is skipped in the file comparison, so an installed copy of it is not reported; a deleted
+// hook file still counts as absent in the hook comparison, so its installed events are reported as
+// added. The host-owned .in_use folder inside an installed copy is not part of the plugin and is
+// ignored. The check only reads: it never writes to either directory.
 //
 // Usage: node scripts/plugin-parity.js <plugin directory in the checkout> <installed plugin directory>
 // Exit 0 when nothing differs, 1 when anything does, 2 on a usage error, when git cannot list the
