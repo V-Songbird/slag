@@ -1784,6 +1784,9 @@ describe("writing cases", () => {
         "The overwrite warning only shows up after it runs.",
         "The overwrite warning appears after it ran.",
         "The page warns that --output overwrites the file only after it runs.",
+        "**The warning comes after the step that does the damage.** Step 2 tells readers to run `csv-tidy export.csv --output export.csv`. Step 3 then says this overwrites the file and they should have kept a copy.",
+        "**The warning comes after the command that causes the damage.** Step 2 runs `csv-tidy export.csv --output export.csv`, which replaces the original file.",
+        "The warning comes too late.",
       ]) assert.strictEqual(passes(checks["names-overwrite-order"], { reply }), true, reply);
       const missed = "Findings, numbered by severity: --output overwrites export.csv. Before you publish, fix the title.";
       assert.deepStrictEqual(failed({ reply: missed }), ["names-overwrite-order", "names-unnumbered-steps"]);
@@ -1792,6 +1795,8 @@ describe("writing cases", () => {
         "As noted above, the --output flag overwrites files.",
         "The overwrite risk is real: save them first.",
         "--output overwrites the input file after it runs, because it names export.csv.",
+        "Add a warning about Node 22 before the install step.",
+        "The warning is clear, but the title is vague.",
       ]) assert.strictEqual(passes(checks["names-overwrite-order"], { reply }), false, reply);
       for (const reply of [
         "There is no number showing how many rows were removed.",
