@@ -141,6 +141,22 @@ test("with transcripts, a completed note another session read within three days 
   assert.ok(report.proposals.every((p) => p.detail.includes("no other session read it within 3 days")));
 });
 
+test("a completed note only a subagent transcript read is kept, and a session without subagents is unchanged", () => {
+  const root = repo();
+  write(root, { "docs/tasks/agent-read.md": task("completed"), "docs/tasks/unread.md": task("completed") });
+  for (const file of ["docs/tasks/agent-read.md", "docs/tasks/unread.md"]) age(root, file, 10);
+  const written = Date.now() - 10 * DAY;
+  const use = (name, input, ms) => JSON.stringify({ type: "assistant", timestamp: new Date(ms).toISOString(), message: { content: [{ type: "tool_use", name, input }] } });
+  const dir = path.join(root, ".private", "transcripts");
+  write(root, {
+    ".private/transcripts/main.jsonl": use("Write", { file_path: path.join(root, "docs/tasks/unread.md") }, written),
+    ".private/transcripts/main/subagents/workflow/agent-a1.jsonl": use("Read", { file_path: path.join(root, "docs/tasks/agent-read.md") }, written + DAY),
+  });
+  assert.deepStrictEqual(maintain(root, { transcripts: [dir] }).proposals.map((p) => p.path), ["docs/tasks/unread.md"]);
+  fs.rmSync(path.join(dir, "main"), { recursive: true });
+  assert.deepStrictEqual(maintain(root, { transcripts: [dir] }).proposals.map((p) => p.path), ["docs/tasks/agent-read.md", "docs/tasks/unread.md"]);
+});
+
 test("transcripts are read only when a completed note is older than three days", (t) => {
   const root = repo();
   write(root, { "docs/tasks/done.md": task("completed"), ".private/transcripts/reader.jsonl": "{}\n" });

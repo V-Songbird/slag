@@ -575,7 +575,7 @@ anneal: 5 documentation proposals, including 1 stale memory and 2 unread notes. 
 The line names two kinds of proposal when they are present:
 
 - A **stale memory** is a note the agent saved about the project. It is older than 14 days and says something is true now, such as "still failing", that may no longer be true.
-- An **unread note** is a finished task note that no other session opened within 3 days of its last change. Its findings belong in the topic docs, and the note can then be deleted. When Claude Code has no session records for the project, nobody can tell whether a note was read, so such notes count only in the total.
+- An **unread note** is a finished task note that no other session opened within 3 days of its last change. Its findings belong in the topic docs, and the note can then be deleted. When Claude Code has no session records for the project, nobody can tell whether a note was read, so such notes count only in the total. A read in a subagent transcript, the `agent-*.jsonl` files at any depth of a session's `subagents` folder, counts as another session's read; a missing or unreadable subagent folder is skipped.
 
 Run `/anneal:repo-docs maintain` to see every proposal and approve the ones you want.
 

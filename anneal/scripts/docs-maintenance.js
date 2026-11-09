@@ -13,6 +13,7 @@ const { spawnSync } = require("node:child_process");
 const { check, docFiles, frontmatter, linkTargets, relatedCandidates } = require("./docs-check.js");
 const { hostDefaults, noDefault } = require("./audit.js");
 const { directory } = require("./session-evidence-redaction.js");
+const { subagentTranscripts } = require("./session-evidence-claude.js");
 
 // 96 of 100 task notes that another session ever read were first read within 3 days of their
 // last write, so a completed note untouched for longer is very likely never read again.
@@ -51,9 +52,11 @@ function transcriptUses(dirs, root, files) {
   const uses = new Map(files.map((file) => [file, []]));
   const rootSlash = root.replace(/\\/g, "/").toLowerCase();
   for (const dir of dirs) {
-    for (const name of fs.readdirSync(dir).filter((n) => n.endsWith(".jsonl"))) {
-      const session = name.slice(0, -".jsonl".length);
-      for (const line of fs.readFileSync(path.join(dir, name), "utf8").split("\n")) {
+    const sessions = fs.readdirSync(dir).filter((n) => n.endsWith(".jsonl")).map((n) => path.join(dir, n));
+    // A subagent's transcript counts as a session of its own, so a note only a subagent read is in use.
+    for (const file of sessions.flatMap((f) => [f, ...subagentTranscripts(f).map((agent) => agent.file)])) {
+      const session = path.basename(file, ".jsonl");
+      for (const line of fs.readFileSync(file, "utf8").split("\n")) {
         if (!line.includes('"tool_use"')) continue;
         let record;
         try {
