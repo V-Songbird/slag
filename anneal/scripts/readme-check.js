@@ -20,12 +20,18 @@ const RESULT_LANGS = new Set(["text", "txt", "console", "output", "json", "yaml"
 // A comment in a code block that shows what a call returns, such as `// user -> { id: 42 }`.
 const RESULT_COMMENT = /^\s*(\/\/|#|--|;)\s*\S.*(->|=>|returns|returned)/;
 const VAGUE_LINK = /\[\s*(click here|here|this link|read more|more|link|aqu[ií]|haz clic aqu[ií]|m[aá]s|leer m[aá]s)\s*\]\(/iu;
-// An HTML title, the `===` underline of a setext title, an ATX heading of any level, and a list
-// item or quote, whose text a setext underline cannot turn into a title.
+// An HTML title, the `===` underline of a setext title, the other headings and thematic breaks,
+// and a list item or quote, whose text a setext underline cannot turn into a title. Inside a
+// paragraph only a quote, a bullet item with text or an ordered item that starts at 1 opens one.
 const HTML_H1 = /<h1(?![\w-])/gi;
 const SETEXT_H1 = /^ {0,3}=+\s*$/;
+const SETEXT_H2 = /^ {0,3}-+\s*$/;
+const BREAK = /^ {0,3}([-*_])[ \t]*(\1[ \t]*){2,}$/;
 const ATX = /^#{1,6}(\s|$)/;
 const LIST_OR_QUOTE = /^([-*+]|\d{1,9}[.)])(\s|$)|^>/;
+const INTERRUPT = /^([-*+]|0{0,8}1[.)])[ \t]+\S|^>/;
+// An HTML comment opener, or a code span, inside which `<!--` opens nothing.
+const COMMENT_OR_CODE = /<!--|`[^`]*`/g;
 const URL_LINK = /\[\s*([^\]]+?)\s*\]\(\s*(https?:\/\/[^)\s]+)\s*\)/g;
 // Word boundaries over Unicode letters and digits, so `éjust` is not the filler `just`.
 const FILLER = /(?<![\p{L}\p{N}_])(simply|just|obviously|easy|easily|powerful|blazing|awesome|it should be noted|we will now|utilize)(?![\p{L}\p{N}_])/giu;
@@ -45,10 +51,11 @@ function outsideComments(line, open) {
       if (end < 0) return [visible, true];
       rest = rest.slice(end + 3);
     }
-    const start = rest.indexOf("<!--");
-    if (start < 0) return [visible + rest, false];
+    const start = [...rest.matchAll(COMMENT_OR_CODE)].find(([hit]) => hit === "<!--")?.index;
+    if (start === undefined) return [visible + rest, false];
     visible += rest.slice(0, start);
-    rest = rest.slice(start + 4);
+    // From the opener's second dash, so `<!-->` and `<!--->` close where they open.
+    rest = rest.slice(start + 2);
     open = true;
   }
 }
@@ -101,9 +108,9 @@ function checkReadme(text, { tier } = {}) {
     const html = text.startsWith("<") ? (text.replace(/`[^`]*`/g, "").match(HTML_H1) ?? []).length : 0;
     const titles = (text.startsWith("# ") ? 1 : 0) + html + (underline ? 1 : 0);
     h1 += titles;
-    const heading = titles > 0 || ATX.test(text);
+    const heading = titles > 0 || ATX.test(text) || BREAK.test(visible) || (settable && SETEXT_H2.test(visible));
+    lazy = text !== "" && !heading && (settable ? lazy || INTERRUPT.test(text) : LIST_OR_QUOTE.test(text));
     settable = text !== "" && !heading;
-    lazy = settable && (lazy || LIST_OR_QUOTE.test(text));
     if (underline) return;
     if (stripped.startsWith("[![") || stripped.startsWith("![")) {
       if (firstBadge === null) firstBadge = i;

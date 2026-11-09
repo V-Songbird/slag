@@ -63,6 +63,13 @@ describe("rules", () => {
     assert.deepStrictEqual(of("h1-count", doc("T", "===", "===")), []);
     assert.deepStrictEqual(of("h1-count", doc("<h1>T</h1>", "===")), []);
     assert.deepStrictEqual(checkReadme(doc("- item", "", "T", "===", "", "Text.")), []);
+    assert.deepStrictEqual(of("h1-count", doc("# T", "", "Section", "---", "===")), []);
+    assert.deepStrictEqual(of("h1-count", doc("# T", "", "***", "===")), []);
+    assert.deepStrictEqual(of("h1-count", doc("# T", "", "Text", "- item", "===")), []);
+  });
+
+  test("h1-count: an ordered item that does not start at 1 continues the paragraph above", () => {
+    assert.deepStrictEqual(checkReadme(doc("Release", "2. edition", "===", "", "Text.")), []);
   });
 
   test("h1-count: a setext title that starts with # but is no ATX heading counts", () => {
@@ -74,6 +81,15 @@ describe("rules", () => {
     assert.deepStrictEqual(of("h1-count", doc("# T", "", "<!-- <h1>Old</h1> -->")), []);
     assert.deepStrictEqual(of("h1-count", doc("# T", "", "<!--", "# Old", "<h1>Old</h1>", "Old", "===", "-->")), []);
     assert.deepStrictEqual(of("h1-count", doc("<!-- note --><h1>T</h1>")), []);
+  });
+
+  test("h1-count: a quoted comment opener or an empty comment hides no later title", () => {
+    assert.deepStrictEqual(of("h1-count", doc("Use `<!--` here.", "", "# T")), []);
+    assert.deepStrictEqual(of("h1-count", doc("<!-->", "", "# T")), []);
+    assert.deepStrictEqual(of("h1-count", doc("<!--->", "", "# T")), []);
+    assert.deepStrictEqual(of("h1-count", doc("# T", "Start the marker with `<!--`.", "# Second")), [
+      { line: 1, rule: "h1-count", message: "expected exactly one H1, found 2" },
+    ]);
   });
 
   test("h1-count: a mention of the tag in prose or a table is not a title", () => {
