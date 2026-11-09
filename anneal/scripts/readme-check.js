@@ -41,15 +41,19 @@ const sentences = (text) => text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).fil
 const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const bare = (url) => url.replace(/^(https?:\/\/)?(www\.)?/i, "").replace(/\/+$/, "").toLowerCase();
 
-// The part of a line outside HTML comments, and whether a comment is still open at its end.
+// The part of a line outside HTML comments, and whether a comment is still open at its end. Only
+// a comment that begins the line after up to three spaces, or one carried from the line above,
+// stays open past the line, and only until the first `-->`, as a Markdown HTML block does.
 function outsideComments(line, open) {
+  let block = open || /^ {0,3}<!--/.test(line);
   let visible = "";
   let rest = line;
   for (;;) {
     if (open) {
       const end = rest.indexOf("-->");
-      if (end < 0) return [visible, true];
+      if (end < 0) return [visible, block];
       rest = rest.slice(end + 3);
+      block = false;
     }
     const start = [...rest.matchAll(COMMENT_OR_CODE)].find(([hit]) => hit === "<!--")?.index;
     if (start === undefined) return [visible + rest, false];

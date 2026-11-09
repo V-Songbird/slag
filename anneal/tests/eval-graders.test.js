@@ -1781,9 +1781,14 @@ describe("writing cases", () => {
       for (const reply of [
         "The page says this overwrites the file you name after --output.",
         "As noted above, the --output flag overwrites files.",
+        "The overwrite risk is real: save them first.",
+        "--output overwrites the input file after it runs, because it names export.csv.",
       ]) assert.strictEqual(passes(checks["names-overwrite-order"], { reply }), false, reply);
-      const count = "There is no number showing how many rows were removed.";
-      assert.strictEqual(passes(checks["names-unnumbered-steps"], { reply: count }), false);
+      for (const reply of [
+        "There is no number showing how many rows were removed.",
+        "Use a specific title; the issues below are ordered by severity.",
+        "The steps show no numbers for rows removed.",
+      ]) assert.strictEqual(passes(checks["names-unnumbered-steps"], { reply }), false, reply);
     });
   });
 
@@ -1859,6 +1864,10 @@ describe("writing cases", () => {
         FIXED.replace("Clean your export:", "Clean the export you just downloaded:"),
         FIXED.replace("Clean your export:", "Clean your export just before you open it:"),
         FIXED.replace("   When it worked, you see:", "   An empty row is easy to miss, so check the count. When it worked, you see:"),
+        FIXED.replace("You need Node 22 or later.", "Before you install csv-tidy, you need Node 22 or later."),
+        FIXED.replace("You need Node 22 or later.\n\n1. Install csv-tidy:", "1. Install a recent Node.js (22 or later).\n2. Install csv-tidy:").replace("2. Clean", "3. Clean"),
+        FIXED.replace("You need Node 22 or later.", "## Install\n\nYou need Node 22 or later."),
+        FIXED.replace("1. Install csv-tidy:\n\n   ```bash\n   npm install -g csv-tidy\n   ```\n", "1. Follow the README's [install steps](../README.md#install).\n"),
       ];
       for (const text of variants) {
         const dir = tempDir("anneal-graders-writing-pass-");
@@ -1874,7 +1883,11 @@ describe("writing cases", () => {
         write(dir, PAGE, FIXED.replace("Clean your export:", `${text} Clean your export:`));
         assert.strictEqual(passes(checks["no-filler"], { dir }), false, text);
       }
-      for (const text of ["1. Install csv-tidy as the README describes.\n2. You need Node 22.\n", "You need Node 22.\n"]) {
+      for (const text of [
+        "1. Install csv-tidy as the README describes.\n2. You need Node 22.\n",
+        "1. Follow the [install steps](../README.md#install).\n2. You need Node 22.\n",
+        "You need Node 22.\n",
+      ]) {
         const dir = tempDir("anneal-graders-writing-order-");
         write(dir, PAGE, text);
         assert.strictEqual(passes(checks["node-before-install"], { dir }), false, text);

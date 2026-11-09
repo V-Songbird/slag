@@ -92,6 +92,13 @@ describe("rules", () => {
     ]);
   });
 
+  test("h1-count: only a comment that begins the line after up to three spaces hides the lines below", () => {
+    for (const opener of ["Type <!-- to start a comment in HTML.", "Type ``<!--`` to start one.", "Type \\<!-- to start one.", "<!-- a --> b <!--", "    <!--"]) {
+      assert.deepStrictEqual(of("h1-count", doc(opener, "# T")), [], opener);
+    }
+    assert.deepStrictEqual(of("h1-count", doc("# T", "", "   <!--", "# Old", "-->")), []);
+  });
+
   test("h1-count: a mention of the tag in prose or a table is not a title", () => {
     assert.deepStrictEqual(checkReadme(doc("# T", "", "Wrap the title in an `<h1>` tag.", "", "| a | b |", "| - | - |", "| <h1 class=x> | y |")), []);
     assert.deepStrictEqual(checkReadme(doc("# T", "", "<h10>x</h10>")), []);
