@@ -11,6 +11,17 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "^(Write|Edit|MultiEdit|apply_patch)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/instruction-guard.js", "claude"],
+            "timeout": 5
+          }
+        ]
       }
     ],
     "SessionEnd": [

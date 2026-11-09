@@ -321,10 +321,16 @@ function main(argv, env = process.env) {
     if (!(args[i] in options) || i + 1 >= args.length) return fail(USAGE, 2);
     options[args[i]] = args[i + 1];
   }
+  // A live session is not finished: the session running this command is never closed out.
+  const running = (env.CLAUDE_CODE_SESSION_ID || "").toLowerCase();
+  const isRunning = (id) => Boolean(running) && id.toLowerCase() === running;
+  const RUNNING = "session-closeout.js: that is the session running this command, and a live session is not finished. "
+    + "Run the close-out from another session once this one has ended.\n";
   let file = options["--session-file"];
   if (file === null) {
     const sessionId = options["--session-id"] || "";
     if (!/^[a-fA-F0-9-]{16,64}$/.test(sessionId)) return fail(USAGE, 2);
+    if (isRunning(sessionId)) return fail(RUNNING, 2);
     // Never the latest session by guess: one id, and exactly one file that carries it.
     const matches = findTranscript("claude", sessionId, { claude: options["--claude-home"] });
     if (matches.length !== 1) {
@@ -332,6 +338,7 @@ function main(argv, env = process.env) {
     }
     file = matches[0];
   }
+  if (isRunning(path.basename(file, ".jsonl"))) return fail(RUNNING, 2);
   const root = path.resolve(options["--root"]);
   if (git(root, ["rev-parse", "--show-toplevel"]).status !== 0) return fail(`session-closeout.js: --root is not inside a Git work tree: ${root}\n`, 1);
   try {

@@ -521,6 +521,28 @@ describe("the command line", () => {
     assert.strictEqual(run(["--root", repository()]).status, 2);
   });
 
+  test("the session running the command is refused with exit 2, by id or by its transcript", () => {
+    const dir = repository();
+    const home = tempDir();
+    const file = transcript(fixTurn(dir), { dir: path.join(home, "projects", "fixture") });
+    const id = path.basename(file, ".jsonl");
+    const runAs = (args, running) => spawnSync(process.execPath, [CLI, ...args], {
+      encoding: "utf8", env: { ...process.env, CLAUDE_CODE_SESSION_ID: running },
+    });
+    for (const args of [["--session-id", id], ["--session-id", id.toUpperCase()], ["--session-file", file]]) {
+      const refused = runAs([...args, "--claude-home", home, "--root", dir], id);
+      assert.strictEqual(refused.status, 2, args.join(" "));
+      assert.match(refused.stderr, /that is the session running this command/);
+      assert.strictEqual(refused.stdout, "");
+    }
+    const other = "0a1b2c3d-0000-4000-8000-00000000ffff";
+    for (const args of [["--session-id", id], ["--session-file", file]]) {
+      const done = runAs([...args, "--claude-home", home, "--root", dir], other);
+      assert.strictEqual(done.status, 0, done.stderr);
+      assert.strictEqual(JSON.parse(done.stdout).sessionFile, file);
+    }
+  });
+
   test("a Codex rollout, a record that is not JSON and a root outside Git exit 1", () => {
     const dir = repository();
     const codex = run(["--session-file", transcript([meta, started(1)]), "--root", dir]);

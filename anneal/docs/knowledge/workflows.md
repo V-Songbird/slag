@@ -36,6 +36,8 @@ related_files:
   - anneal/tests/session-evidence-navigation.test.js
   - anneal/tests/session-transcripts.js
   - anneal/hooks/safety-guard.js
+  - anneal/hooks/instruction-guard.js
+  - anneal/tests/instruction-guard.test.js
   - anneal/hooks/session-end-report.js
   - anneal/tests/session-end-report.test.js
   - anneal/evals/
@@ -301,7 +303,7 @@ The output does not grow with the transcript. It holds at most `--limit` candida
 
 Deleting a Claude Code session can delete its transcript, and with it any decision or work that only the conversation holds. `/anneal:session-review closeout <session id or transcript file>` tells you, before you delete a finished session, whether anything would be lost. It only reports: it never deletes, archives, moves or edits a session, a transcript or a file, and it does not offer to save its findings.
 
-Run it on a finished session, not on the one you are in. With a session id, the script looks for exactly one transcript with that id under your Claude Code home and stops with exit 2 when it finds none or several; the skill then asks you for the file. It exits 1 for a Codex rollout, a record that is not valid JSON, or a `--root` outside a Git work tree.
+Run it on a finished session, not on the one you are in: the script refuses with exit 2 when `--session-id` is the id in `CLAUDE_CODE_SESSION_ID`, or `--session-file` is that session's transcript, `<id>.jsonl`. With a session id, the script looks for exactly one transcript with that id under your Claude Code home and stops with exit 2 when it finds none or several; the skill then asks you for the file. It exits 1 for a Codex rollout, a record that is not valid JSON, or a `--root` outside a Git work tree.
 
 The script `anneal/scripts/session-closeout.js` reads the whole transcript with the same parser as the session evidence and prints JSON. It lists two kinds of items:
 
@@ -568,6 +570,31 @@ It reads the subcommand past git's global flags, such as `--no-pager` or `-C <pa
 On every other branch, the hook asks before one kind of command: one that deletes a migration branch, overwrites it or moves it to another commit while that branch holds commits the checked-out branch lacks. That covers `branch -D` or a delete with `--force`, `checkout -B`, `switch -C` or `--force-create`, `branch -f` or `--force`, a forced rename or copy onto it, `update-ref` on `refs/heads/<migration branch>`, and `push .` naming it as a destination or deleting it. Those commits may belong to another run, so you decide whether they go. The same command on a migration branch the checked-out branch already contains, such as a merged set-aside branch, runs without a question, and every other command is allowed. On Claude Code the hook answers `ask`, which shows a permission prompt. Whether Codex and Antigravity show it as a prompt, refuse the command or let it run is unverified; Antigravity documents only allow and deny.
 
 The hook matches command text, so it cannot see every rewrite, such as git run through a variable. Its denial says that the same command in another form would discard or rewrite the same work.
+
+## The instruction guard
+
+A second hook refuses a file-tool write that would put characters invisible on screen into a file agents load as instructions. It works in every session, with or without a migration.
+
+It checks the same files and the same characters as the audit's [hidden-character finding](#hidden-characters-in-instruction-files), with the same exceptions for emoji, keycaps, subdivision flags and Mongolian letters:
+
+- every `CLAUDE.md`, `AGENTS.md` and `GEMINI.md`, at any depth;
+- the `.md` and `.mdc` files under `.agents/`, `.claude/`, `.cursor/rules/` and `.gemini/` at the repository root. The root is the nearest folder above the file that holds `.git`, or the session's working folder when there is none.
+
+It reads the text each call adds:
+
+| Host | Tools | Text it reads |
+| --- | --- | --- |
+| Claude Code and Codex | `Write`, `Edit`, `MultiEdit`, `apply_patch` | `content`; `new_string`; each edit's `new_string`; each `+` line of a patch, for the file its `Add File`, `Update File` or `Move to` line names |
+| Antigravity | `write_to_file`, `replace_file_content`, `multi_replace_file_content` | every text argument except `TargetFile` and `AbsolutePath` |
+
+A whole-file write may start with a byte order mark. The denial names the file and each code point, such as `U+200B`, and counts Unicode tags without listing them, because their code points spell out the hidden text. It never decodes the characters. To write about such a character in an instruction file, write its code point as text.
+
+Limits of the guard:
+
+- A write through a shell command, such as `Set-Content` or a here-document, is not seen. The audit still reports what lands.
+- A byte order mark in an `Edit`, `MultiEdit` or patch text is refused, even when it lands at the start of the file.
+- On Antigravity the guard reads every text argument, so an edit is refused when the text it replaces already holds such characters. Remove those characters another way. Which Antigravity arguments hold the new text has not been checked.
+- The guard is held by tests that run it as a separate process with each host's payload. Whether each host shows its refusal in a live session is unverified.
 
 ## The session-end report
 
