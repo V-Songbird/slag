@@ -89,6 +89,8 @@ const isDestructive = (command) => DESTRUCTIVE_GIT.test(oneLine(command));
 // whatever they hold: the value of `checkout -B`, `switch -C` or
 // `--force-create`, the branch `branch -f` or `--force` moves, and every
 // branch a `branch -D` or forced delete removes. A start point is not a target.
+// In a short-flag cluster such as `-qB`, git takes the rest of the word after
+// `B` or `C` as the value, or the next word when nothing follows.
 function forcedBranches(line) {
   const names = [];
   for (const segment of line.split(/[\n;|&]/)) {
@@ -103,7 +105,7 @@ function forcedBranches(line) {
       if (remove) names.push(...operands);
       else if (force) names.push(operands[0]);
     } else {
-      const flag = match[1] === "checkout" ? /^-B(.*)$/ : /^(?:-C|--force-create=?)(.*)$/;
+      const flag = match[1] === "checkout" ? /^-[a-zA-Z]*?B(.*)$/ : /^(?:-[a-zA-Z]*?C|--force-create=?)(.*)$/;
       words.forEach((word, i) => {
         const value = flag.exec(word);
         if (value) names.push(value[1] || words[i + 1]);

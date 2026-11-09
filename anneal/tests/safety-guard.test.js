@@ -185,6 +185,8 @@ describe("a migration branch that holds commits of its own", () => {
       `git checkout -B ${branch} HEAD~1`,
       `git switch -C ${branch} HEAD~1`,
       `git branch -f ${branch} HEAD~1`,
+      `git checkout -qB ${branch} HEAD~1`,
+      `git switch -qC ${branch} HEAD~1`,
       "git commit --no-verify -m x",
       "git commit -n -m x",
     ]) {
@@ -201,6 +203,7 @@ describe("a migration branch that holds commits of its own", () => {
       `git branch -D ${branch}`,
       `git checkout -B ${branch}`,
       `git switch -C ${branch}`,
+      `git switch -qC${branch}`,
       `git branch -f ${branch} main`,
     ]) {
       assert.strictEqual(decision(command, root), "ask", command);
