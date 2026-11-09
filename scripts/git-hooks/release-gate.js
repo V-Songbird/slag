@@ -3,8 +3,8 @@
 // Release-commit gate, run by the commit-msg hook. A commit whose subject is
 // "Release <plugin> <version>" must carry the whole release, read from the
 // index: the marketplace entry and every host manifest the plugin ships read
-// that version, <plugin>/.claude-plugin/plugin.json and the Codex index carry
-// none, and the plugin changelog has a "## [<version>] — <YYYY-MM-DD>" heading
+// that version, <plugin>/.claude-plugin/plugin.json and the plugin's entry in
+// the Codex index carry none, and the plugin changelog has a "## [<version>] — <YYYY-MM-DD>" heading
 // with "## [Unreleased]" above it. Any other subject is not judged.
 
 const fs = require("fs");

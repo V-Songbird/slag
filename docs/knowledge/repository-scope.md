@@ -80,7 +80,7 @@ Release changes are reviewed and tested independently of that filter. Use the re
 cut-release procedure when publishing and keep release scope explicit. The commit-msg gate also
 runs scripts/git-hooks/release-gate.js on a commit whose subject is `Release <plugin> <version>`,
 reading the staged files: it fails when the marketplace entry or a host manifest of that plugin
-reads another version, when `<plugin>/.claude-plugin/plugin.json` or
+reads another version, when `<plugin>/.claude-plugin/plugin.json` or the plugin's entry in
 `.agents/plugins/marketplace.json` carries a version, or when the plugin changelog lacks a
 `## [<version>] — <YYYY-MM-DD>` heading with `## [Unreleased]` above it. It does not run the test
 suites, and it does not judge any other subject.
