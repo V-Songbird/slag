@@ -1,24 +1,23 @@
 ---
 name: repo-docs
 description: >-
-  Writes and reviews pages people read, such as help pages, guides, how-tos,
-  FAQs, troubleshooting, changelogs and contributing guides, so a non-expert
+  Writes and reviews pages people read (help pages, guides, how-tos, FAQs,
+  troubleshooting, changelogs, contributing guides), so a non-expert
   can find the answer and finish the task; use it whenever you write or
   substantially edit one, even when nobody names writing rules. Also
   reconciles docs, agent instructions and host setup with current behavior,
   proposes drift and trim fixes, adopts a documentation policy, and handles
-  one README. Use for a docs cleanup, audit, housekeeping or consistency
-  check, to set up where docs go, or for README work never named as such,
-  like "document this repo", "add a quick start" or "nobody can work out how
-  to install this". Pass audit to report only, maintain for proposals that
-  wait for approval, adopt to write the policy files after approval, or
-  readme for one README. Not for code layout (repo-layout) or a session
-  transcript (session-review).
+  one README. Use for a docs cleanup, audit or consistency check, to set up
+  where docs go, or for README work never named as such, like "document this
+  repo". Pass audit to report only, maintain for proposals awaiting
+  approval, adopt to write policy files after approval, or readme for one
+  README. Not for code layout (repo-layout) or session transcripts
+  (session-review).
 argument-hint: "[audit|maintain|adopt|readme] [path or concern]"
 license: MIT
 compatibility: Portable instructions for Claude Code, Codex and Antigravity. The bundled layout audit and README checker require Node 22 or later. Git enables tracked and ignored file checks.
 metadata:
-  version: "2.2"
+  version: "2.3"
 ---
 
 # Repo docs
