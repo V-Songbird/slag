@@ -154,6 +154,22 @@ test('both hooks strip the task id and session start states the report once', ()
   assert.deepEqual(reports, ['Characters that do not show on screen were left out of what is stated here: the id of the open task held U+200B.']);
 });
 
+// An id made only of hidden characters is stamped empty, and session start still reads the stamp as
+// that empty id rather than as the line below it.
+test('a note for an id made only of hidden characters is carried, not dropped', () => {
+  const root = ready();
+  const zwsp = String.fromCodePoint(0x200b);
+  task(root, ['add', '--title', 'window the digest', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const ledger = join(root, '.collet', 'ledger.jsonl');
+  writeFileSync(ledger, readFileSync(ledger, 'utf8').replace('"t1"', `"${zwsp}${zwsp}"`), 'utf8');
+  hook('handoff.js', root, { trigger: 'auto' });
+  assert.match(readFileSync(join(root, '.collet', 'handoff.md'), 'utf8'), /^task: $/m);
+
+  const context = hookOutput(hook('session-start.js', root)).additionalContext;
+  assert.match(context, /^State carried over from the previous session:$/m);
+  assert.ok(existsSync(join(root, '.collet', 'handoff.md')));
+});
+
 test('session start carrying a note that names hidden characters states that line once', () => {
   const root = ready();
   task(root, ['add', '--title', 'window the digest', '--why', 'w', '--scope', 'src/cli.mjs']);

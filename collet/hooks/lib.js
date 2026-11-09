@@ -102,14 +102,14 @@ export function fileText(dir, name) {
 // Session start and the handoff use this one test, so they never disagree about the file.
 export const listsClaims = (text) => /^[-*] \S/m.test(text ?? '');
 
+export const HIDDEN_REPORT = 'Characters that do not show on screen were left out of what is stated here: ';
+
 /**
  * What a hook states, without the characters a model reads and a person does not see. The returned
  * `visible(field, text)` gives `text` without them and remembers the field that held them;
  * `visible.report()` is the closing line naming each such field and its code points, or null.
  * Session start and the handoff use this one rule, so they never disagree about what is hidden.
  */
-export const HIDDEN_REPORT = 'Characters that do not show on screen were left out of what is stated here: ';
-
 export function withoutHidden() {
   const hidden = new Map(); // field → the code points left out of it
   const visible = (field, text) => {

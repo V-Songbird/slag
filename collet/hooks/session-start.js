@@ -95,7 +95,8 @@ if (foreman) {
 
 const handoff = fileText(dir, 'handoff.md');
 if (handoff) {
-  const stamped = /^task:\s*(\S+)/m.exec(handoff);
+  // The stamp is one line: an id stripped to nothing is stamped empty and matches as empty.
+  const stamped = /^task:[ \t]*(\S*)\r?$/m.exec(handoff);
   if (task && stamped && stamped[1] === id) {
     // The note's own report line names fields of the same ledger task, which this hook has just read
     // and reports itself, so it is left out rather than stated twice.
