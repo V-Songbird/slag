@@ -37,13 +37,16 @@ requires actual host discovery and execution checks, not only valid JSON.
 
 Claude Code and Codex use tool_name, tool_input and cwd. Denials use hookSpecificOutput with
 hookEventName PreToolUse and permissionDecision deny. An empty response allows the call.
-Collet also provides SessionStart and PreCompact; Anneal guards migration shell commands.
-Anneal's guard also answers permissionDecision ask, which Claude Code shows as a permission
-prompt; how Codex handles ask is unverified.
+Collet also provides SessionStart and PreCompact. Anneal has two PreToolUse guards: one on shell
+commands for migration branches, one on file-tool writes into instruction files. Anneal's shell
+guard also answers permissionDecision ask, which Claude Code shows as a permission prompt; how
+Codex handles ask is unverified.
 
-Antigravity supports the PreToolUse guard here. It supplies toolCall.name and toolCall.args,
+Antigravity supports PreToolUse guards here. It supplies toolCall.name and toolCall.args,
 with PascalCase path fields. It documents a bare decision allow or deny, with a reason for
-refusal. Anneal's guard also sends decision ask; how Antigravity handles it is unverified.
+refusal. Anneal's shell guard also sends decision ask; how Antigravity handles it is unverified.
+Anneal's file guard is tested only as a subprocess with each host's payload; whether each host
+shows its refusal in a live session is unverified.
 Hooks run from the installed plugin directory. Collet locates the project from explicit context,
 then absolute command Cwd or file TargetFile/AbsolutePath when workspace context is absent.
 Relative arguments alone do not establish a project. The nearest mounted harness is used.

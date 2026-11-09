@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 "use strict";
 
-// The one guard anneal carries: while a migration is in progress, a destructive
+// anneal's shell-command guard: while a migration is in progress, a destructive
 // git command would throw away the commits the migration just made, and the
 // working tree they were checked against.
 //

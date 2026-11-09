@@ -167,7 +167,8 @@ node "<plugin root>/scripts/session-closeout.js" --session-id "<id>" --root "<gi
 
 With a transcript path, pass `--session-file "<path>"` instead of `--session-id`. Never run it on this session: a live session is not finished.
 
-- When the script exits 2, it found no single transcript. Ask the owner for the file. Never pick the most recent session as a guess.
+- When the script exits 2 and says it is the session running this command, stop: report that this session cannot be closed out until it has ended, and run nothing else.
+- When it exits 2 otherwise, it found no single transcript. Ask the owner for the file. Never pick the most recent session as a guess.
 - When it exits 1, the transcript is not a readable Claude Code transcript or the root is not a Git work tree. Report its message and stop.
 
 Compare `context.cwd` with the root as step 1 does: expand a leading `~` to the home directory, and compare with slashes. When the session ran in another checkout, run the script again with that checkout as `--root`; when it ran in another project, say so and stop.

@@ -74,7 +74,9 @@ belong to anneal's `session-repeats`. Choosing where the rest of the work runs s
 It does not limit a task's scope or decide what to work on next. Its hook refuses destructive git
 commands on a migration branch; elsewhere it asks only before a command deletes, overwrites or
 moves a migration branch that holds commits of its own. Claude Code shows that question as a
-permission prompt; how Codex and Antigravity handle it is unverified.
+permission prompt; how Codex and Antigravity handle it is unverified. A second hook, in every
+session, refuses a file-tool write that would put characters invisible on screen into a file agents
+load as instructions; whether each host shows that refusal in a live session is unverified.
 
 ### razor
 

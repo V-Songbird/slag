@@ -18,7 +18,7 @@ const { HIDDEN_CHARACTERS } = require("../scripts/audit.js");
 // instruction folder at the repository root.
 const MAP_NAMES = ["claude.md", "agents.md", "gemini.md"];
 const INSTRUCTION_DIRS = [".agents/", ".claude/", ".cursor/rules/", ".gemini/"];
-const PATCH_HEADER = /^\s*\*\*\*\s+(?:(?:Add|Update)\s+File|Move to):\s*(.+?)\s*$/;
+const PATCH_HEADER = /^\s*\*\*\*\s+(?:(Add|Update|Delete)\s+File|Move to):\s*(.+?)\s*$/;
 const ANTIGRAVITY_TOOLS = new Set(["write_to_file", "replace_file_content", "multi_replace_file_content"]);
 const PATH_ARGS = new Set(["TargetFile", "AbsolutePath"]);
 
@@ -42,11 +42,16 @@ function writes(host, data) {
     return [[input.file_path, (Array.isArray(input.edits) ? input.edits : []).map((edit) => String(edit?.new_string ?? "")).join("\n")]];
   }
   if (data.tool_name !== "apply_patch" || typeof input.command !== "string") return [];
+  // Inside an Update File section a line that starts with a space is context,
+  // even when the text after that space reads like a header.
   const out = [];
+  let updating = false;
   for (const line of input.command.split("\n").map((each) => each.replace(/\r$/, ""))) {
-    const header = PATCH_HEADER.exec(line);
-    if (header) out.push([header[1], ""]);
-    else if (out.length && line.startsWith("+")) out.at(-1)[1] += `${line.slice(1)}\n`;
+    const header = updating && line.startsWith(" ") ? null : PATCH_HEADER.exec(line);
+    if (header) {
+      out.push([header[2], ""]);
+      updating = header[1] !== "Add" && header[1] !== "Delete";
+    } else if (out.length && line.startsWith("+")) out.at(-1)[1] += `${line.slice(1)}\n`;
   }
   return out;
 }

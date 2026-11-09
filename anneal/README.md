@@ -24,7 +24,7 @@ Use it on an existing project. A single rename or a new scaffold does not need i
 Start a new session to load it. In a terminal, `claude plugin list` names `anneal` once it is installed.
 
 **Codex** — add this repository as a marketplace and install `anneal` from the `slag` marketplace, shown as `Slag`. The Codex commands for those two steps are not recorded here; follow Codex's own plugin documentation.
-Before guarded work, open `/hooks` in Codex CLI and review and trust the plugin's `PreToolUse` hook.
+Before guarded work, open `/hooks` in Codex CLI and review and trust the plugin's two `PreToolUse` hooks.
 Changed hook definitions need another review; see [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
 
 **Antigravity CLI** — clone the repository, replace `<path-to-clone>` below, and run:
@@ -36,7 +36,7 @@ agy plugin list
 
 The list names `anneal`. If it does not, the install did not register: run the install command again with the clone path. With `--sandbox`, headless `agy` runs no shell command.
 
-anneal acts on your request. Its guard hook inspects shell commands: on a migration branch it refuses the git commands that would discard or rewrite the migration's work, and on any other branch it asks first only before a command deletes, overwrites or moves a migration branch that holds commits the current branch lacks. On Claude Code that question is a permission prompt; how Codex and Antigravity handle it is unverified. On Claude Code, a second hook shows one line at session end when the session changed `docs/` or the memory folder and there are documentation proposals.
+anneal acts on your request. Its guard hook inspects shell commands: on a migration branch it refuses the git commands that would discard or rewrite the migration's work, and on any other branch it asks first only before a command deletes, overwrites or moves a migration branch that holds commits the current branch lacks. On Claude Code that question is a permission prompt; how Codex and Antigravity handle it is unverified. A second guard hook works in every session: it refuses a file-tool write that would put characters invisible on screen into a file agents load as instructions, such as `AGENTS.md` or `CLAUDE.md`. Tests run it with each host's payload; whether each host shows its refusal in a live session is unverified. On Claude Code, a third hook shows one line at session end when the session changed `docs/` or the memory folder and there are documentation proposals.
 
 ## Quick start
 
@@ -108,7 +108,7 @@ cd anneal
 node --test
 ```
 
-The command reports test results and exits non-zero when a test fails. The suite covers the scripts, the safety hook and the eval graders.
+The command reports test results and exits non-zero when a test fails. The suite covers the scripts, the hooks and the eval graders.
 From the Slag root, `npm run check` runs all repository suites and also exits non-zero when a suite fails outside its tests.
 The [eval instructions](docs/knowledge/workflows.md#running-the-evals) describe the additional sandbox and host requirements for session tests.
 

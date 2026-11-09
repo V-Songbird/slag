@@ -587,7 +587,7 @@ It reads the text each call adds:
 | Claude Code and Codex | `Write`, `Edit`, `MultiEdit`, `apply_patch` | `content`; `new_string`; each edit's `new_string`; each `+` line of a patch, for the file its `Add File`, `Update File` or `Move to` line names |
 | Antigravity | `write_to_file`, `replace_file_content`, `multi_replace_file_content` | every text argument except `TargetFile` and `AbsolutePath` |
 
-A whole-file write may start with a byte order mark. The denial names the file and each code point, such as `U+200B`, and counts Unicode tags without listing them, because their code points spell out the hidden text. It never decodes the characters. To write about such a character in an instruction file, write its code point as text.
+A patch header line is read even when indented, except a line that starts with a space inside an `Update File` section: that is a context line, whatever text follows the space. A whole-file write may start with a byte order mark. The denial names the file and each code point, such as `U+200B`, and counts Unicode tags without listing them, because their code points spell out the hidden text. It never decodes the characters. To write about such a character in an instruction file, write its code point as text.
 
 Limits of the guard:
 
@@ -598,7 +598,7 @@ Limits of the guard:
 
 ## The session-end report
 
-On Claude Code, a second hook runs when a session ends. If the session wrote a file under a `docs/` folder of the project, or into the project's Claude Code memory folder, it runs [the maintenance script](#maintenance-proposals) with its defaults. Then it shows one line, for example:
+On Claude Code, a third hook runs when a session ends. If the session wrote a file under a `docs/` folder of the project, or into the project's Claude Code memory folder, it runs [the maintenance script](#maintenance-proposals) with its defaults. Then it shows one line, for example:
 
 ```text
 anneal: 5 documentation proposals, including 1 stale memory and 2 unread notes. See them with /anneal:repo-docs maintain.

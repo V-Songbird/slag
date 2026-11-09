@@ -96,6 +96,15 @@ describe("a write into an instruction file", () => {
     assert.strictEqual(patch(`*** Begin Patch\n*** Update File: AGENTS.md\n@@\n-a${cp(0x200b)}\n+a\n*** End Patch`), null);
     assert.match(reasonOf(patch(`*** Begin Patch\n *** Add File: AGENTS.md\n+a${cp(0x200b)}\n*** End Patch`)), /AGENTS\.md.*U\+200B/);
     assert.match(reasonOf(patch(`*** Begin Patch\n*** Update File: notes.md\n\t*** Move to: CLAUDE.md\n@@\n+a${cp(0x2060)}\n*** End Patch`)), /CLAUDE\.md.*U\+2060/);
+    assert.match(reasonOf(patch(`*** Begin Patch\n*** Add File: notes.md\n+plain\n *** Add File: AGENTS.md\n+a${cp(0x200b)}\n*** End Patch`)), /AGENTS\.md.*U\+200B/);
+  });
+
+  test("a context line of an Update File section that reads like a header stays in that section", () => {
+    const root = project();
+    const patch = (command) => decide("claude", { tool_name: "apply_patch", cwd: root, tool_input: { command } });
+    assert.match(reasonOf(patch(`*** Begin Patch\n*** Update File: AGENTS.md\n@@\n *** Update File: src/app.py\n+evil${cp(0x200b)}\n*** End Patch`)) ?? "", /AGENTS\.md.*U\+200B/);
+    assert.match(reasonOf(patch(`*** Begin Patch\n*** Update File: CLAUDE.md\n *** Move to: notes.md\n+evil${cp(0x2060)}\n*** End Patch`)) ?? "", /CLAUDE\.md.*U\+2060/);
+    assert.match(reasonOf(patch(`*** Begin Patch\n*** Update File: notes.md\n@@\n x\n*** Delete File: old.md\n *** Add File: AGENTS.md\n+a${cp(0x200b)}\n*** End Patch`)) ?? "", /AGENTS\.md.*U\+200B/);
   });
 
   test("is refused whatever the letter case of the file or folder name", () => {
