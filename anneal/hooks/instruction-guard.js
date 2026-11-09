@@ -16,9 +16,9 @@ const { HIDDEN_CHARACTERS } = require("../scripts/audit.js");
 
 // The audit's rule: a map file by name at any depth, or Markdown under an
 // instruction folder at the repository root.
-const MAP_NAMES = ["CLAUDE.md", "AGENTS.md", "GEMINI.md"];
+const MAP_NAMES = ["claude.md", "agents.md", "gemini.md"];
 const INSTRUCTION_DIRS = [".agents/", ".claude/", ".cursor/rules/", ".gemini/"];
-const PATCH_HEADER = /^\*\*\*\s+(?:(?:Add|Update)\s+File|Move to):\s*(.+?)\s*$/;
+const PATCH_HEADER = /^\s*\*\*\*\s+(?:(?:Add|Update)\s+File|Move to):\s*(.+?)\s*$/;
 const ANTIGRAVITY_TOOLS = new Set(["write_to_file", "replace_file_content", "multi_replace_file_content"]);
 const PATH_ARGS = new Set(["TargetFile", "AbsolutePath"]);
 
@@ -67,10 +67,12 @@ function relative(file, cwd) {
   return !rel || rel.startsWith("..") || path.isAbsolute(rel) ? null : rel.split(path.sep).join("/");
 }
 
+// Names are compared without regard to case: on a case-insensitive file system
+// `agents.md` or `.Claude/rules/x.md` is the file the audit reads.
 function isInstructionFile(file, cwd) {
-  if (MAP_NAMES.includes(path.basename(file.replace(/\\/g, "/")))) return true;
-  const rel = relative(file, cwd);
-  return rel !== null && INSTRUCTION_DIRS.some((dir) => rel.startsWith(dir)) && /\.(md|mdc)$/i.test(rel);
+  if (MAP_NAMES.includes(path.basename(file.replace(/\\/g, "/")).toLowerCase())) return true;
+  const rel = relative(file, cwd)?.toLowerCase();
+  return rel != null && INSTRUCTION_DIRS.some((dir) => rel.startsWith(dir)) && /\.(md|mdc)$/.test(rel);
 }
 
 // The code points as the audit's evidence names them: each one once, tags only counted.

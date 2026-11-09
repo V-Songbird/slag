@@ -94,6 +94,16 @@ describe("a write into an instruction file", () => {
     assert.match(reasonOf(patch(`*** Begin Patch\n*** Add File: notes.md\n+plain\n*** Add File: AGENTS.md\n+a${cp(0x200b)}\n*** End Patch`)), /AGENTS\.md.*U\+200B/);
     assert.match(reasonOf(patch(`*** Begin Patch\n*** Update File: notes.md\n*** Move to: CLAUDE.md\n@@\n+a${cp(0x2060)}\n*** End Patch`)), /CLAUDE\.md.*U\+2060/);
     assert.strictEqual(patch(`*** Begin Patch\n*** Update File: AGENTS.md\n@@\n-a${cp(0x200b)}\n+a\n*** End Patch`), null);
+    assert.match(reasonOf(patch(`*** Begin Patch\n *** Add File: AGENTS.md\n+a${cp(0x200b)}\n*** End Patch`)), /AGENTS\.md.*U\+200B/);
+    assert.match(reasonOf(patch(`*** Begin Patch\n*** Update File: notes.md\n\t*** Move to: CLAUDE.md\n@@\n+a${cp(0x2060)}\n*** End Patch`)), /CLAUDE\.md.*U\+2060/);
+  });
+
+  test("is refused whatever the letter case of the file or folder name", () => {
+    const root = project();
+    for (const file of ["agents.md", "Claude.MD", "packages/web/gemini.md", ".Claude/rules/x.md", ".CURSOR/RULES/style.MDC", ".Agents/skills/a/SKILL.md"]) {
+      const reason = reasonOf(decide("claude", { tool_name: "Write", cwd: root, tool_input: { file_path: path.join(root, file), content: `a${cp(0x200b)}` } }));
+      assert.match(reason ?? "", /U\+200B/, file);
+    }
   });
 });
 
