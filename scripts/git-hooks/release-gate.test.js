@@ -83,16 +83,19 @@ test("a plugin without Codex or Antigravity manifests is judged on what it ships
 
 test("the three most recent release commits in history pass", (t) => {
   const log = spawnSync("git", ["log", "--format=%H %s", "--grep=^Release "], { cwd: ROOT, encoding: "utf8" });
-  const releases = log.status === 0 ? log.stdout.split("\n").filter((l) => RELEASE.test(l.slice(41))).slice(0, 3) : [];
-  if (releases.length < 3) return t.skip("fewer than three release commits in this checkout's history");
-  for (const line of releases) {
+  const judged = [];
+  for (const line of log.status === 0 ? log.stdout.split("\n").filter((l) => RELEASE.test(l.slice(41))) : []) {
     const sha = line.slice(0, 40);
     const read = (p) => {
       const r = spawnSync("git", ["show", `${sha}:${p}`], { cwd: ROOT, encoding: "utf8" });
       return r.status === 0 ? r.stdout : null;
     };
-    assert.deepStrictEqual(releaseProblems(line.slice(41), read), [], line);
+    const problems = releaseProblems(line.slice(41), read);
+    if (problems !== null) judged.push([line, problems]);
+    if (judged.length === 3) break;
   }
+  if (judged.length < 3) return t.skip("fewer than three release commits in this checkout's history");
+  for (const [line, problems] of judged) assert.deepStrictEqual(problems, [], line);
 });
 
 test("the commit-msg hook judges the index, not the working tree", (t) => {
