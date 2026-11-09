@@ -12,6 +12,7 @@ related_files:
   - scripts/ignore-policy.test.js
   - scripts/hidden-characters.test.js
   - scripts/markdown-links.test.js
+  - scripts/git-hooks/release-gate.js
   - anneal/
   - collet/
 ---
@@ -76,7 +77,13 @@ callbacks.
 The configured commit gate can use an optional private name blocklist. It passes when no list is
 available, so a successful commit is not proof that this optional filter checked any names.
 Release changes are reviewed and tested independently of that filter. Use the repository's
-cut-release procedure when publishing and keep release scope explicit.
+cut-release procedure when publishing and keep release scope explicit. The commit-msg gate also
+runs scripts/git-hooks/release-gate.js on a commit whose subject is `Release <plugin> <version>`,
+reading the staged files: it fails when the marketplace entry or a host manifest of that plugin
+reads another version, when `<plugin>/.claude-plugin/plugin.json` or
+`.agents/plugins/marketplace.json` carries a version, or when the plugin changelog lacks a
+`## [<version>] — <YYYY-MM-DD>` heading with `## [Unreleased]` above it. It does not run the test
+suites, and it does not judge any other subject.
 
 ## Contributor setup
 

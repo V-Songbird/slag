@@ -2,9 +2,13 @@
 "use strict";
 
 // Installed via: git config core.hooksPath scripts/git-hooks
-// Blocks commit messages containing private reference-project names.
-// See check-reference-names.js (blocklist is gitignored; missing = pass).
+// Blocks commit messages containing private reference-project names
+// (check-reference-names.js; blocklist is gitignored, missing = pass) and
+// release commits that do not carry the whole release (release-gate.js).
 
-process.argv[3] = process.argv[2]; // git passes the message file as argv[2]
+const messageFile = process.argv[2]; // git passes the message file as argv[2]
+process.argv[3] = messageFile;
 process.argv[2] = "message";
-process.exit(require("./check-reference-names.js").main());
+const names = require("./check-reference-names.js").main();
+const release = require("./release-gate.js").main(messageFile);
+process.exit(names || release);
