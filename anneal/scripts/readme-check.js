@@ -20,9 +20,12 @@ const RESULT_LANGS = new Set(["text", "txt", "console", "output", "json", "yaml"
 // A comment in a code block that shows what a call returns, such as `// user -> { id: 42 }`.
 const RESULT_COMMENT = /^\s*(\/\/|#|--|;)\s*\S.*(->|=>|returns|returned)/;
 const VAGUE_LINK = /\[\s*(click here|here|this link|read more|more|link|aqu[ií]|haz clic aqu[ií]|m[aá]s|leer m[aá]s)\s*\]\(/iu;
-// An HTML title, and the `===` underline of a setext title.
-const HTML_H1 = /^<h1(?![\w-])/i;
+// An HTML title, the `===` underline of a setext title, an ATX heading of any level, and a list
+// item or quote, whose text a setext underline cannot turn into a title.
+const HTML_H1 = /<h1(?![\w-])/gi;
 const SETEXT_H1 = /^ {0,3}=+\s*$/;
+const ATX = /^#{1,6}(\s|$)/;
+const LIST_OR_QUOTE = /^([-*+]|\d{1,9}[.)])(\s|$)|^>/;
 const URL_LINK = /\[\s*([^\]]+?)\s*\]\(\s*(https?:\/\/[^)\s]+)\s*\)/g;
 // Word boundaries over Unicode letters and digits, so `éjust` is not the filler `just`.
 const FILLER = /(?<![\p{L}\p{N}_])(simply|just|obviously|easy|easily|powerful|blazing|awesome|it should be noted|we will now|utilize)(?![\p{L}\p{N}_])/giu;
@@ -30,6 +33,25 @@ const FILLER = /(?<![\p{L}\p{N}_])(simply|just|obviously|easy|easily|powerful|bl
 const words = (text) => text.split(/\s+/).filter(Boolean);
 const sentences = (text) => text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
 const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const bare = (url) => url.replace(/^(https?:\/\/)?(www\.)?/i, "").replace(/\/+$/, "").toLowerCase();
+
+// The part of a line outside HTML comments, and whether a comment is still open at its end.
+function outsideComments(line, open) {
+  let visible = "";
+  let rest = line;
+  for (;;) {
+    if (open) {
+      const end = rest.indexOf("-->");
+      if (end < 0) return [visible, true];
+      rest = rest.slice(end + 3);
+    }
+    const start = rest.indexOf("<!--");
+    if (start < 0) return [visible + rest, false];
+    visible += rest.slice(0, start);
+    rest = rest.slice(start + 4);
+    open = true;
+  }
+}
 
 function splitLines(text) {
   const lines = text.split(LINE_BREAK);
@@ -49,14 +71,18 @@ function checkReadme(text, { tier } = {}) {
   const fences = [];
   const prose = [];
   let h1 = 0;
-  let previous = "";
+  // Whether an underline on this line would make the line above a title: it holds text that is
+  // no heading, and no list item or quote starts the run of text lines it belongs to.
+  let settable = false;
+  let lazy = false;
+  let comment = false;
   let firstText = null;
   let firstBadge = null;
   lines.forEach((line, i) => {
     const marker = FENCE_OPEN.exec(line);
     if (marker && !open) {
       open = { start: i, mark: marker[2][0], lang: marker[3].trim() };
-      previous = "";
+      settable = lazy = false;
       return;
     }
     if (open) {
@@ -67,9 +93,17 @@ function checkReadme(text, { tier } = {}) {
       return;
     }
     const stripped = line.trim();
-    const underline = SETEXT_H1.test(line) && previous !== "" && !previous.startsWith("#");
-    if (stripped.startsWith("# ") || HTML_H1.test(stripped) || underline) h1++;
-    previous = stripped;
+    let visible;
+    [visible, comment] = outsideComments(line, comment);
+    const text = visible.trim();
+    const underline = SETEXT_H1.test(visible) && settable && !lazy;
+    // An HTML title on a line that opens with a tag, outside code spans, such as one inside a <div>.
+    const html = text.startsWith("<") ? (text.replace(/`[^`]*`/g, "").match(HTML_H1) ?? []).length : 0;
+    const titles = (text.startsWith("# ") ? 1 : 0) + html + (underline ? 1 : 0);
+    h1 += titles;
+    const heading = titles > 0 || ATX.test(text);
+    settable = text !== "" && !heading;
+    lazy = settable && (lazy || LIST_OR_QUOTE.test(text));
     if (underline) return;
     if (stripped.startsWith("[![") || stripped.startsWith("![")) {
       if (firstBadge === null) firstBadge = i;
@@ -102,7 +136,6 @@ function checkReadme(text, { tier } = {}) {
     if (text.includes("{{")) flag(i, "placeholder", "unfilled template placeholder");
     if (VAGUE_LINK.test(text)) flag(i, "link-text", "link text does not name its destination");
     for (const [, label, href] of text.matchAll(URL_LINK)) {
-      const bare = (url) => url.replace(/^(https?:\/\/)?(www\.)?/i, "").replace(/\/+$/, "").toLowerCase();
       if (bare(label) === bare(href)) flag(i, "link-text", "link text repeats the URL; name the destination instead");
     }
     for (const [hit] of text.matchAll(FILLER)) flag(i, "filler", `remove or replace '${hit}'`);

@@ -56,6 +56,26 @@ describe("rules", () => {
     assert.deepStrictEqual(checkReadme(doc("# A", "", "===", "", "```text", "<h1>x</h1>", "T", "===", "```")), []);
   });
 
+  test("h1-count: an underline after a list item, a quote or another title is not a title", () => {
+    assert.deepStrictEqual(of("h1-count", doc("# T", "", "- item", "===")), []);
+    assert.deepStrictEqual(of("h1-count", doc("# T", "", "1. item", "   more", "===")), []);
+    assert.deepStrictEqual(of("h1-count", doc("# T", "", "> quote", "===")), []);
+    assert.deepStrictEqual(of("h1-count", doc("T", "===", "===")), []);
+    assert.deepStrictEqual(of("h1-count", doc("<h1>T</h1>", "===")), []);
+    assert.deepStrictEqual(checkReadme(doc("- item", "", "T", "===", "", "Text.")), []);
+  });
+
+  test("h1-count: a setext title that starts with # but is no ATX heading counts", () => {
+    assert.deepStrictEqual(checkReadme(doc("#1 Tool", "===", "", "Text.")), []);
+  });
+
+  test("h1-count: an <h1> inside a wrapping tag counts, one inside an HTML comment does not", () => {
+    assert.deepStrictEqual(checkReadme(doc('<div align="center"><h1>T</h1></div>', "", "Text.")), []);
+    assert.deepStrictEqual(of("h1-count", doc("# T", "", "<!-- <h1>Old</h1> -->")), []);
+    assert.deepStrictEqual(of("h1-count", doc("# T", "", "<!--", "# Old", "<h1>Old</h1>", "Old", "===", "-->")), []);
+    assert.deepStrictEqual(of("h1-count", doc("<!-- note --><h1>T</h1>")), []);
+  });
+
   test("h1-count: a mention of the tag in prose or a table is not a title", () => {
     assert.deepStrictEqual(checkReadme(doc("# T", "", "Wrap the title in an `<h1>` tag.", "", "| a | b |", "| - | - |", "| <h1 class=x> | y |")), []);
     assert.deepStrictEqual(checkReadme(doc("# T", "", "<h10>x</h10>")), []);
