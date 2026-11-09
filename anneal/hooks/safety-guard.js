@@ -7,12 +7,15 @@
 //
 // "In progress" is the checked-out branch, not a state file. anneal works only
 // on `anneal/<YYYY-MM-DD>` branches, so the scope is exact, needs nothing
-// written, and ends by itself the moment you switch away. On every other branch
-// this hook allows everything, which is what it does in a session that never
-// invoked anneal.
+// written, and ends by itself the moment you switch away. From any other
+// branch, the one thing it watches is a command that deletes a migration
+// branch, or forces it to another commit, while that branch holds commits HEAD
+// lacks: that command asks first, since only the owner decides whether another
+// run's commits go. Everything else is allowed there, which is what the hook
+// does in a session that never invoked anneal.
 //
 // One file serves three hosts, because only two things differ: where the
-// command text sits in the payload, and what a denial looks like on the wire.
+// command text sits in the payload, and what a decision looks like on the wire.
 
 const fs = require("node:fs");
 const { execFileSync } = require("node:child_process");
@@ -22,20 +25,24 @@ const HOSTS = {
   claude: {
     command: (data) => (/^(Bash|PowerShell)$/.test(data.tool_name) ? data.tool_input?.command : null),
     cwd: (data) => data.cwd,
-    deny: (reason) => ({
-      hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason },
-    }),
+    deny: (reason) => decision("deny", reason),
+    ask: (reason) => decision("ask", reason),
     allow: () => null,
   },
   // Antigravity: the call is nested under toolCall, with args in PascalCase,
-  // and the decision is a bare allow/deny.
+  // and the decision is a bare word.
   antigravity: {
     command: (data) => (data.toolCall?.name === "run_command" ? data.toolCall.args?.CommandLine : null),
     cwd: (data) => data.toolCall?.args?.Cwd || (Array.isArray(data.workspacePaths) ? data.workspacePaths[0] : null),
     deny: (reason) => ({ decision: "deny", reason }),
+    ask: (reason) => ({ decision: "ask", reason }),
     allow: () => ({ decision: "allow" }),
   },
 };
+
+function decision(permissionDecision, permissionDecisionReason) {
+  return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision, permissionDecisionReason } };
+}
 
 // Each of these discards committed or checked work rather than adding to it,
 // or rewrites the commits that record it. The subcommand has to follow `git`
@@ -66,9 +73,45 @@ const DESTRUCTIVE_GIT = new RegExp(
     ")"
 );
 
+// A commit that skips the checks a migration step has to pass: `--no-verify`, or
+// a short-flag cluster holding `n`. A message with such a word in it matches too.
+const SKIPS_HOOKS = new RegExp(GIT + String.raw`commit\b${ARGS}(?:--no-verify\b|-[a-zA-Z]*n[a-zA-Z]*\b)`);
+
+const MIGRATION_BRANCH = /^anneal\/\d{4}-\d{2}-\d{2}(-set-aside-\d+)?$/;
+const SUBCOMMAND = new RegExp(GIT + "(checkout|switch|branch)\\b(.*)");
+
 // A shell line continuation, `\` in POSIX shells and a backtick in PowerShell,
 // joins one command across lines; read it as the one line it runs as.
-const isDestructive = (command) => DESTRUCTIVE_GIT.test(command.replace(/[\\`]\r?\n/g, " "));
+const oneLine = (command) => command.replace(/[\\`]\r?\n/g, " ");
+const isDestructive = (command) => DESTRUCTIVE_GIT.test(oneLine(command));
+
+// The migration branches a command deletes or forces to another commit,
+// whatever they hold: the value of `checkout -B`, `switch -C` or
+// `--force-create`, the branch `branch -f` or `--force` moves, and every
+// branch a `branch -D` or forced delete removes. A start point is not a target.
+function forcedBranches(line) {
+  const names = [];
+  for (const segment of line.split(/[\n;|&]/)) {
+    const match = SUBCOMMAND.exec(segment);
+    if (!match) continue;
+    const words = match[2].trim().split(/\s+/).map((word) => word.replace(/^["']|["']$/g, ""));
+    if (match[1] === "branch") {
+      const short = words.filter((word) => /^-[a-zA-Z]+$/.test(word)).join("");
+      const force = short.includes("f") || words.includes("--force");
+      const remove = short.includes("D") || (force && (short.includes("d") || words.includes("--delete")));
+      const operands = words.filter((word) => word && !word.startsWith("-"));
+      if (remove) names.push(...operands);
+      else if (force) names.push(operands[0]);
+    } else {
+      const flag = match[1] === "checkout" ? /^-B(.*)$/ : /^(?:-C|--force-create=?)(.*)$/;
+      words.forEach((word, i) => {
+        const value = flag.exec(word);
+        if (value) names.push(value[1] || words[i + 1]);
+      });
+    }
+  }
+  return names.filter((name) => MIGRATION_BRANCH.test(name || ""));
+}
 
 function readInput() {
   try {
@@ -82,29 +125,56 @@ function readInput() {
 // Only anneal's own migration branches are guarded. Anything that stops git
 // from answering means no guard, which is the fail-open direction: this hook
 // must never be what blocks an unrelated command.
-function onMigrationBranch(cwd) {
+function git(cwd, args) {
   try {
-    const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    return execFileSync("git", args, {
       cwd: cwd || process.cwd(),
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    return /^anneal\/\d{4}-\d{2}-\d{2}(-set-aside-\d+)?$/.test(branch);
   } catch {
-    return false;
+    return "";
   }
 }
+
+const holdsOwnCommits = (cwd, name) => Number(git(cwd, ["rev-list", "--count", `HEAD..refs/heads/${name}`])) > 0;
 
 function decide(host, data) {
   const adapter = HOSTS[host] || HOSTS.claude;
   const command = adapter.command(data);
-  if (typeof command !== "string" || !isDestructive(command)) return adapter.allow();
-  if (!onMigrationBranch(adapter.cwd(data))) return adapter.allow();
-  return adapter.deny(
-    "anneal is mid-migration on this branch, and this command discards or rewrites committed or checked work: " +
-      command.trim() +
-      ". Each migration step is its own commit; undo one with `git revert`, or leave the branch first if you meant to abandon the migration. The same command in another form would discard or rewrite the same work."
-  );
+  if (typeof command !== "string") return adapter.allow();
+  const line = oneLine(command);
+  const destructive = DESTRUCTIVE_GIT.test(line);
+  const skipsHooks = SKIPS_HOOKS.test(line);
+  const forced = forcedBranches(line);
+  if (!destructive && !skipsHooks && !forced.length) return adapter.allow();
+
+  const cwd = adapter.cwd(data);
+  const branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const migrating = MIGRATION_BRANCH.test(branch);
+  if ((migrating && destructive) || forced.includes(branch)) {
+    return adapter.deny(
+      "anneal is mid-migration on this branch, and this command discards or rewrites committed or checked work: " +
+        command.trim() +
+        ". Each migration step is its own commit; undo one with `git revert`, or leave the branch first if you meant to abandon the migration. The same command in another form would discard or rewrite the same work."
+    );
+  }
+  if (migrating && skipsHooks) {
+    return adapter.deny(
+      "anneal is mid-migration on this branch, and this commit skips the checks each migration step has to pass: " +
+        command.trim() +
+        ". Commit without `--no-verify` or `-n`, and fix what a check reports. The same command in another form would skip the same checks."
+    );
+  }
+  const held = forced.find((name) => holdsOwnCommits(cwd, name));
+  if (held) {
+    return adapter.ask(
+      `${held} holds commits that HEAD lacks, and this command would delete the branch or move it off them: ` +
+        command.trim() +
+        ". It is an anneal migration branch; whether those commits go is the owner's call, not the session's."
+    );
+  }
+  return adapter.allow();
 }
 
 function main(argv = process.argv) {
@@ -124,4 +194,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { decide, DESTRUCTIVE_GIT, isDestructive, onMigrationBranch };
+module.exports = { decide, DESTRUCTIVE_GIT, SKIPS_HOOKS, isDestructive, forcedBranches };

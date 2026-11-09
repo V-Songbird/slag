@@ -556,11 +556,14 @@ A memory's date is its frontmatter `modified` field, or its file time when it ha
 While a branch named `anneal/<YYYY-MM-DD>` or one of its set-aside branches is checked out, a hook refuses the git commands that would throw away the commits the migration had already made, or the working tree they were checked against:
 
 - `reset --hard`, `clean -f` or `--force`, `checkout --force`, `switch --discard-changes` or `--force`;
-- `push --force` or a `+` refspec, `branch -D` or a delete with `--force`.
+- `push --force` or a `+` refspec, `branch -D` or a delete with `--force`;
+- `checkout -B`, `switch -C` or `--force-create`, and `branch -f` or `--force`, when they name the checked-out branch.
 
-It also refuses the commands that rewrite those commits: `commit --amend`, `rebase` other than `--abort` and `--quit`, `update-ref -d` and `reflog expire` or `delete`.
+It also refuses the commands that rewrite those commits: `commit --amend`, `rebase` other than `--abort` and `--quit`, `update-ref -d` and `reflog expire` or `delete`. A commit that skips the Git hooks, with `--no-verify` or `-n`, is refused too, because each step has to pass its checks. A commit message that holds a word such as `-n` or `--no-verify` is refused as well; reword the message.
 
-It reads the subcommand past git's global flags, such as `--no-pager` or `-C <path>`, and reads a command split with a line continuation as one line. `push --force-with-lease` is allowed, because it refuses on its own when the remote moved. Undo a step with `git revert`, or leave the branch to abandon the migration. On every other branch the hook allows everything.
+It reads the subcommand past git's global flags, such as `--no-pager` or `-C <path>`, and reads a command split with a line continuation as one line. `push --force-with-lease` is allowed, because it refuses on its own when the remote moved. Undo a step with `git revert`, or leave the branch to abandon the migration.
+
+On every other branch, the hook asks before one kind of command: one that deletes a migration branch or forces it to another commit while that branch holds commits the checked-out branch lacks. That covers `branch -D` or a delete with `--force`, `checkout -B`, `switch -C` and `branch -f` naming the migration branch. Those commits may belong to another run, so you decide whether they go. The same command on a migration branch the checked-out branch already contains, such as a merged set-aside branch, runs without a question, and every other command is allowed. On Claude Code the hook answers `ask`, which shows a permission prompt. Whether Codex and Antigravity show it as a prompt, refuse the command or let it run is unverified; Antigravity documents only allow and deny.
 
 The hook matches command text, so it cannot see every rewrite, such as git run through a variable. Its denial says that the same command in another form would discard or rewrite the same work.
 

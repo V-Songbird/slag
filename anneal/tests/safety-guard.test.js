@@ -35,6 +35,19 @@ function repoOn(branch) {
   return root;
 }
 
+// A migration branch with one commit of its own, and a set-aside branch main
+// already holds, left checked out on main.
+function migrationRepo(branch) {
+  const root = repoOn(branch);
+  const git = (...args) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
+  fs.writeFileSync(path.join(root, "b.txt"), "b\n");
+  git("add", "-A");
+  git("commit", "-qm", "step");
+  git("checkout", "-q", "-");
+  git("branch", `${branch}-set-aside-1`);
+  return { root, git };
+}
+
 const claudeCall = (command, cwd) => ({ tool_name: "Bash", tool_input: { command }, cwd });
 const antigravityCall = (command, cwd) => ({ toolCall: { name: "run_command", args: { CommandLine: command, Cwd: cwd } } });
 
@@ -158,6 +171,57 @@ describe("scope", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "anneal-guard-nogit-"));
     created.push(root);
     assert.strictEqual(denied(decide("claude", claudeCall("git reset --hard", root))), false);
+  });
+});
+
+describe("a migration branch that holds commits of its own", () => {
+  const branch = "anneal/2026-11-09";
+  const decision = (command, root) => decide("claude", claudeCall(command, root))?.hookSpecificOutput?.permissionDecision || "allow";
+
+  test("on that branch, a reset of it or a commit that skips the hooks is denied", () => {
+    const { root, git } = migrationRepo(branch);
+    git("checkout", "-q", branch);
+    for (const command of [
+      `git checkout -B ${branch} HEAD~1`,
+      `git switch -C ${branch} HEAD~1`,
+      `git branch -f ${branch} HEAD~1`,
+      "git commit --no-verify -m x",
+      "git commit -n -m x",
+    ]) {
+      assert.strictEqual(decision(command, root), "deny", command);
+    }
+    assert.match(decide("claude", claudeCall("git commit -n -m x", root)).hookSpecificOutput.permissionDecisionReason, /in another form/);
+  });
+
+  test("from another branch, deleting or forcing it asks first", () => {
+    const { root } = migrationRepo(branch);
+    for (const command of [
+      `git branch -D ${branch}`,
+      `git checkout -B ${branch}`,
+      `git switch -C ${branch}`,
+      `git branch -f ${branch} main`,
+    ]) {
+      assert.strictEqual(decision(command, root), "ask", command);
+    }
+    assert.match(decide("claude", claudeCall(`git branch -D ${branch}`, root)).hookSpecificOutput.permissionDecisionReason, /owner/);
+    assert.strictEqual(decide("antigravity", antigravityCall(`git branch -D ${branch}`, root)).decision, "ask");
+  });
+
+  test("the commands that leave its commits alone are allowed", () => {
+    const { root, git } = migrationRepo(branch);
+    for (const command of [
+      `git branch -d ${branch}-set-aside-1`,
+      `git branch -D ${branch}-set-aside-1`,
+      `git checkout -B scratch ${branch}`,
+      `git switch ${branch}`,
+      "git commit -m x",
+    ]) {
+      assert.strictEqual(decision(command, root), "allow", command);
+    }
+    git("checkout", "-q", branch);
+    for (const command of ["git commit -m x", "git checkout -B scratch", `git switch -c ${branch}-set-aside-2`]) {
+      assert.strictEqual(decision(command, root), "allow", command);
+    }
   });
 });
 
