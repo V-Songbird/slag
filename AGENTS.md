@@ -25,6 +25,7 @@ Run from the repository root unless a row names another directory.
 | `node --test scripts/markdown-links.test.js` | Relative links and anchors in tracked public Markdown | Local temporary Git fixtures |
 | `node --test` from `anneal/` or `collet/` | One plugin's suite, without the suite-failure reporter: a suite that fails outside its tests can still exit 0 | Local temporary fixtures |
 | `node anneal/scripts/audit.js --root .` | Heuristic navigation audit | Read-only, local |
+| `node scripts/plugin-parity.js <plugin directory> <installed plugin directory>` | [An installed plugin copy against its tracked source](docs/knowledge/host-plugin-formats.md#checking-an-installed-copy-against-the-source); exits 1 on any difference | Read-only, local |
 | `node --test scripts/sdk-eval/lib.test.mjs` | The SDK eval runner's case reading and grader verdicts | Local |
 | `node --env-file=<file> scripts/sdk-eval/run.mjs <plugin> --output-dir <dir>` | A plugin's eval cases through the Claude Agent SDK, with and without the plugin, or only with it under `--ablation none`; `--case`, `--tag`, `--runs`, `--max-cost-usd`. Needs `npm install` in `scripts/sdk-eval/` and `ANTHROPIC_API_KEY` in the env file; results go outside the repository | Paid API sessions; Bash runs unconfined in each workspace |
 

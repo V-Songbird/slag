@@ -8,6 +8,7 @@ related_files:
   - scripts/suite-failure-reporter.js
   - scripts/claude-hooks/run-tests-on-edit.js
   - scripts/plugin-integrity.test.js
+  - scripts/plugin-parity.js
   - scripts/ignore-policy.test.js
   - scripts/hidden-characters.test.js
   - scripts/markdown-links.test.js
@@ -39,6 +40,9 @@ remain independent of personal skills or private working records.
 
 npm run check runs the plugin suites and repository tests using Node 22 or later. The integrity
 suite validates marketplace sources, local resource paths, host metadata and version ownership.
+scripts/plugin-parity.js compares an installed copy of a plugin with its tracked source, and
+scripts/plugin-parity.test.js checks it against fixtures; see
+[checking an installed copy](host-plugin-formats.md#checking-an-installed-copy-against-the-source).
 The navigation audit is heuristic; its runtime-name matches in anneal/tests/audit.test.js are
 intentional fixture strings and must retain their detector coverage.
 scripts/hidden-characters.test.js fails on raw zero-width, bidi-control, tag, misplaced

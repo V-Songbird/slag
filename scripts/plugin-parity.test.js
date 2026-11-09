@@ -80,3 +80,78 @@ test('the command exits 0 on a match and 1 with one line per difference', async 
     'hook hooks/hooks.json PreToolUse changed',
   ]);
 });
+
+test('reports a changed event in the Codex hook file', async () => {
+  const { source, installed } = await fixture();
+  writeFileSync(path.join(installed, 'hooks', 'codex-hooks.json'),
+    `{ "hooks": ${guard('node "${PLUGIN_ROOT}/hooks/guard.js"', 6)} }\n`);
+  assert.deepEqual(compare(source, installed), {
+    changed: ['hooks/codex-hooks.json'],
+    added: [],
+    missing: [],
+    hooks: [{ file: 'hooks/codex-hooks.json', event: 'PreToolUse', difference: 'changed' }],
+  });
+});
+
+test('reads the plugin-root hook file under the plugin name, not its first key', async () => {
+  const { source, installed } = await fixture();
+  const other = JSON.stringify({ SessionStart: [{ hooks: [{ type: 'command', command: 'node other.js' }] }] });
+  writeFileSync(path.join(installed, 'hooks.json'),
+    `{ "other": ${other}, "fixture": ${guard('node ./hooks/guard.js', 6)} }\n`);
+  assert.deepEqual(compare(source, installed), {
+    changed: ['hooks.json'],
+    added: [],
+    missing: [],
+    hooks: [{ file: 'hooks.json', event: 'PreToolUse', difference: 'changed' }],
+  });
+});
+
+test('a hook file the install lacks reports its events missing', async () => {
+  const { source, installed } = await fixture();
+  rmSync(path.join(installed, 'hooks', 'codex-hooks.json'));
+  assert.deepEqual(compare(source, installed), {
+    changed: [],
+    added: [],
+    missing: ['hooks/codex-hooks.json'],
+    hooks: [{ file: 'hooks/codex-hooks.json', event: 'PreToolUse', difference: 'missing' }],
+  });
+});
+
+test('a tracked hook file deleted in the work tree is skipped, and its installed events read as added', async () => {
+  const { source, installed } = await fixture();
+  rmSync(path.join(source, 'hooks', 'codex-hooks.json'));
+  assert.deepEqual(compare(source, installed), {
+    changed: [],
+    added: [],
+    missing: [],
+    hooks: [{ file: 'hooks/codex-hooks.json', event: 'PreToolUse', difference: 'added' }],
+  });
+});
+
+test('a hook file that is not JSON is unreadable, unless both sides hold the same bytes', async () => {
+  const { source, installed } = await fixture();
+  writeFileSync(path.join(installed, 'hooks', 'hooks.json'), '{\n');
+  assert.deepEqual(compare(source, installed), {
+    changed: ['hooks/hooks.json'],
+    added: [],
+    missing: [],
+    hooks: [{ file: 'hooks/hooks.json', event: '*', difference: 'unreadable' }],
+  });
+  writeFileSync(path.join(source, 'hooks', 'hooks.json'), '{\n');
+  assert.deepEqual(compare(source, installed), { changed: [], added: [], missing: [], hooks: [] });
+});
+
+test('the command exits 2 on a usage error, an unreadable directory and a git that cannot start', async () => {
+  const { source, installed } = await fixture();
+  const run = (args, env = process.env) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', env });
+  const usage = run([source]);
+  assert.equal(usage.status, 2);
+  assert.match(usage.stderr, /^usage: /);
+  const unreadable = run([source, path.join(installed, 'absent')]);
+  assert.equal(unreadable.status, 2);
+  assert.match(unreadable.stderr, /ENOENT/);
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'PATH'));
+  const noGit = run([source, installed], { ...env, PATH: '' });
+  assert.equal(noGit.status, 2);
+  assert.match(noGit.stderr, /^git ls-files could not start in /);
+});

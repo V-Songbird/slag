@@ -1,6 +1,6 @@
 ---
 type: knowledge
-summary: "Which of razor, hush, foreman, collet and anneal owns which job, and where two of them meet; read before choosing plugins or deciding where a new behavior belongs."
+summary: "Which of razor, hush, foreman, collet and anneal owns which job, and where two of them meet, and the gate any native integration between foreman, collet and anneal must pass; read before choosing plugins or deciding where a new behavior belongs."
 related_files:
   - README.md
   - anneal/README.md

@@ -93,11 +93,16 @@ node scripts/plugin-parity.js <plugin directory> <installed plugin directory>
 For example, `node scripts/plugin-parity.js collet <cache>/slag/collet/<version>`. The check prints
 one line per difference: each file whose bytes changed, each installed file the source does not
 track, each tracked file the install lacks, and each hook event in `hooks/hooks.json`,
-`hooks/codex-hooks.json` or the plugin-root `hooks.json` whose definition differs. It prints
-`parity: no differences` and exits 0 when the copy matches, exits 1 on any difference, and exits 2
-when a directory cannot be read. It only reads: it never edits a cache, a configuration, a trust
-record or a hook. A Codex plugin's installed directory can be passed the same way. When a Codex
-hook definition changed, review and trust it again through /hooks, as described above.
+`hooks/codex-hooks.json` or the plugin-root `hooks.json` whose definition differs. The plugin-root
+file is read under the plugin's name from the source's `.claude-plugin/plugin.json`. A hook file
+that is not valid JSON on either side is reported as `unreadable`, unless both sides hold the same
+bytes. A tracked file deleted from the work tree is skipped, so it is never reported as missing. It
+prints `parity: no differences` and exits 0 when the copy matches, exits 1 on any difference, and
+exits 2 on a usage error, when Git cannot list the source's tracked files, or when a directory or
+the source's plugin name cannot be read. It only reads: it never edits a cache, a configuration, a
+trust record or a hook. A Codex plugin's installed directory can be passed the same way, but no
+run against a Codex install has been measured. When a Codex hook definition changed, review and
+trust it again through /hooks, as described above.
 
 Skills are discovered from the plugin's skills directory. Each SKILL.md supplies name, description,
 license, compatibility and metadata.version. A skill revision is independent of the plugin release.
@@ -108,5 +113,6 @@ Current invocation names and verified compatibility limits are in each plugin's 
 Run npm run check from the repository root. The public scripts/plugin-integrity.test.js validates
 Slag's current manifests, paths, identity and version placement, and scripts/plugin-parity.test.js
 checks the installed-copy comparison against fixtures for a matching copy, a changed file, an added
-file and a changed hook definition. Host subprocess tests verify
+file, changed events in each of the three hook files, an added or missing hook file, a hook file
+that is not JSON, and each exit-2 case. Host subprocess tests verify
 payload handling; they do not establish installed-host trust or interactive behavior.
