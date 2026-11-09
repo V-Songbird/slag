@@ -660,8 +660,11 @@ describe("migration-applies-approved-step", () => {
     fs.cpSync(fixture, dir, { recursive: true });
     const before = listRunFiles(dir);
     // The prompt's slash command expands the skill without a Skill call; the
-    // expanded skill reads its conventions before it plans.
-    const calls = [{ name: "Read", input: { file_path: "/plugins/anneal/skills/repo-layout/references/conventions.md" } }];
+    // expanded skill reads its conventions before it plans, and runs the audit.
+    const calls = [
+      { name: "Read", input: { file_path: "/plugins/anneal/skills/repo-layout/references/conventions.md" } },
+      { name: "Bash", input: { command: 'node "/plugins/anneal/scripts/audit.js" --root .' } },
+    ];
     const events = [];
     const bashStep = (command, perform, { name, input } = { name: "Bash", input: { command } }) => {
       calls.push({ name, input });
@@ -931,13 +934,20 @@ describe("migration-applies-approved-step", () => {
     ],
   };
 
-  test("skill-fired sees the conventions read the expanded skill makes, and stays out of the score", () => {
+  test("skill-fired sees the audit the expanded skill runs, and stays out of the score", () => {
     const grader = checks["skill-fired"];
     assert.strictEqual(grader.arm, "with-only");
     assert.strictEqual(passes(grader, { calls: PAIRED_RUN.with }), true);
     assert.strictEqual(passes(grader, { calls: PAIRED_RUN.without }), false);
+    // The first call of each SDK run with a git identity: the audit after a cd
+    // into the workspace, with no conventions read, since the prompt brings the plan.
+    const sdk = 'cd "/work/cwd" && git rev-parse --show-toplevel && git status --porcelain && git config user.email && git log --oneline -3 && node "/plugins/anneal/scripts/audit.js" --root "$(git rev-parse --show-toplevel)"';
+    assert.strictEqual(passes(grader, { calls: bash(sdk) }), true, sdk);
+    assert.strictEqual(passes(grader, { calls: bash('node "C:\\plugins\\anneal\\scripts\\audit.js" --root .') }), true, "a Windows plugin path");
     assert.strictEqual(passes(grader, { calls: [{ name: "Skill", input: { skill: "anneal:repo-layout" } }] }), false, "a Skill call alone");
-    assert.strictEqual(passes(grader, { calls: [READ("/work/cwd/docs/conventions.md")] }), false, "the project's own conventions");
+    assert.strictEqual(passes(grader, { calls: [READ("/plugins/anneal/skills/repo-layout/references/conventions.md")] }), false, "a conventions read alone");
+    assert.strictEqual(passes(grader, { calls: bash("node scripts/audit.js") }), false, "the project's own script");
+    assert.strictEqual(passes(grader, { calls: [{ name: "Bash", input: { command: "git status", description: "Then run audit.js from /plugins/anneal/scripts/audit.js" } }] }), false, "a description is not a command");
   });
 
   describe("checks-run-without-a-file", () => {
@@ -1193,8 +1203,9 @@ describe("migration-applies-approved-step", () => {
       assert.notStrictEqual(Number(row[1]), importers.length);
     });
 
-    test("the graders it shares with the other cases are the same files", () => {
-      assert.strictEqual(read(path.join(WRONG, "graders"), "skill-fired.md"), read(path.join(CASE, "graders"), "skill-fired.md"));
+    test("its skill-fired reads the conventions the skill reads before it plans, and its workspace grader is the shared file", () => {
+      const fired = wrongChecks["skill-fired"];
+      assert.deepStrictEqual([fired.type, fired.tool, fired.input_match, fired.arm], ["tool_used", "Read", "skills/repo-layout/references/conventions\\.md", "with-only"]);
       assert.strictEqual(read(path.join(WRONG, "graders"), "no-new-refs-or-files.md"), read(path.join(MIGRATION, "graders"), "no-new-refs-or-files.md"));
     });
 
@@ -1768,6 +1779,11 @@ describe("writing cases", () => {
         "Make the steps ordered.",
         "The steps have no numbers, so readers lose count.",
         "The steps have no numbers, so it is hard to tell how many there are.",
+        // Two replies of the first SDK baseline.
+        "The steps use bullets instead of numbers, and step 3 isn't an action.",
+        "A numbered list would make the order clear.",
+        "The steps are bullets rather than numbers.",
+        "An ordered list should replace the bullets.",
       ]) assert.strictEqual(passes(checks["names-unnumbered-steps"], { reply }), true, reply);
       for (const reply of [
         "The overwrite warning comes after the command; move it before the Run step.",
@@ -1802,6 +1818,8 @@ describe("writing cases", () => {
         "There is no number showing how many rows were removed.",
         "Use a specific title; the issues below are ordered by severity.",
         "The steps show no numbers for rows removed.",
+        "The page already has a numbered list of options.",
+        "The steps show percentages instead of numbers of rows.",
       ]) assert.strictEqual(passes(checks["names-unnumbered-steps"], { reply }), false, reply);
     });
   });

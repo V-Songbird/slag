@@ -1,6 +1,6 @@
 ---
 type: tool_used
-tool: Read
-input_match: 'skills/repo-layout/references/conventions\.md'
+tool: Bash
+input_match: '"command":"(?:[^"\\]|\\.)*?(?:/|\\\\)scripts(?:/|\\\\)audit\.js'
 arm: with-only
 ---
