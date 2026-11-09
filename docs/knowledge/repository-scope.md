@@ -74,8 +74,8 @@ lines in its feedback. A plain node --test run, including one inside a plugin, h
 so keep file reads, processes and fixture setup in before hooks or tests rather than in describe
 callbacks.
 
-The configured commit gate can use an optional private name blocklist. It passes when no list is
-available, so a successful commit is not proof that this optional filter checked any names.
+The configured commit gate can use an optional private name blocklist. Its name scan passes when no
+list is available, so a successful commit is not proof that this optional filter checked any names.
 Release changes are reviewed and tested independently of that filter. Use the repository's
 cut-release procedure when publishing and keep release scope explicit. The commit-msg gate also
 runs scripts/git-hooks/release-gate.js on a commit whose subject is `Release <plugin> <version>`,
@@ -106,6 +106,7 @@ remains the full gate.
 Those adapters are repository development configuration, separate from shipped plugin hooks.
 
 The optional Git gates can be enabled for a clone with git config core.hooksPath scripts/git-hooks.
-They read HOUSE_REFERENCE_BLOCKLIST first, then a nonempty .private/reference-names.txt in the
-current directory, then the parent directory. With no readable nonempty list, the gates pass.
+Their name scans read HOUSE_REFERENCE_BLOCKLIST first, then a nonempty .private/reference-names.txt
+in the current directory, then the parent directory. With no readable nonempty list, the name scans
+pass; the release gate needs no list.
 This optional input is not required by public tests or plugin installation.
