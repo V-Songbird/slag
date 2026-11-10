@@ -6,12 +6,11 @@ Root JavaScript uses CommonJS; `collet/package.json` selects ESM inside collet.
 
 ## Start here
 
-- For installation and plugin selection, read [README.md](README.md).
+- Documentation rules: .claude/rules/documentation.md (anneal repo-docs contract, profile solo-public)
 - Before changing manifests, hooks or release metadata, read [host contracts](docs/knowledge/host-plugin-formats.md).
 - Before changing collet's mount, scope or closure, read [runtime contracts](collet/docs/knowledge/runtime-contracts.md).
 - Before editing a plugin README, read [the README structure](docs/knowledge/plugin-readme-template.md).
-- For repository setup and checks, read [repository scope](docs/knowledge/repository-scope.md).
-- Before deciding which plugin a new behavior belongs in, read [plugin roles](docs/knowledge/plugin-roles.md).
+- Record index: docs/index.md (one summary line per maintained record; search it before guessing a docs path)
 
 ## Commands
 
@@ -42,7 +41,7 @@ and [collet](collet/docs/knowledge/harness-workflow.md#running-the-evals).
 | `.claude-plugin/marketplace.json` | Claude marketplace and its plugin versions |
 | `.agents/plugins/marketplace.json` | Codex marketplace with local plugin sources |
 | `scripts/` | Repository integrity tests, the edit hook that reruns the test files reaching an edited plugin file, optional Git gates, and the suite-failure reporter that `npm run check` and the edit hook add |
-| `docs/knowledge/` | Repository contracts and contributor documentation |
+| `docs/knowledge/` | Repository contracts and contributor documentation, written for people first and read by agents too |
 | `<plugin>/docs/knowledge/` | Plugin workflows, technical contracts and changelog |
 
 ## Conventions
