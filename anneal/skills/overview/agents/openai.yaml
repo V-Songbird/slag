@@ -1,0 +1,6 @@
+interface:
+  display_name: "Overview"
+  short_description: "See what anneal finds in this repository and which skill to run next"
+  default_prompt: "Use $overview to show what anneal finds in this repository and which of its skills to run next."
+  icon_small: "./assets/icon.png"
+  icon_large: "./assets/icon.png"

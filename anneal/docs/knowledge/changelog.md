@@ -16,7 +16,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- The `overview` skill and `scripts/overview.js`: one read-only run with no model that prints, for navigation, documentation and past sessions, what anneal's own scripts counted in the repository and which skill to run next.
+- The many-sessions pass lists the navigation candidates several sessions share, such as one check that prints a lot each time it passes, as a fifth kind of finding, `navigation`, and counts every candidate by kind in `navigationCounts`.
+
 ### Changed
+
+- **Breaking.** The `session-repeats` skill is now `session-review all`: `/anneal:session-review all [sessions folder or transcript files]`. The script keeps its name, `scripts/session-repeats.js`.
+- **Breaking.** `/anneal:repo-docs` with no argument reports only, as `audit` does. `fix`, or a cleanup request in your own words, applies the ordinary documentation fixes that the bare command used to apply. No anneal command now edits a project on its bare name.
 
 - On Claude Code, the session evidence reads the session's subagent transcripts up to its cutoff and adds `subagentNavigation`: the transcripts read, the calls their subagents issued, their candidate and navigation counts, and the navigation candidates that may call for a change, each with the transcript that holds its lines. Those transcripts were listed and never read, so a session that delegated its work showed none of its missing paths, repeated reads or large outputs. `session-review` reads the listed candidates' lines and routes them like the session's own.
 - The writing reference treats a paragraph over about three sentences as a review flag, like its other numbers. It was the one hard limit left on the page.

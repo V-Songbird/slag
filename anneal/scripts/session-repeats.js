@@ -4,7 +4,8 @@
 // anneal's repeated-step search: which deterministic steps several sessions of one repository ran the same way.
 // Reads Claude Code transcripts and Codex rollouts with the session-evidence parser, through the calls and owner
 // prompts it hands to its hooks, and prints JSON: repeated shell commands, short sequences of steps, file lookups and
-// typed owner prompts, each seen in at least --min-sessions sessions. Matching is text equality after normalization; a
+// typed owner prompts, each seen in at least --min-sessions sessions, and the navigation candidates of the session
+// evidence that several sessions share. Matching is text equality after normalization; a
 // finding is listed, never judged. Read-only: it writes nothing and never touches an instruction file.
 
 const fs = require("node:fs");
@@ -37,6 +38,10 @@ const BUN_COMMANDS = new Set(["a", "add", "audit", "build", "c", "create", "exec
   "pm", "publish", "remove", "repl", "rm", "run", "test", "unlink", "update", "upgrade", "why", "x"]);
 // A printed step's bound, below the key's.
 const SHOWN = 240;
+// The navigation candidates kept from each transcript, the evidence's own upper bound.
+const NAVIGATION_PER_TRANSCRIPT = 30;
+// Scopes that ask for no change, so their candidates are counted and never listed.
+const NO_CHANGE = new Set(["none", "transient"]);
 
 const USAGE = "usage: session-repeats.js --root <repository> [--sessions-dir <dir>]... [--session-file <file>]... [--also-root <repository>]...\n"
   + "       [--claude-home <dir>] [--codex-home <dir>] [--min-sessions <2-20>] [--limit <1-30>]\n";
@@ -370,6 +375,12 @@ function main(argv, env = process.env) {
   const spans = mapSpans(root);
   const map = { spans: new Set([...spans.spans].map(normalize)), rows: spans.rows.map((row) => ({ spans: row.spans.map(normalize), text: normalize(row.text) })) };
   const tallies = Object.fromEntries(KINDS.map((kind) => [kind, new Map()]));
+  // Navigation candidates that may call for a change, by what they are and the path or command they name, and every
+  // navigation candidate by kind. A resumed session copies earlier records with their uuids, so a candidate whose
+  // call another transcript already gave counts once.
+  const navigation = new Map();
+  const navigationCounts = {};
+  const navigated = new Set();
   const skipped = [];
   const read = { claude: 0, codex: 0, subagentTranscripts: 0 };
   // The earliest and the latest typed prompt of the sessions read, as their records time them.
@@ -468,8 +479,8 @@ function main(argv, env = process.env) {
       };
       let result;
       try {
-        result = host === "codex" ? analyzeCodex(transcript.file, Number.MAX_SAFE_INTEGER, 1, hooks)
-          : analyzeClaude(transcript.file, Number.MAX_SAFE_INTEGER, 1, hooks);
+        result = host === "codex" ? analyzeCodex(transcript.file, Number.MAX_SAFE_INTEGER, NAVIGATION_PER_TRANSCRIPT, hooks)
+          : analyzeClaude(transcript.file, Number.MAX_SAFE_INTEGER, NAVIGATION_PER_TRANSCRIPT, hooks);
       } catch (error) {
         // A session whose main transcript cannot be read is not counted, nor are its subagent transcripts.
         skipped.push({ sessionFile: directory(transcript.file), reason: "unreadable", message: excerpt(error.message, 240) });
@@ -492,6 +503,29 @@ function main(argv, env = process.env) {
         }
         const step = repository.own && fresh(call, own) ? stepOf(call, host, normalize) : null;
         if (step) steps.push({ ...step, file: transcript.file, line: call.callLine, actor: call.actor, promptLine: call.promptLine, subagent: transcript.subagent });
+      }
+      if (repository.own) {
+        for (const [kind, total] of Object.entries(result.navigationCounts || {})) navigationCounts[kind] = (navigationCounts[kind] || 0) + total;
+        for (const candidate of result.navigationCandidates || []) {
+          if (NO_CHANGE.has(candidate.scope)) continue;
+          const seen = candidate.observed;
+          // A read or an edit is named by its file; a search, a command or another tool by what it ran, since the
+          // folder a search looked in says nothing of what it looked for.
+          const target = seen.path && (seen.operation === "read" || seen.operation === "edit") ? normalize(seen.path).replace(/^\.(?:[\\/]+|$)/, "") || "."
+            : normalize(typeof seen.commandOrArguments === "string" ? seen.commandOrArguments : JSON.stringify(seen.commandOrArguments ?? ""));
+          const key = JSON.stringify([candidate.kind, candidate.candidateCause, candidate.scope, target]);
+          const issued = calls.find((call) => call.callLine === seen.callLine && call.actor === seen.actor);
+          if (issued && issued.uuid) {
+            if (navigated.has(issued.uuid)) continue;
+            navigated.add(issued.uuid);
+          }
+          if (!navigation.has(key)) navigation.set(key, { sessions: new Set(), occurrences: 0, inSubagents: 0, first: new Map() });
+          const tally = navigation.get(key);
+          tally.sessions.add(session);
+          tally.occurrences += 1;
+          if (transcript.subagent) tally.inSubagents += 1;
+          if (!tally.first.has(session)) tally.first.set(session, { sessionFile: shown(transcript.file), line: seen.line });
+        }
       }
       if (!transcript.subagent) prompts = typed.filter((prompt) => fresh(prompt, own));
       for (const uuid of own) counted.add(uuid);
@@ -567,6 +601,20 @@ function main(argv, env = process.env) {
     shortened += listed.filter(({ key }) => kind !== "prompts" && key.length > SHOWN).length;
     findings[kind] = listed.map(({ finding }) => finding);
   }
+  // The same navigation candidate in several sessions: one path or command, with one cause and one scope.
+  const byName = (a, b) => (a.sessionFile < b.sessionFile ? -1 : a.sessionFile > b.sessionFile ? 1 : a.line - b.line);
+  findings.navigation = [...navigation.entries()]
+    .filter(([, tally]) => tally.sessions.size >= minimum)
+    .map(([key, tally]) => {
+      const [navigationKind, candidateCause, scope, target] = JSON.parse(key);
+      return {
+        kind: "navigation", step: excerpt(target, SHOWN), navigationKind, candidateCause, scope, sessions: tally.sessions.size,
+        occurrences: tally.occurrences, inSubagents: tally.inSubagents, examples: [...tally.first.values()].sort(byName).slice(0, 3),
+      };
+    })
+    .sort((a, b) => b.sessions - a.sessions || b.occurrences - a.occurrences || (a.step < b.step ? -1 : a.step > b.step ? 1 : 0)
+      || (a.navigationKind < b.navigationKind ? -1 : a.navigationKind > b.navigationKind ? 1 : 0))
+    .slice(0, limit);
   const warnings = [];
   if (cutSteps) warnings.push(`${cutSteps} steps were cut at the evidence's 480-character bound; steps that differ only after the cut share a key.`);
   if (shortened) {
@@ -574,9 +622,11 @@ function main(argv, env = process.env) {
   }
   const output = {
     root: directory(root), repositories: repositories.map((repository) => directory(repository.root)), sessionsRead: read, dates,
-    skipped, findings, warnings,
+    skipped, navigationCounts, findings, warnings,
     limits: "Matches are text equality after normalization: whitespace, repository paths, ids and temporary paths. A step is listed, "
-      + "not judged: whether it needed judgement is for the reviewer. Antigravity has no known transcript location, so its sessions "
+      + "not judged: whether it needed judgement is for the reviewer. A navigation finding is the session evidence's candidate "
+      + `seen in several sessions: its cause is a hypothesis, each transcript gives at most ${NAVIGATION_PER_TRANSCRIPT} candidates, and one of `
+      + "scope none or transient is counted in navigationCounts and never listed. Antigravity has no known transcript location, so its sessions "
       + "are read only from files handed in. Redaction is best effort. Subagent transcripts, and forked Codex "
       + "rollouts, count toward their parent session, and their prompts are not counted. A Claude Code record another transcript "
       + "already holds, as a resumed session copies them, counts once, toward the first session read. "

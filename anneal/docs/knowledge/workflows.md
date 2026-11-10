@@ -26,7 +26,9 @@ related_files:
   - anneal/scripts/session-evidence-stall.js
   - anneal/scripts/session-closeout.js
   - anneal/tests/session-closeout.test.js
-  - anneal/skills/session-repeats/SKILL.md
+  - anneal/skills/session-review/references/many-sessions.md
+  - anneal/skills/overview/SKILL.md
+  - anneal/scripts/overview.js
   - anneal/scripts/session-repeats.js
   - anneal/tests/session-repeats.test.js
   - anneal/tests/session-evidence.test.js
@@ -48,6 +50,21 @@ related_files:
 ---
 
 # Anneal workflows
+
+## Where to start
+
+`/anneal:overview` on Claude Code, `$overview` on Codex or `/overview` on Antigravity runs `node anneal/scripts/overview.js --root <repository>` and shows what it prints: two lines for each part of anneal, with what that part's own script counted and the skill to run next.
+
+| Part | Script it runs | Skill it names |
+| --- | --- | --- |
+| Navigation | `audit.js --json` | `repo-layout audit`, when there is a finding, no map file or a start context over its budget |
+| Documentation | `docs-check.js --json` and `docs-maintenance.js --json` | `repo-docs audit` for check findings, `repo-docs maintain` for proposals, `repo-docs adopt` when `docs/` holds no maintained record |
+| Past sessions | `session-repeats.js` | `session-review all`, when a repeated step is not named in the map or sessions share a navigation finding |
+| This session | none | `session-review`, which only you can start |
+
+The script uses no model, writes nothing and adds no judgement: the counts are the heuristic findings, proposals and candidates of those scripts, none of them verified. A script that cannot run, such as the documentation check outside Git or the session search with no session to read, leaves its part as `not available` with that script's own message. `--json` prints the same parts as JSON, and `--no-sessions`, the skill's `no-sessions` argument, reads no past session. On this repository the run takes about 20 seconds, most of it reading 71 sessions.
+
+No anneal command edits a project on its bare name. `overview` and both audits report. `repo-layout` and `session-review` propose and wait for your approval of each step or entry. `repo-docs` applies ordinary fixes only with `fix` or a cleanup request in your own words.
 
 Install the plugin and run the first audit using the [README](../../README.md).
 
@@ -362,7 +379,7 @@ Limits of the close-out:
 
 ## How a repeated-step search runs
 
-Use `/anneal:session-repeats [sessions folder or transcript files]` on Claude Code, `$session-repeats` on Codex or `/session-repeats` on Antigravity. It reads many sessions of one repository and lists the steps they repeated the same way, so that a plain command or a short script with no model can take their place. A single session's detours are session review's job.
+Use `/anneal:session-review all [sessions folder or transcript files]` on Claude Code, `$session-review all` on Codex or `/session-review all` on Antigravity. It reads many sessions of one repository and lists the steps they repeated the same way, so that a plain command or a short script with no model can take their place, and the navigation candidates several sessions share. Without `all`, the same skill reads one session's detours. This pass was a skill of its own, `session-repeats`, until the two were joined: they share a parser, their rules and the file they change.
 
 The skill runs `scripts/session-repeats.js`, which reads transcripts through the same parser as session review and prints JSON. It writes nothing.
 
@@ -384,7 +401,7 @@ node anneal/scripts/session-repeats.js --root "<repository>" [--sessions-dir <di
 
 A finding is text equality after normalization. A shell command is trimmed and its whitespace collapsed. Each repository path, in either slash style, in MSYS form and as the evidence's redaction spells it, becomes `.`. A leading `cd .` or `pwd` and git's `-C .` are dropped. A UUID, and a hex run of seven or more characters holding a digit and a letter, become `<id>`. A path under the temporary directory, or in a `tmp`, `temp` or `scratchpad` folder, becomes `<temp>/<its name>`; a redirect keeps its operator, as in `2><temp>/err.txt`. A command run from a folder inside the repository other than its top level keeps that folder in front, as in `cd anneal && node --test`; on Codex the folder is the call's `workdir` when it names one, and otherwise the turn's `cwd`. A folder outside the repository, such as the one a transcript recorded before the repository moved, adds nothing. Bash and PowerShell runs of one command share a key. On Codex the command is the one an `exec_command`, `shell_command` or legacy `shell` call carries, directly or inside a code-mode `exec` script; another tool's call is no step, whatever its arguments hold. When the evidence cut a call's arguments at its 480-character bound, the command, or a Grep or Glob pattern, keeps its text up to the cut, and `warnings` counts the steps cut. A listed step longer than 240 characters is printed cut to that bound, and `warnings` counts those too.
 
-The script prints four kinds, each kept only when it appears in at least `--min-sessions` sessions (3 by default, 2 to 20), sorted by sessions, then occurrences, then text, with at most `--limit` per kind (10 by default, 1 to 30):
+The script prints five kinds, each kept only when it appears in at least `--min-sessions` sessions (3 by default, 2 to 20), sorted by sessions, then occurrences, then text, with at most `--limit` per kind (10 by default, 1 to 30):
 
 | Kind | What repeats |
 | --- | --- |
@@ -392,6 +409,9 @@ The script prints four kinds, each kept only when it appears in at least `--min-
 | `sequences` | two or three commands one actor ran in a row for one prompt; a command run again at once counts once, and reads between them do not break the run |
 | `lookups` | a read of one file, by a file tool or a shell read of one path, as `read <path from the root>`; a Grep or Glob pattern; an LS path |
 | `prompts` | a prompt the owner typed: lower case except redaction's markers, without host envelopes, whitespace collapsed and closing punctuation removed; a slash command, a first word whose only slash leads it, by its name, so a prompt that starts with an absolute path is keyed whole |
+| `navigation` | a [navigation candidate](#navigation-candidates) of the session evidence whose scope is neither `none` nor `transient`: the same kind, cause and scope for the same file, when it is a read or an edit, or the same command or arguments otherwise, normalized as a step is |
+
+A navigation finding carries `navigationKind`, `candidateCause` and `scope` in place of `namedInMap`, and its example line is the result's line. Each transcript gives at most 30 candidates, the evidence's own bound, and a call a resumed session copied counts once, by its `uuid`. `navigationCounts` counts every navigation candidate by kind, whatever its scope. On this repository's 71 sessions the first run listed three findings, all `verbose-command`: `npm run check` printing 20,000 characters or more while it passed, 95 times in 4 sessions.
 
 An edit, a write and any other call is no step. Injected text, host notices and a subagent's task are no prompt, and on Codex the event that repeats a typed prompt counts once.
 
@@ -406,10 +426,11 @@ The skill reads only each finding's example lines and checks that the calls did 
 3. A step a project script runs: a `Commands` line naming that script.
 4. A step no script runs: the plain command, or a short script with no network and no model, in the project's own scripts folder and language, plus its `Commands` line.
 5. A repeated lookup: a path hint in `Where things live` or a pointer in `Start here`.
-6. A repeated prompt here that only runs steps: the command or script that runs them, plus its map line.
-7. A prompt repeated across repositories: reported for the owner's global instructions or a personal command, never written.
-8. A repeated mistake a machine could catch: reported as a check, naming collet's `check-writer` only when `.collet/` exists.
-9. A step for CI, a hook or a schedule: reported, never written.
+6. A navigation finding: where the one-session audit sends its scope, such as a path hint for `map-file` or the quieter form in `Commands` for `reporter`.
+7. A repeated prompt here that only runs steps: the command or script that runs them, plus its map line.
+8. A prompt repeated across repositories: reported for the owner's global instructions or a personal command, never written.
+9. A repeated mistake a machine could catch: reported as a check, naming collet's `check-writer` only when `.collet/` exists.
+10. A step for CI, a hook or a schedule: reported, never written.
 
 It shows a prioritized list with each entry's example lines, its exact command or script text and its map line, and applies only the entries the owner approves. It then shows `git diff` and the map file's line count before and after. A run nobody can answer writes nothing, and the skill commits nothing unless asked.
 
@@ -423,11 +444,11 @@ Limits of the search:
 
 ## How documentation reconciliation runs
 
-Use `/anneal:repo-docs` on Claude Code, `$repo-docs` on Codex or `/repo-docs` on Antigravity. Add `audit` to receive findings without edits. The audit offers to save its findings and writes that report in the project only after you say yes, even when your own instructions ask to save findings. A run nobody can answer, such as a headless one, writes nothing in the project. Outside the project, the audit writes only its coverage checklist, and only in a scratch directory the host names for the session; without one it writes no file anywhere and reads command output from the command or through a pipe.
+Use `/anneal:repo-docs` on Claude Code, `$repo-docs` on Codex or `/repo-docs` on Antigravity. The command alone, or with `audit`, gives findings without edits; add `fix` to apply the ordinary ones. The audit offers to save its findings and writes that report in the project only after you say yes, even when your own instructions ask to save findings. A run nobody can answer, such as a headless one, writes nothing in the project. Outside the project, the audit writes only its coverage checklist, and only in a scratch directory the host names for the session; without one it writes no file anywhere and reads command output from the command or through a pipe.
 
 The skill inventories maintained documentation, reviews every in-scope README with its [README reference](#readme-work) and checker, and runs the layout audit without entering its migration steps. It checks claims, references, host instructions, development setup and ignore rules against evidence, and proposes routes that take each anticipated task to the one document holding its contract and to the check that proves it, starting from the audit's observations.
 
-A cleanup request authorizes ordinary documentation fixes within its scope. Changes to standing instructions need your authorization; runtime, hook, permission and publishing changes are proposed separately unless already authorized. The report distinguishes verified claims from unresolved ones and static host checks from live execution.
+`fix`, or a cleanup request in your own words, authorizes ordinary documentation fixes within its scope. The command alone does not, so that no anneal command edits a project on its bare name. Changes to standing instructions need your authorization; runtime, hook, permission and publishing changes are proposed separately unless already authorized. The report distinguishes verified claims from unresolved ones and static host checks from live execution.
 
 ### README work
 
@@ -788,7 +809,7 @@ Two kinds of grader score each case:
 
 ### Repeated-step cases
 
-Two cases, tagged `session-repeats`, give `/anneal:session-repeats sessions/` three synthetic Claude Code transcripts in a small shop repository and approve nothing. In each transcript the session runs `npm test`, then `git status --short --ignored`. Each case allows 25 turns and 600 seconds, and the tools Read, Glob, Grep, Skill, Bash, Edit and Write. Run them from the repository root:
+Two cases, tagged `session-repeats`, give `/anneal:session-review all sessions/` three synthetic Claude Code transcripts in a small shop repository and approve nothing. In each transcript the session runs `npm test`, then `git status --short --ignored`. Each case allows 25 turns and 600 seconds, and the tools Read, Glob, Grep, Skill, Bash, Edit and Write. Run them from the repository root:
 
 ```bash
 claude plugin eval ./anneal --tag session-repeats --scaffold --no-publish \

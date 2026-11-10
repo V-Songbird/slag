@@ -85,6 +85,27 @@ describe("which sessions count", () => {
     assert.deepStrictEqual(commands(repeats(["--root", root, "--sessions-dir", two, "--min-sessions", "2"])), [["npm test", 2]]);
   });
 
+  test("a navigation candidate that may call for a change is one finding when several sessions share it", () => {
+    const root = shop();
+    const dir = tempDir();
+    const wide = "x".repeat(20000);
+    for (const index of [0, 1, 2]) {
+      claude(dir, root, index, [], { rows: [
+        use(`g${index}`, "Grep", { pattern: "cart" }, 10, { uuid: `call-g${index}` }), result(`g${index}`, wide, 11),
+        // Version control prints a lot too, and its scope asks for no change.
+        use(`l${index}`, "Bash", { command: "git log" }, 12), result(`l${index}`, wide, 13),
+      ] });
+    }
+    // A resumed session copies the first one's records, with their uuids.
+    fs.copyFileSync(path.join(dir, `${ids[0]}.jsonl`), path.join(dir, `${ids[3]}.jsonl`));
+    const out = repeats(["--root", root, "--sessions-dir", dir]);
+    assert.deepStrictEqual(out.findings.navigation.map((f) => [f.navigationKind, f.candidateCause, f.scope, f.sessions, f.occurrences, f.examples.length]),
+      [["large-output", "broad-search", "layout", 3, 3, 3]]);
+    assert.match(out.findings.navigation[0].step, /cart/);
+    assert.strictEqual(out.navigationCounts["large-output"], 8, "every candidate is counted, the copies and the ones that ask for no change too");
+    assert.deepStrictEqual(repeats(["--root", root, "--sessions-dir", dir, "--min-sessions", "4"]).findings.navigation, []);
+  });
+
   test("the running session is skipped; an unreadable one is reported while the others count; a journal is never read", () => {
     const root = shop();
     const dir = tempDir();
