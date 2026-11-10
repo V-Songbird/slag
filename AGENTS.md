@@ -18,7 +18,8 @@ Run from the repository root unless a row names another directory.
 
 | Command | Purpose | Cost |
 | --- | --- | --- |
-| `npm run check` | All plugin and repository tests | Local subprocesses and temporary fixtures; no paid services |
+| `npm run check` | All plugin and repository tests; prints each failed test and the closing counts, and nothing for a test that passed | Local subprocesses and temporary fixtures; no paid services |
+| `npm run check:verbose` | The same run with a line for every test, over 100,000 characters | The same |
 | `node --test scripts/plugin-integrity.test.js` | Manifest paths and cross-host metadata | Local |
 | `node --test scripts/ignore-policy.test.js` | Documentation visibility contract | Local temporary Git fixtures |
 | `node --test scripts/markdown-links.test.js` | Relative links and anchors in tracked public Markdown | Local temporary Git fixtures |

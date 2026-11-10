@@ -61,6 +61,13 @@ file whose target is not a tracked file or directory, or whose anchor names no h
 or name in the target. Heading anchors follow GitHub's slugs; files under the private directories are
 skipped at any depth. Its header comment lists its known limits.
 
+The check script writes [scripts/quiet-reporter.js](../../scripts/quiet-reporter.js) to stdout in
+place of the spec reporter. A test that passed prints nothing; a failed test prints its name, its
+file and line and its error, a test file's stderr passes through, and the runner's closing counts
+end the run. The spec reporter printed about 126,000 characters on a clean run of 1,285 tests, and an
+agent host that keeps only a preview of a long output then cut off the counts that say the run
+passed. `npm run check:verbose` is the same run with the spec reporter, for a line per test.
+
 On Node 22 the test runner reports a failed suite without counting a failed test, so a describe
 callback that throws or rejects before it registers a test, or a suite's after hook that throws,
 prints the error yet exits 0. An error at the top level of a test file or in a before hook already
@@ -69,7 +76,7 @@ exits 1. The check script therefore adds
 it sets exit code 1 for every failure the runner reports and writes one stderr line for each suite
 that failed outside its tests. scripts/suite-failure-reporter.test.js runs the fixtures in
 scripts/fixtures, whose names keep them out of test discovery, with the check script's own
-arguments. The edit hook passes the same reporter, with tap in place of spec, and quotes those
+arguments. The edit hook passes the same reporter, with tap on stdout, and quotes those
 lines in its feedback. A plain node --test run, including one inside a plugin, has no such guard,
 so keep file reads, processes and fixture setup in before hooks or tests rather than in describe
 callbacks.

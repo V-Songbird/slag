@@ -41,3 +41,26 @@ test("npm run check passes a suite that defines its tests", () => {
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.doesNotMatch(run.stderr, /Suite failed/);
 });
+
+test("a passing run prints its counts and no line for a test that passed", () => {
+  const run = check("suite-passes.js");
+  assert.match(run.stdout, /^ℹ pass [1-9]\d*$/m);
+  assert.match(run.stdout, /^ℹ fail 0$/m);
+  assert.doesNotMatch(run.stdout, /✔/);
+  assert.ok(run.stdout.split("\n").length < 15, run.stdout);
+});
+
+test("a failing run prints the failed test with its file, line and both values, and not the test that passed", () => {
+  const run = check("one-test-fails.js");
+  assert.equal(run.status, 1, run.stdout + run.stderr);
+  assert.match(run.stdout, /^✖ a fixture test that fails \(.+one-test-fails\.js:\d+\)$/m);
+  assert.match(run.stdout, /actual total/);
+  assert.match(run.stdout, /expected total/);
+  assert.doesNotMatch(run.stdout, /a fixture test that passes/);
+  assert.match(run.stdout, /^ℹ fail 1$/m);
+});
+
+test("check:verbose is the same run with the spec reporter on stdout", () => {
+  const scripts = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).scripts;
+  assert.equal(scripts["check:verbose"], scripts.check.replace("./scripts/quiet-reporter.js", "spec"));
+});
