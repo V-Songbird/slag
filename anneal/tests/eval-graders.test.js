@@ -1146,7 +1146,7 @@ describe("migration-applies-approved-step", () => {
       }
     });
 
-    test("branch-directory-and-move-alone fails the refused chain of an interactive run and passes each command alone", () => {
+    test("branch-directory-and-move-alone fails the refused chain of an interactive run and passes each command alone, after at most one leading cd that only sets the directory", () => {
       assert.deepStrictEqual([alone.type, alone.tool, alone.min, alone.max, alone.arm], ["tool_used", "Bash", "0", "0", undefined]);
       assert.strictEqual(passes(alone, { calls: bash("git checkout -b anneal/2026-09-22 && mkdir -p src/lib && git mv src/utils.js src/lib/money.js && git status --porcelain") }), false);
       const chained = [
@@ -1154,7 +1154,13 @@ describe("migration-applies-approved-step", () => {
         "git rev-parse HEAD; git switch -c anneal/2026-09-22",
         "git branch anneal/2026-09-22 && git switch anneal/2026-09-22",
         "mkdir -p src/lib || true",
-        "cd /work/cwd && git mv src/utils.js src/lib/money.js",
+        "cd /work/cwd; git mv src/utils.js src/lib/money.js",
+        "cd /work/cwd && cd src && git mv utils.js lib/money.js",
+        "cd /work/cwd && git mv src/utils.js src/lib/money.js && git status",
+        "cd /work/cwd && mkdir -p src/lib && git mv src/utils.js src/lib/money.js",
+        'cd "/work/cwd" && git status && git switch -c anneal/2026-09-22',
+        "cd /work/cwd && mkdir -p src/lib\ngit mv src/utils.js src/lib/money.js",
+        "git mv src/utils.js src/lib/money.js && cd /work/cwd",
         "mv src/utils.js src/lib/money.js && node update-imports.js",
         "New-Item -ItemType Directory -Path src/lib; git mv src/utils.js src/lib/money.js",
         "New-Item -ItemType Directory -Path src/lib\nMove-Item src/utils.js src/lib/money.js",
@@ -1167,6 +1173,10 @@ describe("migration-applies-approved-step", () => {
         "New-Item -ItemType Directory -Path src/lib",
         "git mv src/utils.js src/lib/money.js",
         "git mv src/utils.js src/lib/money.js\n",
+        "cd /work/cwd && git mv src/utils.js src/lib/money.js",
+        'cd "/work/cwd" && git switch -c anneal/2026-09-22',
+        'cd "C:\\work\\cwd" && mkdir -p src/lib',
+        'cd "/work/cwd" && git mv src/utils.js src/lib/money.js\n',
         "git rev-parse HEAD && git rev-parse --verify --quiet refs/heads/anneal/2026-09-22",
         "git branch --show-current && git status --porcelain",
         "git add -A src && git status --porcelain",
