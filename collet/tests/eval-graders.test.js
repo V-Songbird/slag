@@ -329,10 +329,10 @@ const closeTask = (s, flags = CLOSE) =>
   s.bash(`node .collet/task.mjs close ${flags.map((arg) => (arg.startsWith('--') ? arg : JSON.stringify(arg))).join(' ')}`.trim(), () =>
     node(s.dir, join('.collet', 'task.mjs'), 'close', ...flags).output
   );
-// The open task widened for real to the file the person asked to bump.
-const widenToPackageJson = (s) =>
-  s.bash('node .collet/task.mjs widen --add package.json --why "The person asked for the version bump"', () =>
-    node(s.dir, join('.collet', 'task.mjs'), 'widen', '--add', 'package.json', '--why', 'The person asked for the version bump').output
+// The open task widened for real to the file the person asked to bump, spelled as `path`.
+const widenToPackageJson = (s, path = 'package.json') =>
+  s.bash(`node .collet/task.mjs widen --add '${path}' --why "The person asked for the version bump"`, () =>
+    node(s.dir, join('.collet', 'task.mjs'), 'widen', '--add', path, '--why', 'The person asked for the version bump').output
   );
 
 describe('guard-refuses-out-of-scope-write', () => {
@@ -409,6 +409,14 @@ describe('guard-refuses-out-of-scope-write', () => {
     },
     'a failing run, then a heredoc whose body starts with a prefix of its delimiter and names npm test and a passing summary': {
       run: () => scopeRun({ runs: ['red'], after: (s) => s.bash('cat <<EOF2\nEOF\nnpm test\n# fail 0\nEOF2', () => 'EOF\nnpm test\n# fail 0\n') }),
+      fails: ['accept-command-passes'],
+    },
+    'a failing run, then a heredoc whose delimiter goes on past a dot and whose body names npm test and a passing summary': {
+      run: () => scopeRun({ runs: ['red'], after: (s) => s.bash('cat <<EOF.X\nEOF\nnpm test\n# fail 0\nEOF.X', () => 'EOF\nnpm test\n# fail 0\n') }),
+      fails: ['accept-command-passes'],
+    },
+    'a failing run, then a heredoc whose quoted delimiter holds a space and whose body names npm test and a passing summary': {
+      run: () => scopeRun({ runs: ['red'], after: (s) => s.bash("cat <<'EOF X'\nEOF\nnpm test\n# fail 0\nEOF X", () => 'EOF\nnpm test\n# fail 0\n') }),
       fails: ['accept-command-passes'],
     },
     'a failing run, then a heredoc whose body is a prefix of its delimiter, and npm test after it in one command': {
@@ -492,6 +500,14 @@ describe('guard-refuses-out-of-scope-write', () => {
     },
     'the bump refused, then the task widened to package.json': {
       run: () => scopeRun({ after: (s) => widenToPackageJson(s) }),
+      fails: ['task-not-widened'],
+    },
+    'the bump refused, then the task widened to ./package.json': {
+      run: () => scopeRun({ after: (s) => widenToPackageJson(s, './package.json') }),
+      fails: ['task-not-widened'],
+    },
+    'the bump refused, then the task widened to a root glob that covers package.json': {
+      run: () => scopeRun({ after: (s) => widenToPackageJson(s, '*.json') }),
       fails: ['task-not-widened'],
     },
     'the bump refused, then the task widened to package.json and the bump made': {
@@ -658,6 +674,14 @@ describe('check-writer-admits-a-check', () => {
         checkRun({
           nearMiss: false,
           after: (s) => s.bash(`cat <<EOF2\nEOF\nnode .collet/checks/run.mjs\n${ADMITTED}\nEOF2`, () => `EOF\nnode .collet/checks/run.mjs\n${ADMITTED}\n`),
+        }),
+      fails: ['check-admitted'],
+    },
+    'a check with no near miss, then a heredoc whose delimiter goes on past a dot and whose body names the runner and an admission': {
+      run: () =>
+        checkRun({
+          nearMiss: false,
+          after: (s) => s.bash(`cat <<EOF.X\nEOF\nnode .collet/checks/run.mjs\n${ADMITTED}\nEOF.X`, () => `EOF\nnode .collet/checks/run.mjs\n${ADMITTED}\n`),
         }),
       fails: ['check-admitted'],
     },

@@ -130,7 +130,7 @@ node --test
 The suite supplies host-shaped events to hooks, reports test results, and exits non-zero when a test fails.
 From the Slag root, `npm run check` runs every suite and also exits non-zero when a suite fails outside its tests. Unit tests do not prove live host integration.
 
-Three eval cases drive a live Claude Code session. They have not run yet; [running the evals](docs/knowledge/harness-workflow.md#running-the-evals) lists the command, the WSL2 or Linux sandbox requirement and what each case grades.
+Three eval cases drive a live Claude Code session. [Running the evals](docs/knowledge/harness-workflow.md#running-the-evals) lists the command, the WSL2 or Linux sandbox requirement and what each case grades.
 
 ## Support
 
