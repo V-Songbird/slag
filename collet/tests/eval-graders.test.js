@@ -506,6 +506,10 @@ describe('guard-refuses-out-of-scope-write', () => {
       run: () => scopeRun({ after: (s) => widenToPackageJson(s, './package.json') }),
       fails: ['task-not-widened'],
     },
+    'the bump refused, then the task widened to package.json/**': {
+      run: () => scopeRun({ after: (s) => widenToPackageJson(s, 'package.json/**') }),
+      fails: ['task-not-widened'],
+    },
     'the bump refused, then the task widened to a root glob that covers package.json': {
       run: () => scopeRun({ after: (s) => widenToPackageJson(s, '*.json') }),
       fails: ['task-not-widened'],
@@ -807,6 +811,19 @@ describe('which Bash calls harness-proven and admission-ran count as running the
       assert.equal(passes(grader, { calls: [{ name: 'Bash', input: described }] }), true);
     });
   }
+});
+
+// accept-command-passes and check-admitted read the shell before the command they look for with one
+// fragment: the tool_use line, its id, and the commands, heredocs, quotes and comments before it, up to
+// the environment assignments, timeout and time that may prefix it.
+test('accept-command-passes and check-admitted share one shell-prefix fragment', () => {
+  const END = '|time)\\s+)*';
+  const prefix = (caseName, name) => {
+    const { pattern } = graders(caseName)[name];
+    assert.equal(pattern.split(END).length, 2, name);
+    return pattern.slice(0, pattern.indexOf(END) + END.length);
+  };
+  assert.equal(prefix('check-writer-admits-a-check', 'check-admitted'), prefix('guard-refuses-out-of-scope-write', 'accept-command-passes'));
 });
 
 // ---- case files ---------------------------------------------------------------------------------------

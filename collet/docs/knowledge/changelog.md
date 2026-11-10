@@ -42,12 +42,11 @@ All notable changes to collet are documented here. The format follows
   out of the task even when the person asks for it, and that only a needed file beyond the
   request waits for the person's yes. The README says the same.
 - The `guard-refuses-out-of-scope-write` eval case gains `task-not-widened`, which fails a run
-  that widens the task to `package.json`, however the path is spelled, or to a glob at the
-  project root.
+  that widens the task to `package.json`, with or without a leading `./` or a trailing `/**`,
+  or to any glob at the project root, such as `*.md`.
 - `task-harness` opens with a checklist of the mount for the session to copy and tick.
 - `check-writer` runs admission again after any fix, until the check is admitted or the session
   reports why it cannot be.
-
 - `mount.mjs` mounts in a project that keeps a `ROADMAP.jsonl` or a `.foreman/` directory, instead
   of writing nothing and exiting 2. The planning tool owns the plan and collet enforces the session
   boundary. collet never reads that roadmap, never enforces the files an entry lists, and leaves
@@ -63,9 +62,10 @@ All notable changes to collet are documented here. The format follows
 
 ### Fixed
 
-- The `check-admitted` and `accept-command-passes` eval graders read a heredoc delimiter to the
-  end of its shell word, so a body line that is only part of the delimiter no longer ends the
-  heredoc, and such a heredoc that prints a passing summary no longer passes them.
+- The `check-admitted` and `accept-command-passes` eval graders read a heredoc whose delimiter
+  ends at a shell word boundary, so a body line that is only part of the delimiter no longer ends
+  the heredoc, and such a heredoc that prints a passing summary no longer passes them. The harness
+  workflow guide lists the shapes these heuristic graders still misread.
 - The mount leaves a `CLAUDE.md` that imports `AGENTS.md` without its own rules block, and
   empties a block an earlier mount left there down to its markers, so the host loads the block
   once, from `AGENTS.md`, and the first task after the remount still closes. An `@AGENTS.md` or
