@@ -16,6 +16,8 @@ All notable changes to collet are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0-alpha] — 2026-11-10
+
 ### Changed
 
 - A write outside the open task is no longer refused as it happens. It goes ahead with a note
