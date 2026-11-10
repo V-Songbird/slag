@@ -11,9 +11,12 @@
 import { appendFileSync, closeSync, fstatSync, openSync, readdirSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { COLLET, host, mounted, projectModule, readEvent, root } from './lib.js';
+import { COLLET, config, host, mounted, projectModule, readEvent, root } from './lib.js';
 
 const SCOPE = 'scope.mjs';
+// A write outside the open task is refused only in a project whose config sets this key to true.
+// Everywhere else it goes ahead with a note, and the scope check at close counts it.
+const REFUSE_OUTSIDE = 'refuse_out_of_scope_writes';
 const LOG = 'guard-log.jsonl';
 // hooks.json gives the guard 10 s, and a host that cuts it short lets the call go ahead unjudged.
 // A start older than that with no finish is such a call, not one still running beside this one.
@@ -37,8 +40,15 @@ function checkFiles(dir) {
   return [SCOPE, ...rest];
 }
 
-/** The refusal for this call, or null. Every way of not knowing is null: this guard fails open. */
-async function refusal(dir, task, call) {
+/**
+ * What the checks say about this call: `refused`, the refusal or null, and `outside`, a write
+ * outside the open task that the project lets through, or null. The harness's own files and every
+ * other check refuse whatever the config says. Every way of not knowing is null: this guard fails
+ * open.
+ */
+async function judged(dir, task, call) {
+  const strict = config(dir)[REFUSE_OUTSIDE] === true;
+  let outside = null;
   for (const file of checkFiles(dir)) {
     const check = await projectModule(dir, join('checks', file));
     if (typeof check?.check !== 'function') continue;
@@ -50,10 +60,15 @@ async function refusal(dir, task, call) {
     }
     if (result?.fires) {
       const id = check.id ?? file.replace(/\.mjs$/, '');
-      return { file, id, reason: result.reason, harness: result.harness === true };
+      const found = { file, id, reason: result.reason, harness: result.harness === true };
+      if (file === SCOPE && !found.harness && !strict) {
+        outside = found;
+        continue; // the checks after scope still judge the edit itself
+      }
+      return { refused: found, outside: null };
     }
   }
-  return null;
+  return { refused: null, outside };
 }
 
 // Scope is the one check whose remedy is a command. Every other check caught a mistake inside the
@@ -135,16 +150,20 @@ const call = adapter.call(event);
 const task = mounted(dir) ? (await projectModule(dir, 'state.mjs'))?.openTask(dir) : null;
 const earlier = task ? cutShort(dir, task.id) : [];
 let refused = null;
+let outside = null;
 if (task) {
   // Written before any check runs: a guard cut short from here on leaves a start with no finish.
   record(dir, { start: RUN, task: task.id, tool: call.tool, call: described(call) });
-  refused = await refusal(dir, task, call);
+  ({ refused, outside } = await judged(dir, task, call));
   record(dir, { finish: RUN, ...(refused && { task: task.id, check: refused.id, tool: call.tool, reason: refused.reason }) });
 }
 
-const notice = earlier
-  .map((entry) => `A guard call did not finish: ${entry.tool} ${entry.call} at ${entry.at}. The host may have run it unjudged; check what it changed.`)
-  .join(' ');
+const notice = [
+  ...(outside
+    ? [`${outside.reason} The write goes ahead; node .collet/task.mjs close counts it against the task unless the task is widened for a file it needs or the change is undone.`]
+    : []),
+  ...earlier.map((entry) => `A guard call did not finish: ${entry.tool} ${entry.call} at ${entry.at}. The host may have run it unjudged; check what it changed.`),
+].join(' ');
 const answer = refused ? adapter.deny(`${refused.reason}${remedy(refused)}${notice && ` ${notice}`}`) : adapter.allow(notice);
 if (answer) process.stdout.write(JSON.stringify(answer));
 for (const entry of earlier) record(dir, { reported: entry.start });

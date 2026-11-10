@@ -16,6 +16,14 @@ All notable changes to collet are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A write outside the open task is no longer refused as it happens. It goes ahead with a note
+  that names the path, and `task.mjs close` still fails while the change is outside the task.
+  To keep the refusal, set `refuse_out_of_scope_writes` to `true` in `.collet/config.json`; an
+  existing mount without that key stops refusing such writes once it runs this version. Writes
+  to the harness's own files, and edits a project check catches, are refused as before.
+
 ## [0.6.0-alpha] — 2026-11-09
 
 ### Added

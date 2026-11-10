@@ -165,6 +165,15 @@ A check is admitted only when it catches each shipped violation and leaves its n
 The session guard loads project checks with the scope fallback from the plugin. Hook errors fail
 open; the explicit .collet/off file disables hooks, not committed standalone checks.
 
+The guard refuses a write outside the open task only when `.collet/config.json` holds
+`"refuse_out_of_scope_writes": true`. With the key absent, any other value, or a config that
+cannot be read, the scope check still runs and the call is allowed: its reason and a line saying
+that `close` counts the change ride on the allowed call as context for hosts that take it, the
+log records no refusal, and the checks after scope still judge the call. A scope result marked
+`harness: true`, the harness's own files, is refused whatever the key says, and so is a call any
+other check fires on. The key changes nothing at close, in `run.mjs` or in the check's fixtures.
+The mount never writes it.
+
 A host cuts a hook short at its timeout, 10 s in collet's hook files, and discards its answer.
 Claude Code documents that the tool call then goes ahead; Codex and Antigravity are not checked.
 So while a task is open the guard logs a start in `.collet/guard-log.jsonl` before its checks and

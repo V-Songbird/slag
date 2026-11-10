@@ -7,7 +7,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSyn
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { CONFIG, hook, hookOutput, mount, PLUGIN, project, repo, task, TREE } from './temp-project.js';
+import { CONFIG, CONFIG_DEFAULT, hook, hookOutput, mount, PLUGIN, project, repo, task, TREE } from './temp-project.js';
 
 function ready(extra = {}) {
   const root = project({ ...TREE, ...extra });
@@ -808,6 +808,69 @@ test('on Antigravity a project without collet is allowed out loud, not in silenc
     'guard.js',
     root,
     { toolCall: { name: 'write_to_file', args: { TargetFile: 'anything.txt' } }, workspacePaths: [root] },
+    { args: ['antigravity'], cwd: PLUGIN, project: null }
+  );
+  assert.deepEqual(JSON.parse(out.stdout), { decision: 'allow' });
+});
+
+// A mount leaves `refuse_out_of_scope_writes` out of the config. A write outside the open task
+// then goes ahead with a note, and the scope check at close is what counts it.
+function readyDefault() {
+  const root = ready();
+  writeFileSync(join(root, '.collet', 'config.json'), CONFIG_DEFAULT, 'utf8');
+  return root;
+}
+
+test('without the config key a write outside the task goes ahead with a note and logs no refusal', () => {
+  const root = readyDefault();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const out = hookOutput(hook('guard.js', root, { tool_name: 'Write', tool_input: { file_path: 'src/theme.mjs' } }));
+  assert.equal(out.permissionDecision, undefined);
+  assert.match(out.additionalContext, /src\/theme\.mjs is outside the open task \(t1\)/);
+  assert.match(out.additionalContext, /The write goes ahead; node \.collet\/task\.mjs close counts it/);
+  assert.doesNotMatch(readFileSync(join(root, '.collet', 'guard-log.jsonl'), 'utf8'), /"check"/);
+  const inside = hook('guard.js', root, { tool_name: 'Write', tool_input: { file_path: 'src/cli.mjs' } });
+  assert.equal(inside.stdout, '');
+});
+
+test('only the value true switches the refusal on', () => {
+  const root = readyDefault();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const event = { tool_name: 'Write', tool_input: { file_path: 'src/theme.mjs' } };
+  for (const value of ['true', 1, false, null]) {
+    writeFileSync(join(root, '.collet', 'config.json'), JSON.stringify({ ...JSON.parse(CONFIG_DEFAULT), refuse_out_of_scope_writes: value }), 'utf8');
+    assert.equal(hookOutput(hook('guard.js', root, event)).permissionDecision, undefined, JSON.stringify(value));
+  }
+  writeFileSync(join(root, '.collet', 'config.json'), CONFIG, 'utf8');
+  assert.equal(hookOutput(hook('guard.js', root, event)).permissionDecision, 'deny');
+});
+
+test("without the config key the harness's own files are still refused", () => {
+  const root = readyDefault();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const out = hookOutput(hook('guard.js', root, { tool_name: 'Write', tool_input: { file_path: '.collet/config.json' } }));
+  assert.equal(out.permissionDecision, 'deny');
+  assert.match(out.permissionDecisionReason, /Widening cannot make a harness file writable/);
+});
+
+test('without the config key another check still refuses a write outside the task', () => {
+  const root = readyDefault();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  writeFileSync(join(root, '.collet', 'checks', 'no-todo.mjs'), TODO_CHECK, 'utf8');
+  const out = hookOutput(
+    hook('guard.js', root, { tool_name: 'Write', tool_input: { file_path: 'src/theme.mjs', content: '// TODO\n' } })
+  );
+  assert.equal(out.permissionDecision, 'deny');
+  assert.match(out.permissionDecisionReason, /a TODO was left in the file\./);
+});
+
+test('on Antigravity a write outside the task is allowed without the config key', () => {
+  const root = readyDefault();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const out = hook(
+    'guard.js',
+    root,
+    { toolCall: { name: 'write_to_file', args: { TargetFile: join(root, 'src', 'theme.mjs') } }, workspacePaths: [root] },
     { args: ['antigravity'], cwd: PLUGIN, project: null }
   );
   assert.deepEqual(JSON.parse(out.stdout), { decision: 'allow' });

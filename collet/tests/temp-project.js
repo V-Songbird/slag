@@ -135,15 +135,17 @@ export function repo(root) {
   });
 }
 
-export const CONFIG = JSON.stringify(
-  {
-    project: 'A digest CLI. Node 22, no dependencies.',
-    conventions: ['Dates are parsed in one place.'],
-    accept: 'node -e 0',
-  },
-  null,
-  2
-);
+const SETTINGS = {
+  project: 'A digest CLI. Node 22, no dependencies.',
+  conventions: ['Dates are parsed in one place.'],
+  accept: 'node -e 0',
+};
+
+// A project that asked for the write-time scope refusal, which most suites exercise.
+export const CONFIG = JSON.stringify({ ...SETTINGS, refuse_out_of_scope_writes: true }, null, 2);
+
+// The same project as a mount leaves it: a write outside the open task goes ahead with a note.
+export const CONFIG_DEFAULT = JSON.stringify(SETTINGS, null, 2);
 
 export const TREE = {
   'src/cli.mjs': "import { build } from './digest.mjs';\nexport const run = () => build();\n",

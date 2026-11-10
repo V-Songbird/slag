@@ -1,6 +1,6 @@
 # collet
 
-collet constrains a coding session to one open task, its writable files, and the command required to finish it. Hooks refuse recognized out-of-scope writes.
+collet constrains a coding session to one open task, its writable files, and the command required to finish it. Closing the task fails while a change sits outside its files; hooks refuse such a write as it happens only when the project asks for that.
 
 Use it when agents exceed the task's scope or finish without verification. It constrains already planned work; it does not plan the work.
 
@@ -67,6 +67,9 @@ node .collet/checks/run.mjs
 ```
 
 The first command prints the open task, scope and acceptance command. The second reports whether each check catches its violations and permits its near misses.
+A write outside the open task goes ahead with a note that names the path, and `node .collet/task.mjs close` fails until the task is widened or the change is undone.
+With `refuse_out_of_scope_writes` set to `true` in `.collet/config.json`, the guard refuses that write instead.
+The harness's own files and an edit a check catches are refused either way.
 When an active guard refuses a write, it names the affected path and the remedy that fits the refusal:
 
 - For a file the stated task needs, widen the task with a recorded reason. Ask the person first when that file goes beyond their request. A file the task does not need stays out, even when the person asks for it.
@@ -100,6 +103,7 @@ Values live in `.collet/config.json`. There are no environment settings or secre
 | `ask_first` | no | absent; set by `mount.mjs --ask-first` | Things the person is asked about before they happen |
 | `exclude` | no | absent; set by `mount.mjs --exclude` | Path globs no bundle check reads, such as a generated mirror |
 | `removed_checks` | no | absent; set by `mount.mjs --remove` | Bundle checks a remount keeps out |
+| `refuse_out_of_scope_writes` | no | absent; set by hand to `true` | Makes the guard refuse a write outside the open task instead of noting it |
 
 Replace the `project` and `accept` placeholders before opening a task; leftover `conventions` placeholders are ignored. Creating `.collet/off` silences session guards; committed checks keep running.
 The [configuration reference](docs/knowledge/harness-workflow.md#configuration) explains generated files, host rules, and remount behavior.
@@ -107,6 +111,7 @@ The [configuration reference](docs/knowledge/harness-workflow.md#configuration) 
 ## Limits
 
 - No open task means no enforcement.
+- Without `refuse_out_of_scope_writes`, a write outside the task is caught at close, not as it happens. On Antigravity the note does not reach the session.
 - Shell analysis recognizes specific forms. Dynamic paths and writes performed by invoked programs can escape the guard.
 - Optional checks inspect some edit tools immediately; other writes wait for working-tree checks.
 - Closing requires the `--left-out` and `--unverified` lines, strict live checks and the acceptance command to pass. Unavailable verification leaves the task open.

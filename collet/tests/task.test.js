@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 
 import { hiddenIn, nameHidden } from '../templates/state.mjs';
-import { CONFIG, git, mount, project, repo, task, TREE } from './temp-project.js';
+import { CONFIG, CONFIG_DEFAULT, git, mount, project, repo, task, TREE } from './temp-project.js';
 
 function ready(extra = {}) {
   const root = project({ ...TREE, ...extra });
@@ -429,6 +429,18 @@ test('close proves the scope held before it runs the accept command', () => {
   assert.equal(refused.status, 1);
   assert.match(refused.stdout, /fail scope — changed outside the open task t1: src\/report\.mjs/);
   assert.match(refused.stderr, /Live checks failed\. Task t1 stays open/);
+});
+
+// The write-time refusal is opt-in; the scope check at close is not.
+test('close proves the scope held in a project that did not ask for the write-time refusal', () => {
+  const root = ready();
+  writeFileSync(join(root, '.collet', 'config.json'), CONFIG_DEFAULT, 'utf8');
+  repo(root);
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  writeFileSync(join(root, 'src', 'report.mjs'), 'export const r = 99;\n', 'utf8');
+  const refused = task(root, ['close', '--left-out', 'nothing', '--unverified', 'nothing']);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stdout, /fail scope — changed outside the open task t1: src\/report\.mjs/);
 });
 
 test('a failing non-scope live check leaves the task open without running acceptance', () => {

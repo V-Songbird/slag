@@ -76,7 +76,8 @@ cat > .collet/config.json <<'JSON'
 {
   "project": "A small price-formatting library. Node 22, ES modules, no dependencies.",
   "conventions": [],
-  "accept": "npm test"
+  "accept": "npm test",
+  "refuse_out_of_scope_writes": true
 }
 JSON
 git add AGENTS.md .collet

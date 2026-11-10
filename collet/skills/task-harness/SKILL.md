@@ -240,6 +240,8 @@ Three things, in your own words:
 
 - **The guard binds only while a task is in progress.** With no open task it allows every write.
   Starting one is a command nobody runs by accident; that hole is deliberate and written down.
+  A write outside the open task goes ahead with a note and fails the close; it is refused as it
+  happens only when `.collet/config.json` sets `refuse_out_of_scope_writes` to `true`.
 - **A green accept command is not a review.** It means one command exited zero and the writes
   stayed inside a list someone drew. It does not mean the work is correct.
 - **The rules are the weakest part.** They are prose, and prose is followed at about the rate you

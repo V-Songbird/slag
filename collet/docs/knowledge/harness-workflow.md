@@ -64,7 +64,9 @@ node .collet/task.mjs add --title "Round the cart total" --why "Prices show thre
 
 The command prints the open task, its scope, and the configured acceptance command.
 
-From here the session is held. A write to a file outside the list comes back refused:
+From here the session is held. A write to a file outside the list goes ahead, and the session is told that the file is outside the task and that `close` will count it. `node .collet/task.mjs close` then fails until the task is widened or the change is undone.
+
+To have such a write refused as it happens, add `"refuse_out_of_scope_writes": true` to `.collet/config.json` while no task is open. The write then comes back refused:
 
 ```text
 src/checkout.mjs is outside the open task (t1). Writable: src/cart.mjs. Widen the task
@@ -107,7 +109,7 @@ Add checks between tasks. While a task is open, the guard refuses writes under `
 ## How it works
 
 - **"Finished" stops being an opinion.** Closing runs the accept command itself. A non-zero exit leaves the task open.
-- **Drift gets refused, not reported.** The guard reads write tools, patches, and the shell forms it can read with certainty. It also reads `rm -rf` on a directory, which is the one command worth catching before it lands.
+- **Drift is caught at close, or refused as it happens when the project asks for that.** The guard reads write tools, patches, and the shell forms it can read with certainty. It also reads `rm -rf` on a directory, which is the one command worth catching before it lands.
 - **JavaScript/TypeScript imports expand the list.** Name the module that owns the behaviour, and collet adds its relative imports, with a reason for each addition. For other languages, derive and list the scope by reading the code.
 - **"Covered" means caught.** Every check ships with a planted mistake and a near miss, a lookalike it must leave alone. A failed pair is reported and never counted as coverage.
 - **It works beside a planning tool.** A project with a `ROADMAP.jsonl` or `.foreman/` mounts like any other; see [alongside a planning tool](#alongside-a-planning-tool).
@@ -186,6 +188,8 @@ Commit what lands in `.collet/`. The `.collet/.gitignore` it writes already leav
 
 Kill switch: create `.collet/off` and every session guard goes silent. The committed checks never read it.
 
+Write-time refusal: `"refuse_out_of_scope_writes": true` in `.collet/config.json` makes the guard refuse a write outside the open task. Without the key, or with any other value, the write goes ahead with a note and the scope check at close counts it. The mount never writes this key. Writes to the harness's own files and edits a check catches are refused either way.
+
 ## Benchmarks
 
 | What | Score |
@@ -253,7 +257,7 @@ This case is a smoke test. It shows that a session can mount collet and open the
 - `nothing-outside-the-harness`: no file is created outside `.collet/`, `.git/` and `.claude/`;
 - `agents-md-text-kept`, `package-json-unchanged`, `price-unchanged`, `cart-unchanged` and `tests-unchanged`: those files are byte-identical to the scaffold apart from `AGENTS.md`, which must be the original text, one blank line and exactly one collet block that ends the file.
 
-`guard-refuses-out-of-scope-write` starts from the `task` stage and requires:
+`guard-refuses-out-of-scope-write` starts from the `task` stage, whose config sets `refuse_out_of_scope_writes` to `true`, and requires:
 
 - `guard-refused`: `.collet/guard-log.jsonl` holds a `scope` refusal whose reason starts with `package.json is outside the open task`;
 - `out-of-scope-file-unchanged`: `package.json` is byte-identical to the scaffold, still at version 1.0.0;
