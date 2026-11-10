@@ -1,6 +1,6 @@
 # anneal
 
-anneal helps coding agents navigate an existing project, review session detours, find steps sessions repeat that a plain script could run, and align documentation with current behavior. It provides three skills for those tasks, and a fourth that says which of them to run.
+anneal helps coding agents navigate an existing project and review session detours. It finds steps sessions repeat that a plain script could run, and aligns documentation with current behavior. It provides three skills for those tasks, and a fourth that says which of them to run.
 
 Use it on an existing project. A single rename or a new scaffold does not need it.
 
@@ -36,7 +36,7 @@ agy plugin list
 
 The list names `anneal`. If it does not, the install did not register: run the install command again with the clone path. With `--sandbox`, headless `agy` runs no shell command.
 
-anneal acts on your request. Its guard hook inspects shell commands: on a migration branch it refuses the git commands that would discard or rewrite the migration's work, and on any other branch it asks first only before a command deletes, overwrites or moves a migration branch that holds commits the current branch lacks. On Claude Code that question is a permission prompt; how Codex and Antigravity handle it is unverified. A second guard hook works in every session: it refuses a file-tool write that would put characters invisible on screen into a file agents load as instructions, such as `AGENTS.md` or `CLAUDE.md`. Tests run it with each host's payload; whether each host shows its refusal in a live session is unverified. On Claude Code, a third hook shows one line at session end when the session changed `docs/` or the memory folder and there are documentation proposals.
+anneal acts on your request. Its guard hook inspects shell commands. On a migration branch it refuses the git commands that would discard or rewrite the migration's work. On any other branch it asks first, and only before a command deletes, overwrites or moves a migration branch. It asks only when that branch holds commits the current branch lacks. On Claude Code that question is a permission prompt; how Codex and Antigravity handle it is unverified. A second guard hook works in every session. It refuses a file-tool write that would put characters invisible on screen into a file agents load as instructions. `AGENTS.md` and `CLAUDE.md` are such files. Tests run it with each host's payload; whether each host shows its refusal in a live session is unverified. On Claude Code, a third hook can show one line at session end. It does so when the session changed `docs/` or the memory folder and there are documentation proposals.
 
 ## Quick start
 
@@ -48,7 +48,7 @@ Start with the overview, using the invocation for your host:
 | Codex | `$overview` |
 | Antigravity | `/overview` |
 
-It runs one read-only script with no model and prints, for navigation, documentation and past sessions, what anneal counted in your repository and which skill to run next. It changes nothing.
+It runs one read-only script with no model. For navigation, documentation and past sessions, it prints what anneal counted in your repository and which skill to run next. It changes nothing.
 
 Then ask for an audit, such as `/anneal:repo-layout audit`. The skill runs the scan and reports findings by severity, with counts and example paths, followed by informational observations that carry no severity. Audit mode changes nothing in the project on its own; it saves its findings only after you say yes to its offer.
 A missing Node runtime prevents the scan from running; confirm `node --version` reports 22 or later in the host's environment.
@@ -80,10 +80,10 @@ No command edits your project on its own word. Each one reports, or proposes and
 
 A migration runs baseline checks, proposes changes, and creates an `anneal/<YYYY-MM-DD>` branch for approved steps.
 Each successful step is checked and committed. Session review proposes edits and waits for approval; it commits nothing.
-With `all`, session review reads this project's past sessions and proposes, for each step they repeated, a command or a short no-model script and the map-file line that names it, and for each navigation problem several sessions share, the change that fits it; it writes only what you approve.
-`/anneal:repo-docs` alone, or with `audit`, reports findings without edits and saves a report only after you say yes to its offer. With `fix`, or when you ask for a cleanup in your own words, it applies the ordinary corrections. Its `adopt` mode writes the project-local documentation rule, a map pointer and, for a public solo repository, ignore rules from a shipped template, each after you approve it.
+With `all`, session review reads this project's past sessions. For each step they repeated, it proposes a command or a short no-model script and the map-file line that names it. For each navigation problem several sessions share, it proposes the change that fits it. It writes only what you approve.
+`/anneal:repo-docs` alone, or with `audit`, reports findings without edits. It saves a report only after you say yes to its offer. With `fix`, or when you ask for a cleanup in your own words, it applies the ordinary corrections. Its `adopt` mode writes the project-local documentation rule and a map pointer, each after you approve it. For a public solo repository, it also writes ignore rules from a shipped template after you approve them.
 Its `readme` mode writes, reviews or repairs one README and runs a bundled checker on it.
-Asked to write or review a help page, guide, FAQ or changelog, it follows its writing reference and reports what it could not check against the product.
+Asked to write or review a help page, guide, FAQ or changelog, it follows its writing reference. It reports what it could not check against the product.
 
 The [workflow guide](docs/knowledge/workflows.md) covers every audit finding, approval boundary, map-file format, safety hook, and eval.
 
