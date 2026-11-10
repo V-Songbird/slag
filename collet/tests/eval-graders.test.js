@@ -437,6 +437,36 @@ describe('guard-refuses-out-of-scope-write', () => {
         }),
       fails: [],
     },
+    'the test written through a heredoc and npm test run after it in one command': {
+      run: () =>
+        scopeRun({
+          tests: false,
+          runs: [],
+          after: (s) => {
+            const updated = read(s.dir, 'test/price.test.js').replaceAll("'2.50'", () => "'$2.50'");
+            s.bash(`cat > test/price.test.js <<'EOF'\n${updated}EOF\nnpm test`, () => {
+              write(s.dir, 'test/price.test.js', updated);
+              return node(s.dir, '--test', '--test-reporter=tap').output;
+            });
+          },
+        }),
+      fails: [],
+    },
+    'npm test run before the heredoc that writes the test, in one command': {
+      run: () =>
+        scopeRun({
+          tests: false,
+          runs: [],
+          after: (s) => {
+            const updated = read(s.dir, 'test/price.test.js').replaceAll("'2.50'", () => "'$2.50'");
+            s.bash(`npm test; cat > test/price.test.js <<'EOF'\n${updated}EOF`, () => {
+              write(s.dir, 'test/price.test.js', updated);
+              return GREEN;
+            });
+          },
+        }),
+      fails: ['accept-command-passes'],
+    },
     'the accept command run by closing the task': { run: () => scopeRun({ runs: [], after: (s) => closeTask(s) }), fails: [] },
     'a close without its flags, which never runs the accept command': {
       run: () => scopeRun({ runs: [], after: (s) => closeTask(s, []) }),
