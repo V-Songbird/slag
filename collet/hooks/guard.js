@@ -61,8 +61,9 @@ async function refusal(dir, task, call) {
 const REMEDY = {
   [SCOPE]:
     ` Widen the task only for a file the stated task needs: ` +
-    `node .collet/task.mjs widen --add <path> --why "<reason>". If the file goes beyond what the ` +
-    `person asked for, ask them first. ` +
+    `node .collet/task.mjs widen --add <path> --why "<reason>". A file the task does not need ` +
+    `stays out, even when the person asks for it. If a needed file goes beyond what the person ` +
+    `asked for, ask them first. ` +
     `When the file is not needed, or nobody can be asked, leave it alone and name it in your summary.`,
   // The harness's own files are refused whatever the task lists, so widening would send the
   // session round in a circle.

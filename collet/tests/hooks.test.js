@@ -42,6 +42,7 @@ test('session start states the task, its files and the command that ends it', ()
   assert.match(context, /A digest CLI/);
   assert.match(context, /The open task is t1 — "window the digest"/);
   assert.match(context, /src\/cli\.mjs/);
+  assert.match(context, /a needed file beyond what the person asked for needs their yes first, and a file the task does not need stays out even when they ask for it\./);
   assert.match(context, /node -e 0/);
   assert.match(context, /Dates are parsed in one place/);
   assert.doesNotMatch(context, /do not show on screen/);
@@ -319,8 +320,10 @@ test('a refused harness write is told to close the task, and any other refused w
   assert.match(harness, /node \.collet\/task\.mjs close/);
   assert.doesNotMatch(harness, /widen --add/);
   assert.match(reason('src/theme.mjs'), /node \.collet\/task\.mjs widen --add/);
-  // A widen beyond the request goes to the person, and a run that cannot ask leaves the file.
-  assert.match(reason('src/theme.mjs'), /beyond what the person asked for, ask them first/);
+  // A file the task does not need stays out even when asked for, a needed file beyond the request
+  // goes to the person, and a run that cannot ask leaves the file.
+  assert.match(reason('src/theme.mjs'), /A file the task does not need stays out, even when the person asks for it\./);
+  assert.match(reason('src/theme.mjs'), /If a needed file goes beyond what the person asked for, ask them first/);
   assert.match(reason('src/theme.mjs'), /nobody can be asked, leave it alone and name it in your summary/);
 });
 

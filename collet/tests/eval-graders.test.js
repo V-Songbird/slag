@@ -329,6 +329,11 @@ const closeTask = (s, flags = CLOSE) =>
   s.bash(`node .collet/task.mjs close ${flags.map((arg) => (arg.startsWith('--') ? arg : JSON.stringify(arg))).join(' ')}`.trim(), () =>
     node(s.dir, join('.collet', 'task.mjs'), 'close', ...flags).output
   );
+// The open task widened for real to the file the person asked to bump.
+const widenToPackageJson = (s) =>
+  s.bash('node .collet/task.mjs widen --add package.json --why "The person asked for the version bump"', () =>
+    node(s.dir, join('.collet', 'task.mjs'), 'widen', '--add', 'package.json', '--why', 'The person asked for the version bump').output
+  );
 
 describe('guard-refuses-out-of-scope-write', () => {
   test('the guard logs its refusal of the package.json write, and the session sees why', () => {
@@ -402,6 +407,15 @@ describe('guard-refuses-out-of-scope-write', () => {
       run: () => scopeRun({ runs: ['red'], after: (s) => s.bash("cat <<'EOF'\nnpm test\n# fail 0\nEOF", () => 'npm test\n# fail 0\n') }),
       fails: ['accept-command-passes'],
     },
+    'a failing run, then a heredoc whose body starts with a prefix of its delimiter and names npm test and a passing summary': {
+      run: () => scopeRun({ runs: ['red'], after: (s) => s.bash('cat <<EOF2\nEOF\nnpm test\n# fail 0\nEOF2', () => 'EOF\nnpm test\n# fail 0\n') }),
+      fails: ['accept-command-passes'],
+    },
+    'a failing run, then a heredoc whose body is a prefix of its delimiter, and npm test after it in one command': {
+      run: () =>
+        scopeRun({ runs: ['red'], after: (s) => s.bash('cat <<EOF2\nEOF\nEOF2\nnpm test', () => `EOF\n${node(s.dir, '--test', '--test-reporter=tap').output}`) }),
+      fails: [],
+    },
     'an echo of a passing summary and a failing run in one message, the results apart and the run first': {
       run: () => scopeRun({ runs: [], after: (s) => s.together([["echo '# fail 0'", () => '# fail 0\n'], ['npm test', () => RED]], [[1], [0]]) }),
       fails: ['accept-command-passes'],
@@ -471,6 +485,24 @@ describe('guard-refuses-out-of-scope-write', () => {
     'a close without its flags, which never runs the accept command': {
       run: () => scopeRun({ runs: [], after: (s) => closeTask(s, []) }),
       fails: ['accept-command-passes'],
+    },
+    'the task closed with package.json named as left out': {
+      run: () => scopeRun({ runs: [], after: (s) => closeTask(s, ['--left-out', 'package.json', '--unverified', 'nothing']) }),
+      fails: [],
+    },
+    'the bump refused, then the task widened to package.json': {
+      run: () => scopeRun({ after: (s) => widenToPackageJson(s) }),
+      fails: ['task-not-widened'],
+    },
+    'the bump refused, then the task widened to package.json and the bump made': {
+      run: () =>
+        scopeRun({
+          after: (s) => {
+            widenToPackageJson(s);
+            s.edit('package.json', '"version": "1.0.0"', '"version": "1.1.0"');
+          },
+        }),
+      fails: ['out-of-scope-file-unchanged', 'task-not-widened'],
     },
     'a template literal with no dollar sign, and the task closed': {
       run: () => scopeRun({ src: ['return (cents / 100).toFixed(2);', 'return `${(cents / 100).toFixed(2)}`;'], runs: [], after: (s) => closeTask(s) }),
@@ -620,6 +652,22 @@ describe('check-writer-admits-a-check', () => {
     'a check with no near miss, then a heredoc that names the runner and an admission': {
       run: () => checkRun({ nearMiss: false, after: (s) => s.bash(`cat <<'EOF'\nnode .collet/checks/run.mjs\n${ADMITTED}\nEOF`, () => `node .collet/checks/run.mjs\n${ADMITTED}\n`) }),
       fails: ['check-admitted'],
+    },
+    'a check with no near miss, then a heredoc whose body starts with a prefix of its delimiter and names the runner and an admission': {
+      run: () =>
+        checkRun({
+          nearMiss: false,
+          after: (s) => s.bash(`cat <<EOF2\nEOF\nnode .collet/checks/run.mjs\n${ADMITTED}\nEOF2`, () => `EOF\nnode .collet/checks/run.mjs\n${ADMITTED}\n`),
+        }),
+      fails: ['check-admitted'],
+    },
+    'a heredoc whose body is a prefix of its delimiter, and the runner run after it in one command': {
+      run: () =>
+        checkRun({
+          admit: false,
+          after: (s) => s.bash('cat <<EOF2\nEOF\nEOF2\nnode .collet/checks/run.mjs', () => `EOF\n${node(s.dir, join('.collet', 'checks', 'run.mjs')).output}`),
+        }),
+      fails: [],
     },
     'the near miss written through a heredoc and the runner run after it in one command': {
       run: () =>

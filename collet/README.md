@@ -69,7 +69,7 @@ node .collet/checks/run.mjs
 The first command prints the open task, scope and acceptance command. The second reports whether each check catches its violations and permits its near misses.
 When an active guard refuses a write, it names the affected path and the remedy that fits the refusal:
 
-- For a file the stated task needs, widen the task with a recorded reason. Ask the person first for a file beyond their request.
+- For a file the stated task needs, widen the task with a recorded reason. Ask the person first when that file goes beyond their request. A file the task does not need stays out, even when the person asks for it.
 - For a harness file, change it between tasks.
 - For an edit that a check caught, fix the edit.
 
