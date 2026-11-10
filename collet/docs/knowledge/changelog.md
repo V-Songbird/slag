@@ -16,6 +16,8 @@ All notable changes to collet are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0-alpha] — 2026-11-09
+
 ### Added
 
 - The harness workflow guide explains [how to run collet's evals](harness-workflow.md#running-the-evals),
