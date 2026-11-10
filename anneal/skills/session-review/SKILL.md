@@ -6,7 +6,7 @@ argument-hint: "[transcript file] | closeout <session id or transcript file>"
 license: MIT
 compatibility: Requires Node 22 or later. Finds the session's transcript on Claude Code and Codex. On Antigravity, and on any other host, it works only on a transcript file you hand it.
 metadata:
-  version: "1.2"
+  version: "1.3"
 ---
 
 # Session review
@@ -91,6 +91,8 @@ Then:
 
 A navigation candidate keeps `observed`, what the transcript shows, apart from `candidateCause`, a hypothesis. `scope` says who would act if the hypothesis holds, `intervention` the smallest change, and `verification` how to check it. Confirm the cause from the lines in `observed` before it supports anything. `observed.next` holds the next calls the same actor made for the same prompt, mixed commands included, and a detour runs through all of them. Each has an `outcome`: `ok`, `failed`, on Codex also `unknown` or `pending`, or `null` when no result arrived in the interval. An `unknown` or `pending` call, like a `null` one, proves neither a recovery nor a failed detour. `observed.phase` says whether the actor was still orienting, had changed a file, or had made a call of unknown effect.
 
+On Claude Code, `subagentNavigation` holds what the session's subagents did, read from their own transcripts up to the same cutoff: how many transcripts were read, the calls they issued, their candidate and navigation counts, and up to `--limit` navigation candidates whose scope may call for a change. Compare its `calls` with `coverage.calls`: a session that delegated most of its work lost most of its time there. Each listed candidate names its `transcript`; read its call and result lines in that file, and judge and route it like the session's own. `candidatesOmitted` counts the ones past the limit, and a candidate of scope `none` or `transient` is counted, never listed. This is the only reading of a subagent transcript: do not open one for anything else.
+
 A stall candidate, in `stallCandidates`, is a turn that ended on an offer to go on, a question or the next steps, after which the owner only said to continue. Read the text's `line` and the `nextPromptLine`. It is lost time only when nothing required the stop: an instruction, a skill step, an approval the owner asked for, a permission, or a decision that was the owner's to make.
 
 None of these is a problem on its own:
@@ -155,7 +157,7 @@ A saved map file is not loaded into a session that is already running. Say so.
 - the changes applied, and the map file's line count before and after;
 - what was reported and not written: each machine fact, worded so the owner can paste it into a global instruction file, each check worth writing, with, for a check-writer suggestion, the transcript lines where the mistake repeated when it did, each steering source, and each finding for repo-docs or repo-layout;
 - what was dismissed, and why;
-- the limits: one session was read, subagent transcripts were listed and not read, the candidate counts are matches, not verified failures, and a navigation candidate's cause is a hypothesis.
+- the limits: one session was read, subagent transcripts were read only for `subagentNavigation` (on Codex, not at all), with their failures counted and not listed, the candidate counts are matches, not verified failures, and a navigation candidate's cause is a hypothesis.
 
 ## Close-out
 

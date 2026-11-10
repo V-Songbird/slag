@@ -112,7 +112,7 @@ Calm, direct, respectful. Warmth is a quiet choice of words, not jokes, exclamat
 
 - One `#` H1, then headings in order without skipped levels. Headings describe their topic in the reader's words and still make sense in a table of contents.
 - Put the meaningful words first in headings, paragraphs and list items.
-- At most three sentences per paragraph. A paragraph longer than four lines on a narrow screen is a list not yet written.
+- One job per paragraph. A paragraph longer than four lines on a narrow screen is often a list not yet written.
 - Link text says where it goes: "[Reset your password](https://example.com/reset)", never "click here", "here", "learn more", "read more" or the URL itself. Write `[API reference](https://example.com/retry)`, not `[example.com/retry](https://example.com/retry)`.
 - Images get alt text that carries their information: `![Request flow: client to API to queue to worker](docs/architecture.png)`, not `![diagram](docs/architecture.png)`. Never put an instruction, command, error or setting only inside an image, and never put paragraphs of text inside a screenshot.
 - Use a screenshot only when the reader must recognise a place, icon or state that words describe poorly. Crop it but keep a landmark, place it next to its step, and use the localized interface.
@@ -128,6 +128,7 @@ The evidence does not support these as limits, so never distort a page to satisf
 | Flag | What to do when it trips |
 |---|---|
 | A sentence over about 25 words | check it for stacked conditions or several actions; keep it if it is one clear relationship |
+| A paragraph over about three sentences | check it for a list or a second job; keep it when its ideas connect |
 | English prose above roughly U.S. grade 6 to 8 | find the cause: syntax, vocabulary, or a necessary term. Change only the first two |
 | Many steps | split at phases; never merge actions to cut the count |
 | Readability formulas in general | English formulas say nothing about Spanish text, and no score proves comprehension |

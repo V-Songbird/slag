@@ -16,6 +16,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Changed
+
+- On Claude Code, the session evidence reads the session's subagent transcripts up to its cutoff and adds `subagentNavigation`: the transcripts read, the calls their subagents issued, their candidate and navigation counts, and the navigation candidates that may call for a change, each with the transcript that holds its lines. Those transcripts were listed and never read, so a session that delegated its work showed none of its missing paths, repeated reads or large outputs. `session-review` reads the listed candidates' lines and routes them like the session's own.
+- The writing reference treats a paragraph over about three sentences as a review flag, like its other numbers. It was the one hard limit left on the page.
+
 ## [0.6.0-alpha] — 2026-11-09
 
 ### Changed

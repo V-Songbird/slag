@@ -215,7 +215,45 @@ function subagentTranscripts(file) {
   });
 }
 
-function analyzeClaude(file, before = null, limit = 6, { onCall = null, onPrompt = null } = {}) {
+// What the session's subagents did, read from each subagent transcript up to the session's cutoff time: the calls they
+// issued, their candidate and navigation counts summed, and the first navigation candidates that may call for a change,
+// each with the transcript that holds its lines. A candidate of scope none or transient is counted, not listed.
+function subagentNavigation(subagents, cutoffTime, limit, warnings) {
+  const total = { transcriptsRead: 0, unreadable: 0, calls: 0, candidateCounts: {}, navigationCounts: {}, navigationCandidates: [], candidatesOmitted: 0 };
+  if (!subagents.length) return total;
+  const time = new Date(cutoffTime || NaN);
+  if (Number.isNaN(time.getTime())) {
+    warnings.add("Subagent transcripts were not read: the cutoff has no time to select their records by. Pass --before.");
+    return total;
+  }
+  const add = (into, from) => {
+    for (const [name, count] of Object.entries(from)) into[name] = (into[name] || 0) + count;
+  };
+  for (const agent of subagents) {
+    let report;
+    try {
+      report = analyzeClaude(agent.file, time, limit);
+    } catch {
+      total.unreadable += 1;
+      continue;
+    }
+    total.transcriptsRead += 1;
+    total.calls += report.coverage.calls;
+    add(total.candidateCounts, report.candidateCounts);
+    add(total.navigationCounts, report.navigationCounts);
+    for (const candidate of report.navigationCandidates) {
+      if (candidate.scope === "none" || candidate.scope === "transient") continue;
+      if (total.navigationCandidates.length < limit) total.navigationCandidates.push({ transcript: agent.file, ...candidate });
+      else total.candidatesOmitted += 1;
+    }
+  }
+  if (total.unreadable) warnings.add(`${total.unreadable} subagent transcript${total.unreadable === 1 ? "" : "s"} could not be read and add nothing to subagentNavigation.`);
+  return total;
+}
+
+// `withSubagents` also reads the session's subagent transcripts, for subagentNavigation. The evidence script asks for
+// it; a caller that reads those transcripts itself, as the repeated-step search does, leaves it off.
+function analyzeClaude(file, before = null, limit = 6, { onCall = null, onPrompt = null, withSubagents = false } = {}) {
   const warnings = new Set();
   const buffer = fs.readFileSync(file);
   const prompts = [];
@@ -380,17 +418,23 @@ function analyzeClaude(file, before = null, limit = 6, { onCall = null, onPrompt
   const navigation = navigationOf(nav, warnings);
   const stalled = stallsOf(stalls, warnings);
   const boundary = boundaryOf(cutoff, cutoffTime, buffer.length, before === null ? "before-latest-human-prompt" : null, warnings);
+  const within = withSubagents ? subagentNavigation(subagents, boundary.before, limit, warnings) : null;
   return {
     sessionFile: file, sessionId, boundary,
     context, recordsSelected: selected, coverage: coverageOf(track, limit), candidateCounts: counts, candidates: failures,
     navigationCounts: nav.counts, navigationCandidates: navigation, ...stalled,
-    largestToolTexts: largest, subagentTranscripts: subagents.slice(0, 20), warnings: [...warnings].sort(),
+    largestToolTexts: largest, subagentTranscripts: subagents.slice(0, 20), ...(within ? { subagentNavigation: within } : {}),
+    warnings: [...warnings].sort(),
     limits: "Counts are is_error and text candidates, not verified independent failures; is_error also marks hook blocks, "
       + "permission denials and user interrupts. Successful output of a read or search is content and is not text-matched. "
       + "Redaction is best effort. A later same-tool success is not proof of recovery. A path is resolved from the "
       + "working directory recorded with its call, and a write does not show that a file was created. A navigation "
       + "candidate's cause is a hypothesis, and a scope of none or transient means no change. Subagent transcripts were "
-      + "listed, not read. No other session was read.",
+      + (within
+        ? "read only for subagentNavigation: their calls and counts, and the navigation candidates that may call for a "
+          + "change. Their failures are counted, never listed. "
+        : "listed, not read. ")
+      + "No other session was read.",
   };
 }
 

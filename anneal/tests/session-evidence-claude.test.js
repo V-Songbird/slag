@@ -336,7 +336,55 @@ describe("a Claude Code transcript", () => {
     assert.throws(() => analyzeClaude(file), /No human prompt boundary found\. Supply --before/);
   });
 
-  test("subagent transcripts are listed beside the session and never read", () => {
+  test("subagent transcripts are read up to the session's cutoff when the caller asks for them", () => {
+    const dir = tempDir();
+    const file = transcript([
+      human("go", 1), use("t1", "Agent", { prompt: "find the cart" }, 2), result("t1", "done", 8), human("audit", 9),
+    ], { dir });
+    const agent = { isSidechain: true, agentId: "a1" };
+    const wide = "x".repeat(20000);
+    const folder = path.join(dir, SESSION, "subagents");
+    transcript([
+      { type: "user", ...agent, cwd: "/work/shop", timestamp: at(3), message: { role: "user", content: "find the cart" } },
+      use("s1", "Grep", { pattern: "cart" }, 4, agent), result("s1", wide, 5, false, agent),
+      use("s2", "Bash", { command: "git log" }, 6, agent), result("s2", wide, 7, false, agent),
+      // Issued after the session's cutoff, so it belongs to the audit's own turn.
+      use("s3", "Grep", { pattern: "late" }, 10, agent), result("s3", wide, 11, false, agent),
+    ], { dir: folder, name: "agent-a1.jsonl" });
+    fs.writeFileSync(path.join(folder, "agent-b2.jsonl"), "{not json\n{}\n");
+    const report = analyzeClaude(file, null, 6, { withSubagents: true });
+    const within = report.subagentNavigation;
+    assert.deepStrictEqual([within.transcriptsRead, within.unreadable, within.calls, within.candidatesOmitted], [1, 1, 2, 0]);
+    assert.deepStrictEqual(within.navigationCounts, { "large-output": 2 });
+    // The version-control output is counted and not listed: its scope asks for no change.
+    assert.deepStrictEqual(
+      within.navigationCandidates.map((c) => [path.basename(c.transcript), c.kind, c.candidateCause, c.scope, c.observed.line]),
+      [["agent-a1.jsonl", "large-output", "broad-search", "layout", 3]],
+    );
+    assert.match(report.warnings.join("\n"), /1 subagent transcript could not be read/);
+    assert.match(report.limits, /read only for subagentNavigation/);
+    assert.deepStrictEqual(report.navigationCounts, {}, "the session's own counts hold no subagent's call");
+    // A caller that reads subagent transcripts itself leaves them unread here.
+    const alone = analyzeClaude(file);
+    assert.strictEqual(alone.subagentNavigation, undefined);
+    assert.match(alone.limits, /listed, not read/);
+    // The script asks for them, and prints the same bytes twice.
+    const runs = [1, 2].map(() => spawnSync(process.execPath, [CLI, "--session-file", file], { encoding: "utf8" }));
+    assert.strictEqual(runs[0].status, 0, runs[0].stderr);
+    assert.strictEqual(runs[0].stdout, runs[1].stdout);
+    assert.strictEqual(JSON.parse(runs[0].stdout).subagentNavigation.transcriptsRead, 1);
+  });
+
+  test("a time the cutoff lacks leaves subagent transcripts unread, with a warning", () => {
+    const dir = tempDir();
+    const file = transcript([human("go", 1), human("audit", 2)], { dir });
+    transcript([use("s1", "Grep", { pattern: "cart" }, 1, { isSidechain: true, agentId: "a1" })], { dir: path.join(dir, SESSION, "subagents"), name: "agent-a1.jsonl" });
+    const report = analyzeClaude(file, 99, 6, { withSubagents: true });
+    assert.strictEqual(report.subagentNavigation.transcriptsRead, 0);
+    assert.match(report.warnings.join("\n"), /Subagent transcripts were not read: the cutoff has no time/);
+  });
+
+  test("subagent transcripts are listed beside the session, and not read unless asked", () => {
     const dir = tempDir();
     const file = transcript([human("go", 1), human("audit", 2)], { dir });
     const folder = path.join(dir, SESSION, "subagents");

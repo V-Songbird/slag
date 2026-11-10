@@ -101,7 +101,7 @@ function main(argv, env = process.env) {
     file = path.resolve(file);
     const before = options["--before"] === null ? beforeLine : parseCutoff(options["--before"]);
     host = host || detectHost(file);
-    process.stdout.write(`${JSON.stringify({ host, ...ANALYZERS[host](file, before, limit) }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ host, ...ANALYZERS[host](file, before, limit, { withSubagents: true }) }, null, 2)}\n`);
     return 0;
   } catch (error) {
     return fail(`session-evidence.js: cannot extract reliable session evidence: ${error.message}\n`, 1);
