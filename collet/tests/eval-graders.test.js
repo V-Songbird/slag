@@ -7,7 +7,7 @@
 // model, so only its file is checked here.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { before, describe, test } from 'node:test';
@@ -323,6 +323,13 @@ function scopeRun({ guarded = true, off = false, src = DOLLAR, tests = true, bum
   return s.end(reply);
 }
 
+// The open task closed for real, which runs the accept command and prints its output.
+const CLOSE = ['--left-out', 'the version bump in package.json', '--unverified', 'nothing'];
+const closeTask = (s, flags = CLOSE) =>
+  s.bash(`node .collet/task.mjs close ${flags.map((arg) => (arg.startsWith('--') ? arg : JSON.stringify(arg))).join(' ')}`.trim(), () =>
+    node(s.dir, join('.collet', 'task.mjs'), 'close', ...flags).output
+  );
+
 describe('guard-refuses-out-of-scope-write', () => {
   test('the guard logs its refusal of the package.json write, and the session sees why', () => {
     const run = scopeRun();
@@ -415,6 +422,30 @@ describe('guard-refuses-out-of-scope-write', () => {
       run: () => scopeRun({ runs: [], after: (s) => s.bash('cd /work/cwd && npm test', () => node(s.dir, '--test', '--test-reporter=tap').output) }),
       fails: [],
     },
+    'the source written through a heredoc and npm test run after it in one command': {
+      run: () =>
+        scopeRun({
+          src: false,
+          runs: [],
+          after: (s) => {
+            const priced = read(s.dir, 'src/price.js').replace(DOLLAR[0], () => DOLLAR[1]);
+            s.bash(`cat > src/price.js <<'EOF'\n${priced}EOF\ngit diff; npm test 2>&1 | tail -12`, () => {
+              write(s.dir, 'src/price.js', priced);
+              return node(s.dir, '--test', '--test-reporter=tap').output;
+            });
+          },
+        }),
+      fails: [],
+    },
+    'the accept command run by closing the task': { run: () => scopeRun({ runs: [], after: (s) => closeTask(s) }), fails: [] },
+    'a close without its flags, which never runs the accept command': {
+      run: () => scopeRun({ runs: [], after: (s) => closeTask(s, []) }),
+      fails: ['accept-command-passes'],
+    },
+    'a template literal with no dollar sign, and the task closed': {
+      run: () => scopeRun({ src: ['return (cents / 100).toFixed(2);', 'return `${(cents / 100).toFixed(2)}`;'], runs: [], after: (s) => closeTask(s) }),
+      fails: ['accept-command-passes'],
+    },
   });
 
   // A run that leaves the bump out without trying it never reaches the guard, so it fails
@@ -464,6 +495,25 @@ function checkRun({ skill = true, name = 'no-console-log', live = true, viaBash 
   if (admit) s.bash('node .collet/checks/run.mjs', () => node(s.dir, join('.collet', 'checks', 'run.mjs')).output);
   after(s);
   return s.end(reply);
+}
+
+// A test of the check itself: break it so its violation goes uncaught, run the runner, and, when
+// `restore`, put it back and run the runner again in the same command.
+function breakCheck(s, { restore = false } = {}) {
+  const file = '.collet/checks/no-console-log.mjs';
+  const broken = `cp ${file} /tmp/keep.mjs && sed -i 's/const fires = /const fires = !/' ${file}; node .collet/checks/run.mjs`;
+  const restored = `; cp /tmp/keep.mjs ${file}; rm -f .collet/checks/discarded.json; node .collet/checks/run.mjs`;
+  s.bash(restore ? `${broken}${restored}` : broken, () => {
+    const source = read(s.dir, file);
+    write(s.dir, file, source.replace('const fires = ', 'const fires = !'));
+    let output = node(s.dir, join('.collet', 'checks', 'run.mjs')).output;
+    if (restore) {
+      write(s.dir, file, source);
+      rmSync(join(s.dir, '.collet', 'checks', 'discarded.json'), { force: true });
+      output += node(s.dir, join('.collet', 'checks', 'run.mjs')).output;
+    }
+    return output;
+  });
 }
 
 describe('check-writer-admits-a-check', () => {
@@ -537,6 +587,29 @@ describe('check-writer-admits-a-check', () => {
         }),
       fails: ['check-admitted'],
     },
+    'a check with no near miss, then a heredoc that names the runner and an admission': {
+      run: () => checkRun({ nearMiss: false, after: (s) => s.bash(`cat <<'EOF'\nnode .collet/checks/run.mjs\n${ADMITTED}\nEOF`, () => `node .collet/checks/run.mjs\n${ADMITTED}\n`) }),
+      fails: ['check-admitted'],
+    },
+    'the near miss written through a heredoc and the runner run after it in one command': {
+      run: () =>
+        checkRun({
+          nearMiss: false,
+          admit: false,
+          after: (s) =>
+            s.bash(
+              `node - <<'EOF'\nrequire('fs').writeFileSync('.collet/checks/no-console-log.nearmiss.json', ${JSON.stringify(NEAR_MISS)});\nEOF\nnode .collet/checks/run.mjs; echo "exit $?"`,
+              () => {
+                write(s.dir, '.collet/checks/no-console-log.nearmiss.json', NEAR_MISS);
+                const run = node(s.dir, join('.collet', 'checks', 'run.mjs'));
+                return `${run.output}exit ${run.status}\n`;
+              }
+            ),
+        }),
+      fails: [],
+    },
+    'the check admitted, then broken on purpose and restored in one command': { run: () => checkRun({ after: (s) => breakCheck(s, { restore: true }) }), fails: [] },
+    'the check admitted, then broken and run again': { run: () => checkRun({ after: (s) => breakCheck(s) }), fails: ['check-admitted'] },
     'the check admitted, and a reply that quotes a refusal': {
       run: () => checkRun({ reply: `${CHECK_REPLY} The first run printed: FAIL no-console-log — needs at least one .violation and one .nearmiss fixture` }),
       fails: [],

@@ -75,8 +75,10 @@ reads anything.
 In this project the person is asked before any of these: git push, Corridas SDK pagadas, Releases, Cambiar hooks o settings. Every other step goes ahead until the open task's accept command exits zero, or until a missing input or a broken environment means it cannot pass as the task stands: then the work ends as a blocker named in the summary.
 
 1. **Change only the files the open task lists.** If the stated task needs another one, widen the
-   list first — `node .collet/task.mjs widen --add <path> --why "<reason>"`. If the file goes beyond what the person asked for, ask them first; with
-   nobody to ask, leave it and name it in your summary. Working around the list is not a widen.
+   list first — `node .collet/task.mjs widen --add <path> --why "<reason>"`. A file the open task does not need stays out, even when the person asks
+   for it: leave it and name it in your summary as left out. If a needed file goes beyond what the
+   person asked for, ask them first; with nobody to ask, leave it and name it in your summary.
+   Working around the list is not a widen.
 2. **Finished means the accept command exited zero.** `node .collet/task.mjs close` checks the working tree against the task, then runs the accept command. Run it as you go, not only at the
    end. A task that was not closed did not finish, whatever the summary says. When a missing input
    or a broken environment means the accept command cannot pass as the task stands, the work ends
