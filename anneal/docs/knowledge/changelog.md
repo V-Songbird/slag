@@ -16,6 +16,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.6.0-alpha] — 2026-11-09
+
 ### Changed
 
 - The session close-out refuses with exit 2 when `--session-id` names the session running it, as `CLAUDE_CODE_SESSION_ID` gives it, or `--session-file` is that session's transcript, by its name or by the session id of its first record that carries one. `session-review closeout` then stops and says the session must end first, instead of asking for a transcript file.
