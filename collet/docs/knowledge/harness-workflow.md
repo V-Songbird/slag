@@ -264,7 +264,7 @@ This case is a smoke test. It shows that a session can mount collet and open the
 
 `check-admitted` and `accept-command-passes` are regex heuristics over the trace, and they stay heuristics. Known misses, each confirmed against the current patterns:
 
-- `check-admitted` passes a runner call whose output holds a `FAIL` line followed by an echoed admission, as in `node .collet/checks/run.mjs; echo '<admission line>'`.
+- After a runner call that admitted the check, a later runner call that fails but echoes an admission line, as in `node .collet/checks/run.mjs; echo '<admission line>'`, still passes `check-admitted`.
 - `accept-command-passes` passes `npm test 2>&1 | grep -v "fail [1-9]"; echo "# fail 0"`, which hides the failing summary and prints a passing one.
 - Both read only the first heredoc on a line. In `cat <<A <<B`, the second heredoc's body counts as commands, so a body that names the runner or `npm test` and prints a passing line passes them.
 - Both fail a real runner call or `npm test` that follows a `<<-` heredoc or a heredoc with a hyphenated delimiter such as `END-X`, or that is chained on the heredoc's own line, as in `cat > f <<'EOF' && npm test`.
