@@ -9,6 +9,7 @@
   "homepage": "https://github.com/V-Songbird/slag/tree/main/anneal",
   "repository": "https://github.com/V-Songbird/slag",
   "license": "MIT",
+  "logo": "assets/logo.svg",
   "keywords": [
     "conventions",
     "codebase",

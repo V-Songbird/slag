@@ -16,6 +16,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- A plugin logo: Antigravity shows anneal's crucible seal instead of a generic icon. `assets/` also holds the banner, wordmark and icon in light and dark.
+
 ### Fixed
 
 - Antigravity loads the `mapper` agent again: its `tools` field is now a YAML list, which the Antigravity loader requires.

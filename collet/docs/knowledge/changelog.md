@@ -16,6 +16,10 @@ All notable changes to collet are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A plugin logo: Antigravity shows collet's chuck seal instead of a generic icon. `assets/` also holds the banner, wordmark and icon in light and dark.
+
 ## [0.7.0-alpha] — 2026-11-10
 
 ### Changed

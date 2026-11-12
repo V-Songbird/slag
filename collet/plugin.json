@@ -9,6 +9,7 @@
   "homepage": "https://github.com/V-Songbird/slag/tree/main/collet",
   "repository": "https://github.com/V-Songbird/slag",
   "license": "MIT",
+  "logo": "assets/logo.svg",
   "keywords": [
     "harness",
     "scope",
