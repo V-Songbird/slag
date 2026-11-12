@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 130 130">
-  <rect width="130" height="130" rx="28" fill="#3a86c8"/>
-  <path d="M20 38 L50 38 L58 48 L110 48 L110 106 L20 106 Z" fill="#f3ead8"/>
-  <path d="M65 98 C52 82 46 74 46 66 A19 19 0 0 1 84 66 C84 74 78 82 65 98 Z" fill="#1f1d2b"/>
-  <circle cx="65" cy="66" r="7" fill="#f3ead8"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="anneal:repo-layout skill" style="--accent:#7b4fa0;--paper:#ffffff;--ink:#252820"><g stroke="#252820" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 26Q64 22 116 26L106 42 98 98Q96 112 82 112L46 112Q32 112 30 98L22 42Z" fill="#7b4fa0"/><path d="M22 42Q64 38 106 42" fill="none"/><path d="M42 52Q52 51 61 52L61 72Q52 73 42 72Z" fill="#ffffff"/><path d="M67 52Q76 51 86 52L86 72Q76 73 67 72Z" fill="#ffffff"/><path d="M44 78Q64 77 84 78L84 98Q64 99 44 98Z" fill="#ffffff"/></g></svg>

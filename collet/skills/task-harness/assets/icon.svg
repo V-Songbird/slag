@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 130 130">
-  <rect width="130" height="130" rx="28" fill="#3f8f4f"/>
-  <rect x="40" y="42" width="50" height="46" rx="6" fill="#f3ead8"/>
-  <path d="M50 58 L80 58 M50 72 L70 72" fill="none" stroke="#1f1d2b" stroke-width="6" stroke-linecap="round"/>
-  <path d="M24 44 L24 24 L44 24 M86 24 L106 24 L106 44 M106 86 L106 106 L86 106 M44 106 L24 106 L24 86" fill="none" stroke="#1f1d2b" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="collet:task-harness skill" style="--accent:#3f8f4f;--paper:#ffffff;--ink:#252820"><g stroke="#252820" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M64 12Q100 13 113 40Q119 64 112 88Q99 114 64 116Q29 115 16 88Q9 64 16 40Q29 13 64 12Z" fill="#3f8f4f"/><path d="M64 15V40M23 87L42 77M105 87L86 77" fill="none"/><path d="M46 46Q64 44 82 46L82 92Q64 94 46 92Z" fill="#ffffff"/><path d="M56 40H72V50H56Z" fill="var(--ink)"/><path d="M54 62H74M54 72H74M54 82H66" fill="none"/></g></svg>
