@@ -16,6 +16,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Fixed
+
+- Antigravity loads the `mapper` agent again: its `tools` field is now a YAML list, which the Antigravity loader requires.
+
 ## [0.7.0-alpha] — 2026-11-10
 
 ### Added
