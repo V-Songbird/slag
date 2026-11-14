@@ -111,7 +111,8 @@ function main(argv) {
     tool: "anneal-overview", root: directory(root), parts,
     invocation: "Run a skill as /anneal:<name> on Claude Code, $<name> on Codex or /<name> on Antigravity.",
     limits: "Each line repeats what that part's own script counted: heuristic findings, proposals and candidates, none of them verified. "
-      + "A part with nothing next still accepts a request. Past sessions are read for counts only.",
+      + "A part with nothing next still accepts a request."
+      + (options.sessions ? " Past sessions are read for counts only." : ""),
   };
   if (options.json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

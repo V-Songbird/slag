@@ -26,7 +26,7 @@ The repository root is `git rev-parse --show-toplevel`, or the working directory
 
 ## 2. Show its lines
 
-Show the script's output as it is: one part per line, with what its script found and the skill to run next. Then add only this:
+Show the script's output as it is: two lines per part, with what its script found and the skill to run next. Then add only this:
 
 - the command for each `next` on this host: `/anneal:<name>` on Claude Code, `$<name>` on Codex, `/<name>` on Antigravity, with the argument the line gives;
 - for a part that says `not available`, its reason in the script's words;

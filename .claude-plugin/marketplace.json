@@ -10,7 +10,7 @@
     {
       "name": "anneal",
       "source": "./anneal",
-      "description": "Improves agent navigation through a repository, turns session detours into approved map-file changes, and reconciles documentation and non-code development files with current behavior. Includes audit-only review, an approved layout migration, README review, host consistency and repository hygiene.",
+      "description": "Improves agent navigation through a repository, turns session detours into approved map-file changes, finds steps sessions repeat that a plain script could run, and reconciles documentation and non-code development files with current behavior. Includes audit-only review, an approved layout migration, README review, host consistency and repository hygiene.",
       "version": "0.7.0-alpha",
       "license": "MIT",
       "author": {
@@ -36,7 +36,7 @@
     {
       "name": "collet",
       "source": "./collet",
-      "description": "Holds a session inside the task it was given: one open task with the files it may touch and the command that ends it, a guard that refuses writes outside that list, and checks that each ship with a violation and a near miss so none of them counts as coverage before it has been shown to work. It mounts beside a planning tool's roadmap, enforces the session boundary and never enforces the roadmap.",
+      "description": "Holds a session inside the task it was given: one open task with the files it may touch and the command that ends it, a close that fails while a change sits outside that list, a guard that can refuse such a write as it happens, and checks that each ship with a violation and a near miss so none of them counts as coverage before it has been shown to work. It mounts beside a planning tool's roadmap, enforces the session boundary and never enforces the roadmap.",
       "version": "0.7.0-alpha",
       "license": "MIT",
       "author": {

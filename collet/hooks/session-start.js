@@ -11,7 +11,7 @@
 // the same breath.
 //
 // Nor is a character a model reads and a person does not see: zero-width characters, the word
-// joiner, a byte order mark past the start, bidi embeddings and isolates, variation selectors, the
+// joiner, a byte order mark, bidi embeddings and isolates, variation selectors, the
 // Mongolian free variation selectors and vowel separator, and Unicode tags. The mount and the task
 // CLI refuse them, but text edited in by hand, or written by an earlier collet, can still carry an
 // order in them that nobody reviewing the file can read, and stating it would deliver that order
@@ -61,7 +61,11 @@ if (task) {
   lines.push(
     `The open task is ${id} — "${visible(`the title of task ${id}`, task.title)}" (status ${task.status}).` +
       ` Writable files: ${scope.join(', ') || 'none declared'}.` +
-      ` Writes outside that list are refused. \`node .collet/task.mjs widen --add <path> --why "<reason>"\` extends it for a file the stated task needs; a needed file beyond what the person asked for needs their yes first, and a file the task does not need stays out even when they ask for it.` +
+      // The guard refuses such a write only where the project's config asks for that.
+      (settings.refuse_out_of_scope_writes === true
+        ? ' Writes outside that list are refused.'
+        : ' A write outside that list goes ahead with a note, and `node .collet/task.mjs close` fails while it stands.') +
+      ` \`node .collet/task.mjs widen --add <path> --why "<reason>"\` extends it for a file the stated task needs; a needed file beyond what the person asked for needs their yes first, and a file the task does not need stays out even when they ask for it.` +
       ` The task ends when \`${accept}\` exits zero, which \`node .collet/task.mjs close\` runs after checking that nothing landed outside the list.`
   );
 } else {

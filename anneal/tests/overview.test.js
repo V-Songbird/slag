@@ -74,7 +74,7 @@ test("the text form prints two lines per part, and --no-sessions leaves past ses
   assert.strictEqual(ran.status, 0, ran.stderr);
   assert.match(ran.stdout, /^Navigation {2,}.*no map file.*\n {2,}next: repo-layout audit$/m);
   assert.match(ran.stdout, /^Documentation {2,}no maintained records under docs\/\n {2,}next: repo-docs adopt$/m);
-  assert.doesNotMatch(ran.stdout, /^Past sessions/m);
+  assert.doesNotMatch(ran.stdout, /Past sessions/);
   assert.match(ran.stdout, /\/anneal:<name> on Claude Code, \$<name> on Codex or \/<name> on Antigravity/);
 });
 

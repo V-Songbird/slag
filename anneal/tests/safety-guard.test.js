@@ -31,7 +31,8 @@ function repoOn(branch) {
   fs.writeFileSync(path.join(root, "a.txt"), "a\n");
   git("add", "-A");
   git("commit", "-qm", "first");
-  git("checkout", "-qb", branch);
+  // -B, not -b: where init.defaultBranch is already `main`, that branch exists.
+  git("checkout", "-qB", branch);
   return root;
 }
 
@@ -237,6 +238,10 @@ describe("a migration branch that holds commits of its own", () => {
     }
     assert.match(decide("claude", claudeCall(`git branch -D ${branch}`, root)).hookSpecificOutput.permissionDecisionReason, /owner/);
     assert.strictEqual(decide("antigravity", antigravityCall(`git branch -D ${branch}`, root)).decision, "ask");
+    // Codex does not support `ask` and would run the command, so there the question is a denial.
+    const codex = decide("codex", claudeCall(`git branch -D ${branch}`, root)).hookSpecificOutput;
+    assert.strictEqual(codex.permissionDecision, "deny");
+    assert.match(codex.permissionDecisionReason, /owner/);
   });
 
   test("the commands that leave its commits alone are allowed", () => {
@@ -321,7 +326,13 @@ describe("wire", () => {
         for (const handler of handlers) {
           assert.strictEqual(handler.commandWindows, undefined);
           // The guards take the payload dialect as an argument; the session-start hook takes none.
-          assert.match(handler.command, /^node "\$\{PLUGIN_ROOT\}\/hooks\/[a-z-]+\.js"(?: claude)?$/);
+          assert.match(handler.command, /^node "\$\{PLUGIN_ROOT\}\/hooks\/[a-z-]+\.js"(?: (?:claude|codex))?$/);
         }
+  });
+
+  test("the Codex hook runs the shell guard as codex, so its question is a denial there", () => {
+    const { hooks } = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "hooks", "codex-hooks.json"), "utf8"));
+    const commands = hooks.PreToolUse.flatMap((group) => group.hooks.map((handler) => handler.command));
+    assert.ok(commands.includes('node "${PLUGIN_ROOT}/hooks/safety-guard.js" codex'));
   });
 });

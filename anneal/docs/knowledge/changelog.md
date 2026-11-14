@@ -21,9 +21,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - A session-start line on Claude Code and Codex: a hook tells each new session which finished task notes are still on disk and where the record index is, or that there is none. It uses no model and only reads. `ANNEAL_SESSION_REPORT=off` turns it off. On Codex, review and trust the new `SessionStart` hook in `/hooks`.
 - A plugin logo: Antigravity shows anneal's crucible seal instead of a generic icon. `assets/` also holds the banner, wordmark and icon in light and dark.
 
+### Changed
+
+- On Codex the safety hook refuses a command that deletes, overwrites or moves a migration branch with commits of its own. It asked before, and Codex's documentation says Codex runs the command on such a question. Review and trust the changed hook in `/hooks`. The refusal was not observed in a live Codex session.
+
+### Removed
+
+- The session-end report on Claude Code. Claude Code's documentation says it discards what a `SessionEnd` hook prints, so the line could not be shown. `/anneal:repo-docs maintain` lists the same proposals.
+
 ### Fixed
 
 - Antigravity loads the `mapper` agent again: its `tools` field is now a YAML list, which the Antigravity loader requires.
+- The overview no longer says past sessions are read when it runs with `--no-sessions`.
+- The README and the workflow guide say Antigravity's documentation lists the safety hook's question as a prompt. That prompt was not observed live.
+- The README says a changed hook script, not only a changed hook definition, needs a new review in Codex.
+- The repo-layout skill says the hook refuses commits that skip the Git hooks; it said the hook "skips" them.
+- The plugin description on every host names the repeated-step search.
+- The test suite passes when the plugin sits alone in its own repository, and where Git names a new repository's first branch `main`.
 
 ## [0.7.0-alpha] — 2026-11-10
 

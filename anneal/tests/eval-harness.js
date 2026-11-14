@@ -7,6 +7,10 @@
 // directory, where a missing file fails. An llm grader needs a judge model, so
 // it gets no verdict here: its keys and its PASS and FAIL criteria are checked,
 // and it is skipped.
+//
+// anneal and collet each ship alone, so each keeps this file: anneal as
+// tests/eval-harness.js and collet as tests/eval-harness.cjs. Change both
+// together; scripts/shared-copies.test.js in Slag fails when they differ.
 
 const assert = require("node:assert");
 const fs = require("node:fs");

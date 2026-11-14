@@ -14,9 +14,8 @@ import { before, describe, test } from 'node:test';
 
 import { hook, hookOutput, PLUGIN, project } from './temp-project.js';
 
-const { readGraders, passes, listRunFiles, createdPaths } = createRequire(import.meta.url)(
-  '../../anneal/tests/eval-harness.js'
-);
+// collet's own copy of the harness anneal's grader tests use, since collet ships alone.
+const { readGraders, passes, listRunFiles, createdPaths } = createRequire(import.meta.url)('./eval-harness.cjs');
 
 const EVALS = join(PLUGIN, 'evals');
 const SCRIPT = readFileSync(join(EVALS, 'price-project.sh'), 'utf8');

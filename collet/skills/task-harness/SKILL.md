@@ -22,7 +22,7 @@ The whole design is one sentence: **prose is read, a hook is executed, and a che
 been shown to fire is not a check.** Everything below follows from that.
 
 Read the plugin's `README.md` — two directories up — for what ends up in the project. This file is how to mount it,
-and the mounting itself is a command — `scripts/mount.mjs` — because the part that must be
+and the mounting itself is a command — `mount.mjs`, in the plugin's `scripts` folder — because the part that must be
 identical every time has no business being a list of instructions someone follows by hand.
 
 Copy this checklist into your reply and tick it as you go:
@@ -52,7 +52,7 @@ project root to find one**, sibling projects included: another project's `.colle
 describes that project, not this one.
 
 For question four, offer the bundle for the languages the project uses: JavaScript/TypeScript,
-Python, Go, Rust, JVM or .NET. From the corresponding `catalogue/<id>.json`, extract only `title`,
+Python, Go, Rust, JVM or .NET. From the corresponding `catalogue/<id>.json` in the plugin root, extract only `title`,
 `example` and `gapNotes` for this conversation; the fixture bodies belong to the runner.
 Show one short example per mistake and one plain limit drawn from its `gapNotes`. Keep
 the internal ids out of the conversation. The choices are the whole bundle or none for now;
@@ -70,8 +70,8 @@ Then **derive the task's scope by reading the code the task touches.** Not from 
 This is the one mistake worth spending time on: a scope one file too narrow does not merely block
 work, it pushes the session to work *around* the constraint, and a scope one file too wide never
 fires at all. Open the modules the task names, follow what they import, and list what genuinely
-has to change. For JavaScript/TypeScript, `task.mjs add` follows relative imports and prints what
-it added. Other languages need that scope derived and
+has to change. For JavaScript/TypeScript, `task.mjs add` follows relative imports one level deep,
+stops after 12 added files and prints what it added. Other languages need that scope derived and
 listed explicitly; a language bundle does not add import analysis for its language.
 
 **The accept command is a decision, not a formality.** If you cannot name a command that can tell

@@ -45,7 +45,7 @@ user's, not `.claude/settings.local.json`, and nothing for Codex or Antigravity.
 raises, so the host refuses the matching command there.
 
 The session start leaves out of what it states every character a model reads and a person does
-not see: U+200B-U+200D, U+2060, U+FEFF past the start, U+202A-U+202E, U+2066-U+2069, the
+not see: U+200B-U+200D, U+2060, U+FEFF, U+202A-U+202E, U+2066-U+2069, the
 variation selectors U+FE00-U+FE0F and U+E0100-U+E01EF, the Mongolian free variation selectors
 U+180B-U+180D and U+180F, the Mongolian vowel separator U+180E, and the Unicode tags
 U+E0000-U+E007F. U+FE0E or U+FE0F right after an Extended_Pictographic character, and U+FE0F

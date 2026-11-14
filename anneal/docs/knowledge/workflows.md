@@ -40,8 +40,6 @@ related_files:
   - anneal/hooks/safety-guard.js
   - anneal/hooks/instruction-guard.js
   - anneal/tests/instruction-guard.test.js
-  - anneal/hooks/session-end-report.js
-  - anneal/tests/session-end-report.test.js
   - anneal/hooks/session-start-records.js
   - anneal/tests/session-start-records.test.js
   - anneal/evals/
@@ -64,7 +62,7 @@ related_files:
 | Past sessions | `session-repeats.js` | `session-review all`, when a repeated step is not named in the map or sessions share a navigation finding |
 | This session | none | `session-review`, which only you can start |
 
-The script uses no model, writes nothing and adds no judgement: the counts are the heuristic findings, proposals and candidates of those scripts, none of them verified. A script that cannot run, such as the documentation check outside Git or the session search with no session to read, leaves its part as `not available` with that script's own message. `--json` prints the same parts as JSON, and `--no-sessions`, the skill's `no-sessions` argument, reads no past session. On this repository the run takes about 20 seconds, most of it reading 71 sessions.
+The script uses no model, writes nothing and adds no judgement: the counts are the heuristic findings, proposals and candidates of those scripts, none of them verified. A script that cannot run, such as the documentation check outside Git or the session search with no session to read, leaves its part as `not available` with that script's own message. `--json` prints the same parts as JSON, and `--no-sessions`, the skill's `no-sessions` argument, reads no past session and prints no Past sessions part. On this repository the run takes about 20 seconds, most of it reading 71 sessions.
 
 No anneal command edits a project on its bare name. `overview` and both audits report. `repo-layout` and `session-review` propose and wait for your approval of each step or entry. `repo-docs` applies ordinary fixes only with `fix` or a cleanup request in your own words.
 
@@ -78,7 +76,7 @@ An `audit` run shows the findings, offers to save them and writes a findings, re
 
 | Severity | Finding | What it means |
 | --- | --- | --- |
-| high | `map-file-missing` | No map file, the `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` a session reads first to learn where things are, so every session starts by exploring |
+| high | `map-file-missing` | No map file, the `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` a session reads first to learn where things are, at the root or in `.claude/`, `.agents/` or `.gemini/`, so every session starts by exploring |
 | high | `check-command-missing` | No test or check command found |
 | high | `build-output-not-ignored` | Build or dependency folders that git does not ignore, so they fill search results |
 | high | `not-a-git-repo` | Search cannot use `.gitignore` to skip generated files |
@@ -604,7 +602,7 @@ It also refuses the commands that rewrite those commits: `commit --amend`, `reba
 
 It reads the subcommand past git's global flags, such as `--no-pager` or `-C <path>`, reads a flag inside a short-flag cluster, such as `checkout -qB`, and reads a command split with a line continuation as one line. `push --force-with-lease` is allowed, because it refuses on its own when the remote moved. Undo a step with `git revert`, or leave the branch to abandon the migration.
 
-On every other branch, the hook asks before one kind of command: one that deletes a migration branch, overwrites it or moves it to another commit while that branch holds commits the checked-out branch lacks. That covers `branch -D` or a delete with `--force`, `checkout -B`, `switch -C` or `--force-create`, `branch -f` or `--force`, a forced rename or copy onto it, `update-ref` on `refs/heads/<migration branch>`, and `push .` naming it as a destination or deleting it. Those commits may belong to another run, so you decide whether they go. The same command on a migration branch the checked-out branch already contains, such as a merged set-aside branch, runs without a question, and every other command is allowed. On Claude Code the hook answers `ask`, which shows a permission prompt. Whether Codex and Antigravity show it as a prompt, refuse the command or let it run is unverified; Antigravity documents only allow and deny.
+On every other branch, the hook asks before one kind of command: one that deletes a migration branch, overwrites it or moves it to another commit while that branch holds commits the checked-out branch lacks. That covers `branch -D` or a delete with `--force`, `checkout -B`, `switch -C` or `--force-create`, `branch -f` or `--force`, a forced rename or copy onto it, `update-ref` on `refs/heads/<migration branch>`, and `push .` naming it as a destination or deleting it. Those commits may belong to another run, so you decide whether they go. The same command on a migration branch the checked-out branch already contains, such as a merged set-aside branch, runs without a question, and every other command is allowed. On Claude Code the hook answers `ask`, which shows a permission prompt. On Codex the hook refuses the command instead. Codex's hook documentation, read on 2026-11-14, says Codex parses `ask` but does not support it yet, and would run the command. To delete or move such a branch on Codex, run the command yourself outside the session. Antigravity's hook documentation, read the same day, lists `ask` as a decision that prompts you for approval. Neither host's answer was observed in a live session.
 
 The hook matches command text, so it cannot see every rewrite, such as git run through a variable. Its denial says that the same command in another form would discard or rewrite the same work.
 
@@ -650,36 +648,9 @@ The hook uses no model. It only reads: it never deletes, moves or edits a note, 
 
 - the project has no Markdown file under a `docs/` folder;
 - the hook fails;
-- `ANNEAL_SESSION_REPORT` is `off`, `0` or `false`, the same setting that turns off [the session-end report](#the-session-end-report).
+- `ANNEAL_SESSION_REPORT` is `off`, `0` or `false`. Set it in the `env` block of Claude Code's `settings.json`, or in the shell that starts the host.
 
 Unlike the maintenance proposals, the line counts a finished note from the moment it is marked, without the three-day wait. On Codex, review and trust the new hook in `/hooks` before it runs. Antigravity has no such hook.
-
-## The session-end report
-
-On Claude Code, another hook runs when a session ends. Its line is shown to you, not to the agent, and no later session receives it; [the session-start line](#the-session-start-line) is what reaches the next session. If the session wrote a file under a `docs/` folder of the project, or into the project's Claude Code memory folder, it runs [the maintenance script](#maintenance-proposals) with its defaults. Then it shows one line, for example:
-
-```text
-anneal: 5 documentation proposals, including 1 stale memory and 2 unread notes. See them with /anneal:repo-docs maintain.
-```
-
-The line names two kinds of proposal when they are present:
-
-- A **stale memory** is a note the agent saved about the project. It is older than 14 days and says something is true now, such as "still failing", that may no longer be true.
-- An **unread note** is a finished task note that no other session opened within 3 days of its last change. Its findings belong in the topic docs, and the note can then be deleted. When Claude Code has no session records for the project, nobody can tell whether a note was read, so such notes count only in the total. A read in a subagent transcript, the `agent-*.jsonl` files at any depth of a session's `subagents` folder, counts as another session's read; a missing or unreadable subagent folder is skipped.
-
-Run `/anneal:repo-docs maintain` to see every proposal and approve the ones you want.
-
-The hook looks for those writes in the session's main transcript and in its subagent transcripts, the `agent-*.jsonl` files at any depth of the session's `subagents` folder, so a session whose only writes came from subagents is still reported. A missing or unreadable subagent folder is skipped.
-
-The project is the folder in `CLAUDE_PROJECT_DIR`, or the session's working folder when that is unset. The hook only reads; it writes nothing, and its Git commands leave the index as it is. It stays silent in these cases:
-
-- the session wrote nothing under `docs/` or the memory folder;
-- there are no proposals;
-- the script fails or takes more than 10 seconds.
-
-To turn the report off, set `ANNEAL_SESSION_REPORT` to `off` in the `env` block of Claude Code's `settings.json`, or in the shell that starts Claude Code. The values `0` and `false` also turn it off.
-
-The hook sees only writes made with file tools such as `Write` or `Edit`. A file written by a shell command, such as `echo text > docs/a.md`, does not count. Codex and Antigravity have no such hook.
 
 ## Limits
 
@@ -703,13 +674,11 @@ A complete migration and the Git guard's refusal on its branch have been observe
 
 The audits and session review have run from the published package in Claude Code, headless Codex CLI 0.155.1 and headless Antigravity CLI 1.2.8 and 1.2.9 without `--sandbox`, and a repo-layout audit has run in the Antigravity IDE and the Codex desktop app 26.917. The other flows in the Antigravity IDE remain unverified.
 
-The session-end report is held by tests that run the hook as a separate process. Whether Claude Code shows its line in a live session is unverified.
-
 The session-start line is held by tests that run the hook as a separate process. Whether Claude Code and Codex pass its line to the agent in a live session is unverified.
 
 ## Running the evals
 
-Thirty-four eval cases live in [evals](../../evals/). Three check skill discovery, audit mode leaving files unchanged, migration stopping on a dirty tree, and session proposals waiting for approval; [two](#a-migration-on-a-clean-tree) apply an approved migration step on a clean tree, one of them into a new directory, [one](#a-plan-from-a-wrong-survey-row) shows a plan from a layout survey row whose importer count is wrong, [one](#an-unreadable-transcript) gives session review a transcript its evidence script refuses, [seven](#session-failure-checks) give session review a transcript of one failure shape and grade what its reply proposes, [two](#repeated-step-cases) give the repeated-step search three transcripts that repeat the same commands, [two](#readme-cases) review and repair one README, [two](#writing-cases) write and review a page for people, [two](#reader-only-map-checks) ask a reader what the map alone answers, the six navigation cases have their own [paired protocol](#paired-navigation-runs), and six [held-out cases](#held-out-checks) repeat it on a second repository. Each run drives a real session, so it is slow. The three build their fixtures with a `scaffold_script` and grade Bash calls, so a run needs `--scaffold` and a tool grant.
+Thirty-four eval cases live in [evals](../../evals/). Three check that the skills are found and that audit mode leaves files unchanged, a migration stops on a dirty tree, and session proposals wait for approval; [two](#a-migration-on-a-clean-tree) apply an approved migration step on a clean tree, one of them into a new directory, [one](#a-plan-from-a-wrong-survey-row) shows a plan from a layout survey row whose importer count is wrong, [one](#an-unreadable-transcript) gives session review a transcript its evidence script refuses, [seven](#session-failure-checks) give session review a transcript of one failure shape and grade what its reply proposes, [two](#repeated-step-cases) give the repeated-step search three transcripts that repeat the same commands, [two](#readme-cases) review and repair one README, [two](#writing-cases) write and review a page for people, [two](#reader-only-map-checks) ask a reader what the map alone answers, the six navigation cases have their own [paired protocol](#paired-navigation-runs), and six [held-out cases](#held-out-checks) repeat it on a second repository. Each run drives a real session, so it is slow. The three build their fixtures with a `scaffold_script` and grade Bash calls, so a run needs `--scaffold` and a tool grant.
 
 The harness confines the granted shell in a sandbox, and native Windows has none. There it refuses the run: `A shell tool (Bash or PowerShell) was granted but this machine cannot confine it`. Run it under WSL2 or Linux, with `bubblewrap` and `socat` installed. With no terminal, add `--trust-plugin`, or the harness refuses an untrusted plugin directory.
 
@@ -925,7 +894,7 @@ The two arms are the snapshots, not the plugin: no case allows a Skill call, and
      --output-dir <results>/01
    ```
 
-   The same run through the Claude Agent SDK, which bills an API key instead of a Claude plan, uses [the SDK runner](../../../scripts/sdk-eval/run.mjs). Pass `--ablation none` there too: without it the runner adds a without-plugin arm and doubles the paid sessions. The runner needs `npm install` in `scripts/sdk-eval/` and `ANTHROPIC_API_KEY` in the env file, runs Bash unconfined, defaults to `--model claude-opus-5-5`, and keeps each run's workspace under `--output-dir`, which stays outside the repository (under 120 characters on Windows). `--concurrency 1` keeps one run at a time:
+   The same run through the Claude Agent SDK, which bills an API key instead of a Claude plan, uses the SDK runner, `scripts/sdk-eval/run.mjs` at the root of the Slag repository. Pass `--ablation none` there too: without it the runner adds a without-plugin arm and doubles the paid sessions. The runner needs `npm install` in `scripts/sdk-eval/` and `ANTHROPIC_API_KEY` in the env file, runs Bash unconfined, defaults to `--model claude-opus-5-5`, and keeps each run's workspace under `--output-dir`, which stays outside the repository (under 120 characters on Windows). `--concurrency 1` keeps one run at a time:
 
    ```bash
    node --env-file=<file> scripts/sdk-eval/run.mjs anneal --case navigation-package-lookup-original \
@@ -980,7 +949,7 @@ One held-out run with these lines is recorded, on Claude Code 2.1.278 under WSL2
 
 ### The first SDK baseline
 
-One two-arm run of 15 cases is recorded through [the SDK runner](../../../scripts/sdk-eval/run.mjs), on 2026-11-09, three runs per arm: the seven [session-failure cases](#session-failure-checks), both [repeated-step cases](#repeated-step-cases), both [README cases](#readme-cases), both [writing cases](#writing-cases), `migration-moves-into-new-directory` and `plan-flags-a-wrong-importer-count`. The sessions ran on `claude-opus-5-5` through Agent SDK 0.3.299, and the judged graders on `claude-sonnet-5-5`.
+One two-arm run of 15 cases is recorded through the SDK runner, `scripts/sdk-eval/run.mjs` at the root of the Slag repository, on 2026-11-09, three runs per arm: the seven [session-failure cases](#session-failure-checks), both [repeated-step cases](#repeated-step-cases), both [README cases](#readme-cases), both [writing cases](#writing-cases), `migration-moves-into-new-directory` and `plan-flags-a-wrong-importer-count`. The sessions ran on `claude-opus-5-5` through Agent SDK 0.3.299, and the judged graders on `claude-sonnet-5-5`.
 
 Read a with/without delta in three parts:
 

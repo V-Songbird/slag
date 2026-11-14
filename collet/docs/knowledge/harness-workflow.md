@@ -64,7 +64,7 @@ node .collet/task.mjs add --title "Round the cart total" --why "Prices show thre
 
 The command prints the open task, its scope, and the configured acceptance command.
 
-From here the session is held. A write to a file outside the list goes ahead, and the session is told that the file is outside the task and that `close` will count it. `node .collet/task.mjs close` then fails until the task is widened or the change is undone.
+From here the session is held. A write to a file outside the list goes ahead, and the guard answers with a note that the file is outside the task and that `close` will count it. Antigravity's hook answer has no field for such a note, so the session does not see it there. `node .collet/task.mjs close` then fails until the task is widened or the change is undone.
 
 To have such a write refused as it happens, add `"refuse_out_of_scope_writes": true` to `.collet/config.json` while no task is open. The write then comes back refused:
 
@@ -97,6 +97,7 @@ The mount's own writes are not task changes: `.collet/` and the rules block betw
 | Set the harness up in a repository | `/collet:task-harness` |
 | Add the optional language checks | Ask `/collet:task-harness` to mount with the checks for tests and verification settings |
 | See the open task and what it may touch | `/collet:task-harness what's the task?`, or `node .collet/task.mjs status` |
+| See every task in the ledger, open and closed | `node .collet/task.mjs list` |
 | Open a task | `node .collet/task.mjs add --title "..." --why "..." --scope "src/cart.mjs,test/**"` |
 | Add a file the open task needs; ask the person first for one beyond their request. A file the task does not need stays out, even when they ask for it | `node .collet/task.mjs widen --add <path> --why "<reason>"` |
 | Finish one | `node .collet/task.mjs close --left-out "..." --unverified "..."` |
@@ -110,7 +111,7 @@ Add checks between tasks. While a task is open, the guard refuses writes under `
 
 - **"Finished" stops being an opinion.** Closing runs the accept command itself. A non-zero exit leaves the task open.
 - **Drift is caught at close, or refused as it happens when the project asks for that.** The guard reads write tools, patches, and the shell forms it can read with certainty. It also reads `rm -rf` on a directory, which is the one command worth catching before it lands.
-- **JavaScript/TypeScript imports expand the list.** Name the module that owns the behaviour, and collet adds its relative imports, with a reason for each addition. For other languages, derive and list the scope by reading the code.
+- **JavaScript/TypeScript imports expand the list.** Name the module that owns the behaviour, and collet adds its relative imports, one level deep, with a reason for each addition. It stops after 12 added files, so check a module with more imports yourself. For other languages, derive and list the scope by reading the code.
 - **"Covered" means caught.** Every check ships with a planted mistake and a near miss, a lookalike it must leave alone. A failed pair is reported and never counted as coverage.
 - **It works beside a planning tool.** A project with a `ROADMAP.jsonl` or `.foreman/` mounts like any other; see [alongside a planning tool](#alongside-a-planning-tool).
 
@@ -159,7 +160,7 @@ A fresh mount without `--checks` adds only scope. A later mount preserves each i
 
 ## Configuration
 
-`.collet/config.json` holds three values, plus up to three optional ones that the mount writes only when asked: `ask_first`, `exclude` and `removed_checks`. The session start states `project`, `conventions`, `ask_first` and the open task's accept command before the session reads a file, so a placeholder left in `project` or `accept` blocks `task.mjs add`. A leftover `conventions` placeholder is dropped instead, and an empty list is valid.
+`.collet/config.json` holds three values, plus up to three optional ones that the mount writes only when asked, `ask_first`, `exclude` and `removed_checks`, and one you add by hand, `refuse_out_of_scope_writes`. The session start states `project`, `conventions`, `ask_first` and the open task's accept command before the session reads a file, so a placeholder left in `project` or `accept` blocks `task.mjs add`. A leftover `conventions` placeholder is dropped instead, and an empty list is valid.
 
 | Name | Required | Default | What it does |
 | --- | --- | --- | --- |
@@ -169,8 +170,9 @@ A fresh mount without `--checks` adds only scope. A later mount preserves each i
 | `ask_first` | no | absent unless the mount got `--ask-first` | What must never happen here without asking the person; the rules block and the session start state it as a fact |
 | `exclude` | no | absent unless the mount got `--exclude` | Path globs that no bundle check reads, at write time or at close, such as a committed generated mirror |
 | `removed_checks` | no | absent unless the mount got `--remove` | Bundle checks the project took out; a remount keeps them out until `--restore` |
+| `refuse_out_of_scope_writes` | no | absent; set by hand to `true` | Makes the guard refuse a write outside the open task instead of noting it; see write-time refusal below |
 
-The rules block always goes into `AGENTS.md`. It also goes into `CLAUDE.md` when that file exists, and into `.cursor/rules/collet.md` when `.cursor/` exists. The mount does not create a new `CLAUDE.md`. A `CLAUDE.md` that imports `AGENTS.md` gets no copy, because it already loads the block from there: an `@AGENTS.md` or `@./AGENTS.md` anywhere outside a code block or code span counts as that import. The mount empties a block an earlier mount left in such a file down to an empty pair of markers, keeps the text around them, and prints a `kept` line for it.
+The rules block always goes into `AGENTS.md`. It also goes into `CLAUDE.md` when that file exists, and into `.cursor/rules/collet.md` when `.cursor/` exists. The mount does not create a new `CLAUDE.md`. A `CLAUDE.md` that imports `AGENTS.md` gets no copy, because it already loads the block from there: an `@AGENTS.md` or `@./AGENTS.md` anywhere outside a code block or code span counts as that import. The mount empties a block an earlier mount left in such a file down to an empty pair of markers, keeps the text around them, and prints a `wrote` line saying the block was emptied. Once the markers are empty, or when the file never held a block, it prints a `kept` line instead.
 
 The mount reads Markdown approximately. It recognizes fenced blocks at the top level and behind blockquote markers, and indented code blocks before the first line that starts with a list marker, `>` or `<`. It does not recognize these code blocks, so an `@AGENTS.md` in one counts as the import:
 
@@ -217,7 +219,7 @@ Three eval cases in [evals](../../evals/) each drive a real Claude Code session 
 
 Each case allows 30 turns and 600 seconds, and the tools Read, Glob, Grep, Skill, Bash, Edit and Write. The cases build their fixtures with a `scaffold_script`, so a run needs `--scaffold` and a tool grant.
 
-The harness confines the granted shell in a sandbox, and native Windows has none. On Claude Code 2.1.278 it refuses the run there, so run it under WSL2 or Linux with `bubblewrap` and `socat` installed. With no terminal, add `--trust-plugin`, or the harness refuses an untrusted plugin directory. How the harness runs scaffolds, which entries it leaves in the workspace, and what the sandbox does to `PATH` and `npm` are measured in [anneal's guide to running its evals](../../../anneal/docs/knowledge/workflows.md#running-the-evals); they apply to these cases too.
+The harness confines the granted shell in a sandbox, and native Windows has none. On Claude Code 2.1.278 it refuses the run there, so run it under WSL2 or Linux with `bubblewrap` and `socat` installed. With no terminal, add `--trust-plugin`, or the harness refuses an untrusted plugin directory. With `--scaffold`, the harness runs each case's scaffold script with bash, as you and outside the sandbox, in the run's new workspace. Inside the sandbox, nothing a shell startup file adds to `PATH` applies. In a WSL2 run of anneal's cases with Node installed through fnm, the first `node` call of each session failed with `command not found`. Put fnm's versioned `installation/bin` directory on `PATH` before starting the harness, and its parent `installation` directory too, so that `npm` resolves. The entries the harness leaves in the workspace are listed below.
 
 Run them from the repository root, and write the results outside it:
 

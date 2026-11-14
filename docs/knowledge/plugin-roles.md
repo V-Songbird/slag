@@ -50,9 +50,10 @@ acceptance. It is for a solo developer rather than a team tracker.
 
 ### collet
 
-collet holds an already planned task to its writable files and its acceptance command. Hooks refuse
-recognized out-of-scope writes. Closing a task requires the live checks and the acceptance command to
-pass. A handoff is written before compaction, so the open task survives it where the host supports
+collet holds an already planned task to its writable files and its acceptance command. Closing a
+task requires the live checks and the acceptance command to pass, and fails while a change sits
+outside the task. Hooks note a recognized out-of-scope write as it happens, and refuse it only in a
+project that asks for that. A handoff is written before compaction, so the open task survives it where the host supports
 that (see the [host coverage](../../collet/docs/knowledge/harness-workflow.md#host-coverage) for
 what has been observed).
 
@@ -76,7 +77,8 @@ belong to anneal's `session-review all`. Choosing where the rest of the work run
 It does not limit a task's scope or decide what to work on next. Its hook refuses destructive git
 commands on a migration branch; elsewhere it asks only before a command deletes, overwrites or
 moves a migration branch that holds commits of its own. Claude Code shows that question as a
-permission prompt; how Codex and Antigravity handle it is unverified. A second hook, in every
+permission prompt, and Antigravity's documentation says it prompts too. On Codex, which does not
+support the question, the hook refuses the command; neither was observed live. A second hook, in every
 session, refuses a file-tool write that would put characters invisible on screen into a file agents
 load as instructions; whether each host shows that refusal in a live session is unverified.
 
@@ -108,7 +110,7 @@ detail, so ask for depth when you need it.
 | --- | --- |
 | foreman and collet | Partners with separate jobs in one project. foreman owns the plan: which work comes next, the files an entry expects to touch, and when the entry is done. collet owns the session boundary: the open task's writable files and the acceptance command that finishes it. collet mounts in a project that has `ROADMAP.jsonl` or `.foreman/`, leaves those files unchanged, and never reads the roadmap. It never enforces an entry's `planned_touches`; the collet task's scope comes from the code. Its scope check never refuses a write to `ROADMAP.jsonl` or `.foreman/`, so foreman keeps its records current while a task is open. |
 | collet and anneal | collet constrains one planned task; anneal inspects the repository around it. anneal's `session-review` can propose an instruction change after a session, and collet's `check-writer` skill turns a recurring mistake into a machine check. Use the instruction change for guidance, the check for a mistake a script can catch. A deterministic step that many sessions repeat becomes a script and a map-file line through anneal's `session-review all`; a mistake they repeat becomes a check through `check-writer`. |
-| razor and collet | Both can push back on an edit, for different reasons. razor questions an addition that may be unnecessary, such as a new package or file. collet refuses a write outside the task's scope. Neither replaces the other. |
+| razor and collet | Both can push back on an edit, for different reasons. razor questions an addition that may be unnecessary, such as a new package or file. collet notes a write outside the task's scope, or refuses it when the project asks for that, and its close fails until the task is widened or the change is undone. Neither replaces the other. |
 | razor and hush | razor questions additions while the code is written and runs its build check at the end of a turn, once per session. hush shortens long tool output during the work and shapes the final message. Their hooks both run in a Claude Code session. Their combined behavior has not been measured here. |
 | foreman and hush | foreman produces the handoff prompt and hush shapes how the session that runs it reports. Neither depends on the other. |
 | foreman and anneal | foreman decides what to do; anneal reports navigation findings and documentation drift. Neither depends on the other. |

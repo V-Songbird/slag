@@ -1,6 +1,6 @@
 # collet
 
-collet constrains a coding session to one open task, its writable files, and the command required to finish it. Closing the task fails while a change sits outside its files; hooks refuse such a write as it happens only when the project asks for that.
+collet constrains a coding session to one open task, its writable files, and the command required to finish it. Closing the task fails while a change sits outside its files. Hooks refuse such a write as it happens only when the project asks for that.
 
 Use it when agents exceed the task's scope or finish without verification. It constrains already planned work; it does not plan the work.
 
@@ -25,7 +25,7 @@ Start a new session to load it. In a terminal, `claude plugin list` names `colle
 
 **Codex** — add this repository as a marketplace and install `collet` from the `slag` marketplace, shown as `Slag`. The Codex commands for those two steps are not recorded here; follow Codex's own plugin documentation.
 Before guarded work, open `/hooks` in Codex CLI and trust the plugin's `SessionStart`, `PreToolUse` and `PreCompact` hooks.
-Changed definitions need another review; see [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
+A changed hook definition or hook script needs another review; see [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
 
 **Antigravity CLI** — clone the repository, replace `<path-to-clone>` below, and run:
 
@@ -67,7 +67,7 @@ node .collet/checks/run.mjs
 ```
 
 The first command prints the open task, scope and acceptance command. The second reports whether each check catches its violations and permits its near misses.
-A write outside the open task goes ahead with a note that names the path, and `node .collet/task.mjs close` fails until the task is widened or the change is undone.
+A write outside the open task goes ahead with a note that names the path. `node .collet/task.mjs close` then fails until the task is widened or the change is undone.
 With `refuse_out_of_scope_writes` set to `true` in `.collet/config.json`, the guard refuses that write instead.
 The harness's own files and an edit a check catches are refused either way.
 When an active guard refuses a write, it names the affected path and the remedy that fits the refusal:

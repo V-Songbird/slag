@@ -41,13 +41,21 @@ Collet also provides SessionStart and PreCompact. Anneal has two PreToolUse guar
 commands for migration branches, one on file-tool writes into instruction files. On Claude Code
 and Codex anneal also provides SessionStart, which answers hookSpecificOutput with hookEventName
 SessionStart and additionalContext; whether each host passes that text to the agent in a live
-session is unverified for anneal. On Claude Code alone it provides SessionEnd. Anneal's shell
-guard also answers permissionDecision ask, which Claude Code shows as a permission prompt; how
-Codex handles ask is unverified.
+session is unverified for anneal. Neither plugin registers SessionEnd: Claude Code's hook
+documentation, read on 2026-11-14, says it discards a SessionEnd hook's JSON output and stops such
+a hook after 1.5 seconds, whatever timeout a plugin sets. Anneal's shell
+guard also answers permissionDecision ask, which Claude Code shows as a permission prompt. Codex's
+hook documentation, read on 2026-11-14, says Codex parses ask on PreToolUse but does not support it
+yet: it reports the hook as failed and continues the tool call. So anneal's Codex hook definition
+passes the host argument codex, and the guard answers deny there where it answers ask on Claude
+Code. Neither Codex behavior was observed in a live session.
 
 Antigravity supports PreToolUse guards here. It supplies toolCall.name and toolCall.args,
-with PascalCase path fields. It documents a bare decision allow or deny, with a reason for
-refusal. Anneal's shell guard also sends decision ask; how Antigravity handles it is unverified.
+with PascalCase path fields. It documents a bare decision, with a reason for refusal. Its hook
+documentation, read on 2026-11-14, lists allow, deny and ask among the decisions, ask prompting for
+approval, and gives PreToolUse no field that adds context for the model. Anneal's shell guard sends
+decision ask; that prompt was not observed in a live session. The same documentation lists a
+SessionStart event and a PreInvocation event that can inject steps; neither plugin registers one.
 Anneal's file guard is tested only as a subprocess with each host's payload; whether each host
 shows its refusal in a live session is unverified.
 Hooks run from the installed plugin directory. Collet locates the project from explicit context,
@@ -59,7 +67,9 @@ Relative arguments alone do not establish a project. The nearest mounted harness
 Install Claude Code plugins through its marketplace. Install Codex plugins from the slag
 marketplace, then review and trust their exact hook definitions through Codex's /hooks command,
 which lists each plugin's hooks by event name: SessionStart and PreToolUse for anneal; SessionStart, PreToolUse and
-PreCompact for collet. New or changed definitions need review.
+PreCompact for collet. New or changed definitions need review. Codex's hook documentation, read on
+2026-11-14, says a plugin update that changes a bundled hook script also needs a new review; that
+was not measured here.
 For Antigravity CLI, use agy plugin install and confirm registration with agy plugin list.
 
 Headless Antigravity CLI runs no shell command without a permission rule. Measured with agy 1.2.8

@@ -16,6 +16,9 @@
 //
 // One file serves three hosts, because only two things differ: where the
 // command text sits in the payload, and what a decision looks like on the wire.
+// Codex shares Claude Code's payload and wire shape, but its hook documentation
+// says `ask` is not supported there and the command runs, so on Codex the
+// question is a denial.
 
 const fs = require("node:fs");
 const { execFileSync } = require("node:child_process");
@@ -39,6 +42,7 @@ const HOSTS = {
     allow: () => ({ decision: "allow" }),
   },
 };
+HOSTS.codex = { ...HOSTS.claude, ask: HOSTS.claude.deny };
 
 function decision(permissionDecision, permissionDecisionReason) {
   return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision, permissionDecisionReason } };

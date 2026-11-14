@@ -1,8 +1,8 @@
 # anneal
 
-anneal helps coding agents navigate an existing project and review session detours. It finds steps sessions repeat that a plain script could run, and aligns documentation with current behavior. It provides three skills for those tasks, and a fourth that says which of them to run.
+anneal helps coding agents navigate an existing project and review session detours. It finds steps sessions repeat that a plain script could run, and aligns documentation with current behavior. It has three skills for those tasks and a fourth that says which to run.
 
-Use it on an existing project. A single rename or a new scaffold does not need it.
+Use it on an existing project. A single rename or a new scaffold needs none of it.
 
 > **Experimental.** No support or stability promise. It can change or disappear without a migration path.
 
@@ -21,11 +21,11 @@ Use it on an existing project. A single rename or a new scaffold does not need i
 /plugin install anneal@slag
 ```
 
-Start a new session to load it. In a terminal, `claude plugin list` names `anneal` once it is installed.
+Start a new session to load it. In a terminal, `claude plugin list` names `anneal` once installed.
 
 **Codex** — add this repository as a marketplace and install `anneal` from the `slag` marketplace, shown as `Slag`. The Codex commands for those two steps are not recorded here; follow Codex's own plugin documentation.
 Before guarded work, open `/hooks` in Codex CLI and review and trust the plugin's `SessionStart` hook and its two `PreToolUse` hooks.
-Changed hook definitions need another review; see [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
+A changed hook definition or hook script needs another review; see [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
 
 **Antigravity CLI** — clone the repository, replace `<path-to-clone>` below, and run:
 
@@ -36,11 +36,15 @@ agy plugin list
 
 The list names `anneal`. If it does not, the install did not register: run the install command again with the clone path. With `--sandbox`, headless `agy` runs no shell command.
 
-anneal acts on your request. Its guard hook inspects shell commands. On a migration branch it refuses the git commands that would discard or rewrite the migration's work. On any other branch it asks first, and only before a command deletes, overwrites or moves a migration branch. It asks only when that branch holds commits the current branch lacks. On Claude Code that question is a permission prompt; how Codex and Antigravity handle it is unverified. A second guard hook works in every session. It refuses a file-tool write that would put characters invisible on screen into a file agents load as instructions. `AGENTS.md` and `CLAUDE.md` are such files. Tests run it with each host's payload; whether each host shows its refusal in a live session is unverified. On Claude Code, a third hook can show one line at session end. It does so when the session changed `docs/` or the memory folder and there are documentation proposals. On Claude Code and Codex, a hook at session start tells the agent which finished task notes are still on disk and where the record index is. It only reads; whether each host passes its line to the agent in a live session is unverified.
+anneal acts on your request. It also installs three hooks:
+
+- **[Safety hook](docs/knowledge/workflows.md#the-safety-hook).** On a migration branch it refuses the git commands that would discard or rewrite the migration's work. On any other branch it asks before a command deletes, overwrites or moves a migration branch with commits of its own. Claude Code shows that question as a permission prompt, and Antigravity's documentation says it prompts too. On Codex, which does not support the question, the hook refuses the command. Neither was observed live.
+- **[Instruction guard](docs/knowledge/workflows.md#the-instruction-guard).** It refuses a file-tool write that puts invisible characters into a file agents load as instructions, such as `AGENTS.md`. A live refusal is unverified on every host.
+- **[Session-start line](docs/knowledge/workflows.md#the-session-start-line).** On Claude Code and Codex it names finished task notes still on disk and the record index. Whether a host passes that line to the agent is unverified.
 
 ## Quick start
 
-Start with the overview, using the invocation for your host:
+Start with the overview, as your host invokes it:
 
 | Host | Request |
 | --- | --- |
@@ -48,10 +52,10 @@ Start with the overview, using the invocation for your host:
 | Codex | `$overview` |
 | Antigravity | `/overview` |
 
-It runs one read-only script with no model. For navigation, documentation and past sessions, it prints what anneal counted in your repository and which skill to run next. It changes nothing.
+It runs one read-only script with no model. For navigation, documentation and past sessions, it prints what anneal counted in your repository and which skill to run next.
 
-Then ask for an audit, such as `/anneal:repo-layout audit`. The skill runs the scan and reports findings by severity, with counts and example paths, followed by informational observations that carry no severity. Audit mode changes nothing in the project on its own; it saves its findings only after you say yes to its offer.
-A missing Node runtime prevents the scan from running; confirm `node --version` reports 22 or later in the host's environment.
+Then ask for an audit, such as `/anneal:repo-layout audit`. The skill runs the scan and reports findings by severity, with counts and example paths, followed by observations that carry no severity. Audit mode changes nothing on its own; it saves its findings only after you say yes.
+The scan needs Node: confirm `node --version` reports 22 or later on the host.
 
 From the Slag repository root, you can also run the scan directly. Replace `<your-repository>` with the directory to inspect:
 
@@ -81,7 +85,7 @@ No command edits your project on its own word. Each one reports, or proposes and
 A migration runs baseline checks, proposes changes, and creates an `anneal/<YYYY-MM-DD>` branch for approved steps.
 Each successful step is checked and committed. Session review proposes edits and waits for approval; it commits nothing.
 With `all`, session review reads this project's past sessions. For each step they repeated, it proposes a command or a short no-model script and the map-file line that names it. For each navigation problem several sessions share, it proposes the change that fits it. It writes only what you approve.
-`/anneal:repo-docs` alone, or with `audit`, reports findings without edits. It saves a report only after you say yes to its offer. With `fix`, or when you ask for a cleanup in your own words, it applies the ordinary corrections. Its `adopt` mode writes the project-local documentation rule and a map pointer, each after you approve it. For a public solo repository, it also writes ignore rules from a shipped template after you approve them.
+`/anneal:repo-docs` alone, or with `audit`, reports findings without edits. It saves a report only after you say yes. With `fix`, or when you ask for a cleanup in your own words, it applies the ordinary corrections. Its `adopt` mode writes the project-local documentation rule and a map pointer, each after you approve it. For a public solo repository, it also writes ignore rules from a shipped template after you approve them.
 Its `readme` mode writes, reviews or repairs one README and runs a bundled checker on it.
 Asked to write or review a help page, guide, FAQ or changelog, it follows its writing reference. It reports what it could not check against the product.
 
@@ -89,14 +93,14 @@ The [workflow guide](docs/knowledge/workflows.md) covers every audit finding, ap
 
 ## Configuration
 
-Choose a skill and its mode. To turn off the [session-start line](docs/knowledge/workflows.md#the-session-start-line) and the [session-end report](docs/knowledge/workflows.md#the-session-end-report), set `ANNEAL_SESSION_REPORT=off` in the `env` block of Claude Code's `settings.json` or in your shell.
+anneal has no settings file: you choose a skill and its mode. To turn off the [session-start line](docs/knowledge/workflows.md#the-session-start-line), set `ANNEAL_SESSION_REPORT=off` in the `env` block of Claude Code's `settings.json` or in your shell.
 
 ## Limits
 
 - Findings are heuristics; framework conventions and project instructions take precedence.
 - Import rewriting covers relative imports in JavaScript and TypeScript family files (`.js`, `.ts`, `.vue`, `.svelte` and their variants). Other references need review.
 - Session review reads one transcript. Redaction is best effort; inspect excerpts before sharing them.
-- The many-sessions pass matches steps as text after normalization. It finds Claude Code and Codex sessions on its own; on Antigravity it reads only the files you hand it. It has not run live on any host yet, and neither has the overview.
+- The many-sessions pass matches steps as text after normalization. It finds Claude Code and Codex sessions on its own; on Antigravity it reads only the files you hand it. It has run only in eval cases through the Agent SDK, not in an interactive session. The overview has not run live on any host.
 - Transcript parsing depends on the formats covered by tests. Antigravity requires an explicit transcript file. The close-out check reads Claude Code transcripts only.
 - Documentation checks cover the stated evidence and do not scan Git history by default.
 - A complete migration, with the Git guard's refusal on its branch, has been observed in Claude Code, Codex CLI and the Antigravity IDE. On Codex it only changed the map file, so a migration that moves files is unverified there.
@@ -114,9 +118,9 @@ cd anneal
 node --test
 ```
 
-The command reports test results and exits non-zero when a test fails. The suite covers the scripts, the hooks and the eval graders.
-From the Slag root, `npm run check` runs all repository suites and also exits non-zero when a suite fails outside its tests.
-The [eval instructions](docs/knowledge/workflows.md#running-the-evals) describe the additional sandbox and host requirements for session tests.
+The command exits non-zero when a test fails. The suite covers the scripts, the hooks and the eval graders.
+From the Slag root, `npm run check` runs every suite and also fails when a suite fails outside its tests.
+The [eval instructions](docs/knowledge/workflows.md#running-the-evals) list the sandbox and host requirements for session tests.
 
 ## Support
 

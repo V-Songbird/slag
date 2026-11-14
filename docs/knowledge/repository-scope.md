@@ -6,6 +6,8 @@ related_files:
   - .gitignore
   - package.json
   - scripts/suite-failure-reporter.js
+  - scripts/quiet-reporter.js
+  - scripts/shared-copies.test.js
   - scripts/claude-hooks/run-tests-on-edit.js
   - scripts/plugin-integrity.test.js
   - scripts/plugin-parity.js
@@ -56,6 +58,8 @@ The vowel separator U+180E is allowed in the same place or right after such a se
 fail anywhere else. It walks the tree
 instead when there is no Git work tree. It also fails when collet/templates/state.mjs's
 HIDDEN_CHARACTERS differs from anneal/scripts/audit.js's. Write such characters as escapes (\u200B, \u{E0041}).
+scripts/shared-copies.test.js fails when collet/tests/eval-harness.cjs differs from
+anneal/tests/eval-harness.js: each plugin keeps its own copy, so its suite runs without the other.
 scripts/markdown-links.test.js fails on a relative link or #anchor in a tracked public Markdown
 file whose target is not a tracked file or directory, or whose anchor names no heading or `<a>` id
 or name in the target. Heading anchors follow GitHub's slugs; files under the private directories are

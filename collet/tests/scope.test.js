@@ -198,7 +198,9 @@ test('a path on another drive is outside the repository, not a path inside it', 
   const root = withTree();
   // relative() between two roots returns the target's own absolute path, which starts with a
   // letter rather than "..". Read as repo-relative it matches no scope and fires on a scratch file.
-  for (const target of ['X:/Temp/scratch/out.txt', 'C:/Temp/out.txt', '../outside.txt']) {
+  // A drive letter names another root only on Windows; elsewhere `X:/…` is a relative path.
+  const otherDrives = process.platform === 'win32' ? ['X:/Temp/scratch/out.txt', 'C:/Temp/out.txt'] : [];
+  for (const target of [...otherDrives, '../outside.txt']) {
     assert.equal(fires(root, { tool: 'Write', input: { file_path: target } }), false, target);
   }
 });

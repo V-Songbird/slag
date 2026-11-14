@@ -821,6 +821,17 @@ function readyDefault() {
   return root;
 }
 
+test('session start says writes outside the task are refused only where the config asks for that', () => {
+  const strict = ready();
+  task(strict, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  assert.match(hookOutput(hook('session-start.js', strict)).additionalContext, /Writes outside that list are refused\./);
+  const root = readyDefault();
+  task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);
+  const context = hookOutput(hook('session-start.js', root)).additionalContext;
+  assert.doesNotMatch(context, /are refused/);
+  assert.match(context, /A write outside that list goes ahead with a note, and `node \.collet\/task\.mjs close` fails while it stands\./);
+});
+
 test('without the config key a write outside the task goes ahead with a note and logs no refusal', () => {
   const root = readyDefault();
   task(root, ['add', '--title', 'window', '--why', 'w', '--scope', 'src/cli.mjs']);

@@ -20,6 +20,18 @@ All notable changes to collet are documented here. The format follows
 
 - A plugin logo: Antigravity shows collet's chuck seal instead of a generic icon. `assets/` also holds the banner, wordmark and icon in light and dark.
 
+### Changed
+
+- The plugin description on every host says what happens since 0.7.0-alpha: a write outside the open task fails the close, and the guard refuses it as it happens only when the project asks for that.
+
+### Fixed
+
+- The session start no longer says writes outside the open task are refused when they are not. It says so only with `refuse_out_of_scope_writes: true`; otherwise it says the write goes ahead with a note and the close fails while it stands. On Codex, review and trust the changed hook in `/hooks`.
+- The harness workflow guide lists `refuse_out_of_scope_writes` with the other config keys and `task.mjs list` with the other commands. It says the import closure stops after 12 added files, and that an emptied `CLAUDE.md` block prints a `wrote` line.
+- The guide says the note about a write outside the task does not reach an Antigravity session.
+- The README says a changed hook script, not only a changed hook definition, needs a new review in Codex.
+- The test suite passes when the plugin sits alone in its own repository, and on Linux, where one test expected Windows drive letters.
+
 ## [0.7.0-alpha] — 2026-11-10
 
 ### Changed

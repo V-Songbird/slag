@@ -14,7 +14,8 @@ const { tempDir } = require("./session-transcripts.js");
 const { decide, isInstructionFile } = require("../hooks/instruction-guard.js");
 
 const HOOK = path.join(__dirname, "..", "hooks", "instruction-guard.js");
-const REPOSITORY = path.join(__dirname, "..", "..");
+// The repository that tracks this plugin: its own when it ships alone, or the one that holds it.
+const repository = () => execFileSync("git", ["-C", __dirname, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
 const cp = (...codes) => String.fromCodePoint(...codes);
 const isTag = (char) => char.codePointAt(0) >= 0xe0000 && char.codePointAt(0) <= 0xe007f;
 
@@ -148,6 +149,7 @@ describe("the guard stays silent", () => {
   });
 
   test("on every tracked Markdown file of this repository, written back unchanged", () => {
+    const REPOSITORY = repository();
     const files = execFileSync("git", ["-C", REPOSITORY, "ls-files", "-z", "--", "*.md", "*.mdc"], { encoding: "utf8" })
       .split("\0").filter(Boolean);
     const fired = [];
@@ -160,7 +162,7 @@ describe("the guard stays silent", () => {
       if (output !== null) fired.push(file);
     }
     assert.deepStrictEqual(fired, []);
-    assert.ok(instructions >= 5, `${instructions} tracked instruction files`);
+    assert.ok(instructions >= 1, `${instructions} tracked instruction files`);
   });
 });
 
