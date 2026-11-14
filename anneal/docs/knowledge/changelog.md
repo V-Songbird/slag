@@ -18,6 +18,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
+- A session-start line on Claude Code and Codex: a hook tells each new session which finished task notes are still on disk and where the record index is, or that there is none. It uses no model and only reads. `ANNEAL_SESSION_REPORT=off` turns it off. On Codex, review and trust the new `SessionStart` hook in `/hooks`.
 - A plugin logo: Antigravity shows anneal's crucible seal instead of a generic icon. `assets/` also holds the banner, wordmark and icon in light and dark.
 
 ### Fixed

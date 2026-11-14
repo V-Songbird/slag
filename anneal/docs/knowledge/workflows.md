@@ -42,6 +42,8 @@ related_files:
   - anneal/tests/instruction-guard.test.js
   - anneal/hooks/session-end-report.js
   - anneal/tests/session-end-report.test.js
+  - anneal/hooks/session-start-records.js
+  - anneal/tests/session-start-records.test.js
   - anneal/evals/
   - anneal/evals/heldout-fixture.js
   - anneal/tests/eval-graders.test.js
@@ -631,9 +633,30 @@ Limits of the guard:
 - On Antigravity the guard reads every text argument, so an edit is refused when the text it replaces already holds such characters. Remove those characters another way. Which Antigravity arguments hold the new text has not been checked.
 - The guard is held by tests that run it as a separate process with each host's payload. Whether each host shows its refusal in a live session is unverified.
 
+## The session-start line
+
+On Claude Code and Codex, a hook runs when a session starts and adds one line to what the agent reads first. Nobody has to run a skill for it. For example:
+
+```text
+anneal: 2 completed task notes are still on disk: docs/tasks/12-login.md, docs/tasks/15-export.md. Fold each one's findings into its topic documents, then ask the owner before deleting it. Record index: docs/index.md; search it before guessing a docs path.
+```
+
+The line holds two facts:
+
+- **Finished task notes still on disk.** These are the notes with `status: completed`, in a `docs/tasks/` folder or with `type: task_summary`, ignored files included. The line gives their count and up to ten paths; past ten it counts the rest. With none, this part is left out.
+- **The record index.** The line says [the record index](#the-record-index) is at `docs/index.md`, or that there is none.
+
+The hook uses no model. It only reads: it never deletes, moves or edits a note, and deleting one stays your decision. The project is the folder in `CLAUDE_PROJECT_DIR`, or the session's working folder when that is unset; inside a Git working tree, the hook reads from the tree's top folder. It stays silent in these cases:
+
+- the project has no Markdown file under a `docs/` folder;
+- the hook fails;
+- `ANNEAL_SESSION_REPORT` is `off`, `0` or `false`, the same setting that turns off [the session-end report](#the-session-end-report).
+
+Unlike the maintenance proposals, the line counts a finished note from the moment it is marked, without the three-day wait. On Codex, review and trust the new hook in `/hooks` before it runs. Antigravity has no such hook.
+
 ## The session-end report
 
-On Claude Code, a third hook runs when a session ends. If the session wrote a file under a `docs/` folder of the project, or into the project's Claude Code memory folder, it runs [the maintenance script](#maintenance-proposals) with its defaults. Then it shows one line, for example:
+On Claude Code, another hook runs when a session ends. Its line is shown to you, not to the agent, and no later session receives it; [the session-start line](#the-session-start-line) is what reaches the next session. If the session wrote a file under a `docs/` folder of the project, or into the project's Claude Code memory folder, it runs [the maintenance script](#maintenance-proposals) with its defaults. Then it shows one line, for example:
 
 ```text
 anneal: 5 documentation proposals, including 1 stale memory and 2 unread notes. See them with /anneal:repo-docs maintain.
@@ -681,6 +704,8 @@ A complete migration and the Git guard's refusal on its branch have been observe
 The audits and session review have run from the published package in Claude Code, headless Codex CLI 0.155.1 and headless Antigravity CLI 1.2.8 and 1.2.9 without `--sandbox`, and a repo-layout audit has run in the Antigravity IDE and the Codex desktop app 26.917. The other flows in the Antigravity IDE remain unverified.
 
 The session-end report is held by tests that run the hook as a separate process. Whether Claude Code shows its line in a live session is unverified.
+
+The session-start line is held by tests that run the hook as a separate process. Whether Claude Code and Codex pass its line to the agent in a live session is unverified.
 
 ## Running the evals
 

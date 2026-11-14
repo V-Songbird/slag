@@ -24,7 +24,7 @@ Use it on an existing project. A single rename or a new scaffold does not need i
 Start a new session to load it. In a terminal, `claude plugin list` names `anneal` once it is installed.
 
 **Codex** — add this repository as a marketplace and install `anneal` from the `slag` marketplace, shown as `Slag`. The Codex commands for those two steps are not recorded here; follow Codex's own plugin documentation.
-Before guarded work, open `/hooks` in Codex CLI and review and trust the plugin's two `PreToolUse` hooks.
+Before guarded work, open `/hooks` in Codex CLI and review and trust the plugin's `SessionStart` hook and its two `PreToolUse` hooks.
 Changed hook definitions need another review; see [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
 
 **Antigravity CLI** — clone the repository, replace `<path-to-clone>` below, and run:
@@ -36,7 +36,7 @@ agy plugin list
 
 The list names `anneal`. If it does not, the install did not register: run the install command again with the clone path. With `--sandbox`, headless `agy` runs no shell command.
 
-anneal acts on your request. Its guard hook inspects shell commands. On a migration branch it refuses the git commands that would discard or rewrite the migration's work. On any other branch it asks first, and only before a command deletes, overwrites or moves a migration branch. It asks only when that branch holds commits the current branch lacks. On Claude Code that question is a permission prompt; how Codex and Antigravity handle it is unverified. A second guard hook works in every session. It refuses a file-tool write that would put characters invisible on screen into a file agents load as instructions. `AGENTS.md` and `CLAUDE.md` are such files. Tests run it with each host's payload; whether each host shows its refusal in a live session is unverified. On Claude Code, a third hook can show one line at session end. It does so when the session changed `docs/` or the memory folder and there are documentation proposals.
+anneal acts on your request. Its guard hook inspects shell commands. On a migration branch it refuses the git commands that would discard or rewrite the migration's work. On any other branch it asks first, and only before a command deletes, overwrites or moves a migration branch. It asks only when that branch holds commits the current branch lacks. On Claude Code that question is a permission prompt; how Codex and Antigravity handle it is unverified. A second guard hook works in every session. It refuses a file-tool write that would put characters invisible on screen into a file agents load as instructions. `AGENTS.md` and `CLAUDE.md` are such files. Tests run it with each host's payload; whether each host shows its refusal in a live session is unverified. On Claude Code, a third hook can show one line at session end. It does so when the session changed `docs/` or the memory folder and there are documentation proposals. On Claude Code and Codex, a hook at session start tells the agent which finished task notes are still on disk and where the record index is. It only reads; whether each host passes its line to the agent in a live session is unverified.
 
 ## Quick start
 
@@ -89,7 +89,7 @@ The [workflow guide](docs/knowledge/workflows.md) covers every audit finding, ap
 
 ## Configuration
 
-Choose a skill and its mode. To turn off the [session-end report](docs/knowledge/workflows.md#the-session-end-report), set `ANNEAL_SESSION_REPORT=off` in the `env` block of Claude Code's `settings.json` or in your shell.
+Choose a skill and its mode. To turn off the [session-start line](docs/knowledge/workflows.md#the-session-start-line) and the [session-end report](docs/knowledge/workflows.md#the-session-end-report), set `ANNEAL_SESSION_REPORT=off` in the `env` block of Claude Code's `settings.json` or in your shell.
 
 ## Limits
 

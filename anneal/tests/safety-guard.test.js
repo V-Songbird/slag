@@ -320,7 +320,8 @@ describe("wire", () => {
       for (const { hooks: handlers } of groups)
         for (const handler of handlers) {
           assert.strictEqual(handler.commandWindows, undefined);
-          assert.match(handler.command, /^node "\$\{PLUGIN_ROOT\}\/hooks\/[a-z-]+\.js" claude$/);
+          // The guards take the payload dialect as an argument; the session-start hook takes none.
+          assert.match(handler.command, /^node "\$\{PLUGIN_ROOT\}\/hooks\/[a-z-]+\.js"(?: claude)?$/);
         }
   });
 });

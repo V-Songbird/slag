@@ -38,7 +38,10 @@ requires actual host discovery and execution checks, not only valid JSON.
 Claude Code and Codex use tool_name, tool_input and cwd. Denials use hookSpecificOutput with
 hookEventName PreToolUse and permissionDecision deny. An empty response allows the call.
 Collet also provides SessionStart and PreCompact. Anneal has two PreToolUse guards: one on shell
-commands for migration branches, one on file-tool writes into instruction files. Anneal's shell
+commands for migration branches, one on file-tool writes into instruction files. On Claude Code
+and Codex anneal also provides SessionStart, which answers hookSpecificOutput with hookEventName
+SessionStart and additionalContext; whether each host passes that text to the agent in a live
+session is unverified for anneal. On Claude Code alone it provides SessionEnd. Anneal's shell
 guard also answers permissionDecision ask, which Claude Code shows as a permission prompt; how
 Codex handles ask is unverified.
 
@@ -55,7 +58,7 @@ Relative arguments alone do not establish a project. The nearest mounted harness
 
 Install Claude Code plugins through its marketplace. Install Codex plugins from the slag
 marketplace, then review and trust their exact hook definitions through Codex's /hooks command,
-which lists each plugin's hooks by event name: PreToolUse for anneal; SessionStart, PreToolUse and
+which lists each plugin's hooks by event name: SessionStart and PreToolUse for anneal; SessionStart, PreToolUse and
 PreCompact for collet. New or changed definitions need review.
 For Antigravity CLI, use agy plugin install and confirm registration with agy plugin list.
 
