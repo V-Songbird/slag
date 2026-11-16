@@ -1,59 +1,44 @@
 # Slag
 
-Slag contains experimental plugins for coding agents that inspect repositories, reconcile documentation, and constrain implementation tasks.
+Slag is the workshop where the [anneal](https://github.com/V-Songbird/anneal) and
+[collet](https://github.com/V-Songbird/collet) plugins for coding agents were developed.
+Both now live in their own repositories and are listed in the
+[Foundry](https://github.com/V-Songbird/foundry) marketplace. This repository holds no plugin.
 
-Use [anneal](anneal/README.md) for repository and documentation reviews.
-Use [collet](collet/README.md) for an already planned task with a writable scope and an acceptance command.
-These experiments have no support or stability promise.
+## Install anneal and collet
 
-## Requirements
-
-- Node 22 or later.
-- Claude Code, Codex or Antigravity to load a plugin.
-- Git for collet and anneal migrations; anneal's read-only audit can also inspect a directory without Git.
-
-## Install and try
-
-In Claude Code, install anneal from this marketplace:
+In Claude Code:
 
 ```text
-/plugin marketplace add V-Songbird/slag
-/plugin install anneal@slag
+/plugin marketplace add V-Songbird/foundry
+/plugin install anneal@foundry
+/plugin install collet@foundry
 ```
 
-In a terminal, `claude plugin list` names `anneal` once it is installed.
-Start a new session in the repository you want to inspect, then request:
+If you installed either plugin from the `slag` marketplace, remove that marketplace and install
+from `foundry` as above. For Codex and Antigravity, follow the install section of each plugin's
+README: [anneal](https://github.com/V-Songbird/anneal#install) and
+[collet](https://github.com/V-Songbird/collet#install).
 
-```text
-/anneal:repo-layout audit
-```
+To compare anneal and collet with razor, hush and foreman, read
+[which plugin owns which job](docs/knowledge/plugin-roles.md).
 
-The skill reports navigation findings with counts and example paths.
-It changes nothing in the project on its own and saves its findings only after you say yes to its offer.
-If Node is unavailable, the scan cannot run; check that the host can run `node --version`.
+## What stays here
 
-For Codex and Antigravity installation, invocation and hook activation, follow the
-[anneal instructions](anneal/README.md#install) or [collet instructions](collet/README.md#install).
-The plugin guides distinguish subprocess tests from live host validation.
+- `scripts/sdk-eval/`: a runner that gives a plugin's eval cases to the Claude Agent SDK, so the
+  sessions bill an API key instead of a Claude plan. It takes the plugin as a directory path, for
+  example a clone of anneal or collet. Its header, `scripts/sdk-eval/run.mjs`, lists the options.
+- `.collet/`: this repository's own collet harness, which scopes each change to a task and ends it
+  with `npm run check`.
+- `docs/knowledge/`: research records on [host plugin formats](docs/knowledge/host-plugin-formats.md),
+  [plugin roles](docs/knowledge/plugin-roles.md) and
+  [repository scope](docs/knowledge/repository-scope.md).
+- `scripts/`: the repository's tests and `plugin-parity.js`, which compares an installed plugin copy
+  with its tracked source.
 
-## Choose a workflow
+## Retired ideas
 
-| Need | Plugin guide |
-| --- | --- |
-| Audit repository navigation or plan an approved migration | [Anneal workflows](anneal/docs/knowledge/workflows.md) |
-| Reconcile documentation or explicitly review a session | [Anneal skills](anneal/README.md#what-you-can-do) |
-| Mount a task harness or add a targeted check | [Collet workflow](collet/docs/knowledge/harness-workflow.md) |
-
-To compare anneal and collet with razor, hush and foreman, which are installed separately,
-read [which plugin owns which job](docs/knowledge/plugin-roles.md).
-
-Slag has no application configuration. Anneal has no settings;
-collet's mounted project uses [its harness configuration](collet/docs/knowledge/harness-workflow.md#configuration).
-
-## Deprecated ideas
-
-These plugins are retired and are not included in the current marketplace.
-The marketplace's rename list also retires `forge` and `proof`, two earlier names whose ideas are not recorded here.
+These plugins were retired and are not offered anywhere.
 
 | Plugin | Idea |
 | --- | --- |
@@ -72,16 +57,16 @@ From the root of a Git clone, with Node 22 or later and Git available:
 npm run check
 ```
 
-The command runs all repository and plugin tests and exits non-zero on failure.
-No dependency installation is needed. Read [repository scope and checks](docs/knowledge/repository-scope.md)
-and [host contracts](docs/knowledge/host-plugin-formats.md) before changing a plugin.
+The command runs the repository tests and exits non-zero on failure. No dependency installation is
+needed. Read [repository scope and checks](docs/knowledge/repository-scope.md) before changing the
+checks.
 
 ## Support and changes
 
-The [issue tracker](https://github.com/V-Songbird/slag/issues) is the only listed channel for bugs and usage questions.
-There is no dedicated security-reporting policy in this repository; avoid posting sensitive details publicly.
-Release changes are recorded in the [anneal changelog](anneal/docs/knowledge/changelog.md)
-and [collet changelog](collet/docs/knowledge/changelog.md).
+The [issue tracker](https://github.com/V-Songbird/slag/issues) is the only listed channel for bugs
+and usage questions about this repository; report a plugin's own problems in its repository. There is
+no dedicated security-reporting policy here; avoid posting sensitive details publicly. Plugin release
+changes are recorded in each plugin's own repository.
 
 ## License
 

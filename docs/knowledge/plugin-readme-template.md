@@ -1,14 +1,15 @@
 ---
 type: knowledge
-summary: "Shared public README structure for Slag plugins; read before editing installation, usage or compatibility documentation."
-related_files:
-  - anneal/README.md
-  - collet/README.md
+summary: "The README structure the anneal and collet plugins used while they lived in Slag, kept as a record; read it when writing a plugin README in the same style."
+related_files: []
 ---
 
 # Plugin README structure
 
-Both plugin READMEs use this H2 order:
+The anneal and collet READMEs now live in their own repositories
+([anneal](https://github.com/V-Songbird/anneal#readme),
+[collet](https://github.com/V-Songbird/collet#readme)) and may have moved on from this structure.
+While the plugins lived in Slag, both READMEs used this H2 order:
 
 1. Requirements
 2. Install

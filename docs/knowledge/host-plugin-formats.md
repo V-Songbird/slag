@@ -1,22 +1,19 @@
 ---
 type: knowledge
-summary: "Current manifest, hook and version contracts for Slag's three hosts; read before changing a host adapter or release metadata."
+summary: "Research record of the manifest, hook and version contracts of Claude Code, Codex and Antigravity, as measured while anneal and collet were developed here; read before changing a host adapter or the parity check."
 related_files:
-  - .claude-plugin/marketplace.json
-  - .agents/plugins/marketplace.json
-  - anneal/plugin.json
-  - anneal/.codex-plugin/plugin.json
-  - collet/plugin.json
-  - collet/.codex-plugin/plugin.json
-  - anneal/hooks/
-  - collet/hooks/
   - scripts/plugin-parity.js
 ---
 
 # Host plugin contracts
 
-Each plugin is an in-tree directory with three host manifests. Sources in both marketplaces
-resolve relative to this repository; keep source paths local and do not add absolute machine paths.
+This record was written while anneal and collet lived in this repository; both now live in their
+own repositories ([anneal](https://github.com/V-Songbird/anneal),
+[collet](https://github.com/V-Songbird/collet)) and are listed in the
+[Foundry](https://github.com/V-Songbird/foundry) marketplace. It keeps the host findings, which
+describe the hosts and not this repository, and names anneal and collet where a finding came from
+one of them. Each plugin has three host manifests. Sources in a marketplace resolve relative to
+the marketplace; keep source paths local and do not add absolute machine paths.
 
 | Host | Manifest | Version source | Hook definition |
 | --- | --- | --- | --- |
@@ -24,9 +21,12 @@ resolve relative to this repository; keep source paths local and do not add abso
 | Codex | .codex-plugin/plugin.json inside each plugin | That manifest | hooks/codex-hooks.json |
 | Antigravity | plugin.json inside each plugin | That manifest | hooks.json at the plugin root |
 
-Claude plugin manifests contain no version. Codex marketplace entries contain no version.
-All three effective versions agree. Descriptions and author identity also agree; the repository
-integrity test checks these contracts and declared local resources.
+While the plugins lived here, Claude plugin manifests contained no version and Codex marketplace
+entries contained none; the version sat in the Claude marketplace entry and the other manifests.
+All three effective versions agreed, and so did descriptions and author identity; the integrity
+test that checked this and the declared local resources is gone with the plugins, and each plugin's
+own tests/manifests.test.js and the Foundry marketplace's CI now hold those contracts. Read the
+plugin's repository for the placement it uses today.
 
 The plugin-root plugin.json, Antigravity's manifest, deliberately omits the portable Agent Plugins
 schema and com.openai extension. Codex uses the compatibility manifest, .codex-plugin/plugin.json,
@@ -64,8 +64,8 @@ Relative arguments alone do not establish a project. The nearest mounted harness
 
 ## Installation and trust
 
-Install Claude Code plugins through its marketplace. Install Codex plugins from the slag
-marketplace, then review and trust their exact hook definitions through Codex's /hooks command,
+Install Claude Code plugins through its marketplace. Install Codex plugins from a marketplace
+that lists them (anneal and collet: the foundry marketplace), then review and trust their exact hook definitions through Codex's /hooks command,
 which lists each plugin's hooks by event name: SessionStart and PreToolUse for anneal; SessionStart, PreToolUse and
 PreCompact for collet. New or changed definitions need review. Codex's hook documentation, read on
 2026-11-14, says a plugin update that changes a bundled hook script also needs a new review; that
@@ -109,7 +109,8 @@ matches the tracked source, run from the repository root:
 node scripts/plugin-parity.js <plugin directory> <installed plugin directory>
 ```
 
-For example, `node scripts/plugin-parity.js collet <cache>/slag/collet/<version>`. The check prints
+For example, with a clone of collet at `<clone>`,
+`node scripts/plugin-parity.js <clone> <cache>/foundry/collet/<version>`. The check prints
 one line per difference: each file whose bytes changed, each installed file the source does not
 track, each tracked file the install lacks, and each hook event in `hooks/hooks.json`,
 `hooks/codex-hooks.json` or the plugin-root `hooks.json` whose definition differs. The plugin-root
@@ -131,8 +132,7 @@ Current invocation names and verified compatibility limits are in each plugin's 
 
 ## Validation
 
-Run npm run check from the repository root. The public scripts/plugin-integrity.test.js validates
-Slag's current manifests, paths, identity and version placement, and scripts/plugin-parity.test.js
+Run npm run check from the repository root. scripts/plugin-parity.test.js
 checks the installed-copy comparison against fixtures for a matching copy, a changed file, an added
 file, changed events in each of the three hook files, an added or missing hook file, a hook file
 that is not JSON, a hook file deleted in the work tree, and exit 2 on a usage error, an unreadable

@@ -1,39 +1,40 @@
 ---
 type: knowledge
-summary: "Current repository scope and public validation boundaries; read before adding plugin files or repository documentation."
+summary: "Current repository scope and public validation boundaries; read before adding files or repository documentation."
 related_files:
   - AGENTS.md
   - .gitignore
   - package.json
   - scripts/suite-failure-reporter.js
   - scripts/quiet-reporter.js
-  - scripts/shared-copies.test.js
   - scripts/claude-hooks/run-tests-on-edit.js
-  - scripts/plugin-integrity.test.js
   - scripts/plugin-parity.js
   - scripts/ignore-policy.test.js
   - scripts/hidden-characters.test.js
   - scripts/markdown-links.test.js
   - scripts/git-hooks/release-gate.js
-  - anneal/
-  - collet/
+  - scripts/sdk-eval/run.mjs
 ---
 
 # Repository scope and validation
 
-Slag ships anneal and collet as plain in-tree directories with one Git history. There are no
-submodules, dependency-install step, CI workflow, artwork or support promise. A plugin carries
-its README, LICENSE and docs/knowledge/changelog.md plus its runtime, skills and tests; collet/package.json declares
-its ESM module type. Root source stays CommonJS.
+Slag was the workshop where the anneal and collet plugins were developed, as plain in-tree
+directories with one Git history. Both now live in their own repositories,
+[anneal](https://github.com/V-Songbird/anneal) and [collet](https://github.com/V-Songbird/collet),
+and are installed from the [Foundry](https://github.com/V-Songbird/foundry) marketplace; Slag has
+no plugin, no marketplace catalog and no release procedure. There are no submodules,
+dependency-install step at the root, CI workflow, artwork or support promise. What stays is the SDK
+eval runner in scripts/sdk-eval, the mounted .collet harness, the research records under
+docs/knowledge and the repository checks. Root source stays CommonJS.
 
 ## Public product surface
 
-Ship complete runtime source, skill prompts, host manifests, generic fixtures, tests and the
-technical documentation needed to use and modify them. The public checks must run without private
-working records. Do not add generated caches, local host settings or test-run artifacts to releases.
+Ship generic fixtures, tests and the technical documentation needed to use and modify what is
+here. The public checks must run without private working records. Do not add generated caches,
+local host settings or test-run artifacts.
 
-Repository contracts live under docs/knowledge. Each plugin keeps its workflow guide and
-changelog under its own docs/knowledge so installed plugin documentation stays self-contained.
+Repository contracts live under docs/knowledge. A plugin's workflow guide and changelog live in its
+own repository.
 
 The repository's own ignore boundary is checked by
 [scripts/ignore-policy.test.js](../../scripts/ignore-policy.test.js). Public source and checks
@@ -41,13 +42,15 @@ remain independent of personal skills or private working records.
 
 ## Checks
 
-npm run check runs the plugin suites and repository tests using Node 22 or later. The integrity
-suite validates marketplace sources, local resource paths, host metadata and version ownership.
-scripts/plugin-parity.js compares an installed copy of a plugin with its tracked source, and
-scripts/plugin-parity.test.js checks it against fixtures; see
+npm run check runs the repository tests using Node 22 or later. Manifest, catalog and version
+checks moved with the plugins: each plugin's own tests/manifests.test.js, and the Foundry
+marketplace's CI, which validates its catalogs. scripts/plugin-parity.js compares an installed
+copy of a plugin with its tracked source, and scripts/plugin-parity.test.js checks it against
+fixtures; see
 [checking an installed copy](host-plugin-formats.md#checking-an-installed-copy-against-the-source).
-The navigation audit is heuristic; its runtime-name matches in anneal/tests/audit.test.js are
-intentional fixture strings and must retain their detector coverage.
+scripts/sdk-eval/lib.test.mjs checks the SDK eval runner's model-free parts against
+scripts/sdk-eval/fixtures, a snapshot of three of collet's eval cases and its eval harness; the
+runner loads the harness of the plugin directory it is given.
 scripts/hidden-characters.test.js fails on raw zero-width, bidi-control, tag, misplaced
 byte-order-mark, variation-selector and Mongolian vowel separator characters in tracked text
 files, naming file, line and code point. U+FE0E and U+FE0F are allowed right after an
@@ -56,10 +59,9 @@ Mongolian variation selectors U+180B-U+180D and U+180F are allowed right after a
 or one of its combining marks U+1885, U+1886 or U+18A9, all in U+1820-U+1878 or U+1880-U+18AA.
 The vowel separator U+180E is allowed in the same place or right after such a selector. Both
 fail anywhere else. It walks the tree
-instead when there is no Git work tree. It also fails when collet/templates/state.mjs's
-HIDDEN_CHARACTERS differs from anneal/scripts/audit.js's. Write such characters as escapes (\u200B, \u{E0041}).
-scripts/shared-copies.test.js fails when collet/tests/eval-harness.cjs differs from
-anneal/tests/eval-harness.js: each plugin keeps its own copy, so its suite runs without the other.
+instead when there is no Git work tree. The pattern is the one exported by the mounted
+.collet/state.mjs; that the two plugins' copies of it agree is no longer checked here, because
+each plugin keeps its own copy in its own repository. Write such characters as escapes (\u200B, \u{E0041}).
 scripts/markdown-links.test.js fails on a relative link or #anchor in a tracked public Markdown
 file whose target is not a tracked file or directory, or whose anchor names no heading or `<a>` id
 or name in the target. Heading anchors follow GitHub's slugs; files under the private directories are
@@ -87,34 +89,27 @@ callbacks.
 
 The configured commit gate can use an optional private name blocklist. Its name scan passes when no
 list is available, so a successful commit is not proof that this optional filter checked any names.
-Release changes are reviewed and tested independently of that filter. Use the repository's
-cut-release procedure when publishing and keep release scope explicit. The commit-msg gate also
-runs scripts/git-hooks/release-gate.js on a commit whose subject is `Release <plugin> <version>`,
-reading the staged files: it fails when the marketplace entry or a host manifest of that plugin
-reads another version, when `<plugin>/.claude-plugin/plugin.json` or the plugin's entry in
-`.agents/plugins/marketplace.json` carries a version, or when the plugin changelog lacks a
-`## [<version>] — <YYYY-MM-DD>` heading with `## [Unreleased]` above it. It judges only a subject
-whose `<plugin>` is an entry in the staged `.claude-plugin/marketplace.json`, so a subject such as
-`Release gate tests` passes unjudged. It does not run the test suites.
+The commit-msg gate also runs scripts/git-hooks/release-gate.js on a commit whose subject is
+`Release <plugin> <version>`, reading the staged files. It judges only a subject whose `<plugin>`
+is an entry in the staged `.claude-plugin/marketplace.json`. That catalog and the plugins' release
+procedure moved to the plugins' repositories and the Foundry marketplace, so with no such file
+the gate passes every subject unjudged; its tests still exercise it on in-memory trees. It does
+not run the test suites.
 
 ## Contributor setup
 
 Use the Node major selected by .nvmrc and run from a Git checkout. No dependency installation
-is needed. Run npm run check from the root, or node --test inside one plugin to run its suite. The suites create disposable
+is needed at the root. Run npm run check from the root. The suites create disposable
 Git fixtures and use Node's built-in test runner.
 
 The repository edit hook is configured in .claude/settings.json and .codex/hooks.json.
-After an edit to a .js or .mjs file under a plugin's scripts, hooks or templates directory, it runs
-that plugin's test files that reach the edited file. A file reaches it by quoting the file's name,
-with or without its extension, as a relative require, import or joined path does, or, for a
-template, by quoting a folder on the template's path; a plugin file reached that way passes the
-reach on. When no test file reaches the edit, the plugin's whole suite runs. The runs share a
-110-second budget, TEST_TIMEOUT_MS, under the 120-second timeout at which the host stops the hook.
-Every collet test file reaches collet/scripts/mount.mjs, so an edit to a collet script or template
-runs every one of them. With other suites running on the same machine that can take several minutes,
-past the budget, and the hook then reports that it did not complete instead of a verdict. A test
-that reaches a file only through a name built at run time is not selected, so npm run check
-remains the full gate.
+It was written to rerun the tests of the plugin an edit lands in: after an edit to a .js or .mjs
+file under `<plugin>/scripts`, `hooks` or `templates`, where `<plugin>` is a top-level folder that
+holds `.claude-plugin/plugin.json`, it ran the test files that reach the edited file. No such
+folder exists in Slag now, so the hook prints nothing and exits 0 after every edit; its
+registrations stay as they are until the owner decides to change them, and scripts/claude-hooks
+keeps its tests, which run on temporary plugin folders. The runs shared a 110-second budget,
+TEST_TIMEOUT_MS, under the 120-second timeout at which the host stops the hook.
 Those adapters are repository development configuration, separate from shipped plugin hooks.
 
 The optional Git gates can be enabled for a clone with git config core.hooksPath scripts/git-hooks.

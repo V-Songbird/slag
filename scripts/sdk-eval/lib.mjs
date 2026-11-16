@@ -1,15 +1,29 @@
 // The parts of the SDK eval runner that need no model: reading a case, turning
 // the SDK's messages into the run the graders read, and deciding the
-// deterministic verdicts. Verdicts come from anneal's eval-harness.js, the same
-// evaluator the offline grader tests use, so both read a grader the same way.
+// deterministic verdicts. Verdicts come from the eval harness of the plugin under
+// test (its tests/eval-harness.js or tests/eval-harness.cjs), the same evaluator
+// that plugin's offline grader tests use, so both read a grader the same way.
+// selectCases loads it from the plugin directory it is given.
 
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const harness = require("../../anneal/tests/eval-harness.js");
-export const { listRunFiles, createdPaths } = harness;
+
+let harness = null;
+// Loads the eval harness of the plugin at pluginDir and makes it this module's evaluator.
+export function useHarness(pluginDir) {
+  const file = ["eval-harness.js", "eval-harness.cjs"].map((name) => path.join(pluginDir, "tests", name)).find((candidate) => fs.existsSync(candidate));
+  if (!file) throw new Error(`${pluginDir} has no tests/eval-harness.js or tests/eval-harness.cjs.`);
+  harness = require(file);
+}
+const loaded = () => {
+  if (!harness) throw new Error("No eval harness loaded; selectCases loads the plugin's.");
+  return harness;
+};
+export const listRunFiles = (root) => loaded().listRunFiles(root);
+export const createdPaths = (before, after) => loaded().createdPaths(before, after);
 
 const HEAD = /^---\s*\n([\s\S]*?)---\s*\n?/;
 
@@ -67,7 +81,7 @@ export const sessionOptions = (c, arm, { pluginDir, model }) => ({
 export function readCase(caseDir) {
   const yaml = fs.readFileSync(path.join(caseDir, "case.yaml"), "utf8");
   const promptFile = path.join(caseDir, "prompt.md");
-  const head = harness.frontmatter(promptFile);
+  const head = loaded().frontmatter(promptFile);
   return {
     name: path.basename(caseDir),
     dir: caseDir,
@@ -77,12 +91,13 @@ export function readCase(caseDir) {
     timeoutSeconds: Number(head.timeout_seconds ?? 600),
     allowedTools: head.allowed_tools ?? [],
     prompt: fs.readFileSync(promptFile, "utf8").replace(HEAD, "").trim(),
-    graders: harness.readGraders(caseDir),
+    graders: loaded().readGraders(caseDir),
   };
 }
 
 // The cases under a plugin's evals/ folder, narrowed by --case and --tag.
 export function selectCases(pluginDir, { names = [], tags = [] } = {}) {
+  useHarness(pluginDir);
   const evals = path.join(pluginDir, "evals");
   return fs.readdirSync(evals, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(evals, entry.name, "case.yaml")))
@@ -236,7 +251,7 @@ export function summarize(records) {
 }
 
 // A deterministic verdict, or null for an llm grader.
-export const verdict = (grader, run) => harness.passes(grader, run);
+export const verdict = (grader, run) => loaded().passes(grader, run);
 
 // The grades of a finished run: a deterministic verdict, or the judge's for an
 // llm grader, which reads the grader's judgeText. A grader whose verdict or

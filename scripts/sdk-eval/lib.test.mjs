@@ -1,4 +1,5 @@
-// The SDK eval runner's model-free parts, against collet's real cases: case
+// The SDK eval runner's model-free parts, against fixtures/, a snapshot of three of
+// collet's eval cases and of its eval harness laid out as a plugin directory: case
 // reading, the run built from SDK messages, and grader verdicts on that run.
 
 import { test } from "node:test";
@@ -10,7 +11,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { selectCases, runFromMessages, gradersFor, gradeRun, verdict, judgeText, sessionEnv, sessionHome, JUDGE_CLIENT, runArms, sessionOptions, resultError, sessionSpend, runError, runRecord, recordJob, summarize, reportBatch, batchStop, BATCH_STOPPED } from "./lib.mjs";
 
-const COLLET = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../collet");
+const COLLET = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 const byName = (cases, name) => cases.find((c) => c.name === name);
 
 const bashCall = (id, command) => ({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id, name: "Bash", input: { command } }] } });
@@ -61,17 +62,23 @@ test("collet's cases are read with their limits, tags and scaffolds", () => {
   assert.deepStrictEqual(selectCases(COLLET, { tags: ["safety"] }).map((c) => c.name), ["guard-refuses-out-of-scope-write"]);
 });
 
-test("anneal's paired navigation and held-out cases are read with their scaffolds and no Skill tool", () => {
-  for (const [tag, prefix] of [["navigation", ""], ["heldout", "heldout-"]]) {
-    const cases = selectCases(path.join(COLLET, "../anneal"), { tags: [tag] });
-    assert.strictEqual(cases.length, 6, tag);
-    for (const c of cases) {
-      assert.match(c.scaffold, new RegExp(`^${prefix}(package-lookup|contract-section|explicit-path)-(original|oriented)\\.sh$`));
-      assert.ok(!c.allowedTools.includes("Skill"));
-      assert.match(c.prompt, /^Before anything else, read `AGENTS\.md`\./);
-      // The map reaches a session only through that read: no fixture CLAUDE.md loads.
-      assert.deepStrictEqual(sessionOptions(c, "with", { pluginDir: "anneal", model: "m" }).settingSources, ["user"]);
-    }
+test("a session reads user settings only, so a fixture's CLAUDE.md and AGENTS.md never load", () => {
+  // anneal's paired navigation cases rely on this: their map reaches a session only through a read the prompt asks for.
+  for (const c of selectCases(COLLET)) assert.deepStrictEqual(sessionOptions(c, "with", { pluginDir: COLLET, model: "m" }).settingSources, ["user"]);
+});
+
+test("a plugin directory without an eval harness is refused, and the harness of the one given is the one used", () => {
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-eval-plugin-"));
+  try {
+    assert.throws(() => selectCases(empty), /has no tests\/eval-harness\.js or tests\/eval-harness\.cjs/);
+    fs.mkdirSync(path.join(empty, "tests"));
+    fs.mkdirSync(path.join(empty, "evals"));
+    fs.writeFileSync(path.join(empty, "tests", "eval-harness.js"), "module.exports = { passes: () => 'marker' };\n");
+    assert.deepStrictEqual(selectCases(empty), []);
+    assert.strictEqual(verdict({}, {}), "marker");
+  } finally {
+    fs.rmSync(empty, { recursive: true, force: true });
+    selectCases(COLLET);
   }
 });
 

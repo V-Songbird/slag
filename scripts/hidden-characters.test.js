@@ -1,17 +1,20 @@
 'use strict';
 
 // Fails on raw invisible characters in the repository's text files. Write them as escapes
-// (\u200B, \u{E0041}) instead. The pattern and its emoji and Mongolian exceptions are anneal's audit's own;
-// a test checks that collet's copy of the pattern is identical to it.
-const { test } = require('node:test');
+// (\u200B, \u{E0041}) instead. The pattern and its emoji and Mongolian exceptions are the mounted
+// harness's own (.collet/state.mjs); the anneal and collet repositories keep their copies of it.
+const { before, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync, readdirSync } = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { HIDDEN_CHARACTERS } = require('../anneal/scripts/audit.js');
+const { project } = require('./temp-project.js');
 
 const root = path.resolve(__dirname, '..');
-const harness = import('../collet/tests/temp-project.js');
+let HIDDEN_CHARACTERS;
+before(async () => {
+  ({ HIDDEN_CHARACTERS } = await import('../.collet/state.mjs'));
+});
 
 // Tracked files in a Git work tree; every file but .git/ and node_modules/ in an exported tree.
 function listFiles(dir) {
@@ -53,12 +56,6 @@ test('tracked text files hold no raw invisible characters', () => {
   assert.deepEqual(findHiddenCharacters(root), []);
 });
 
-test("collet's copy of the hidden-character pattern is identical to anneal's", async () => {
-  const { HIDDEN_CHARACTERS: copy } = await import('../collet/templates/state.mjs');
-  assert.equal(copy.source, HIDDEN_CHARACTERS.source);
-  assert.equal(copy.flags, HIDDEN_CHARACTERS.flags);
-});
-
 const fixtureFiles = {
   'zero-width.md': 'first line\nbad\u200Bword\n',
   'tag.txt': 'plain \u{E0041} tag\n',
@@ -98,8 +95,7 @@ const expected = [
   'zero-width.md:2: U+200B',
 ];
 
-test('flags raw characters in a Git work tree and allows emoji joiners, subdivision flags, emoji variation selectors and Mongolian letter forms', async () => {
-  const { project } = await harness;
+test('flags raw characters in a Git work tree and allows emoji joiners, subdivision flags, emoji variation selectors and Mongolian letter forms', () => {
   const fixture = project(fixtureFiles);
   for (const args of [['init', '-q'], ['add', '-A']]) {
     const result = spawnSync('git', ['-C', fixture, ...args], { encoding: 'utf8' });
@@ -108,8 +104,7 @@ test('flags raw characters in a Git work tree and allows emoji joiners, subdivis
   assert.deepEqual(findHiddenCharacters(fixture).sort(), expected);
 });
 
-test('walks an exported tree without Git, skipping node_modules', async () => {
-  const { project } = await harness;
+test('walks an exported tree without Git, skipping node_modules', () => {
   const fixture = project({ ...fixtureFiles, 'node_modules/dep/index.js': 'x\u200By\n' });
   assert.deepEqual(findHiddenCharacters(fixture).sort(), expected);
 });

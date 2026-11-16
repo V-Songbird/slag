@@ -1,7 +1,7 @@
 {
   "name": "slag",
   "private": true,
-  "description": "Experimental agent plugins, in-tree. Each host's manifest owns a plugin's version, so this file carries none.",
+  "description": "Workshop of the anneal and collet plugins, now in their own repositories: the SDK eval runner, a collet harness and research records.",
   "license": "MIT",
   "engines": {
     "node": ">=22"

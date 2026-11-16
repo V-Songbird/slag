@@ -1,8 +1,7 @@
 {
-  "project": "Slag holds the experimental anneal and collet plugins for Claude Code, Codex and Antigravity; Node 22 or later, no dependency installation or build step.",
+  "project": "Slag is the workshop where the anneal and collet plugins were developed; it keeps the SDK eval runner and its own collet harness. Node 22 or later, no dependency installation or build step at the root.",
   "conventions": [
-    "Root JavaScript uses CommonJS; collet/package.json selects ESM inside collet.",
-    "Host discovery files and executable skill resources stay with their plugin.",
+    "Root JavaScript uses CommonJS; the .mjs files under scripts/sdk-eval and .collet are ESM.",
     "Public records never name another project except where it was measured.",
     "Tracked text writes zero-width, bidi, tag and stray variation-selector characters as escapes, never raw."
   ],

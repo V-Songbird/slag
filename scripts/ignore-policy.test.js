@@ -7,10 +7,9 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
-const harness = import('../collet/tests/temp-project.js');
+const { project } = require('./temp-project.js');
 
 async function checkPaths(filename, cases) {
-  const { project } = await harness;
   const fixture = project({
     '.gitignore': readFileSync(path.join(root, filename), 'utf8'),
     'empty-global-ignore': '',

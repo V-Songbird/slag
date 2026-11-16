@@ -3,13 +3,7 @@ type: knowledge
 summary: "Which of razor, hush, foreman, collet and anneal owns which job, and where two of them meet, and the gate any native integration between foreman, collet and anneal must pass; read before choosing plugins or deciding where a new behavior belongs."
 related_files:
   - README.md
-  - anneal/README.md
-  - anneal/skills/session-review/references/many-sessions.md
-  - collet/README.md
-  - collet/scripts/mount.mjs
-  - collet/templates/checks/scope.mjs
-  - collet/skills/task-harness/SKILL.md
-  - collet/docs/knowledge/harness-workflow.md
+  - docs/knowledge/host-plugin-formats.md
 ---
 
 # Which plugin owns which job
@@ -19,19 +13,21 @@ any of them alone. Together they overlap only where
 [two plugins meet](#where-two-plugins-meet). foreman and collet run together in one project:
 foreman owns the plan, and collet enforces the session boundary.
 
-anneal and collet live in this repository. razor, hush and foreman are separate plugins, published
-in the [foundry](https://github.com/V-Songbird/foundry) marketplace, and are not part of Slag. This
-page was checked against each plugin's README and how-it-works guide, in these versions: foreman
-3.2.0, razor 1.7.0 and hush 1.12.1. Read each plugin's own README for current install steps and
-limits.
+All five plugins are published in the [foundry](https://github.com/V-Songbird/foundry) marketplace.
+anneal ([repository](https://github.com/V-Songbird/anneal#readme)) and collet
+([repository](https://github.com/V-Songbird/collet#readme)) were developed in Slag and now live in
+their own repositories; razor, hush and foreman never were part of Slag. This page was checked,
+while anneal and collet still lived here, against each plugin's README and how-it-works guide, in
+these versions: foreman 3.2.0, razor 1.7.0 and hush 1.12.1. Read each plugin's own README for
+current install steps and limits.
 
 ## Who owns what
 
 | Plugin | Owns | In one sentence | Lives in |
 | --- | --- | --- | --- |
 | foreman | What to do and why | Keeps a roadmap beside your code and recommends the next task with its reason and a checked prompt | foundry |
-| collet | The boundary of one task | Holds one open task to its writable files and the command that must pass before it closes | Slag |
-| anneal | How an agent finds its way | Audits repository navigation, reconciles documentation, proposes changes from one session, and turns steps many sessions repeat into scripts | Slag |
+| collet | The boundary of one task | Holds one open task to its writable files and the command that must pass before it closes | foundry |
+| anneal | How an agent finds its way | Audits repository navigation, reconciles documentation, proposes changes from one session, and turns steps many sessions repeat into scripts | foundry |
 | razor | The size of each change | Asks, before code is written, whether the project or the language already has what the task needs | foundry |
 | hush | The shape of the final message | Quiets routine narration and shapes the answer around what changed, whether it worked and what comes next | foundry |
 
@@ -54,8 +50,8 @@ collet holds an already planned task to its writable files and its acceptance co
 task requires the live checks and the acceptance command to pass, and fails while a change sits
 outside the task. Hooks note a recognized out-of-scope write as it happens, and refuse it only in a
 project that asks for that. A handoff is written before compaction, so the open task survives it where the host supports
-that (see the [host coverage](../../collet/docs/knowledge/harness-workflow.md#host-coverage) for
-what has been observed).
+that (see [collet's README](https://github.com/V-Songbird/collet#readme) for what has been
+observed).
 
 It does not plan work. With no open task it enforces nothing.
 
@@ -120,16 +116,16 @@ detail, so ask for depth when you need it.
 foreman, collet and anneal keep separate records, and no shared protocol, event stream or store
 connects them. Two links already exist: a collet task opened with `--foreman <id>` stores the Foreman
 entry id and its `close` prints the Foreman step for that entry (see
-[alongside a planning tool](../../collet/docs/knowledge/harness-workflow.md#alongside-a-planning-tool)),
+[alongside a planning tool](https://github.com/V-Songbird/collet#alongside-a-planning-tool)),
 and anneal's `session-review` recommends collet's `check-writer` when `.collet/` exists. This section states what each one owns and what any future connection between them must respect.
 
 - foreman owns the plan, the history of what was done, and the acceptance of that work; see the
   [foreman and collet](#where-two-plugins-meet) row.
 - collet owns the open task's scope and the executable checks that close it; see
-  [alongside a planning tool](../../collet/docs/knowledge/harness-workflow.md#alongside-a-planning-tool).
+  [alongside a planning tool](https://github.com/V-Songbird/collet#alongside-a-planning-tool).
 - anneal owns the evidence it reads from sessions and repositories and the recommendations drawn
   from it, each waiting for your approval; see
-  [how a session audit runs](../../anneal/docs/knowledge/workflows.md#how-a-session-audit-runs).
+  [anneal's README](https://github.com/V-Songbird/anneal#readme).
 - Each host adapter, the hook definition files and manifests listed in
   [host plugin contracts](host-plugin-formats.md), keeps the real differences between hosts instead
   of flattening them into one form.
@@ -159,6 +155,6 @@ How the plugins behave together in a live Claude Code or Codex session is not me
 ## What this page does not cover
 
 - How razor, hush and foreman behave when they run in the same session as anneal or collet. collet's
-  tests check that `ROADMAP.jsonl` and `.foreman/` stay writable while a task is open, but no Slag
-  test installs razor, hush or foreman.
+  tests check that `ROADMAP.jsonl` and `.foreman/` stay writable while a task is open, but no
+  collet or Slag test installs razor, hush or foreman.
 - Install steps for razor, hush and foreman. Follow their own READMEs.

@@ -17,7 +17,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
-const harness = import('../collet/tests/temp-project.js');
+const { project, git } = require('./temp-project.js');
 const PRIVATE = /(^|\/)(\.private|docs\/tasks|docs\/decisions|docs\/knowledge\/private|docs\/apis\/private)\//;
 
 function trackedFiles(dir) {
@@ -149,8 +149,7 @@ test('relative links and anchors in tracked public Markdown resolve', () => {
 });
 
 test('reports a missing file, a missing heading and an untracked target, skipping private notes', async () => {
-  const { project, git } = await harness;
-  const privateNotes = ['.private', 'docs/tasks', 'docs/decisions', 'docs/knowledge/private', 'docs/apis/private'].flatMap((folder) => [`${folder}/kept.md`, `collet/${folder}/kept.md`]);
+  const privateNotes = ['.private', 'docs/tasks', 'docs/decisions', 'docs/knowledge/private', 'docs/apis/private'].flatMap((folder) => [`${folder}/kept.md`, `nested/${folder}/kept.md`]);
   const fixture = project({
     '.gitignore': 'docs/tasks/note.md\n',
     'README.md': [

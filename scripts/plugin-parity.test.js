@@ -7,7 +7,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { compare } = require('./plugin-parity.js');
 
-const harness = import('../collet/tests/temp-project.js');
+const { project, repo } = require('./temp-project.js');
 const SCRIPT = path.join(__dirname, 'plugin-parity.js');
 
 const guard = (command, timeout) => JSON.stringify({
@@ -24,7 +24,6 @@ const plugin = {
 
 // A tracked plugin and an installed copy of it, with the host's .in_use marker and no .git.
 async function fixture() {
-  const { project, repo } = await harness;
   const source = project(plugin);
   repo(source);
   const installed = project();
