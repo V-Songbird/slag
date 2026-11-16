@@ -1,13 +1,21 @@
 # Slag
 
-Slag is the workshop where the [anneal](https://github.com/V-Songbird/anneal) and
-[collet](https://github.com/V-Songbird/collet) plugins for coding agents were developed.
-Both now live in their own repositories and are listed in the
-[Foundry](https://github.com/V-Songbird/foundry) marketplace. This repository holds no plugin.
+Slag was the workshop where the anneal and collet plugins for coding agents were developed. It also held an SDK eval runner and its own collet harness. This repository is kept as a record and takes no new work.
 
-## Install anneal and collet
+## What happened
 
-In Claude Code:
+- 2026-11-14: the owner decided to move both plugins out of Slag.
+- 2026-11-15: anneal and collet got their own repositories. Their history came across with `git subtree split`.
+- 2026-11-16: the Foundry marketplace listed both plugins, and the first release there was 0.8.0-alpha. The same day, commit `327a47f` removed `anneal/`, `collet/`, Slag's two marketplace catalogs and its release skills.
+- 2026-11-16: the commit that wrote this page removed everything else except this README, the license and `.gitignore`. The eval runner is no longer published here.
+
+## Where everything is now
+
+- Marketplace: [V-Songbird/foundry](https://github.com/V-Songbird/foundry)
+- anneal: [V-Songbird/anneal](https://github.com/V-Songbird/anneal)
+- collet: [V-Songbird/collet](https://github.com/V-Songbird/collet)
+
+In Claude Code, install the plugins with:
 
 ```text
 /plugin marketplace add V-Songbird/foundry
@@ -15,58 +23,13 @@ In Claude Code:
 /plugin install collet@foundry
 ```
 
-If you installed either plugin from the `slag` marketplace, remove that marketplace and install
-from `foundry` as above. For Codex and Antigravity, follow the install section of each plugin's
-README: [anneal](https://github.com/V-Songbird/anneal#install) and
-[collet](https://github.com/V-Songbird/collet#install).
+For Codex and Antigravity, follow the install section of each plugin's README. Release notes are on each plugin's GitHub releases page.
 
-To compare anneal and collet with razor, hush and foreman, read
-[which plugin owns which job](docs/knowledge/plugin-roles.md).
+If you added the `slag` marketplace, remove it and add `foundry` instead. Use Claude Code's plugin manager to remove a marketplace.
 
-## What stays here
+## The earlier tree
 
-- `scripts/sdk-eval/`: a runner that gives a plugin's eval cases to the Claude Agent SDK, so the
-  sessions bill an API key instead of a Claude plan. It takes the plugin as a directory path, for
-  example a clone of anneal or collet. Its header, `scripts/sdk-eval/run.mjs`, lists the options.
-- `.collet/`: this repository's own collet harness, which scopes each change to a task and ends it
-  with `npm run check`.
-- `docs/knowledge/`: research records on [host plugin formats](docs/knowledge/host-plugin-formats.md),
-  [plugin roles](docs/knowledge/plugin-roles.md) and
-  [repository scope](docs/knowledge/repository-scope.md).
-- `scripts/`: the repository's tests and `plugin-parity.js`, which compares an installed plugin copy
-  with its tracked source.
-
-## Retired ideas
-
-These plugins were retired and are not offered anywhere.
-
-| Plugin | Idea |
-| --- | --- |
-| assay | Audit and improve agent instructions. |
-| jig | Turn recurring mistakes into verified repository checks. |
-| brink | Warn before context limits and suggest focused compaction. |
-| jetbrains-router | Route reads, searches and edits through JetBrains IDEs. |
-| scribe | Clarify ambiguous requests before implementation. |
-| verity | Ground Claude Code answers in current official documentation. |
-
-## Development
-
-From the root of a Git clone, with Node 22 or later and Git available:
-
-```shell
-npm run check
-```
-
-The command runs the repository tests and exits non-zero on failure. No dependency installation is
-needed. Read [repository scope and checks](docs/knowledge/repository-scope.md) before changing the
-checks.
-
-## Support and changes
-
-The [issue tracker](https://github.com/V-Songbird/slag/issues) is the only listed channel for bugs
-and usage questions about this repository; report a plugin's own problems in its repository. There is
-no dedicated security-reporting policy here; avoid posting sensitive details publicly. Plugin release
-changes are recorded in each plugin's own repository.
+The full earlier tree is in this repository's Git history. The last commit that holds everything but the two plugin folders is `327a47f`. Its parent, `9ae0f3d`, still holds `anneal/` and `collet/`. Check one out to read the old files.
 
 ## License
 
